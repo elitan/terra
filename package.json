@@ -7,13 +7,13 @@
     "build": "bun build index.ts --outdir ./dist",
     "plan": "bun run index.ts plan",
     "apply": "bun run index.ts apply",
-    "test": "bun test",
+    "test": "bun test src/test",
     "test:watch": "bun test --watch",
-    "test:setup": "docker compose up -d && bun run test/setup.ts",
+    "test:setup": "docker compose up -d && bun run src/test/setup.ts",
     "test:teardown": "docker compose down",
     "test:full": "bun run test:setup && bun test && bun run test:teardown",
-    "test:unit": "bun test test/parser.test.ts",
-    "test:integration": "bun test test/integration.test.ts"
+    "test:unit": "bun test src/test/tables.test.ts src/test/columns.test.ts",
+    "test:integration": "bun test src/test/integration.test.ts"
   },
   "dependencies": {
     "chalk": "^5.3.0",

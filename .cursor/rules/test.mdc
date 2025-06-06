@@ -1,0 +1,141 @@
+---
+description: 
+globs: *.test.ts
+alwaysApply: false
+---
+# Testing Guide
+
+This directory contains tests for the PostgreSQL schema migration tool.
+
+## Philosophy
+
+Tests should be **simple end-to-end tests** that verify the core workflow:
+
+1. **Initial state** - Set up database in a known state
+2. **Desired state** - Define what we want using SQL
+3. **Tool applies diff** - Let the tool figure out and apply the migration
+4. **Verify final state** - Check that the database ended up correctly
+
+**Focus on outcomes, not implementation details.**
+
+## Test Structure
+
+### Basic Pattern
+
+```typescript
+test("should do something meaningful", async () => {
+  // 1. Initial state: set up database
+  await client.query(`CREATE TABLE existing_table (...);`);
+
+  // 2. Desired state: SQL with what we want
+  const desiredSQL = `
+    CREATE TABLE existing_table (...);
+    CREATE TABLE new_table (...);
+  `;
+
+  // 3. Parse desired state and apply diff
+  const initialSchema = await inspector.getCurrentSchema(client);
+  const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+  const migrationStatements = differ.generateMigrationPlan(
+    desiredTables,
+    initialSchema
+  );
+
+  const plan: MigrationPlan = {
+    statements: migrationStatements,
+    hasChanges: migrationStatements.length > 0,
+  };
+  await executor.executePlan(client, plan);
+
+  // 4. Verify final state
+  const finalTableNames = await getTableNames(client);
+  expect(finalTableNames).toContain("existing_table");
+  expect(finalTableNames).toContain("new_table");
+});
+```
+
+### What to Test
+
+- ✅ **Final database state** - Does the database have the right tables/columns?
+- ✅ **End-to-end workflows** - Can we migrate from state A to state B?
+- ❌ **Implementation details** - Don't test specific SQL statements generated
+- ❌ **Internal APIs** - Don't test individual classes in isolation
+
+### Setup/Teardown
+
+Each test should:
+
+- Start with a clean database (`cleanDatabase(client)`)
+- Create necessary test services (`parser`, `differ`, `inspector`, `executor`)
+- Clean up after itself
+
+```typescript
+beforeEach(async () => {
+  client = await createTestClient();
+  await cleanDatabase(client);
+
+  parser = new SchemaParser();
+  differ = new SchemaDiffer();
+  inspector = new DatabaseInspector();
+  databaseService = new DatabaseService(TEST_DB_CONFIG);
+  executor = new MigrationExecutor(databaseService);
+});
+
+afterEach(async () => {
+  await cleanDatabase(client);
+  await client.end();
+});
+```
+
+## Running Tests
+
+```bash
+# Setup test database (run once)
+bun run test:setup
+
+# Run specific test file
+bun test src/test/tables.test.ts
+
+# Run all tests
+bun test src/test/
+```
+
+## Test Categories
+
+### Table Tests (`tables.test.ts`)
+
+Focus on table-level operations: adding tables, removing tables, mixed operations.
+
+### Column Tests (future)
+
+Focus on column-level operations: adding columns, modifying columns, removing columns.
+
+### Index Tests (future)
+
+Focus on index operations: creating indexes, dropping indexes.
+
+### Constraint Tests (future)
+
+Focus on constraint operations: foreign keys, unique constraints, check constraints.
+
+## Best Practices
+
+1. **Use descriptive test names** - `"should migrate from empty database to simple table"`
+2. **Test realistic scenarios** - Use SQL that users would actually write
+3. **Verify end state thoroughly** - Check that the database actually has what you expect
+4. **Keep tests independent** - Each test should work in isolation
+5. **Use simple SQL** - Avoid complex features that might break parsing
+6. **Focus on happy paths first** - Test the main workflows before edge cases
+
+## Test Database
+
+Tests run against a real PostgreSQL database in Docker:
+
+- Host: `localhost`
+- Port: `5432`
+- Database: `postgres`
+- User: `postgres`
+- Password: `password`
+
+The test setup automatically starts the database and waits for it to be ready.
+
