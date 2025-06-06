@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Use bun as package manager, not npm.
+- Use only TypeScript files, not JavaScript files.
+- Tests are located at `src/test`
