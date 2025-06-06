@@ -75,3 +75,5 @@ gh pr edit [number] --body-file pr-body.md
 # Remove temporary file
 rm pr-body.md
 ```
+
+In the end, write the github PR link (in markdown) to the user
