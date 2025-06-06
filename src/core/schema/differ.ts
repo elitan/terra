@@ -187,7 +187,8 @@ export class SchemaDiffer {
         desiredNormalized.includes("decimal") ||
         desiredNormalized.includes("numeric") ||
         desiredNormalized.includes("integer") ||
-        desiredNormalized.includes("int")
+        desiredNormalized.includes("int") ||
+        desiredNormalized.includes("boolean")
       ) {
         return true;
       }
@@ -221,6 +222,9 @@ export class SchemaDiffer {
         desiredNormalized.includes("int")
       ) {
         return `${columnName}::integer`;
+      }
+      if (desiredNormalized.includes("boolean")) {
+        return `${columnName}::boolean`;
       }
     }
 

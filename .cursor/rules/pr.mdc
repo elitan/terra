@@ -1,0 +1,77 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+---
+description:
+globs:
+alwaysApply: false
+---
+
+# PR Creation Guide
+
+You task is yo create a new PR based on this guide.
+
+## Quick Start
+
+```bash
+# Create branch, commit, and push
+git checkout -b feature-name
+git add . && git commit -m "descriptive message"
+git push -u origin feature-name
+
+# Create PR
+gh pr create --title "Clear PR Title" --body "
+## Problem
+- Issue being solved
+
+## Solution
+- What was implemented
+
+## Impact
+- Benefits delivered
+"
+```
+
+## Branch Naming
+
+- `feature-auth-system`
+- `fix-memory-leak`
+- `refactor-db-layer`
+
+## PR Structure
+
+**Title**: Action verb + specific change
+
+- ✅ "Add user authentication with JWT"
+- ❌ "Authentication stuff"
+
+**Body**: Problem → Solution → Impact
+
+- Use bullet points
+- Be specific
+- Include metrics when relevant
+
+## Commands
+
+```bash
+# Create temporary file
+echo "## Problem
+- Issue being solved
+
+## Solution
+- What was implemented
+
+## Impact
+- Benefits delivered" > pr-body.md
+
+# Create PR
+gh pr create --title "Title" --body-file pr-body.md
+
+# Or edit existing PR
+gh pr edit [number] --body-file pr-body.md
+
+# Remove temporary file
+rm pr-body.md
+```
