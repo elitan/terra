@@ -299,6 +299,23 @@ export const BooleanEdgeCases = {
     `''`, // Empty string
     `' '`, // Space
   ],
+
+  /**
+   * Convert string to expected boolean value for testing
+   */
+  convertStringToBoolean(str: string): boolean {
+    const cleaned = str.toLowerCase().trim();
+    const trueValues = ["t", "true", "1", "yes", "y", "on"];
+    const falseValues = ["f", "false", "0", "no", "n", "off"];
+
+    if (trueValues.includes(cleaned)) {
+      return true;
+    } else if (falseValues.includes(cleaned)) {
+      return false;
+    } else {
+      throw new Error(`Invalid boolean string: ${str}`);
+    }
+  },
 };
 
 /**
