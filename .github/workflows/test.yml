@@ -44,6 +44,3 @@ jobs:
 
       - name: Run integration tests
         run: bun run test:integration
-
-      - name: Teardown test environment
-        run: bun run test:teardown
