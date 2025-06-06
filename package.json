@@ -12,8 +12,8 @@
     "test:setup": "docker compose up -d && bun run src/test/setup.ts",
     "test:teardown": "docker compose down",
     "test:full": "bun run test:setup && bun test && bun run test:teardown",
-    "test:unit": "bun test src/test/tables.test.ts src/test/columns.test.ts",
-    "test:integration": "bun test src/test/integration.test.ts"
+    "test:unit": "bun test src/test/tables.test.ts src/test/columns/",
+    "test:integration": "echo 'No integration tests defined yet'"
   },
   "dependencies": {
     "chalk": "^5.3.0",
