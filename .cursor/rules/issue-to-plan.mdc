@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+For the given overview.md file, create a plan.md alongside the file where you add an actionable task list of how you plan to imeplement the things defined in the overview file.
+
+Ensure that the tasks are in the order of how they should be implemented and should be completed from top to bottom.
+
+Add different phases like categories so we can ask the ai to implement one "phase" at a time. Each phase should be a set of tasks that are related to each other.
