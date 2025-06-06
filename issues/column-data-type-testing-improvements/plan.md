@@ -85,7 +85,7 @@
 
 ### Complex Multi-Operation Testing
 
-- [ ] Add multiple simultaneous type change tests
+- [x] Add multiple simultaneous type change tests
 - [ ] Add type changes with constraint modification tests
 - [ ] Add cross-column dependency scenario tests
 - [ ] Add complex migration rollback tests
