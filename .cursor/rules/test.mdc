@@ -7,6 +7,8 @@ alwaysApply: false
 
 This directory contains tests for the PostgreSQL schema migration tool.
 
+Remember: If a test fails, don't only try to make it work by changing the test. It is equally important to look at the source code that might inculde a bug or might not be implemented correctly and fixing it there.
+
 ## Philosophy
 
 Tests should be **simple end-to-end tests** that verify the core workflow:
@@ -100,24 +102,6 @@ bun test src/test/tables.test.ts
 bun test src/test/
 ```
 
-## Test Categories
-
-### Table Tests (`tables.test.ts`)
-
-Focus on table-level operations: adding tables, removing tables, mixed operations.
-
-### Column Tests (future)
-
-Focus on column-level operations: adding columns, modifying columns, removing columns.
-
-### Index Tests (future)
-
-Focus on index operations: creating indexes, dropping indexes.
-
-### Constraint Tests (future)
-
-Focus on constraint operations: foreign keys, unique constraints, check constraints.
-
 ## Best Practices
 
 1. **Use descriptive test names** - `"should migrate from empty database to simple table"`
@@ -138,4 +122,5 @@ Tests run against a real PostgreSQL database in Docker:
 - Password: `password`
 
 The test setup automatically starts the database and waits for it to be ready.
+
 

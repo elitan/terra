@@ -334,15 +334,15 @@ export const EnhancedAssertions = {
       throw new Error(
         `Expected migration to fail${context ? ` in ${context}` : ""}`
       );
-    } catch (error) {
+    } catch (error: any) {
+      // PostgreSQL errors have the message in the 'message' property
+      const errorMessage = error.message || error.toString();
       expect(
-        error,
-        `Error should match expected pattern${context ? ` in ${context}` : ""}`
-      ).toEqual(
-        expect.objectContaining({
-          message: expect.stringMatching(expectedErrorPattern),
-        })
-      );
+        expectedErrorPattern.test(errorMessage),
+        `Error message "${errorMessage}" should match pattern ${expectedErrorPattern}${
+          context ? ` in ${context}` : ""
+        }`
+      ).toBe(true);
     }
   },
 
@@ -461,7 +461,7 @@ export const DataIntegrityUtils = {
     beforeSnapshot: any[],
     afterSnapshot: any[],
     columnName: string,
-    conversionFunction?: (value: any) => any
+    conversionFunction?: (beforeValue: any, afterValue: any) => boolean
   ): Promise<void> {
     expect(afterSnapshot.length).toBe(beforeSnapshot.length);
 
@@ -470,9 +470,25 @@ export const DataIntegrityUtils = {
       const afterValue = afterSnapshot[i][columnName];
 
       if (conversionFunction) {
-        expect(afterValue).toEqual(conversionFunction(beforeValue));
+        // Use custom comparison function for type conversions
+        const isEqual = conversionFunction(beforeValue, afterValue);
+        expect(
+          isEqual,
+          `Data mismatch at row ${i}: before=${beforeValue}, after=${afterValue}`
+        ).toBe(true);
       } else {
-        expect(afterValue).toEqual(beforeValue);
+        // For same-type comparisons, handle numeric types specially
+        if (typeof beforeValue === "number" && typeof afterValue === "string") {
+          // PostgreSQL returns numbers as strings, convert for comparison
+          expect(parseInt(afterValue)).toEqual(beforeValue);
+        } else if (
+          typeof beforeValue === "string" &&
+          typeof afterValue === "number"
+        ) {
+          expect(afterValue).toEqual(parseInt(beforeValue));
+        } else {
+          expect(afterValue).toEqual(beforeValue);
+        }
       }
     }
   },
