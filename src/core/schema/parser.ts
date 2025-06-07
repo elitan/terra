@@ -298,9 +298,19 @@ export class SchemaParser {
       const columnItems = node.columns?.expr?.items || [];
 
       for (const item of columnItems) {
-        // Look for constraint definitions (not column definitions)
-        if (item.type === "constraint" || item.type === "table_constraint") {
+        // Look for constraint_primary_key type (table-level primary key)
+        if (item.type === "constraint_primary_key") {
           const constraint = this.parseTableConstraintFromCST(item);
+          if (constraint) {
+            return constraint;
+          }
+        }
+        // Look for named constraints (type: "constraint" with constraint.type: "constraint_primary_key")
+        else if (
+          item.type === "constraint" &&
+          item.constraint?.type === "constraint_primary_key"
+        ) {
+          const constraint = this.parseNamedTableConstraintFromCST(item);
           if (constraint) {
             return constraint;
           }
@@ -316,23 +326,27 @@ export class SchemaParser {
   private parseTableConstraintFromCST(node: any): PrimaryKeyConstraint | null {
     try {
       // Check if this is a primary key constraint
-      if (
-        node.constraint?.type === "constraint_primary_key" ||
-        node.type === "constraint_primary_key"
-      ) {
+      if (node.type === "constraint_primary_key") {
         // Extract constraint name if present
         let constraintName: string | undefined;
         if (node.name) {
           constraintName = node.name.text || node.name.name;
         }
 
-        // Extract column list
+        // Extract column list from the columns property
         const columns: string[] = [];
-        const columnList = node.columns || node.constraint?.columns;
+        const columnList = node.columns;
 
         if (columnList?.expr?.items) {
           for (const col of columnList.expr.items) {
-            const colName = col.text || col.name?.text || col.name?.name;
+            // Handle index_specification type which contains the column reference
+            let colName: string | undefined;
+            if (col.type === "index_specification" && col.expr) {
+              colName = col.expr.text || col.expr.name;
+            } else {
+              colName = col.text || col.name?.text || col.name?.name;
+            }
+
             if (colName) {
               columns.push(colName);
             }
@@ -345,6 +359,49 @@ export class SchemaParser {
             columns,
           };
         }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private parseNamedTableConstraintFromCST(
+    node: any
+  ): PrimaryKeyConstraint | null {
+    try {
+      // Extract constraint name from the named constraint wrapper
+      let constraintName: string | undefined;
+      if (node.name?.name) {
+        constraintName = node.name.name.text || node.name.name.name;
+      }
+
+      // Extract column list from the constraint.columns property
+      const columns: string[] = [];
+      const columnList = node.constraint?.columns;
+
+      if (columnList?.expr?.items) {
+        for (const col of columnList.expr.items) {
+          // Handle index_specification type which contains the column reference
+          let colName: string | undefined;
+          if (col.type === "index_specification" && col.expr) {
+            colName = col.expr.text || col.expr.name;
+          } else {
+            colName = col.text || col.name?.text || col.name?.name;
+          }
+
+          if (colName) {
+            columns.push(colName);
+          }
+        }
+      }
+
+      if (columns.length > 0) {
+        return {
+          name: constraintName,
+          columns,
+        };
       }
 
       return null;
