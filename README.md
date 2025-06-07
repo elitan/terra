@@ -377,108 +377,168 @@ graph LR
 
 ## 🚦 Current Status & Roadmap
 
-## Core Schema Objects
+### ✅ **Implemented Features**
 
-- [ ] **Tables**
+#### **Core Table Operations**
 
-  - Creation, alteration, dropping
-  - Ownership, storage parameters, comments
+- ✅ **Table Creation** - Create new tables from schema definitions
+- ✅ **Table Dropping** - Remove tables not in desired schema
+- ✅ **Mixed Table Operations** - Add, keep, and remove tables in single migration
 
-- [ ] **Columns**
+#### **Column Management**
 
-  - Creation, alteration (data type, default, nullability)
-  - Dropping, NOT NULL/NULL, default values, collations, comments
+- ✅ **Column Addition** - Add new columns with various data types
+- ✅ **Column Removal** - Remove columns while preserving data
+- ✅ **Column Type Changes** - Convert between compatible data types
+- ✅ **Default Values** - Handle columns with default values and constraints
+- ✅ **Nullable Constraints** - Manage NOT NULL/NULL constraints
+
+#### **Advanced Type Conversions**
+
+- ✅ **String Type Conversions** - VARCHAR ↔ TEXT with length handling
+- ✅ **Numeric Type Conversions** - INTEGER ↔ BIGINT, DECIMAL precision changes
+- ✅ **Boolean Type Conversions** - All PostgreSQL boolean representations
+- ✅ **Smart USING Clauses** - Automatic type conversion logic
+- ✅ **Unicode Support** - Full Unicode, emoji, and multi-byte character handling
+
+#### **Data Integrity & Safety**
+
+- ✅ **Data Preservation** - All migrations preserve existing data
+- ✅ **Operation Ordering** - Smart ordering to avoid constraint conflicts
+- ✅ **Boundary Value Testing** - Edge cases for all data types
+- ✅ **Large Dataset Support** - Performance-tested with large tables
+
+#### **Performance & Reliability**
+
+- ✅ **Performance Monitoring** - Benchmark tracking and regression detection
+- ✅ **Concurrent Operations** - Lock management and concurrent access
+- ✅ **Memory Efficiency** - Optimized for large datasets
+- ✅ **Error Handling** - Graceful handling of edge cases and failures
+
+#### **CLI & Tooling**
+
+- ✅ **Plan Command** - Preview changes before applying
+- ✅ **Apply Command** - Execute migrations safely
+- ✅ **Schema File Support** - Custom schema file paths
+- ✅ **Database Configuration** - Connection management
+- ✅ **Comprehensive Testing** - 20+ test suites covering edge cases
+
+### 🔄 **In Progress**
+
+#### **Primary Key Support**
+
+- 🔄 **Primary Key Detection** - Currently handles SERIAL PRIMARY KEY
+- 🔄 **Composite Primary Keys** - Multi-column primary keys
+- 🔄 **Primary Key Changes** - Adding/removing/modifying primary keys
+
+### 📋 **Planned Features**
+
+#### **Core Schema Objects**
 
 - [ ] **Indexes**
+  - B-tree, GIN, GiST, BRIN, Hash indexes
+  - Unique, partial, expression indexes
+  - Concurrent creation and REINDEX operations
+- [ ] **Advanced Constraints**
+  - Foreign Keys with CASCADE/RESTRICT/SET NULL actions
+  - Unique Constraints (multi-column)
+  - Check Constraints with custom expressions
+  - DEFERRABLE constraints
 
-  - Creation, alteration (REINDEX), dropping
-  - Types: B-tree, GIN, GiST, BRIN, Hash
-  - Unique, partial, expression, concurrent creation, storage parameters
-
-- [ ] **Constraints**
-  - [ ] **Primary Keys**: Creation, composite
-  - [ ] **Foreign Keys**: Creation, ON DELETE/ON UPDATE actions (CASCADE, RESTRICT, SET NULL), DEFERRABLE
-  - [ ] **Unique Constraints**: Creation
-  - [ ] **Check Constraints**: CHECK clauses
-
----
-
-## Advanced Schema Objects & Features
+#### **Advanced PostgreSQL Features**
 
 - [ ] **Sequences**
+  - Custom sequences with start/increment/min/max
+  - Sequence ownership and dependencies
+- [ ] **Views & Materialized Views**
+  - Standard view creation and OR REPLACE
+  - Materialized view management and refresh
+- [ ] **Custom Types**
+  - ENUMs with value management
+  - Composite Types for complex data structures
+  - Domain types with constraints
 
-  - Creation, alteration (start, increment, min/max, cycle), dropping
-  - Column ownership
+#### **Functions & Triggers**
 
-- [ ] **Views**
-
-  - Standard and Materialized: creation, OR REPLACE, dropping
-  - Refresh for materialized views
-
-- [ ] **Functions/Procedures (Routines)**
-
-  - Creation, alteration (OR REPLACE), dropping
-  - Language (PL/pgSQL, SQL), parameters, return types, volatility, security
-
+- [ ] **Stored Functions/Procedures**
+  - PL/pgSQL and SQL functions
+  - Parameter and return type management
+  - Function versioning (OR REPLACE)
 - [ ] **Triggers**
+  - BEFORE/AFTER/INSTEAD OF triggers
+  - Row-level and statement-level triggers
+  - Trigger enabling/disabling
 
-  - Creation, enabling/disabling, dropping
-  - BEFORE/AFTER/INSTEAD OF
-  - FOR EACH ROW/STATEMENT
-  - Event types: INSERT, UPDATE, DELETE, TRUNCATE
-  - WHEN clause
-
-- [ ] **Domains**
-
-  - Creation, alteration, dropping
-  - Underlying type, constraints
-
-- [ ] **Enums (Enumerated Types)**
-
-  - Creation, adding values
-
-- [ ] **Composite Types**
-
-  - Defining custom data structures
+#### **Database Administration**
 
 - [ ] **Extensions**
-
-  - Enabling/disabling PostgreSQL extensions
-
-- [ ] **Rules**
-
-  - Creation, dropping
-
-- [ ] **Collation Sequences**
-
-  - Creating custom collations
-
-- [ ] **Event Triggers**
-  - Triggers on DDL events
-
----
-
-## Database-Level Configuration & Management
-
-- [ ] **Roles/Users and Permissions (Grants)**
-
-  - Creation, alteration, dropping roles/users
-  - Password management
-  - Granting/revoking privileges on objects
-  - Role memberships
-
-- [ ] **Schemas (Namespaces)**
-
-  - Creation, alteration, dropping
-  - Ownership, search path
-
+  - Enable/disable PostgreSQL extensions
+  - Extension version management
+- [ ] **Roles & Security**
+  - User and role management
+  - Permission grants and revokes
+  - Role membership hierarchy
+- [ ] **Schema Namespaces**
+  - Multi-schema support
+  - Schema ownership and search paths
 - [ ] **Tablespaces**
+  - Custom tablespace management
+  - Table and index tablespace assignment
 
-  - Creation, alteration, dropping
+#### **Enhanced Features**
 
-- [ ] **Database Properties**
+- [ ] **Comments & Documentation**
+  - Object-level comments and descriptions
+  - Schema documentation generation
+- [ ] **Advanced Rules**
+  - Query rewrite rules
+  - Rule creation and management
+- [ ] **Event Triggers**
+  - DDL event triggers
+  - Database-level event handling
 
-  - Encoding, locale, connection limits, template database
+#### **Tooling & DevEx Improvements**
 
-- [ ] **Comments/Descriptions**
-  - Associating comments with various database objects
+- [ ] **Configuration Management**
+  - Multiple environment support
+  - Configuration file formats (JSON/YAML)
+- [ ] **Migration History**
+  - Track applied migrations
+  - Rollback capabilities
+- [ ] **Schema Validation**
+  - Pre-migration validation
+  - Dependency checking
+- [ ] **Import/Export**
+  - Import from existing databases
+  - Export current schema to files
+
+### 📊 **Current Test Coverage**
+
+The project has comprehensive test coverage with **20+ test suites** covering:
+
+- **Table Operations**: 6 core scenarios
+- **Column Operations**: 15+ test suites
+- **Type Conversions**: String, Numeric, Boolean edge cases
+- **Performance Testing**: Large datasets, concurrent operations
+- **Unicode Support**: Emoji, multi-byte characters, escape sequences
+- **Data Integrity**: Boundary values, NULL handling, constraint management
+
+### 🎯 **Next Milestones**
+
+**v0.2.0 - Primary Key & Index Support**
+
+- Complete primary key constraint management
+- Basic index creation and management
+- Performance improvements for large schemas
+
+**v0.3.0 - Foreign Keys & Advanced Constraints**
+
+- Foreign key relationships with actions
+- Unique and check constraints
+- Constraint dependency resolution
+
+**v0.4.0 - Views & Functions**
+
+- Standard and materialized views
+- Basic stored function support
+- Enhanced schema validation
