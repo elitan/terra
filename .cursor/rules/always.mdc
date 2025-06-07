@@ -5,11 +5,31 @@ alwaysApply: true
 ---
 ## Overview
 
-This library is a Infrastructure as Code tool for PostgreSQL databases, similar to Terraform but specifically designed for database schema management.
+## Project Overview
 
-You have a single schema.sql file that contains the state you want to be in. This tool will figure out what needs to be changed in the target database for the target database to be in the same state.
+PGTerra is a declarative Infrastructure as Code tool for PostgreSQL databases, similar to Terraform but specifically designed for database schema management. The core concept is **declarative state management** - you define your desired database state in @schema.sql, and PGTerra figures out what changes are needed.
 
-This means this tool will figure out what diffs to apply to the target database, like adding/updating/deleting various schema changes to the target postgres database.
+## Architecture Components
+
+### Core Architecture
+The system follows a clear separation of concerns with four main components:
+
+1. **Schema Parser** (@src/core/schema/) - Parses `schema.sql` using `sql-parser-cst`
+2. **Database Inspector** (@src/core/database/) - Queries current database state
+3. **Schema Differ** (@src/core/migration/) - Compares desired vs current state
+4. **Migration Executor** (@src/core/migration/) - Executes planned changes
+
+### Entry Points
+- Main CLI entry: @src/index.ts 
+- CLI commands: @src/cli/
+- Core types: @src/types/
+
+## Technology Stack
+- **Runtime**: Bun (not Node.js)
+- **Language**: TypeScript only (no JavaScript files)
+- **Database**: PostgreSQL
+- **Package Manager**: `bun` (not `npm` or `yarn`)
+- **Testing**: Bun's built-in test runner
 
 ## Other
 
@@ -17,6 +37,50 @@ This means this tool will figure out what diffs to apply to the target database,
 - Use only TypeScript (.ts) files, not JavaScript files.
 - Use `bun` to run .ts files.
 
+## File Organization Patterns
+
+### Directory Structure
+```
+src/
+├── cli/           # Command-line interface
+├── core/          # Core business logic
+│   ├── database/  # Database connection & queries
+│   ├── migration/ # Migration planning & execution
+│   └── schema/    # Schema parsing & inspection
+├── test/          # Comprehensive test suites
+├── types/         # TypeScript type definitions
+└── utils/         # Shared utilities
+```
+
+
+### Naming Conventions
+- Use descriptive function names
+- Prefer explicit over implicit
+- Use TypeScript interfaces for all data structures
+- Follow PostgreSQL naming conventions for database objects
+
 ## Tests
 
-When fixing tests, be mindful if the test is failing because the test is incorrect, or because we have a bug or need to fix something in our code. Lean towards fixin things in our code. Use best practices to debug and understand the core issue so we can make the best possible solution for failing tests.
+### Test Commands
+```bash
+bun test                    # Run all tests
+bun run test:watch         # Watch mode
+bun run test:unit          # Unit tests only
+bun run test:full          # Full test suite with setup/teardown
+```
+
+### Test Database Setup
+Tests use Docker Compose for database setup:
+```bash
+bun run test:setup:local   # Start test database
+bun run test:teardown      # Stop test database
+```
+
+### Testing Requirements
+When fixing tests, determine if the issue is:
+1. **Test is incorrect** - Fix the test
+2. **Code has a bug** - Fix the implementation (preferred approach)
+
+## Backward compability
+
+You don't need to think about backward compability. This tool is currently in alpha and not public so we can just change whatever we want and make it right.

@@ -8,3 +8,22 @@ For the given overview.md file, create a plan.md alongside the file where you ad
 Ensure that the tasks are in the order of how they should be implemented and should be completed from top to bottom.
 
 Add different phases like categories so we can ask the ai to implement one "phase" at a time. Each phase should be a set of tasks that are related to each other.
+
+Example:
+
+# Primary Key Support - Implementation Plan
+
+## Overview
+
+This plan breaks down the primary key support implementation into actionable tasks, organized by phases. Tasks should be completed from top to bottom within each phase.
+
+---
+
+## Phase 1: Core Infrastructure & Type System
+
+### 1.1 Update Type Definitions
+
+- [ ] **Task 1.1.1**: Remove `primary?: boolean` field from `Column` interface in `src/types/schema.ts`
+- [ ] **Task 1.1.2**: Add `PrimaryKeyConstraint` interface with `name?: string` and `columns: string[]` fields
+- [ ] **Task 1.1.3**: Add `primaryKey?: PrimaryKeyConstraint` field to `Table` interface
+- [ ] **Task 1.1.4**: Update all imports and references to use the new type definitions

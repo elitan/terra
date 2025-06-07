@@ -1,8 +1,10 @@
-import type { Table, Column } from "../../types/schema";
+import type { Table, Column, PrimaryKeyConstraint } from "../../types/schema";
 import {
   generateCreateTableStatement,
   columnsAreDifferent,
   normalizeType,
+  generateAddPrimaryKeySQL,
+  generateDropPrimaryKeySQL,
 } from "../../utils/sql";
 
 export class SchemaDiffer {
@@ -21,13 +23,29 @@ export class SchemaDiffer {
       if (!currentTables.has(table.name)) {
         statements.push(generateCreateTableStatement(table));
       } else {
-        // Handle column changes for existing tables
+        // Handle existing tables - ORDER MATTERS!
         const currentTable = currentTables.get(table.name)!;
+
+        // 1. First handle primary key changes that involve dropping constraints
+        const primaryKeyDropStatements = this.generatePrimaryKeyDropStatements(
+          table,
+          currentTable
+        );
+        statements.push(...primaryKeyDropStatements);
+
+        // 2. Then handle column changes (now that blocking constraints are removed)
         const columnStatements = this.generateColumnStatements(
           table,
           currentTable
         );
         statements.push(...columnStatements);
+
+        // 3. Finally handle primary key additions/modifications
+        const primaryKeyAddStatements = this.generatePrimaryKeyAddStatements(
+          table,
+          currentTable
+        );
+        statements.push(...primaryKeyAddStatements);
       }
     }
 
@@ -155,6 +173,24 @@ export class SchemaDiffer {
     desiredType: string,
     currentType: string
   ): string {
+    // Special handling for SERIAL type conversions
+    if (desiredType === "SERIAL") {
+      // SERIAL can't be used in ALTER COLUMN, must use INTEGER
+      // and handle sequence creation separately if needed
+      const needsUsing = this.requiresUsingClause(currentType, "INTEGER");
+
+      if (needsUsing) {
+        const usingExpression = this.generateUsingExpression(
+          columnName,
+          currentType,
+          "INTEGER"
+        );
+        return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE INTEGER USING ${usingExpression};`;
+      } else {
+        return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE INTEGER;`;
+      }
+    }
+
     // Check if we need a USING clause for type conversion
     const needsUsing = this.requiresUsingClause(currentType, desiredType);
 
@@ -231,5 +267,147 @@ export class SchemaDiffer {
 
     // Default: just cast to the desired type
     return `${columnName}::${desiredType}`;
+  }
+
+  private generatePrimaryKeyStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+
+    const primaryKeyChange = this.comparePrimaryKeys(
+      desiredTable.primaryKey,
+      currentTable.primaryKey
+    );
+
+    if (primaryKeyChange.type === "add") {
+      statements.push(
+        generateAddPrimaryKeySQL(desiredTable.name, primaryKeyChange.desiredPK!)
+      );
+    } else if (primaryKeyChange.type === "drop") {
+      statements.push(
+        generateDropPrimaryKeySQL(
+          desiredTable.name,
+          primaryKeyChange.currentPK!.name!
+        )
+      );
+    } else if (primaryKeyChange.type === "modify") {
+      // Drop old primary key first, then add new one
+      statements.push(
+        generateDropPrimaryKeySQL(
+          desiredTable.name,
+          primaryKeyChange.currentPK!.name!
+        )
+      );
+      statements.push(
+        generateAddPrimaryKeySQL(desiredTable.name, primaryKeyChange.desiredPK!)
+      );
+    }
+
+    return statements;
+  }
+
+  private comparePrimaryKeys(
+    desired: PrimaryKeyConstraint | undefined,
+    current: PrimaryKeyConstraint | undefined
+  ): {
+    type: "add" | "drop" | "modify" | "none";
+    currentPK?: PrimaryKeyConstraint;
+    desiredPK?: PrimaryKeyConstraint;
+  } {
+    // No primary key in either - no change
+    if (!desired && !current) {
+      return { type: "none" };
+    }
+
+    // Add primary key (none -> some)
+    if (desired && !current) {
+      return { type: "add", desiredPK: desired };
+    }
+
+    // Drop primary key (some -> none)
+    if (!desired && current) {
+      return { type: "drop", currentPK: current };
+    }
+
+    // Both exist - check if they're different
+    if (desired && current) {
+      if (this.primaryKeysAreEqual(desired, current)) {
+        return { type: "none" };
+      } else {
+        return { type: "modify", currentPK: current, desiredPK: desired };
+      }
+    }
+
+    return { type: "none" };
+  }
+
+  private primaryKeysAreEqual(
+    pk1: PrimaryKeyConstraint,
+    pk2: PrimaryKeyConstraint
+  ): boolean {
+    // Compare column arrays
+    if (pk1.columns.length !== pk2.columns.length) {
+      return false;
+    }
+
+    // Check if all columns are the same in the same order
+    for (let i = 0; i < pk1.columns.length; i++) {
+      if (pk1.columns[i] !== pk2.columns[i]) {
+        return false;
+      }
+    }
+
+    // Note: We don't compare constraint names because they might be auto-generated
+    // The important part is the column composition
+    return true;
+  }
+
+  private generatePrimaryKeyDropStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+
+    const primaryKeyChange = this.comparePrimaryKeys(
+      desiredTable.primaryKey,
+      currentTable.primaryKey
+    );
+
+    // Only handle drops and the drop part of modify operations
+    if (
+      primaryKeyChange.type === "drop" ||
+      primaryKeyChange.type === "modify"
+    ) {
+      statements.push(
+        generateDropPrimaryKeySQL(
+          desiredTable.name,
+          primaryKeyChange.currentPK!.name!
+        )
+      );
+    }
+
+    return statements;
+  }
+
+  private generatePrimaryKeyAddStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+
+    const primaryKeyChange = this.comparePrimaryKeys(
+      desiredTable.primaryKey,
+      currentTable.primaryKey
+    );
+
+    // Only handle adds and the add part of modify operations
+    if (primaryKeyChange.type === "add" || primaryKeyChange.type === "modify") {
+      statements.push(
+        generateAddPrimaryKeySQL(desiredTable.name, primaryKeyChange.desiredPK!)
+      );
+    }
+
+    return statements;
   }
 }

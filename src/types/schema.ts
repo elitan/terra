@@ -3,10 +3,15 @@ export interface Column {
   type: string;
   nullable: boolean;
   default?: string;
-  primary?: boolean;
+}
+
+export interface PrimaryKeyConstraint {
+  name?: string;
+  columns: string[];
 }
 
 export interface Table {
   name: string;
   columns: Column[];
+  primaryKey?: PrimaryKeyConstraint;
 }

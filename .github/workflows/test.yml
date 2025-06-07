@@ -36,11 +36,5 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Setup test environment
-        run: bun run test:setup
-
       - name: Run unit tests
-        run: bun run test:unit
-
-      - name: Run integration tests
-        run: bun run test:integration
+        run: bun run test
