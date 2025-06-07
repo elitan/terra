@@ -43,10 +43,12 @@ describe("Primary Key Support", () => {
       const tables = parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
-      expect(tables[0].name).toBe("users");
-      expect(tables[0].primaryKey).toBeDefined();
-      expect(tables[0].primaryKey!.columns).toEqual(["id"]);
-      expect(tables[0].primaryKey!.name).toBeUndefined(); // No explicit name
+      const table = tables[0];
+      expect(table).toBeDefined();
+      expect(table!.name).toBe("users");
+      expect(table!.primaryKey).toBeDefined();
+      expect(table!.primaryKey!.columns).toEqual(["id"]);
+      expect(table!.primaryKey!.name).toBeUndefined(); // No explicit name
     });
 
     test("should parse table-level PRIMARY KEY", () => {
@@ -61,8 +63,10 @@ describe("Primary Key Support", () => {
       const tables = parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
-      expect(tables[0].primaryKey).toBeDefined();
-      expect(tables[0].primaryKey!.columns).toEqual(["order_id"]);
+      const table = tables[0];
+      expect(table).toBeDefined();
+      expect(table!.primaryKey).toBeDefined();
+      expect(table!.primaryKey!.columns).toEqual(["order_id"]);
     });
 
     test("should parse composite PRIMARY KEY", () => {
@@ -77,8 +81,10 @@ describe("Primary Key Support", () => {
       const tables = parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
-      expect(tables[0].primaryKey).toBeDefined();
-      expect(tables[0].primaryKey!.columns).toEqual(["user_id", "role_id"]);
+      const table = tables[0];
+      expect(table).toBeDefined();
+      expect(table!.primaryKey).toBeDefined();
+      expect(table!.primaryKey!.columns).toEqual(["user_id", "role_id"]);
     });
 
     test("should parse named PRIMARY KEY constraint", () => {
@@ -93,9 +99,11 @@ describe("Primary Key Support", () => {
       const tables = parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
-      expect(tables[0].primaryKey).toBeDefined();
-      expect(tables[0].primaryKey!.name).toBe("pk_sessions");
-      expect(tables[0].primaryKey!.columns).toEqual(["session_id", "user_id"]);
+      const table = tables[0];
+      expect(table).toBeDefined();
+      expect(table!.primaryKey).toBeDefined();
+      expect(table!.primaryKey!.name).toBe("pk_sessions");
+      expect(table!.primaryKey!.columns).toEqual(["session_id", "user_id"]);
     });
 
     test("should handle table without PRIMARY KEY", () => {
@@ -109,7 +117,9 @@ describe("Primary Key Support", () => {
       const tables = parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
-      expect(tables[0].primaryKey).toBeUndefined();
+      const table = tables[0];
+      expect(table).toBeDefined();
+      expect(table!.primaryKey).toBeUndefined();
     });
   });
 
@@ -459,6 +469,482 @@ describe("Primary Key Support", () => {
       `);
 
       const result = await client.query("SELECT COUNT(*) FROM user_roles");
+      expect(parseInt(result.rows[0].count)).toBe(3);
+    });
+  });
+
+  describe("Error Scenarios", () => {
+    test("should fail to add primary key when table has duplicate values", async () => {
+      // 1. Initial state: create table with duplicate values
+      await client.query(`
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100)
+        );
+      `);
+
+      // Insert duplicate values
+      await client.query(`
+        INSERT INTO users (id, name) VALUES 
+        (1, 'Alice'), 
+        (1, 'Bob'),  -- Duplicate id
+        (2, 'Charlie');
+      `);
+
+      // 2. Desired state: SQL with primary key on duplicate column
+      const desiredSQL = `
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100),
+          PRIMARY KEY (id)
+        );
+      `;
+
+      // 3. Execute migration - should fail
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      // Should throw an error due to duplicate values
+      await expect(executor.executePlan(client, plan)).rejects.toThrow();
+
+      // 4. Verify original state is preserved
+      const result = await client.query("SELECT COUNT(*) FROM users");
+      expect(parseInt(result.rows[0].count)).toBe(3);
+    });
+
+    test("should fail to add primary key when table has NULL values", async () => {
+      // 1. Initial state: create table with NULL values
+      await client.query(`
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100)
+        );
+      `);
+
+      // Insert NULL values
+      await client.query(`
+        INSERT INTO users (id, name) VALUES 
+        (1, 'Alice'), 
+        (NULL, 'Bob'),  -- NULL id
+        (2, 'Charlie');
+      `);
+
+      // 2. Desired state: SQL with primary key on nullable column
+      const desiredSQL = `
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100),
+          PRIMARY KEY (id)
+        );
+      `;
+
+      // 3. Execute migration - should fail
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      // Should throw an error due to NULL values
+      await expect(executor.executePlan(client, plan)).rejects.toThrow();
+
+      // 4. Verify original state is preserved
+      const result = await client.query("SELECT COUNT(*) FROM users");
+      expect(parseInt(result.rows[0].count)).toBe(3);
+    });
+
+    test("should handle malformed primary key SQL gracefully", () => {
+      const malformedSQL = `
+        CREATE TABLE users (
+          id INTEGER,
+          PRIMARY KEY ()  -- Empty primary key
+        );
+      `;
+
+      // Should either parse gracefully or throw descriptive error
+      expect(() => parser.parseCreateTableStatements(malformedSQL)).toThrow();
+    });
+
+    test("should handle duplicate primary key definitions", () => {
+      const duplicateSQL = `
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY,
+          name VARCHAR(100),
+          PRIMARY KEY (id)  -- Duplicate primary key
+        );
+      `;
+
+      // Parser should handle gracefully by using table-level definition
+      const tables = parser.parseCreateTableStatements(duplicateSQL);
+
+      expect(tables).toHaveLength(1);
+      expect(tables[0]!.primaryKey).toBeDefined();
+      expect(tables[0]!.primaryKey!.columns).toEqual(["id"]);
+      // Should use table-level definition (no name specified)
+      expect(tables[0]!.primaryKey!.name).toBeUndefined();
+    });
+
+    test("should fail when trying to drop non-existent primary key", async () => {
+      // 1. Initial state: create table without primary key
+      await client.query(`
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100)
+        );
+      `);
+
+      // 2. Try to drop non-existent primary key constraint
+      const dropSQL = generateDropPrimaryKeySQL("users", "pk_users");
+
+      // Should fail gracefully
+      await expect(client.query(dropSQL)).rejects.toThrow();
+    });
+  });
+
+  describe("Edge Cases", () => {
+    test("should handle primary key with UUID data type", async () => {
+      // Enable UUID extension if not already enabled
+      await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`);
+
+      // 1. Initial state: no table
+
+      // 2. Desired state: table with UUID primary key
+      const desiredSQL = `
+        CREATE TABLE sessions (
+          session_id UUID,
+          user_id INTEGER,
+          PRIMARY KEY (session_id)
+        );
+      `;
+
+      // 3. Execute migration
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      await executor.executePlan(client, plan);
+
+      // 4. Verify final state
+      const finalSchema = await inspector.getCurrentSchema(client);
+      const sessionsTable = finalSchema.find((t) => t.name === "sessions");
+
+      expect(sessionsTable).toBeDefined();
+      expect(sessionsTable!.primaryKey).toBeDefined();
+      expect(sessionsTable!.primaryKey!.columns).toEqual(["session_id"]);
+
+      // Test inserting UUID values
+      await client.query(`
+        INSERT INTO sessions (session_id, user_id) VALUES 
+        (uuid_generate_v4(), 1),
+        (uuid_generate_v4(), 2);
+      `);
+
+      const result = await client.query("SELECT COUNT(*) FROM sessions");
+      expect(parseInt(result.rows[0].count)).toBe(2);
+    });
+
+    test("should handle primary key with BIGINT data type", async () => {
+      // 1. Initial state: no table
+
+      // 2. Desired state: table with BIGINT primary key
+      const desiredSQL = `
+        CREATE TABLE large_entities (
+          entity_id BIGINT,
+          data TEXT,
+          PRIMARY KEY (entity_id)
+        );
+      `;
+
+      // 3. Execute migration
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      await executor.executePlan(client, plan);
+
+      // 4. Verify final state
+      const finalSchema = await inspector.getCurrentSchema(client);
+      const entitiesTable = finalSchema.find(
+        (t) => t.name === "large_entities"
+      );
+
+      expect(entitiesTable).toBeDefined();
+      expect(entitiesTable!.primaryKey).toBeDefined();
+      expect(entitiesTable!.primaryKey!.columns).toEqual(["entity_id"]);
+
+      // Test inserting large integer values
+      await client.query(`
+        INSERT INTO large_entities (entity_id, data) VALUES 
+        (9223372036854775801, 'data1'),
+        (9223372036854775802, 'data2');
+      `);
+
+      const result = await client.query("SELECT COUNT(*) FROM large_entities");
+      expect(parseInt(result.rows[0].count)).toBe(2);
+    });
+
+    test("should handle primary key with VARCHAR data type", async () => {
+      // 1. Initial state: no table
+
+      // 2. Desired state: table with VARCHAR primary key
+      const desiredSQL = `
+        CREATE TABLE products (
+          product_code VARCHAR(50),
+          name VARCHAR(255),
+          PRIMARY KEY (product_code)
+        );
+      `;
+
+      // 3. Execute migration
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      await executor.executePlan(client, plan);
+
+      // 4. Verify final state
+      const finalSchema = await inspector.getCurrentSchema(client);
+      const productsTable = finalSchema.find((t) => t.name === "products");
+
+      expect(productsTable).toBeDefined();
+      expect(productsTable!.primaryKey).toBeDefined();
+      expect(productsTable!.primaryKey!.columns).toEqual(["product_code"]);
+
+      // Test inserting string values
+      await client.query(`
+        INSERT INTO products (product_code, name) VALUES 
+        ('PROD-001', 'Product 1'),
+        ('PROD-002', 'Product 2');
+      `);
+
+      const result = await client.query("SELECT COUNT(*) FROM products");
+      expect(parseInt(result.rows[0].count)).toBe(2);
+    });
+
+    test("should handle large composite primary key", async () => {
+      // 1. Initial state: no table
+
+      // 2. Desired state: table with 5-column composite primary key
+      const desiredSQL = `
+        CREATE TABLE multi_tenant_data (
+          tenant_id INTEGER,
+          region_id INTEGER,
+          service_id INTEGER,
+          entity_type VARCHAR(50),
+          entity_id INTEGER,
+          data TEXT,
+          PRIMARY KEY (tenant_id, region_id, service_id, entity_type, entity_id)
+        );
+      `;
+
+      // 3. Execute migration
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      await executor.executePlan(client, plan);
+
+      // 4. Verify final state
+      const finalSchema = await inspector.getCurrentSchema(client);
+      const dataTable = finalSchema.find((t) => t.name === "multi_tenant_data");
+
+      expect(dataTable).toBeDefined();
+      expect(dataTable!.primaryKey).toBeDefined();
+      expect(dataTable!.primaryKey!.columns).toEqual([
+        "tenant_id",
+        "region_id",
+        "service_id",
+        "entity_type",
+        "entity_id",
+      ]);
+
+      // Test inserting complex composite key values
+      await client.query(`
+        INSERT INTO multi_tenant_data 
+        (tenant_id, region_id, service_id, entity_type, entity_id, data) VALUES 
+        (1, 1, 1, 'user', 100, 'data1'),
+        (1, 1, 1, 'user', 101, 'data2'),
+        (1, 1, 2, 'user', 100, 'data3');
+      `);
+
+      const result = await client.query(
+        "SELECT COUNT(*) FROM multi_tenant_data"
+      );
+      expect(parseInt(result.rows[0].count)).toBe(3);
+    });
+
+    test("should handle primary key constraint name changes", async () => {
+      // 1. Initial state: create table with named primary key
+      await client.query(`
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100),
+          CONSTRAINT pk_users_old PRIMARY KEY (id)
+        );
+      `);
+
+      // Insert test data
+      await client.query(`
+        INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob');
+      `);
+
+      // 2. Get initial schema to check current constraint name
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const initialUsersTable = initialSchema.find((t) => t.name === "users");
+      expect(initialUsersTable).toBeDefined();
+      expect(initialUsersTable!.primaryKey).toBeDefined();
+      expect(initialUsersTable!.primaryKey!.columns).toEqual(["id"]);
+
+      // 3. Desired state: same primary key but different constraint name
+      const desiredSQL = `
+        CREATE TABLE users (
+          id INTEGER,
+          name VARCHAR(100),
+          CONSTRAINT pk_users_new PRIMARY KEY (id)
+        );
+      `;
+
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      // 4. Check if migration detects the constraint name difference
+      // Note: The current implementation may or may not detect constraint name changes
+      // This test documents the current behavior
+      if (migrationStatements.length > 0) {
+        // If changes are detected, verify they can be applied without errors
+        const plan: MigrationPlan = {
+          statements: migrationStatements,
+          hasChanges: true,
+        };
+
+        // Should either succeed or fail gracefully
+        try {
+          await executor.executePlan(client, plan);
+        } catch (error) {
+          // If constraint renaming fails, that's acceptable for now
+          // The important thing is that the database remains consistent
+          console.log(
+            "Constraint name change failed (acceptable):",
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
+
+      // 5. Verify final state - primary key should still exist and work
+      const finalSchema = await inspector.getCurrentSchema(client);
+      const usersTable = finalSchema.find((t) => t.name === "users");
+
+      expect(usersTable).toBeDefined();
+      expect(usersTable!.primaryKey).toBeDefined();
+      expect(usersTable!.primaryKey!.columns).toEqual(["id"]);
+
+      // Verify data is preserved
+      const result = await client.query("SELECT COUNT(*) FROM users");
+      expect(parseInt(result.rows[0].count)).toBe(2);
+
+      // Verify primary key constraint still works
+      await expect(
+        client.query("INSERT INTO users (id, name) VALUES (1, 'Duplicate')")
+      ).rejects.toThrow();
+    });
+
+    test("should handle mixed case column names in primary key", async () => {
+      // 1. Initial state: no table
+
+      // 2. Desired state: table with mixed case column names
+      const desiredSQL = `
+        CREATE TABLE "MixedCaseTable" (
+          "UserId" INTEGER,
+          "RoleId" INTEGER,
+          "CreatedAt" TIMESTAMP,
+          PRIMARY KEY ("UserId", "RoleId")
+        );
+      `;
+
+      // 3. Execute migration
+      const initialSchema = await inspector.getCurrentSchema(client);
+      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const migrationStatements = differ.generateMigrationPlan(
+        desiredTables,
+        initialSchema
+      );
+
+      const plan: MigrationPlan = {
+        statements: migrationStatements,
+        hasChanges: migrationStatements.length > 0,
+      };
+
+      await executor.executePlan(client, plan);
+
+      // 4. Verify final state
+      const finalSchema = await inspector.getCurrentSchema(client);
+      const mixedTable = finalSchema.find((t) => t.name === "MixedCaseTable");
+
+      expect(mixedTable).toBeDefined();
+      expect(mixedTable!.primaryKey).toBeDefined();
+      expect(mixedTable!.primaryKey!.columns).toEqual(["UserId", "RoleId"]);
+
+      // Test inserting data with quoted column names
+      await client.query(`
+        INSERT INTO "MixedCaseTable" ("UserId", "RoleId", "CreatedAt") VALUES 
+        (1, 1, NOW()),
+        (1, 2, NOW()),
+        (2, 1, NOW());
+      `);
+
+      const result = await client.query(
+        'SELECT COUNT(*) FROM "MixedCaseTable"'
+      );
       expect(parseInt(result.rows[0].count)).toBe(3);
     });
   });

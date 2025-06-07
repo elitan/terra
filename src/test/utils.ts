@@ -18,13 +18,17 @@ export async function createTestClient(): Promise<Client> {
 export async function cleanDatabase(client: Client): Promise<void> {
   // Drop all tables in the public schema
   const result = await client.query(`
-    SELECT tablename 
+    SELECT 
+      schemaname,
+      tablename,
+      quote_ident(tablename) as quoted_tablename
     FROM pg_tables 
     WHERE schemaname = 'public'
   `);
 
   for (const row of result.rows) {
-    await client.query(`DROP TABLE IF EXISTS ${row.tablename} CASCADE`);
+    // Use quote_ident to properly handle case-sensitive table names
+    await client.query(`DROP TABLE IF EXISTS ${row.quoted_tablename} CASCADE`);
   }
 }
 
