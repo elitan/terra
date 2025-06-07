@@ -55,7 +55,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
       // Test that migration fails with appropriate error
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, targetSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "String to INTEGER conversion with non-numeric data"
       );
 
@@ -137,7 +137,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
       // Should fail because of the one invalid row
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, targetSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "Mixed valid/invalid data conversion"
       );
 
@@ -285,7 +285,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
 
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, targetSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "Migration with invalid data conversion"
       );
 
@@ -340,7 +340,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
 
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, targetSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "Multi-column migration with partial failure"
       );
 
@@ -384,7 +384,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
       // First migration should fail
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, targetSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "First migration failure"
       );
 

@@ -346,7 +346,7 @@ describe("Simultaneous Type Changes", () => {
       // 3. Expect migration to fail due to invalid numeric conversion
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, desiredSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "mixed valid/invalid conversion"
       );
 
@@ -589,7 +589,7 @@ describe("Simultaneous Type Changes", () => {
       // 3. Expect complete rollback on failure
       await EnhancedAssertions.assertMigrationFailure(
         executeColumnMigration(client, desiredSQL, services),
-        /invalid input syntax for.*integer/i,
+        /invalid input syntax for.*numeric/i,
         "partial failure scenario"
       );
 
