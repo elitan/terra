@@ -13,8 +13,9 @@ This means this tool will figure out what diffs to apply to the target database,
 
 ## Other
 
-- Use bun as package manager, not npm.
-- Use only TypeScript files, not JavaScript files.
+- Use `bun` as package manager, not `npm`.
+- Use only TypeScript (.ts) files, not JavaScript files.
+- Use `bun` to run .ts files.
 
 ## Tests
 
