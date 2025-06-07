@@ -23,20 +23,29 @@ export class SchemaDiffer {
       if (!currentTables.has(table.name)) {
         statements.push(generateCreateTableStatement(table));
       } else {
-        // Handle column changes and primary key changes for existing tables
+        // Handle existing tables - ORDER MATTERS!
         const currentTable = currentTables.get(table.name)!;
+
+        // 1. First handle primary key changes that involve dropping constraints
+        const primaryKeyDropStatements = this.generatePrimaryKeyDropStatements(
+          table,
+          currentTable
+        );
+        statements.push(...primaryKeyDropStatements);
+
+        // 2. Then handle column changes (now that blocking constraints are removed)
         const columnStatements = this.generateColumnStatements(
           table,
           currentTable
         );
         statements.push(...columnStatements);
 
-        // Handle primary key changes for existing tables
-        const primaryKeyStatements = this.generatePrimaryKeyStatements(
+        // 3. Finally handle primary key additions/modifications
+        const primaryKeyAddStatements = this.generatePrimaryKeyAddStatements(
           table,
           currentTable
         );
-        statements.push(...primaryKeyStatements);
+        statements.push(...primaryKeyAddStatements);
       }
     }
 
@@ -164,6 +173,24 @@ export class SchemaDiffer {
     desiredType: string,
     currentType: string
   ): string {
+    // Special handling for SERIAL type conversions
+    if (desiredType === "SERIAL") {
+      // SERIAL can't be used in ALTER COLUMN, must use INTEGER
+      // and handle sequence creation separately if needed
+      const needsUsing = this.requiresUsingClause(currentType, "INTEGER");
+
+      if (needsUsing) {
+        const usingExpression = this.generateUsingExpression(
+          columnName,
+          currentType,
+          "INTEGER"
+        );
+        return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE INTEGER USING ${usingExpression};`;
+      } else {
+        return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE INTEGER;`;
+      }
+    }
+
     // Check if we need a USING clause for type conversion
     const needsUsing = this.requiresUsingClause(currentType, desiredType);
 
@@ -334,5 +361,53 @@ export class SchemaDiffer {
     // Note: We don't compare constraint names because they might be auto-generated
     // The important part is the column composition
     return true;
+  }
+
+  private generatePrimaryKeyDropStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+
+    const primaryKeyChange = this.comparePrimaryKeys(
+      desiredTable.primaryKey,
+      currentTable.primaryKey
+    );
+
+    // Only handle drops and the drop part of modify operations
+    if (
+      primaryKeyChange.type === "drop" ||
+      primaryKeyChange.type === "modify"
+    ) {
+      statements.push(
+        generateDropPrimaryKeySQL(
+          desiredTable.name,
+          primaryKeyChange.currentPK!.name!
+        )
+      );
+    }
+
+    return statements;
+  }
+
+  private generatePrimaryKeyAddStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+
+    const primaryKeyChange = this.comparePrimaryKeys(
+      desiredTable.primaryKey,
+      currentTable.primaryKey
+    );
+
+    // Only handle adds and the add part of modify operations
+    if (primaryKeyChange.type === "add" || primaryKeyChange.type === "modify") {
+      statements.push(
+        generateAddPrimaryKeySQL(desiredTable.name, primaryKeyChange.desiredPK!)
+      );
+    }
+
+    return statements;
   }
 }

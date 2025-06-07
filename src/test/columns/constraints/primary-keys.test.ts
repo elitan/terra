@@ -387,7 +387,7 @@ describe("Primary Key Support", () => {
 
       const idColumn = sessionsTable!.columns.find((c) => c.name === "id");
       expect(idColumn).toBeDefined();
-      expect(idColumn!.type).toBe("SERIAL");
+      expect(idColumn!.type).toBe("integer");
     });
 
     test("should handle identical primary keys without changes", async () => {

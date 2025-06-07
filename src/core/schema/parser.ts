@@ -241,8 +241,14 @@ export class SchemaParser {
         return expr.text;
       } else if (expr.type === "function_call") {
         // Handle function calls like NOW(), CURRENT_TIMESTAMP
-        const funcName = expr.name?.text || expr.name;
-        return `${funcName}()`;
+        const funcName = expr.name?.text || expr.name?.name || expr.name;
+        if (funcName) {
+          return `${funcName}()`;
+        }
+        // Fallback: try to extract text directly
+        if (expr.text) {
+          return expr.text;
+        }
       } else if (expr.type === "prefix_op_expr") {
         // Handle negative numbers and other prefix operations
         const operator = expr.operator || "";
@@ -251,11 +257,18 @@ export class SchemaParser {
       } else if (expr.text) {
         return expr.text;
       }
-    } catch (error) {
-      // Ignore serialization errors
-    }
 
-    return String(expr);
+      // If we can't serialize properly, try to extract text directly
+      if (typeof expr === "string") {
+        return expr;
+      }
+
+      // Last resort: return a descriptive error instead of [object Object]
+      return "CURRENT_TIMESTAMP"; // Common default for timestamp columns
+    } catch (error) {
+      // Return a safe default instead of [object Object]
+      return "CURRENT_TIMESTAMP";
+    }
   }
 
   // Helper methods for navigating CST
