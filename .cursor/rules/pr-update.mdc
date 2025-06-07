@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Updat the pr using the github cli. Update the title and/or body with more relevant information.
+
+Feel free to first do research of the pr and the state of things before updating.

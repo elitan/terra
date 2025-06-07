@@ -1,5 +1,5 @@
 import { Client } from "pg";
-import type { DatabaseConfig } from "../index";
+import type { DatabaseConfig } from "../types/config";
 
 export const TEST_DB_CONFIG: DatabaseConfig = {
   host: "localhost",
