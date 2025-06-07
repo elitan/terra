@@ -11,12 +11,7 @@ import {
 } from "../../../utils/sql";
 import type { PrimaryKeyConstraint } from "../../../types/schema";
 import type { MigrationPlan } from "../../../types/migration";
-import {
-  createTestClient,
-  cleanDatabase,
-  getTableColumns,
-  TEST_DB_CONFIG,
-} from "../../utils";
+import { createTestClient, cleanDatabase, TEST_DB_CONFIG } from "../../utils";
 
 describe("Primary Key Support", () => {
   let client: Client;
