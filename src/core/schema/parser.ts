@@ -259,13 +259,28 @@ export class SchemaParser {
         return `'${value.value}'`;
       } else if (value.type === "number") {
         return String(value.value);
+      } else if (value.type === "bool") {
+        return String(value.value);
       } else if (value.type === "function") {
-        const funcName = value.name;
-        const args =
-          value.args && Array.isArray(value.args)
-            ? value.args.map((arg: any) => this.serializeValue(arg)).join(", ")
+        // Extract function name from nested structure
+        let funcName = value.name;
+        if (
+          funcName &&
+          typeof funcName === "object" &&
+          funcName.name &&
+          Array.isArray(funcName.name)
+        ) {
+          // Handle complex function name structure like NOW() and CURRENT_TIMESTAMP
+          funcName = funcName.name[0]?.value || funcName.name[0];
+        }
+
+        // Handle arguments
+        const args = value.args?.value || value.args;
+        const argString =
+          args && Array.isArray(args)
+            ? args.map((arg: any) => this.serializeValue(arg)).join(", ")
             : "";
-        return `${funcName}(${args})`;
+        return `${funcName}(${argString})`;
       } else if (value.type === "column_ref") {
         return value.column;
       }

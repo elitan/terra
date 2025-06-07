@@ -16,3 +16,6 @@ This means this tool will figure out what diffs to apply to the target database,
 - Use bun as package manager, not npm.
 - Use only TypeScript files, not JavaScript files.
 
+## Tests
+
+When fixing tests, be mindful if the test is failing because the test is incorrect, or because we have a bug or need to fix something in our code. Lean towards fixin things in our code. Use best practices to debug and understand the core issue so we can make the best possible solution for failing tests.

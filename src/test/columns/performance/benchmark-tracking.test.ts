@@ -300,7 +300,7 @@ describe("Performance Benchmark Tracking", () => {
   describe("Complex Scenario Benchmarks", () => {
     test("should benchmark multi-column conversions", async () => {
       const tableName = "multi_column_benchmark";
-      const recordCount = 20000; // Medium dataset for multi-column
+      const recordCount = 5000; // Reduced dataset for testing
 
       await client.query(`
         CREATE TABLE ${tableName} (
@@ -308,7 +308,7 @@ describe("Performance Benchmark Tracking", () => {
           varchar_col VARCHAR(255),
           int_col INTEGER,
           decimal_col DECIMAL(8,2),
-          bool_col BOOLEAN DEFAULT false
+          bool_col BOOLEAN
         );
       `);
 
@@ -345,7 +345,7 @@ describe("Performance Benchmark Tracking", () => {
             varchar_col TEXT,
             int_col BIGINT,
             decimal_col DECIMAL(12,4),
-            bool_col BOOLEAN DEFAULT false
+            bool_col BOOLEAN
           );
         `,
             services

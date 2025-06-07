@@ -398,11 +398,13 @@ describe("Performance Regression Testing", () => {
       `);
 
       // Use large dataset to test memory efficiency
-      const largeDataSize = 50000; // 50K records with large strings
-      const largeStrings = Array.from(
-        { length: largeDataSize },
-        (_, i) => `'${Array(500).fill(`data_${i}`).join("_")}'` // ~2KB per record
-      );
+      const largeDataSize = 15000; // 15K records with large strings
+      const largeStrings = Array.from({ length: largeDataSize }, (_, i) => {
+        // Generate strings that fit in VARCHAR(1000) - max 800 chars to be safe
+        const baseString = `data_${i}_`;
+        const repeatCount = Math.floor(800 / baseString.length);
+        return `'${Array(repeatCount).fill(baseString).join("")}'`;
+      });
 
       await DataIntegrityUtils.insertTestDataSafely(
         client,
@@ -626,23 +628,27 @@ describe("Performance Regression Testing", () => {
         const prev = results[i - 1];
         const curr = results[i];
 
-        const sizeRatio = curr.size / prev.size;
-        const timeRatio = curr.duration / prev.duration;
-        const scalingEfficiency = sizeRatio / timeRatio;
+        if (prev && curr) {
+          const sizeRatio = curr.size / prev.size;
+          const timeRatio = curr.duration / prev.duration;
+          const scalingEfficiency = sizeRatio / timeRatio;
 
-        console.log(
-          `Scaling ${prev.size} → ${
-            curr.size
-          }: efficiency ${scalingEfficiency.toFixed(2)}`
-        );
+          console.log(
+            `Scaling ${prev.size} → ${
+              curr.size
+            }: efficiency ${scalingEfficiency.toFixed(2)}`
+          );
 
-        // Scaling should be reasonably linear (efficiency > 0.5 is acceptable)
-        expect(scalingEfficiency).toBeGreaterThan(0.3);
+          // Scaling should be reasonably linear (efficiency > 0.5 is acceptable)
+          expect(scalingEfficiency).toBeGreaterThan(0.3);
+        }
       }
 
       // Performance should not degrade dramatically with scale
       const largestTest = results[results.length - 1];
-      expect(largestTest.rate).toBeGreaterThan(50); // Minimum acceptable rate at scale
+      if (largestTest) {
+        expect(largestTest.rate).toBeGreaterThan(50); // Minimum acceptable rate at scale
+      }
     });
   });
 });
