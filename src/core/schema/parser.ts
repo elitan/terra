@@ -193,22 +193,46 @@ export class SchemaParser {
 
   private extractDefaultValueFromCST(node: any): string | undefined {
     try {
-      // Find DEFAULT keyword and following value
-      const keywords = this.findNodesByType(node, "keyword");
-      const defaultIndex = keywords.findIndex(
-        (k: any) => k.text?.toUpperCase() === "DEFAULT"
-      );
-
-      if (defaultIndex >= 0 && defaultIndex < keywords.length - 1) {
-        // Get the next node after DEFAULT
-        const valueNode = keywords[defaultIndex + 1];
-        return valueNode?.text;
+      if (node.constraints && Array.isArray(node.constraints)) {
+        for (const constraint of node.constraints) {
+          if (constraint.type === "constraint_default" && constraint.expr) {
+            return this.serializeDefaultValueFromCST(constraint.expr);
+          }
+        }
       }
     } catch (error) {
       // Ignore extraction errors
     }
 
     return undefined;
+  }
+
+  private serializeDefaultValueFromCST(expr: any): string {
+    try {
+      if (expr.type === "number_literal") {
+        return expr.text || String(expr.value);
+      } else if (expr.type === "string_literal") {
+        // The text property already includes quotes
+        return expr.text;
+      } else if (expr.type === "keyword") {
+        return expr.text;
+      } else if (expr.type === "function_call") {
+        // Handle function calls like NOW(), CURRENT_TIMESTAMP
+        const funcName = expr.name?.text || expr.name;
+        return `${funcName}()`;
+      } else if (expr.type === "prefix_op_expr") {
+        // Handle negative numbers and other prefix operations
+        const operator = expr.operator || "";
+        const operand = this.serializeDefaultValueFromCST(expr.expr);
+        return `${operator}${operand}`;
+      } else if (expr.text) {
+        return expr.text;
+      }
+    } catch (error) {
+      // Ignore serialization errors
+    }
+
+    return String(expr);
   }
 
   // Helper methods for navigating CST

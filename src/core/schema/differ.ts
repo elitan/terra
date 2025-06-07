@@ -221,7 +221,8 @@ export class SchemaDiffer {
         desiredNormalized.includes("integer") ||
         desiredNormalized.includes("int")
       ) {
-        return `${columnName}::integer`;
+        // For string to integer conversion, first convert to numeric to handle decimal strings, then truncate
+        return `TRUNC(${columnName}::DECIMAL)::integer`;
       }
       if (desiredNormalized.includes("boolean")) {
         return `${columnName}::boolean`;
