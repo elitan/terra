@@ -1,6 +1,11 @@
 import { readFileSync, existsSync } from "fs";
 import { parse as parseCST, cstVisitor } from "sql-parser-cst";
-import type { Table, Column, PrimaryKeyConstraint } from "../../types/schema";
+import type {
+  Table,
+  Column,
+  PrimaryKeyConstraint,
+  Index,
+} from "../../types/schema";
 import { Logger } from "../../utils/logger";
 
 export class SchemaParser {
@@ -11,15 +16,27 @@ export class SchemaParser {
     }
 
     const content = readFileSync(filePath, "utf-8");
-    return this.parseCreateTableStatements(content);
+    return this.parseSchema(content);
+  }
+
+  parseSchema(sql: string): Table[] {
+    const { tables } = this.parseWithCST(sql);
+    return tables;
   }
 
   parseCreateTableStatements(sql: string): Table[] {
-    return this.parseWithCST(sql);
+    const { tables } = this.parseWithCST(sql);
+    return tables;
   }
 
-  private parseWithCST(sql: string): Table[] {
+  parseCreateIndexStatements(sql: string): Index[] {
+    const { indexes } = this.parseWithCST(sql);
+    return indexes;
+  }
+
+  private parseWithCST(sql: string): { tables: Table[]; indexes: Index[] } {
     const tables: Table[] = [];
+    const indexes: Index[] = [];
 
     try {
       const cst = parseCST(sql, {
@@ -30,13 +47,18 @@ export class SchemaParser {
         includeRange: true,
       });
 
-      // Extract CREATE TABLE statements directly from the CST
+      // Extract statements from the CST
       if (cst.statements) {
         for (const statement of cst.statements) {
           if (statement.type === "create_table_stmt") {
             const table = this.parseCreateTableFromCST(statement);
             if (table) {
               tables.push(table);
+            }
+          } else if (statement.type === "create_index_stmt") {
+            const index = this.parseCreateIndexFromCST(statement);
+            if (index) {
+              indexes.push(index);
             }
           }
         }
@@ -50,7 +72,7 @@ export class SchemaParser {
       throw error;
     }
 
-    return tables;
+    return { tables, indexes };
   }
 
   private parseCreateTableFromCST(node: any): Table | null {
@@ -450,5 +472,241 @@ export class SchemaParser {
 
     // No primary key found
     return undefined;
+  }
+
+  // Index parsing methods
+  private parseCreateIndexFromCST(node: any): Index | null {
+    try {
+      // Extract index name
+      const indexName = this.extractIndexNameFromCST(node);
+      if (!indexName) return null;
+
+      // Extract table name
+      const tableName = this.extractIndexTableNameFromCST(node);
+      if (!tableName) return null;
+
+      // Extract columns
+      const columns = this.extractIndexColumnsFromCST(node);
+      if (columns.length === 0) return null;
+
+      // Extract index type (default is btree)
+      const indexType = this.extractIndexTypeFromCST(node);
+
+      // Extract unique flag
+      const unique = this.extractIndexUniqueFromCST(node);
+
+      // Extract concurrent flag
+      const concurrent = this.extractIndexConcurrentFromCST(node);
+
+      // Extract WHERE clause for partial indexes
+      const whereClause = this.extractIndexWhereClauseFromCST(node);
+
+      return {
+        name: indexName,
+        tableName,
+        columns,
+        type: indexType,
+        unique,
+        concurrent,
+        where: whereClause,
+      };
+    } catch (error) {
+      Logger.warning(
+        `⚠️ Failed to parse CREATE INDEX from CST: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return null;
+    }
+  }
+
+  private extractIndexNameFromCST(node: any): string | null {
+    try {
+      return node.name?.text || node.name?.name || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private extractIndexTableNameFromCST(node: any): string | null {
+    try {
+      return node.table?.text || node.table?.name || null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private extractIndexColumnsFromCST(node: any): string[] {
+    const columns: string[] = [];
+
+    try {
+      // Index columns are typically in node.columns.expr.items
+      const columnItems = node.columns?.expr?.items || [];
+
+      for (const columnNode of columnItems) {
+        let columnName: string | undefined;
+
+        // Handle different CST structures for index columns
+        if (columnNode.type === "index_specification" && columnNode.expr) {
+          columnName = columnNode.expr.text || columnNode.expr.name;
+        } else {
+          columnName =
+            columnNode.text || columnNode.name?.text || columnNode.name?.name;
+        }
+
+        if (columnName) {
+          columns.push(columnName);
+        }
+      }
+    } catch (error) {
+      Logger.warning(
+        `⚠️ Failed to extract index columns: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+
+    return columns;
+  }
+
+  private extractIndexTypeFromCST(node: any): Index["type"] {
+    try {
+      // Look for USING clause to determine index type
+      const method = node.using?.method?.text || node.using?.method?.name;
+
+      if (method) {
+        const type = method.toLowerCase();
+        if (["btree", "hash", "gist", "spgist", "gin", "brin"].includes(type)) {
+          return type as Index["type"];
+        }
+      }
+
+      // Default to btree if no USING clause specified
+      return "btree";
+    } catch (error) {
+      return "btree";
+    }
+  }
+
+  private extractIndexUniqueFromCST(node: any): boolean {
+    try {
+      // Check if the index has UNIQUE keyword (stored in indexTypeKw)
+      return node.indexTypeKw?.name === "UNIQUE" || false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private extractIndexConcurrentFromCST(node: any): boolean {
+    try {
+      // Check if the index has CONCURRENTLY keyword
+      return node.concurrentlyKw?.name === "CONCURRENTLY" || false;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private extractIndexWhereClauseFromCST(node: any): string | undefined {
+    try {
+      // Look for WHERE clause in the clauses array
+      if (node.clauses && Array.isArray(node.clauses)) {
+        for (const clause of node.clauses) {
+          if (clause.type === "where_clause" && clause.expr) {
+            // Serialize the WHERE expression back to SQL string
+            return this.serializeExpressionFromCST(clause.expr);
+          }
+        }
+      }
+      return undefined;
+    } catch (error) {
+      Logger.warning(
+        `⚠️ Failed to extract WHERE clause: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return undefined;
+    }
+  }
+
+  private serializeExpressionFromCST(expr: any): string {
+    try {
+      // Handle different expression types
+      if (typeof expr === "string") {
+        return expr;
+      }
+
+      // Direct text property
+      if (expr.text) {
+        return expr.text;
+      }
+
+      // Comparison expressions (e.g., "column > value")
+      if (expr.type === "binary_expr" || expr.type === "binary_op_expr") {
+        const left = this.serializeExpressionFromCST(expr.left);
+        const operator = expr.operator || "=";
+        const right = this.serializeExpressionFromCST(expr.right);
+        return `${left} ${operator} ${right}`;
+      }
+
+      // Column references
+      if (expr.type === "identifier" || expr.type === "column_ref") {
+        return expr.name || expr.text || expr.column || "unknown_column";
+      }
+
+      // Literals
+      if (expr.type === "number_literal") {
+        return String(expr.value || expr.text);
+      }
+
+      if (expr.type === "string_literal") {
+        return expr.text || `'${expr.value}'`;
+      }
+
+      if (expr.type === "boolean_literal") {
+        return String(expr.value || expr.valueKw?.text || expr.text);
+      }
+
+      // NULL values
+      if (expr.type === "null_literal") {
+        return "NULL";
+      }
+
+      // Function calls
+      if (expr.type === "function_call") {
+        const funcName = expr.name?.text || expr.name?.name || "unknown_func";
+        // For now, just return the function name with parentheses
+        // More complex function parsing can be added later
+        return `${funcName}()`;
+      }
+
+      // Parenthesized expressions
+      if (expr.type === "parenthesized_expr" && expr.expr) {
+        return `(${this.serializeExpressionFromCST(expr.expr)})`;
+      }
+
+      // Unary expressions (e.g., NOT)
+      if (expr.type === "unary_op_expr") {
+        const operator = expr.operator || "";
+        const operand = this.serializeExpressionFromCST(
+          expr.operand || expr.expr
+        );
+        return `${operator} ${operand}`;
+      }
+
+      // Fallback: try to extract any available text
+      if (expr.value !== undefined) {
+        return String(expr.value);
+      }
+
+      // Final fallback
+      return "unknown_expression";
+    } catch (error) {
+      Logger.warning(
+        `⚠️ Failed to serialize expression: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return "unknown_expression";
+    }
   }
 }

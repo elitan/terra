@@ -423,15 +423,13 @@ graph LR
 - ✅ **Database Configuration** - Connection management
 - ✅ **Comprehensive Testing** - 20+ test suites covering edge cases
 
-### 🔄 **In Progress**
-
 #### **Primary Key Support**
 
-- 🔄 **Primary Key Detection** - Currently handles SERIAL PRIMARY KEY
-- 🔄 **Composite Primary Keys** - Multi-column primary keys
-- 🔄 **Primary Key Changes** - Adding/removing/modifying primary keys
+- ✅ **Primary Key Detection** - Handles SERIAL PRIMARY KEY and composite keys
+- ✅ **Composite Primary Keys** - Multi-column primary keys
+- ✅ **Primary Key Changes** - Adding/removing/modifying primary keys
 
-### 📋 **Planned Features**
+### 🔄 **In Progress**
 
 #### **Core Schema Objects**
 
@@ -444,6 +442,8 @@ graph LR
   - Unique Constraints (multi-column)
   - Check Constraints with custom expressions
   - DEFERRABLE constraints
+
+### 📋 **Planned Features**
 
 #### **Advanced PostgreSQL Features**
 

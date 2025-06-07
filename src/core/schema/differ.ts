@@ -1,4 +1,9 @@
-import type { Table, Column, PrimaryKeyConstraint } from "../../types/schema";
+import type {
+  Table,
+  Column,
+  PrimaryKeyConstraint,
+  Index,
+} from "../../types/schema";
 import {
   generateCreateTableStatement,
   columnsAreDifferent,
@@ -46,6 +51,27 @@ export class SchemaDiffer {
           currentTable
         );
         statements.push(...primaryKeyAddStatements);
+
+        // 4. Handle index changes for existing tables
+        const indexStatements = this.generateIndexStatements(
+          table,
+          currentTable
+        );
+        statements.push(...indexStatements);
+      }
+    }
+
+    // Handle indexes for new tables (created after table creation)
+    for (const table of desiredSchema) {
+      if (
+        !currentTables.has(table.name) &&
+        table.indexes &&
+        table.indexes.length > 0
+      ) {
+        const newTableIndexStatements = this.generateIndexCreationStatements(
+          table.indexes
+        );
+        statements.push(...newTableIndexStatements);
       }
     }
 
@@ -409,5 +435,176 @@ export class SchemaDiffer {
     }
 
     return statements;
+  }
+
+  // Index-related methods
+  private generateIndexStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+
+    const indexComparison = this.compareIndexes(
+      desiredTable.indexes || [],
+      currentTable.indexes || []
+    );
+
+    // Drop removed indexes first
+    statements.push(
+      ...this.generateIndexDropStatements(indexComparison.toRemove)
+    );
+
+    // Create new indexes
+    statements.push(
+      ...this.generateIndexCreationStatements(indexComparison.toAdd)
+    );
+
+    // Handle modified indexes (drop + create)
+    statements.push(
+      ...this.generateIndexDropStatements(
+        indexComparison.toModify.map((mod) => mod.current)
+      )
+    );
+    statements.push(
+      ...this.generateIndexCreationStatements(
+        indexComparison.toModify.map((mod) => mod.desired)
+      )
+    );
+
+    return statements;
+  }
+
+  private compareIndexes(
+    desiredIndexes: Index[],
+    currentIndexes: Index[]
+  ): {
+    toAdd: Index[];
+    toRemove: Index[];
+    toModify: { current: Index; desired: Index }[];
+  } {
+    const currentIndexMap = new Map(
+      currentIndexes.map((idx) => [idx.name, idx])
+    );
+    const desiredIndexMap = new Map(
+      desiredIndexes.map((idx) => [idx.name, idx])
+    );
+
+    const toAdd: Index[] = [];
+    const toRemove: Index[] = [];
+    const toModify: { current: Index; desired: Index }[] = [];
+
+    // Find new indexes to add
+    for (const desiredIndex of desiredIndexes) {
+      if (!currentIndexMap.has(desiredIndex.name)) {
+        toAdd.push(desiredIndex);
+      } else {
+        // Check if existing index needs modification
+        const currentIndex = currentIndexMap.get(desiredIndex.name)!;
+        if (!this.indexesAreEqual(desiredIndex, currentIndex)) {
+          toModify.push({ current: currentIndex, desired: desiredIndex });
+        }
+      }
+    }
+
+    // Find indexes to remove
+    for (const currentIndex of currentIndexes) {
+      if (!desiredIndexMap.has(currentIndex.name)) {
+        toRemove.push(currentIndex);
+      }
+    }
+
+    return { toAdd, toRemove, toModify };
+  }
+
+  private indexesAreEqual(index1: Index, index2: Index): boolean {
+    // Compare all relevant properties
+    if (index1.tableName !== index2.tableName) return false;
+    if (index1.type !== index2.type) return false;
+    if (index1.unique !== index2.unique) return false;
+
+    // Compare columns (order matters)
+    if (index1.columns.length !== index2.columns.length) return false;
+    for (let i = 0; i < index1.columns.length; i++) {
+      if (index1.columns[i] !== index2.columns[i]) return false;
+    }
+
+    // Compare optional properties
+    if (index1.where !== index2.where) return false;
+    if (index1.expression !== index2.expression) return false;
+    if (index1.tablespace !== index2.tablespace) return false;
+
+    // Compare storage parameters
+    const params1 = index1.storageParameters || {};
+    const params2 = index2.storageParameters || {};
+    const keys1 = Object.keys(params1);
+    const keys2 = Object.keys(params2);
+
+    if (keys1.length !== keys2.length) return false;
+    for (const key of keys1) {
+      if (params1[key] !== params2[key]) return false;
+    }
+
+    return true;
+  }
+
+  private generateIndexCreationStatements(indexes: Index[]): string[] {
+    return indexes.map((index) => this.generateCreateIndexSQL(index));
+  }
+
+  private generateIndexDropStatements(indexes: Index[]): string[] {
+    return indexes.map((index) => `DROP INDEX ${index.name};`);
+  }
+
+  private generateCreateIndexSQL(index: Index): string {
+    let sql = "CREATE";
+
+    // Add UNIQUE if specified
+    if (index.unique) {
+      sql += " UNIQUE";
+    }
+
+    sql += " INDEX";
+
+    // Add CONCURRENTLY if specified (for operational safety)
+    if (index.concurrent) {
+      sql += " CONCURRENTLY";
+    }
+
+    sql += ` ${index.name} ON ${index.tableName}`;
+
+    // Add USING clause if not default btree
+    if (index.type && index.type !== "btree") {
+      sql += ` USING ${index.type.toUpperCase()}`;
+    }
+
+    // Add columns or expression
+    if (index.expression) {
+      sql += ` (${index.expression})`;
+    } else {
+      sql += ` (${index.columns.join(", ")})`;
+    }
+
+    // Add WHERE clause for partial indexes
+    if (index.where) {
+      sql += ` WHERE ${index.where}`;
+    }
+
+    // Add storage parameters
+    if (
+      index.storageParameters &&
+      Object.keys(index.storageParameters).length > 0
+    ) {
+      const params = Object.entries(index.storageParameters)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(", ");
+      sql += ` WITH (${params})`;
+    }
+
+    // Add tablespace
+    if (index.tablespace) {
+      sql += ` TABLESPACE ${index.tablespace}`;
+    }
+
+    return sql + ";";
   }
 }
