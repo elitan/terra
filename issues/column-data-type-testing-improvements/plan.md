@@ -86,17 +86,17 @@
 ### Complex Multi-Operation Testing
 
 - [x] Add multiple simultaneous type change tests (8/9 tests pass - 1 test has parser issue but functionality works)
-- [ ] Add type changes with constraint modification tests
-- [ ] Add cross-column dependency scenario tests
-- [ ] Add complex migration rollback tests
+- [ ] (skip) Add type changes with constraint modification tests
+- [ ] (skip) Add cross-column dependency scenario tests
+- [ ] (skip) Add complex migration rollback tests
 
 ### Performance and Concurrency
 
-- [ ] Add large dataset conversion testing
-- [ ] Add lock time minimization validation
-- [ ] Add concurrent operation testing
-- [ ] Add performance benchmark establishment
-- [ ] Add performance regression tests
+- [x] Add large dataset conversion testing
+- [x] Add lock time minimization validation
+- [x] Add concurrent operation testing
+- [x] Add performance benchmark establishment
+- [x] Add performance regression tests
 
 ## Quality Assurance Checklist
 
