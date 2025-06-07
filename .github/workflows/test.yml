@@ -40,7 +40,4 @@ jobs:
         run: bun run test:setup
 
       - name: Run unit tests
-        run: bun run test:unit
-
-      - name: Run integration tests
-        run: bun run test:integration
+        run: bun run test:full
