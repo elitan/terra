@@ -93,10 +93,6 @@ export function assertColumn(
       expect(column.default).toContain(expectedProperties.default);
     }
   }
-
-  if (expectedProperties.primary !== undefined) {
-    expect(column.primary).toBe(expectedProperties.primary);
-  }
 }
 
 /**

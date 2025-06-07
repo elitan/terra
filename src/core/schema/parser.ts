@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { parse as parseCST, cstVisitor } from "sql-parser-cst";
-import type { Table, Column } from "../../types/schema";
+import type { Table, Column, PrimaryKeyConstraint } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 
 export class SchemaParser {
@@ -59,12 +59,25 @@ export class SchemaParser {
       const tableName = this.extractTableNameFromCST(node);
       if (!tableName) return null;
 
-      // Extract columns
-      const columns = this.extractColumnsFromCST(node);
+      // Extract columns and collect column-level primary key info
+      const columnPrimaryKeys: string[] = [];
+      const columns = this.extractColumnsFromCST(node, columnPrimaryKeys);
+
+      // Extract table-level primary key constraints
+      const tableLevelPrimaryKey =
+        this.extractTableLevelPrimaryKeyFromCST(node);
+
+      // Build unified primary key constraint
+      const primaryKey = this.buildPrimaryKeyConstraint(
+        columnPrimaryKeys,
+        tableLevelPrimaryKey,
+        tableName
+      );
 
       return {
         name: tableName,
         columns,
+        primaryKey,
       };
     } catch (error) {
       Logger.warning(
@@ -85,7 +98,10 @@ export class SchemaParser {
     }
   }
 
-  private extractColumnsFromCST(node: any): Column[] {
+  private extractColumnsFromCST(
+    node: any,
+    columnPrimaryKeys: string[]
+  ): Column[] {
     const columns: Column[] = [];
 
     try {
@@ -94,7 +110,7 @@ export class SchemaParser {
 
       for (const columnNode of columnItems) {
         if (columnNode.type === "column_definition") {
-          const column = this.parseColumnFromCST(columnNode);
+          const column = this.parseColumnFromCST(columnNode, columnPrimaryKeys);
           if (column) {
             columns.push(column);
           }
@@ -111,7 +127,10 @@ export class SchemaParser {
     return columns;
   }
 
-  private parseColumnFromCST(node: any): Column | null {
+  private parseColumnFromCST(
+    node: any,
+    columnPrimaryKeys: string[]
+  ): Column | null {
     try {
       // Extract column name from the node
       const name = node.name?.text || node.name?.name;
@@ -123,6 +142,11 @@ export class SchemaParser {
       // Extract constraints
       const constraints = this.extractConstraintsFromCST(node);
 
+      // If this column has a primary key constraint, add it to the list
+      if (constraints.primary) {
+        columnPrimaryKeys.push(name);
+      }
+
       // Extract default value
       const defaultValue = this.extractDefaultValueFromCST(node);
 
@@ -131,7 +155,6 @@ export class SchemaParser {
         type,
         nullable: !constraints.notNull && !constraints.primary,
         default: defaultValue,
-        primary: constraints.primary,
       };
     } catch (error) {
       Logger.warning(
@@ -265,5 +288,97 @@ export class SchemaParser {
     }
 
     return results;
+  }
+
+  private extractTableLevelPrimaryKeyFromCST(
+    node: any
+  ): PrimaryKeyConstraint | null {
+    try {
+      // Look for table-level PRIMARY KEY constraints in the columns section
+      const columnItems = node.columns?.expr?.items || [];
+
+      for (const item of columnItems) {
+        // Look for constraint definitions (not column definitions)
+        if (item.type === "constraint" || item.type === "table_constraint") {
+          const constraint = this.parseTableConstraintFromCST(item);
+          if (constraint) {
+            return constraint;
+          }
+        }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private parseTableConstraintFromCST(node: any): PrimaryKeyConstraint | null {
+    try {
+      // Check if this is a primary key constraint
+      if (
+        node.constraint?.type === "constraint_primary_key" ||
+        node.type === "constraint_primary_key"
+      ) {
+        // Extract constraint name if present
+        let constraintName: string | undefined;
+        if (node.name) {
+          constraintName = node.name.text || node.name.name;
+        }
+
+        // Extract column list
+        const columns: string[] = [];
+        const columnList = node.columns || node.constraint?.columns;
+
+        if (columnList?.expr?.items) {
+          for (const col of columnList.expr.items) {
+            const colName = col.text || col.name?.text || col.name?.name;
+            if (colName) {
+              columns.push(colName);
+            }
+          }
+        }
+
+        if (columns.length > 0) {
+          return {
+            name: constraintName,
+            columns,
+          };
+        }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private buildPrimaryKeyConstraint(
+    columnPrimaryKeys: string[],
+    tableLevelPrimaryKey: PrimaryKeyConstraint | null,
+    tableName: string
+  ): PrimaryKeyConstraint | undefined {
+    // Validate that we don't have both column-level and table-level primary keys
+    if (columnPrimaryKeys.length > 0 && tableLevelPrimaryKey) {
+      Logger.warning(
+        `⚠️ Table ${tableName} has both column-level and table-level primary key definitions. Using table-level definition.`
+      );
+      return tableLevelPrimaryKey;
+    }
+
+    // Return table-level primary key if it exists
+    if (tableLevelPrimaryKey) {
+      return tableLevelPrimaryKey;
+    }
+
+    // Convert column-level primary keys to table-level representation
+    if (columnPrimaryKeys.length > 0) {
+      return {
+        columns: columnPrimaryKeys,
+      };
+    }
+
+    // No primary key found
+    return undefined;
   }
 }

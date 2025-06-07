@@ -1,4 +1,4 @@
-import type { Table, Column } from "../types/schema";
+import type { Table, Column, PrimaryKeyConstraint } from "../types/schema";
 
 export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
@@ -44,9 +44,42 @@ export function generateCreateTableStatement(table: Table): string {
     let def = `${col.name} ${col.type}`;
     if (!col.nullable) def += " NOT NULL";
     if (col.default) def += ` DEFAULT ${col.default}`;
-    if (col.primary) def += " PRIMARY KEY";
     return def;
   });
 
+  // Add primary key constraint if it exists
+  if (table.primaryKey) {
+    const primaryKeyClause = generatePrimaryKeyClause(table.primaryKey);
+    columnDefs.push(primaryKeyClause);
+  }
+
   return `CREATE TABLE ${table.name} (\n  ${columnDefs.join(",\n  ")}\n);`;
+}
+
+export function generatePrimaryKeyClause(
+  primaryKey: PrimaryKeyConstraint
+): string {
+  const columns = primaryKey.columns.join(", ");
+
+  if (primaryKey.name) {
+    return `CONSTRAINT ${primaryKey.name} PRIMARY KEY (${columns})`;
+  } else {
+    return `PRIMARY KEY (${columns})`;
+  }
+}
+
+export function generateAddPrimaryKeySQL(
+  tableName: string,
+  primaryKey: PrimaryKeyConstraint
+): string {
+  const constraintName = primaryKey.name || `pk_${tableName}`;
+  const columns = primaryKey.columns.join(", ");
+  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} PRIMARY KEY (${columns});`;
+}
+
+export function generateDropPrimaryKeySQL(
+  tableName: string,
+  constraintName: string
+): string {
+  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
 }
