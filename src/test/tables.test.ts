@@ -12,24 +12,15 @@ import { MigrationExecutor } from "../core/migration/executor";
 import { DatabaseService } from "../core/database/client";
 import type { MigrationPlan } from "../types/migration";
 import { Client } from "pg";
+import { createColumnTestServices } from "./columns/column-test-utils";
 
 describe("Table Operations - End to End", () => {
   let client: Client;
-  let parser: SchemaParser;
-  let differ: SchemaDiffer;
-  let inspector: DatabaseInspector;
-  let executor: MigrationExecutor;
-  let databaseService: DatabaseService;
+  const { parser, inspector, differ, executor } = createColumnTestServices();
 
   beforeEach(async () => {
     client = await createTestClient();
     await cleanDatabase(client);
-
-    parser = new SchemaParser();
-    differ = new SchemaDiffer();
-    inspector = new DatabaseInspector();
-    databaseService = new DatabaseService(TEST_DB_CONFIG);
-    executor = new MigrationExecutor(databaseService);
   });
 
   afterEach(async () => {
@@ -54,15 +45,8 @@ describe("Table Operations - End to End", () => {
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
-    const migrationStatements = differ.generateMigrationPlan(
-      desiredTables,
-      initialSchema
-    );
+    const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    const plan: MigrationPlan = {
-      statements: migrationStatements,
-      hasChanges: migrationStatements.length > 0,
-    };
     await executor.executePlan(client, plan);
 
     // Verify final state
@@ -104,15 +88,8 @@ describe("Table Operations - End to End", () => {
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
-    const migrationStatements = differ.generateMigrationPlan(
-      desiredTables,
-      initialSchema
-    );
+    const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    const plan: MigrationPlan = {
-      statements: migrationStatements,
-      hasChanges: migrationStatements.length > 0,
-    };
     await executor.executePlan(client, plan);
 
     // Verify final state
@@ -146,15 +123,8 @@ describe("Table Operations - End to End", () => {
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
-    const migrationStatements = differ.generateMigrationPlan(
-      desiredTables,
-      initialSchema
-    );
+    const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    const plan: MigrationPlan = {
-      statements: migrationStatements,
-      hasChanges: migrationStatements.length > 0,
-    };
     await executor.executePlan(client, plan);
 
     // Verify final state
@@ -192,15 +162,8 @@ describe("Table Operations - End to End", () => {
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
-    const migrationStatements = differ.generateMigrationPlan(
-      desiredTables,
-      initialSchema
-    );
+    const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    const plan: MigrationPlan = {
-      statements: migrationStatements,
-      hasChanges: migrationStatements.length > 0,
-    };
     await executor.executePlan(client, plan);
 
     // Verify final state
@@ -229,15 +192,8 @@ describe("Table Operations - End to End", () => {
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
     expect(desiredTables).toHaveLength(0);
 
-    const migrationStatements = differ.generateMigrationPlan(
-      desiredTables,
-      initialSchema
-    );
+    const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    const plan: MigrationPlan = {
-      statements: migrationStatements,
-      hasChanges: migrationStatements.length > 0,
-    };
     await executor.executePlan(client, plan);
 
     // Verify final state - no tables

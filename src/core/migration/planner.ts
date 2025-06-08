@@ -10,14 +10,6 @@ export class MigrationPlanner {
   }
 
   generatePlan(desiredSchema: Table[], currentSchema: Table[]): MigrationPlan {
-    const statements = this.differ.generateMigrationPlan(
-      desiredSchema,
-      currentSchema
-    );
-
-    return {
-      statements,
-      hasChanges: statements.length > 0,
-    };
+    return this.differ.generateMigrationPlan(desiredSchema, currentSchema);
   }
 }

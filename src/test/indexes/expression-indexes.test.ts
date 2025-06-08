@@ -431,8 +431,12 @@ describe("Schema Differ Support", () => {
       currentSchema
     );
 
-    expect(migrationPlan).toContain(
-      "CREATE INDEX idx_email_lower ON users (LOWER(email));"
+    const allStatements = [
+      ...migrationPlan.transactional,
+      ...migrationPlan.concurrent,
+    ];
+    expect(allStatements).toContain(
+      "CREATE INDEX CONCURRENTLY idx_email_lower ON users (LOWER(email));"
     );
   });
 
@@ -448,7 +452,9 @@ describe("Schema Differ Support", () => {
     const differ = new SchemaDiffer();
     const sql = (differ as any).generateCreateIndexSQL(expressionIndex);
 
-    expect(sql).toBe("CREATE INDEX idx_email_lower ON users (LOWER(email));");
+    expect(sql).toBe(
+      "CREATE INDEX CONCURRENTLY idx_email_lower ON users (LOWER(email));"
+    );
   });
 
   test("should generate correct SQL for unique expression indexes", () => {
@@ -465,7 +471,7 @@ describe("Schema Differ Support", () => {
     const sql = (differ as any).generateCreateIndexSQL(uniqueExpressionIndex);
 
     expect(sql).toBe(
-      "CREATE UNIQUE INDEX idx_email_lower_unique ON users (LOWER(email));"
+      "CREATE UNIQUE INDEX CONCURRENTLY idx_email_lower_unique ON users (LOWER(email));"
     );
   });
 });
@@ -536,7 +542,7 @@ describe("Advanced Index Options Support", () => {
     const indexes = parser.parseCreateIndexStatements(sql);
     expect(indexes).toHaveLength(1);
 
-    const index = indexes[0];
+    const index = indexes[0]!;
     expect(index.name).toBe("idx_users_lower_email_params");
     expect(index.expression).toBe("LOWER(email)");
     expect(index.columns).toEqual([]);
@@ -557,7 +563,7 @@ describe("Advanced Index Options Support", () => {
     const indexes = parser.parseCreateIndexStatements(sql);
     expect(indexes).toHaveLength(1);
 
-    const index = indexes[0];
+    const index = indexes[0]!;
     expect(index.name).toBe("idx_active_users_email_advanced");
     expect(index.columns).toEqual(["email"]);
     expect(index.where).toBe("active = true");
@@ -575,7 +581,7 @@ describe("Advanced Index Options Support", () => {
     const indexes = parser.parseCreateIndexStatements(sql);
     expect(indexes).toHaveLength(1);
 
-    const index = indexes[0];
+    const index = indexes[0]!;
     expect(index.name).toBe("idx_users_simple");
     expect(index.storageParameters).toBeUndefined();
     expect(index.tablespace).toBeUndefined();

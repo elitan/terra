@@ -47,10 +47,7 @@ export async function executeColumnMigration(
     initialSchema
   );
 
-  const plan: MigrationPlan = {
-    statements: migrationStatements,
-    hasChanges: migrationStatements.length > 0,
-  };
+  const plan: MigrationPlan = migrationStatements;
 
   await executor.executePlan(client, plan);
 }

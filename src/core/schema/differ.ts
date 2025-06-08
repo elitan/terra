@@ -4,6 +4,8 @@ import type {
   PrimaryKeyConstraint,
   Index,
 } from "../../types/schema";
+import type { MigrationPlan, MigrationOptions } from "../../types/migration";
+import { DEFAULT_MIGRATION_OPTIONS } from "../../types/migration";
 import {
   generateCreateTableStatement,
   columnsAreDifferent,
@@ -13,10 +15,16 @@ import {
 } from "../../utils/sql";
 
 export class SchemaDiffer {
+  private options: MigrationOptions;
+
+  constructor(options: MigrationOptions = DEFAULT_MIGRATION_OPTIONS) {
+    this.options = { ...DEFAULT_MIGRATION_OPTIONS, ...options };
+  }
+
   generateMigrationPlan(
     desiredSchema: Table[],
     currentSchema: Table[]
-  ): string[] {
+  ): MigrationPlan {
     const statements: string[] = [];
 
     // Create a map of current tables for easy lookup
@@ -82,7 +90,23 @@ export class SchemaDiffer {
       }
     }
 
-    return statements;
+    // Separate statements into transactional and concurrent
+    const transactional: string[] = [];
+    const concurrent: string[] = [];
+
+    for (const statement of statements) {
+      if (statement.includes("CONCURRENTLY")) {
+        concurrent.push(statement);
+      } else {
+        transactional.push(statement);
+      }
+    }
+
+    return {
+      transactional,
+      concurrent,
+      hasChanges: transactional.length > 0 || concurrent.length > 0,
+    };
   }
 
   private generateColumnStatements(
@@ -548,14 +572,24 @@ export class SchemaDiffer {
   }
 
   private generateIndexCreationStatements(indexes: Index[]): string[] {
-    return indexes.map((index) => this.generateCreateIndexSQL(index));
+    return indexes.map((index) =>
+      this.generateCreateIndexSQL(
+        index,
+        this.options.useConcurrentIndexes ?? true
+      )
+    );
   }
 
   private generateIndexDropStatements(indexes: Index[]): string[] {
-    return indexes.map((index) => `DROP INDEX ${index.name};`);
+    const concurrent = this.options.useConcurrentDrops ?? true;
+    const dropClause = concurrent ? "DROP INDEX CONCURRENTLY" : "DROP INDEX";
+    return indexes.map((index) => `${dropClause} ${index.name};`);
   }
 
-  private generateCreateIndexSQL(index: Index): string {
+  private generateCreateIndexSQL(
+    index: Index,
+    useConcurrent: boolean = true
+  ): string {
     let sql = "CREATE";
 
     // Add UNIQUE if specified
@@ -565,8 +599,11 @@ export class SchemaDiffer {
 
     sql += " INDEX";
 
-    // Add CONCURRENTLY if specified (for operational safety)
-    if (index.concurrent) {
+    // Add CONCURRENTLY for production safety (default: true)
+    // Can be overridden by explicit index.concurrent setting or global useConcurrent parameter
+    const shouldUseConcurrent =
+      index.concurrent !== undefined ? index.concurrent : useConcurrent;
+    if (shouldUseConcurrent) {
       sql += " CONCURRENTLY";
     }
 

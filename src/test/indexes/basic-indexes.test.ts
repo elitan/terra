@@ -1,10 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { SchemaParser } from "../core/schema/parser";
-import { DatabaseInspector } from "../core/schema/inspector";
-import { createTestClient, cleanDatabase, TEST_DB_CONFIG } from "./utils";
+import { SchemaParser } from "../../core/schema/parser";
+import { DatabaseInspector } from "../../core/schema/inspector";
+import { createTestClient, cleanDatabase, TEST_DB_CONFIG } from "../utils";
 import type { Client } from "pg";
+import type { Table } from "../../types/schema";
 
-describe("PostgreSQL Index Support", () => {
+describe("PostgreSQL Basic Index Support", () => {
   let client: Client;
   let parser: SchemaParser;
   let inspector: DatabaseInspector;
@@ -37,12 +38,12 @@ describe("PostgreSQL Index Support", () => {
       expect(indexes).toHaveLength(1);
 
       if (indexes.length > 0) {
-        expect(indexes[0].name).toBe("idx_users_email");
-        expect(indexes[0].tableName).toBe("users");
-        expect(indexes[0].columns).toEqual(["email"]);
-        expect(indexes[0].type).toBe("btree");
-        expect(indexes[0].unique).toBe(false);
-        expect(indexes[0].concurrent).toBe(false);
+        expect(indexes[0]!.name).toBe("idx_users_email");
+        expect(indexes[0]!.tableName).toBe("users");
+        expect(indexes[0]!.columns).toEqual(["email"]);
+        expect(indexes[0]!.type).toBe("btree");
+        expect(indexes[0]!.unique).toBe(false);
+        expect(indexes[0]!.concurrent).toBe(false);
       }
     });
 
@@ -228,37 +229,11 @@ describe("PostgreSQL Index Support", () => {
         expect(indexes[0].name).toBe("idx_test_users_email");
       }
     });
-
-    test("should detect partial indexes with WHERE clauses", async () => {
-      await client.query(`
-        CREATE TABLE partial_test_users (
-          id SERIAL PRIMARY KEY,
-          email VARCHAR(255),
-          active BOOLEAN DEFAULT true
-        );
-      `);
-
-      await client.query(`
-        CREATE INDEX idx_active_users_email ON partial_test_users (email) WHERE active = true;
-      `);
-
-      const indexes = await inspector.getTableIndexes(
-        client,
-        "partial_test_users"
-      );
-      expect(indexes).toHaveLength(1);
-
-      if (indexes.length > 0) {
-        expect(indexes[0].name).toBe("idx_active_users_email");
-        expect(indexes[0].columns).toEqual(["email"]);
-        expect(indexes[0].where).toBe("active = true");
-      }
-    });
   });
 
   describe("Phase 1.4: Schema Differ - Index Comparison", () => {
     test("should identify new indexes to create", () => {
-      const { SchemaDiffer } = require("../core/schema/differ");
+      const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
       const currentSchema: Table[] = [
@@ -292,18 +267,16 @@ describe("PostgreSQL Index Support", () => {
         },
       ];
 
-      const statements = differ.generateMigrationPlan(
-        desiredSchema,
-        currentSchema
-      );
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      expect(statements).toContain(
+      const allStatements = [...plan.transactional, ...plan.concurrent];
+      expect(allStatements).toContain(
         "CREATE INDEX idx_users_email ON users (email);"
       );
     });
 
     test("should identify indexes to drop", () => {
-      const { SchemaDiffer } = require("../core/schema/differ");
+      const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
       const currentSchema: Table[] = [
@@ -337,16 +310,16 @@ describe("PostgreSQL Index Support", () => {
         },
       ];
 
-      const statements = differ.generateMigrationPlan(
-        desiredSchema,
-        currentSchema
-      );
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      expect(statements).toContain("DROP INDEX idx_users_email;");
+      const allStatements = [...plan.transactional, ...plan.concurrent];
+      expect(allStatements).toContain(
+        "DROP INDEX CONCURRENTLY idx_users_email;"
+      );
     });
 
     test("should treat modified indexes as drop + create", () => {
-      const { SchemaDiffer } = require("../core/schema/differ");
+      const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
       const currentSchema: Table[] = [
@@ -391,147 +364,16 @@ describe("PostgreSQL Index Support", () => {
         },
       ];
 
-      const statements = differ.generateMigrationPlan(
-        desiredSchema,
-        currentSchema
-      );
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
       // Should drop old index and create new one
-      expect(statements).toContain("DROP INDEX idx_users_email;");
-      expect(statements).toContain(
+      const allStatements = [...plan.transactional, ...plan.concurrent];
+      expect(allStatements).toContain(
+        "DROP INDEX CONCURRENTLY idx_users_email;"
+      );
+      expect(allStatements).toContain(
         "CREATE INDEX idx_users_email ON users (email, name);"
       );
-    });
-
-    test("should handle partial index changes", () => {
-      const { SchemaDiffer } = require("../core/schema/differ");
-      const differ = new SchemaDiffer();
-
-      const currentSchema: Table[] = [
-        {
-          name: "users",
-          columns: [
-            { name: "id", type: "INTEGER", nullable: false },
-            { name: "email", type: "VARCHAR(255)", nullable: true },
-            { name: "active", type: "BOOLEAN", nullable: true },
-          ],
-          indexes: [
-            {
-              name: "idx_users_email",
-              tableName: "users",
-              columns: ["email"],
-              type: "btree",
-              unique: false,
-              concurrent: false,
-              // No WHERE clause initially
-            },
-          ],
-        },
-      ];
-
-      const desiredSchema: Table[] = [
-        {
-          name: "users",
-          columns: [
-            { name: "id", type: "INTEGER", nullable: false },
-            { name: "email", type: "VARCHAR(255)", nullable: true },
-            { name: "active", type: "BOOLEAN", nullable: true },
-          ],
-          indexes: [
-            {
-              name: "idx_users_email",
-              tableName: "users",
-              columns: ["email"],
-              type: "btree",
-              unique: false,
-              concurrent: false,
-              where: "active = true", // Added WHERE clause
-            },
-          ],
-        },
-      ];
-
-      const statements = differ.generateMigrationPlan(
-        desiredSchema,
-        currentSchema
-      );
-
-      // Should drop old index and create new partial index
-      expect(statements).toContain("DROP INDEX idx_users_email;");
-      expect(statements).toContain(
-        "CREATE INDEX idx_users_email ON users (email) WHERE active = true;"
-      );
-    });
-  });
-
-  describe("Phase 2: Advanced Index Features", () => {
-    test("should parse partial indexes with WHERE clause", () => {
-      const { SchemaParser } = require("../core/schema/parser");
-      const parser = new SchemaParser();
-
-      const sql = `
-        CREATE INDEX idx_active_users ON users (email) WHERE active = true;
-        CREATE INDEX idx_recent_orders ON orders (created_at) WHERE created_at > '2023-01-01';
-      `;
-
-      const indexes = parser.parseCreateIndexStatements(sql);
-
-      expect(indexes).toHaveLength(2);
-
-      // Test first partial index
-      expect(indexes[0].name).toBe("idx_active_users");
-      expect(indexes[0].tableName).toBe("users");
-      expect(indexes[0].columns).toEqual(["email"]);
-      expect(indexes[0].where).toBe("active = true");
-
-      // Test second partial index
-      expect(indexes[1].name).toBe("idx_recent_orders");
-      expect(indexes[1].tableName).toBe("orders");
-      expect(indexes[1].columns).toEqual(["created_at"]);
-      expect(indexes[1].where).toBe("created_at > '2023-01-01'");
-    });
-
-    test("should parse expression indexes", () => {
-      // TODO: Implement in Phase 2
-      // const sql = `CREATE INDEX idx_users_lower_email ON users (LOWER(email));`;
-    });
-
-    test("should parse indexes with storage parameters", () => {
-      // TODO: Implement in Phase 2
-      // const sql = `CREATE INDEX idx_users_email ON users (email) WITH (fillfactor=90);`;
-    });
-  });
-
-  describe("Phase 3: Operational Features", () => {
-    test("should handle concurrent index creation", () => {
-      // TODO: Implement in Phase 3
-      // Test actual concurrent index creation and monitoring
-    });
-
-    test("should generate REINDEX statements when needed", () => {
-      // TODO: Implement in Phase 3
-      // Test REINDEX logic and generation
-    });
-  });
-
-  describe("End-to-End Integration Tests", () => {
-    test("should create indexes from schema file", async () => {
-      // TODO: Implement when full pipeline is ready
-      // This will test the complete workflow:
-      // 1. Parse schema with indexes
-      // 2. Compare with current database state
-      // 3. Generate migration plan
-      // 4. Execute index creation
-      // 5. Verify indexes exist and work
-    });
-
-    test("should drop indexes not in schema file", async () => {
-      // TODO: Implement when full pipeline is ready
-    });
-
-    test("should handle complex index migration scenarios", async () => {
-      // TODO: Implement when full pipeline is ready
-      // Test scenarios with multiple index changes in one migration
     });
   });
 });

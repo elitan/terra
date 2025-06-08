@@ -35,13 +35,23 @@ export class SchemaService {
       if (!plan.hasChanges) {
         Logger.success("✓ No changes needed - database is up to date");
       } else {
-        Logger.warning(
-          `📝 Found ${plan.statements.length} change(s) to apply:`
-        );
+        const totalChanges = plan.transactional.length + plan.concurrent.length;
+        Logger.warning(`📝 Found ${totalChanges} change(s) to apply:`);
         console.log();
-        plan.statements.forEach((stmt, i) => {
-          Logger.cyan(`${i + 1}. ${stmt}`);
-        });
+
+        if (plan.transactional.length > 0) {
+          Logger.info("Transactional changes:");
+          plan.transactional.forEach((stmt, i) => {
+            Logger.cyan(`  ${i + 1}. ${stmt}`);
+          });
+        }
+
+        if (plan.concurrent.length > 0) {
+          Logger.info("Concurrent changes (non-transactional):");
+          plan.concurrent.forEach((stmt, i) => {
+            Logger.cyan(`  ${i + 1}. ${stmt}`);
+          });
+        }
       }
 
       return plan;
