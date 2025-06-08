@@ -116,16 +116,35 @@ export class DatabaseInspector {
         i.indexdef as index_definition,
         ix.indisunique as is_unique,
         am.amname as access_method,
-        string_to_array(
-          regexp_replace(
+        ix.indexprs IS NOT NULL as has_expressions,
+        -- Extract tablespace information
+        ts.spcname as tablespace_name,
+        -- Extract storage parameters (reloptions)
+        ic.reloptions as storage_options,
+        CASE 
+          WHEN ix.indexprs IS NOT NULL THEN 
+            -- Extract expression from the full index definition
+            -- Use a more specific regex to extract content between USING btree ( and )
             regexp_replace(
               regexp_replace(i.indexdef, ' WHERE .*$', ''),  -- Remove WHERE clause first
-              '^.*\\((.*)\\).*$', '\\1'
-            ),
-            '\\s+', '', 'g'
-          ), 
-          ','
-        ) as column_names,
+              '^.*USING btree \\((.+)\\)$', '\\1'  -- Extract content between USING btree ( and )
+            )
+          ELSE NULL
+        END as expression_def,
+        CASE 
+          WHEN ix.indexprs IS NULL THEN 
+            -- Regular column-based index
+            ARRAY(
+              SELECT a.attname
+              FROM pg_attribute a
+              WHERE a.attrelid = ix.indrelid
+                AND a.attnum = ANY(ix.indkey)
+              ORDER BY array_position(ix.indkey, a.attnum)
+            )
+          ELSE 
+            -- Expression index - no simple column names
+            ARRAY[]::text[]
+        END as column_names,
         CASE 
           WHEN ix.indpred IS NOT NULL THEN 
             regexp_replace(
@@ -142,6 +161,10 @@ export class DatabaseInspector {
       JOIN pg_am am ON am.oid = (
         SELECT pg_class.relam FROM pg_class WHERE relname = i.indexname
       )
+      -- Join with pg_class again to get the index relation for storage options
+      JOIN pg_class ic ON ic.oid = ix.indexrelid
+      -- Left join with pg_tablespace to get tablespace name
+      LEFT JOIN pg_tablespace ts ON ts.oid = ic.reltablespace
       WHERE i.tablename = $1 
         AND i.schemaname = 'public'
         AND NOT ix.indisprimary  -- Exclude primary key indexes
@@ -158,12 +181,37 @@ export class DatabaseInspector {
     return result.rows.map((row: any) => ({
       name: row.index_name,
       tableName: row.table_name,
-      columns: row.column_names,
+      columns: row.column_names || [],
       type: this.mapPostgreSQLIndexType(row.access_method),
       unique: row.is_unique,
       concurrent: false, // Cannot detect from system catalogs
       where: row.where_clause || undefined,
+      expression: row.has_expressions ? row.expression_def : undefined,
+      storageParameters: this.parseStorageOptions(row.storage_options),
+      tablespace: row.tablespace_name || undefined,
     }));
+  }
+
+  private parseStorageOptions(
+    reloptions: string[] | null
+  ): Record<string, string> | undefined {
+    if (!reloptions || !Array.isArray(reloptions) || reloptions.length === 0) {
+      return undefined;
+    }
+
+    const parameters: Record<string, string> = {};
+
+    for (const option of reloptions) {
+      // PostgreSQL storage options are stored as "key=value" strings
+      const match = option.match(/^([^=]+)=(.*)$/);
+      if (match && match.length >= 3 && match[1] && match[2] !== undefined) {
+        const key = match[1];
+        const value = match[2];
+        parameters[key] = value;
+      }
+    }
+
+    return Object.keys(parameters).length > 0 ? parameters : undefined;
   }
 
   private mapPostgreSQLIndexType(accessMethod: string): Index["type"] {

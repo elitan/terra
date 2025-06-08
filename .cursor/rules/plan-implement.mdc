@@ -8,3 +8,5 @@ Implement the tasks stated in plan.md. Use the overview.md file as a reference.
 Remember, always try to create tests and run tests frequenetly to ensure you are on the right path.
 
 For each task you complete, update the plan.md file and mark the task as completed [x].
+
+During the implementation, if you find interesting new findings, always add them to the overview.md document so we can use them later for other tasks too.
