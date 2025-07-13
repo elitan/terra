@@ -1,0 +1,42 @@
+{
+  "name": "sql-terraform",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "build": "bun build index.ts --outdir ./dist",
+    "plan": "bun run index.ts plan",
+    "apply": "bun run index.ts apply",
+    "test": "bun test src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts",
+    "test:watch": "bun test --watch src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts",
+    "test:performance": "bun test src/test/columns/performance/",
+    "test:performance:watch": "bun test --watch src/test/columns/performance/",
+    "test:setup": "bun run src/test/setup.ts",
+    "test:setup:local": "docker compose up -d && bun run src/test/setup.ts",
+    "test:teardown": "docker compose down",
+    "test:full": "bun run test:setup:local && bun test src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts && bun run test:teardown",
+    "test:full:with-performance": "bun run test:setup:local && bun test src/test && bun run test:teardown",
+    "test:unit": "bun test src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/",
+    "test:integration": "echo 'No integration tests defined yet'",
+    "test:all": "bun test src/test",
+    "test:constraints": "bun test src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/",
+    "test:dependencies": "bun test src/test/dependency-resolution.test.ts",
+    "test:destructive": "bun test src/test/destructive-operations.test.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "diff": "^5.1.0",
+    "pg": "^8.11.3",
+    "sql-parser-cst": "^0.33.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/diff": "^5.0.8",
+    "@types/pg": "^8.10.9",
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
