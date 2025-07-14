@@ -1,119 +1,102 @@
 # pgterra
 
-Declarative schema management for Postgres.
+Declarative schema management for Postgres. Define your desired schema, pgterra handles the migrations.
 
-## Example
+## Quick Start
 
-**Step 1: Define your schema**
+```bash
+npm install -g pgterra
+```
+
+## How it works
+
+**1. Start with a schema:**
 
 ```sql
 -- schema.sql
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  email VARCHAR(255) NOT NULL,
-  name VARCHAR(100) NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE posts (
-  id SERIAL PRIMARY KEY,
-  title VARCHAR(255) NOT NULL,
-  user_id INTEGER NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
   created_at TIMESTAMP DEFAULT NOW()
 );
 ```
 
-**Step 2: Plan changes**
-
 ```bash
-$ bun run plan
-📋 Analyzing schema changes...
-📝 Found 2 change(s) to apply:
-
-Transactional changes:
-  1. CREATE TABLE users (id SERIAL PRIMARY KEY, email VARCHAR(255) NOT NULL, name VARCHAR(100) NOT NULL, created_at TIMESTAMP DEFAULT NOW())
-  2. CREATE TABLE posts (id SERIAL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id INTEGER NOT NULL, created_at TIMESTAMP DEFAULT NOW())
+pgterra apply  # Creates the table
 ```
 
-**Step 3: Apply changes**
-
-```bash
-$ bun run apply
-🚀 Applying schema changes...
-Applying transactional changes...
-Executing: CREATE TABLE users (id SERIAL PRIMARY KEY, email VARCHAR(255) NOT NULL, name VARCHAR(100) NOT NULL, created_at TIMESTAMP DEFAULT NOW())
-✓ Done
-Executing: CREATE TABLE posts (id SERIAL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id INTEGER NOT NULL, created_at TIMESTAMP DEFAULT NOW())
-✓ Done
-🎉 All changes applied successfully!
-```
-
-## Schema Evolution
-
-**Update schema.sql:**
+**2. Update your schema declaratively:**
 
 ```sql
+-- schema.sql
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  email VARCHAR(255) NOT NULL,
-  full_name VARCHAR(200) NOT NULL,  -- renamed from 'name'
-  is_active BOOLEAN DEFAULT true,   -- new column
+  email VARCHAR(255) NOT NULL UNIQUE,
+  full_name VARCHAR(200) NOT NULL,  -- new column
+  is_active BOOLEAN DEFAULT true,   -- another new column
   created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE posts (
+CREATE TABLE posts (                 -- new table
   id SERIAL PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
-  user_id INTEGER NOT NULL,
+  user_id INTEGER REFERENCES users(id),
   created_at TIMESTAMP DEFAULT NOW()
 );
 ```
 
-**Plan shows the diff:**
+**3. pgterra calculates the migration:**
 
 ```bash
-$ bun run plan
+$ pgterra plan
 📋 Analyzing schema changes...
-📝 Found 3 change(s) to apply:
 
-Transactional changes:
+Planned changes:
   1. ALTER TABLE users ADD COLUMN full_name VARCHAR(200) NOT NULL
-  2. ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT true
-  3. ALTER TABLE users DROP COLUMN name
+  2. ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT true  
+  3. CREATE TABLE posts (id SERIAL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT NOW())
+
+$ pgterra apply  # Applies the changes safely
 ```
 
-## Installation
+**That's it.** No migration files, no manual ALTER statements, no dependency ordering. Just define what you want.
 
-### Global install (npm)
-```bash
-npm install -g pgterra
-```
+## Configuration
 
-### From source
-```bash
-git clone https://github.com/elitan/pgterra.git
-cd pgterra
-bun install
-bun run build
-```
-
-## Setup
+Set your database connection:
 
 ```bash
-# Configure database
 export DB_HOST=localhost
 export DB_PORT=5432
-export DB_NAME=postgres
+export DB_NAME=mydb
 export DB_USER=postgres
-export DB_PASSWORD=postgres
-
-# Use
-pgterra plan    # preview changes
-pgterra apply   # execute changes
+export DB_PASSWORD=password
 ```
+
+## Features
+
+- ✅ Tables, columns, and data types
+- ✅ Primary keys, foreign keys, check constraints, unique constraints  
+- ✅ Indexes (btree, gin, gist, partial, expression-based)
+- ✅ ENUM types
+- ✅ Dependency resolution for complex schemas
+- ✅ Data-safe migrations with validation
+- ✅ Destructive operation protection
+
+## Why declarative?
+
+Like Terraform for infrastructure, pgterra lets you define *what* you want, not *how* to get there:
+
+- **Version control your complete schema** - not scattered migration files
+- **No migration ordering issues** - pgterra handles dependencies
+- **Easier code reviews** - see the full schema state, not just changes
+- **Safe schema changes** - preview before applying, with rollback support
 
 ## Development
 
 ```bash
-bun run test:full       # run tests
+git clone https://github.com/elitan/pgterra.git
+cd pgterra
+bun install
+bun test
 ```
