@@ -1,12 +1,17 @@
 {
   "name": "pgterra",
-  "module": "index.ts",
+  "version": "0.1.0",
+  "description": "Declarative schema management for Postgres",
+  "bin": {
+    "pgterra": "./dist/index.js"
+  },
   "type": "module",
   "scripts": {
-    "dev": "bun run --watch index.ts",
-    "build": "bun build index.ts --outdir ./dist",
-    "plan": "bun run index.ts plan",
-    "apply": "bun run index.ts apply",
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build src/index.ts --outdir ./dist --target node",
+    "prepublishOnly": "bun run build",
+    "plan": "bun run src/index.ts plan",
+    "apply": "bun run src/index.ts apply",
     "test": "bun test src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts",
     "test:watch": "bun test --watch src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts",
     "test:performance": "bun test src/test/columns/performance/",

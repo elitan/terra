@@ -1,6 +1,6 @@
-# PgTerra
+# pgterra
 
-Infrastructure as Code for PostgreSQL databases. Define your schema in SQL, let PgTerra handle the migrations.
+Declarative schema management for Postgres.
 
 ## Example
 
@@ -82,12 +82,24 @@ Transactional changes:
   3. ALTER TABLE users DROP COLUMN name
 ```
 
+## Installation
+
+### Global install (npm)
+```bash
+npm install -g pgterra
+```
+
+### From source
+```bash
+git clone https://github.com/elitan/pgterra.git
+cd pgterra
+bun install
+bun run build
+```
+
 ## Setup
 
 ```bash
-# Install
-bun install
-
 # Configure database
 export DB_HOST=localhost
 export DB_PORT=5432
@@ -96,8 +108,8 @@ export DB_USER=postgres
 export DB_PASSWORD=postgres
 
 # Use
-bun run plan    # preview changes
-bun run apply   # execute changes
+pgterra plan    # preview changes
+pgterra apply   # execute changes
 ```
 
 ## Development

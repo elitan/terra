@@ -7,8 +7,8 @@ export async function runCLI() {
 
   program
     .name("pgterra")
-    .description("Infrastructure as Code for PostgreSQL databases")
-    .version("1.0.0");
+    .description("Declarative schema management for Postgres")
+    .version("0.1.0");
 
   program
     .command("plan")

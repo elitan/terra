@@ -194,7 +194,7 @@ bun test src/test/destructive-operations.test.ts
 
 ## 🎉 MILESTONE ACHIEVED
 
-**PgTerra is now a complete PostgreSQL schema management solution!**
+**pgterra is now a complete PostgreSQL schema management solution!**
 
 All critical features from the test plan have been successfully implemented:
 - **70+ comprehensive tests** covering all constraint types and edge cases
@@ -223,7 +223,7 @@ Tests needed:
 - Cross-table ENUM type usage
 - ENUM type dependency resolution
 
-**Why Critical**: ENUM types are used in almost every production PostgreSQL application but are completely missing from PgTerra.
+**Why Critical**: ENUM types are used in almost every production PostgreSQL application but are completely missing from pgterra.
 
 ### 7. JSON/JSONB Column Types (`src/test/types/json-types.test.ts`)
 **Priority: HIGH - MISSING**
