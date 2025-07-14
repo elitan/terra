@@ -1,8 +1,8 @@
-# PgVibe Development Philosophy & Guidelines
+# PgTerra Development Philosophy & Guidelines
 
 ## Core Philosophy: Declarative Schema Management
 
-PgVibe is a **declarative** PostgreSQL schema management tool. This means:
+PgTerra is a **declarative** PostgreSQL schema management tool. This means:
 
 ### ✅ What We Support (Declarative)
 
@@ -41,7 +41,7 @@ DROP TABLE old_table;
 1. **Simplicity**: Users only need to think about their desired schema, not migration steps
 2. **Idempotency**: Running the same schema file multiple times produces the same result
 3. **Version Control**: Schema files represent complete states, making diffs meaningful
-4. **Reliability**: PgVibe figures out the optimal migration path automatically
+4. **Reliability**: PgTerra figures out the optimal migration path automatically
 
 ## Handling Complex Scenarios
 
@@ -143,11 +143,11 @@ test("should add foreign key", async () => {
 
 ## User Documentation
 
-Always remind users that PgVibe is declarative:
+Always remind users that PgTerra is declarative:
 
 - "Define what you want, not how to get there"
 - "Your schema file should represent the complete desired state"
-- "PgVibe figures out the migration steps automatically"
+- "PgTerra figures out the migration steps automatically"
 
 ## Migration Generation
 
@@ -155,7 +155,7 @@ The **differ** is responsible for generating any necessary `ALTER`, `DROP`, or o
 
 ## Summary
 
-PgVibe follows the same philosophy as Terraform, Kubernetes, and other modern infrastructure tools: **declarative configuration**. This makes schemas easier to understand, version control, and maintain.
+PgTerra follows the same philosophy as Terraform, Kubernetes, and other modern infrastructure tools: **declarative configuration**. This makes schemas easier to understand, version control, and maintain.
 
 # Testing
 ALWAYS use `bun test` to run tests, not `npm test`.

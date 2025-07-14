@@ -1,5 +1,5 @@
 {
-  "name": "sql-terraform",
+  "name": "pgterra",
   "module": "index.ts",
   "type": "module",
   "scripts": {
