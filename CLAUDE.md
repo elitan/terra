@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # pgterra Development Philosophy & Guidelines
 
 ## Core Philosophy: Declarative Schema Management
@@ -157,5 +161,74 @@ The **differ** is responsible for generating any necessary `ALTER`, `DROP`, or o
 
 pgterra follows the same philosophy as Terraform, Kubernetes, and other modern infrastructure tools: **declarative configuration**. This makes schemas easier to understand, version control, and maintain.
 
-# Testing
+# Development Commands
+
+## Testing
 ALWAYS use `bun test` to run tests, not `npm test`.
+
+### Common test commands:
+- `bun test` - Run main test suite (tables, columns, indexes, constraints)
+- `bun run test:watch` - Run tests in watch mode
+- `bun run test:performance` - Run performance tests
+- `bun run test:full` - Run full test suite with Docker setup
+- `bun run test:setup:local` - Start Docker containers and setup test DB
+- `bun run test:teardown` - Stop Docker containers
+- `bun run test:constraints` - Run constraint-specific tests
+- `bun run test:dependencies` - Run dependency resolution tests
+- `bun run test:destructive` - Run destructive operation tests
+
+## Development
+- `bun run dev` - Run in development mode with file watching
+- `bun run build` - Build for production
+- `bun run plan` - Run the plan command (preview schema changes)
+- `bun run apply` - Run the apply command (execute schema changes)
+
+## Project Structure
+
+The codebase follows a layered architecture:
+
+### Core Components
+- **Parser** (`src/core/schema/parser.ts`): Parses SQL schema definitions using `sql-parser-cst`
+- **Differ** (`src/core/schema/differ.ts`): Compares desired vs current schema and generates migration plans
+- **Database Client** (`src/core/database/client.ts`): Handles PostgreSQL connections and queries
+- **Schema Service** (`src/core/schema/service.ts`): Orchestrates parsing, diffing, and applying changes
+- **Migration Executor** (`src/core/migration/executor.ts`): Executes migration statements safely
+- **Dependency Resolver** (`src/core/schema/dependency-resolver.ts`): Handles table dependency ordering
+
+### CLI Layer
+- **Commands** (`src/cli/commands/`): Command implementations (plan, apply)
+- **CLI Entry** (`src/cli/index.ts`): Command-line interface setup using Commander.js
+
+### Type System
+- **Schema Types** (`src/types/schema.ts`): Core schema object definitions (Table, Column, Index, etc.)
+- **Migration Types** (`src/types/migration.ts`): Migration plan and execution types
+- **Config Types** (`src/types/config.ts`): Configuration and database connection types
+
+### Key Dependencies
+- `sql-parser-cst`: PostgreSQL SQL parsing
+- `pg`: PostgreSQL client
+- `commander`: CLI framework
+- `chalk`: Terminal colors
+- `diff`: Text diffing for migration display
+
+## Architecture Principles
+
+### Schema Objects
+The system represents database schemas as TypeScript objects:
+- `Table`: Contains columns, constraints, and indexes
+- `Column`: Defines name, type, nullable, default
+- Constraints: PrimaryKey, ForeignKey, Check, Unique
+- `Index`: Supports btree, gin, gist, partial, expression-based
+
+### Migration Flow
+1. Parse desired schema from SQL files
+2. Inspect current database schema
+3. Generate diff/migration plan
+4. Execute migration statements in correct order
+5. Handle dependencies and circular references
+
+### Error Handling
+- Parser validates and rejects imperative SQL statements
+- Migration executor provides rollback capabilities
+- Destructive operations require explicit confirmation
+- Data integrity validation before schema changes
