@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import type { DatabaseConfig } from "../types/config";
+import { DatabaseService } from "../core/database/client";
 
 export const TEST_DB_CONFIG: DatabaseConfig = {
   host: "localhost",
@@ -33,6 +34,11 @@ export async function createTestClient(): Promise<Client> {
   const client = new Client(config);
   await client.connect();
   return client;
+}
+
+export function createTestDatabaseService(): DatabaseService {
+  const config = getTestDbConfig();
+  return new DatabaseService(config);
 }
 
 export async function cleanDatabase(client: Client): Promise<void> {
