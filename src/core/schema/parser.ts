@@ -283,7 +283,7 @@ export class SchemaParser {
           if (pk) tableLevelPrimaryKey = pk;
         } else if (item.type === "constraint_primary_key") {
           // Extract direct table-level primary key
-          tableLevelPrimaryKey = this.parseTableConstraintFromCST(item);
+          tableLevelPrimaryKey = this.parseTableConstraintFromCST(item) || undefined;
         } else if (item.type === "constraint_foreign_key") {
           // Extract direct table-level foreign key
           const fk = this.parseForeignKeyConstraintFromCST(item);
@@ -309,7 +309,7 @@ export class SchemaParser {
     // Build final primary key constraint
     const primaryKey = this.buildPrimaryKeyConstraint(
       columnPrimaryKeys,
-      tableLevelPrimaryKey,
+      tableLevelPrimaryKey || null,
       tableName
     );
 
@@ -833,50 +833,6 @@ export class SchemaParser {
           if (constraint) {
             return constraint;
           }
-        }
-      }
-
-      return null;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  private parseTableConstraintFromCST(node: any): PrimaryKeyConstraint | null {
-    try {
-      // Check if this is a primary key constraint
-      if (node.type === "constraint_primary_key") {
-        // Extract constraint name if present
-        let constraintName: string | undefined;
-        if (node.name) {
-          constraintName = node.name.text || node.name.name;
-        }
-
-        // Extract column list from the columns property
-        const columns: string[] = [];
-        const columnList = node.columns;
-
-        if (columnList?.expr?.items) {
-          for (const col of columnList.expr.items) {
-            // Handle index_specification type which contains the column reference
-            let colName: string | undefined;
-            if (col.type === "index_specification" && col.expr) {
-              colName = col.expr.text || col.expr.name;
-            } else {
-              colName = col.text || col.name?.text || col.name?.name;
-            }
-
-            if (colName) {
-              columns.push(colName);
-            }
-          }
-        }
-
-        if (columns.length > 0) {
-          return {
-            name: constraintName,
-            columns,
-          };
         }
       }
 

@@ -29,7 +29,8 @@ export class SchemaService {
     const client = await this.databaseService.createClient();
 
     try {
-      const desiredSchema = this.parseSchemaInput(schemaFile);
+      const parsedSchema = this.parseSchemaInput(schemaFile);
+      const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const currentSchema = await this.inspector.getCurrentSchema(client);
       const plan = this.planner.generatePlan(desiredSchema, currentSchema);
 
