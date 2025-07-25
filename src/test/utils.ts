@@ -30,6 +30,18 @@ export async function cleanDatabase(client: Client): Promise<void> {
     // Use quote_ident to properly handle case-sensitive table names
     await client.query(`DROP TABLE IF EXISTS ${row.quoted_tablename} CASCADE`);
   }
+
+  // Drop all custom types (including ENUMs)
+  const typeResult = await client.query(`
+    SELECT typname
+    FROM pg_type
+    WHERE typtype = 'e' 
+      AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+  `);
+
+  for (const row of typeResult.rows) {
+    await client.query(`DROP TYPE IF EXISTS ${row.typname} CASCADE`);
+  }
 }
 
 export async function getTableNames(client: Client): Promise<string[]> {

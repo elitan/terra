@@ -132,21 +132,19 @@ export class SchemaService {
         // ENUM doesn't exist, create it
         statements.push(this.generateCreateTypeStatement(desiredEnum));
       } else {
-        // ENUM exists, check if values match
-        const currentValues = [...currentEnum.values].sort();
-        const desiredValues = [...desiredEnum.values].sort();
+        // ENUM exists, check if values need to be modified
+        const currentValues = currentEnum.values;
+        const desiredValues = desiredEnum.values;
         
-        if (JSON.stringify(currentValues) !== JSON.stringify(desiredValues)) {
-          throw new Error(
-            `ENUM type '${desiredEnum.name}' already exists with different values. ` +
-            `Current: [${currentValues.join(', ')}], ` +
-            `Desired: [${desiredValues.join(', ')}]. ` +
-            `Modifying ENUM values can cause data loss and is not supported. ` +
-            `Please rename the ENUM type or handle the migration manually.`
-          );
+        // Check if values are identical in order and content
+        if (JSON.stringify(currentValues) === JSON.stringify(desiredValues)) {
+          // Values match exactly, skip modification
+          Logger.info(`✓ ENUM type '${desiredEnum.name}' already exists with matching values, skipping creation`);
+        } else {
+          // Values differ, generate modification statements
+          const modificationStatements = this.generateEnumModificationStatements(desiredEnum, currentEnum);
+          statements.push(...modificationStatements);
         }
-        // Values match, skip creation (safe)
-        Logger.info(`✓ ENUM type '${desiredEnum.name}' already exists with matching values, skipping creation`);
       }
     }
     
@@ -187,6 +185,70 @@ export class SchemaService {
     `, [enumName]);
     
     return parseInt(result.rows[0].usage_count) > 0;
+  }
+
+  private generateEnumModificationStatements(desiredEnum: EnumType, currentEnum: EnumType): string[] {
+    const statements: string[] = [];
+    const currentValues = new Set(currentEnum.values);
+    const desiredValues = new Set(desiredEnum.values);
+    
+    // Find values to add
+    const valuesToAdd = desiredEnum.values.filter(value => !currentValues.has(value));
+    
+    // Find values to remove  
+    const valuesToRemove = currentEnum.values.filter(value => !desiredValues.has(value));
+    
+    // Check if values are identical in order and content
+    const valuesIdentical = JSON.stringify(currentEnum.values) === JSON.stringify(desiredEnum.values);
+    
+    // Check if only appending new values at the end (safe case)
+    const isOnlyAppending = valuesToRemove.length === 0 && valuesToAdd.length > 0 &&
+                           currentEnum.values.every((value, index) => desiredEnum.values[index] === value);
+    
+    if (valuesIdentical) {
+      // No changes needed
+      Logger.info(`✓ ENUM type '${desiredEnum.name}' values already match, no changes needed`);
+    } else if (isOnlyAppending) {
+      // Only adding values at the end - safe operation using ALTER TYPE ADD VALUE
+      for (const value of valuesToAdd) {
+        statements.push(`ALTER TYPE ${desiredEnum.name} ADD VALUE '${value}';`);
+        Logger.info(`✓ Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
+      }
+    } else {
+      // Values are removed or reordered - need to recreate the type safely
+      Logger.info(`✓ Recreating ENUM type '${desiredEnum.name}' due to value removal/reordering`);
+      
+      // Use a safer approach: create temp type, update columns, drop old type
+      const tempTypeName = `${desiredEnum.name}_new`;
+      
+      // 1. Create temporary type with desired values
+      statements.push(this.generateCreateTypeStatement({ 
+        name: tempTypeName, 
+        values: desiredEnum.values 
+      }));
+      
+      // 2. Get all columns that use this ENUM type and update them
+      statements.push(`-- Update columns to use new ENUM type`);
+      statements.push(`DO $$ 
+        DECLARE 
+          rec RECORD;
+        BEGIN
+          FOR rec IN 
+            SELECT table_name, column_name, column_default, is_nullable
+            FROM information_schema.columns 
+            WHERE udt_name = '${desiredEnum.name}' AND table_schema = 'public'
+          LOOP
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE ${tempTypeName} USING %I::text::${tempTypeName}', 
+                          rec.table_name, rec.column_name, rec.column_name);
+          END LOOP;
+        END $$;`);
+      
+      // 3. Drop old type and rename new type
+      statements.push(`DROP TYPE ${desiredEnum.name};`);
+      statements.push(`ALTER TYPE ${tempTypeName} RENAME TO ${desiredEnum.name};`);
+    }
+    
+    return statements;
   }
 
   private generateCreateTypeStatement(enumType: EnumType): string {
