@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { SchemaParser } from "../../core/schema/parser";
 import { DatabaseInspector } from "../../core/schema/inspector";
-import { createTestClient, cleanDatabase, TEST_DB_CONFIG } from "../utils";
+import { createTestClient, cleanDatabase, createTestDatabaseService } from "../utils";
 import type { Client } from "pg";
 import type { Table } from "../../types/schema";
 

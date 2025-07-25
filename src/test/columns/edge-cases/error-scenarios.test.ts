@@ -5,7 +5,7 @@ import {
   executeColumnMigration,
   EnhancedAssertions,
 } from "../column-test-utils";
-import { getTableColumns, TEST_DB_CONFIG } from "../../utils";
+import { getTableColumns, createTestClient } from "../../utils";
 import { InvalidData } from "../test-data-generators";
 import type { Column } from "../../../types/schema";
 
@@ -14,8 +14,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
   let services: ReturnType<typeof createColumnTestServices>;
 
   beforeEach(async () => {
-    client = new Client(TEST_DB_CONFIG);
-    await client.connect();
+    client = await createTestClient();
     services = createColumnTestServices();
   });
 

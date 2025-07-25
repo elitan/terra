@@ -3,7 +3,6 @@ import {
   createTestClient,
   cleanDatabase,
   getTableNames,
-  TEST_DB_CONFIG,
 } from "./utils";
 import { SchemaParser } from "../core/schema/parser";
 import { SchemaDiffer } from "../core/schema/differ";
