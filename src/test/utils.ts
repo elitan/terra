@@ -9,8 +9,28 @@ export const TEST_DB_CONFIG: DatabaseConfig = {
   password: "test_password",
 };
 
+function getTestDbConfig(): DatabaseConfig {
+  const databaseUrl = process.env.DATABASE_URL;
+  
+  if (databaseUrl) {
+    // Parse DATABASE_URL if provided
+    const url = new URL(databaseUrl);
+    return {
+      host: url.hostname,
+      port: parseInt(url.port) || 5432,
+      database: url.pathname.slice(1), // Remove leading slash
+      user: url.username,
+      password: url.password,
+    };
+  }
+  
+  // Fall back to default config
+  return TEST_DB_CONFIG;
+}
+
 export async function createTestClient(): Promise<Client> {
-  const client = new Client(TEST_DB_CONFIG);
+  const config = getTestDbConfig();
+  const client = new Client(config);
   await client.connect();
   return client;
 }
