@@ -215,37 +215,24 @@ export class SchemaService {
         Logger.info(`✓ Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
       }
     } else {
-      // Values are removed or reordered - need to recreate the type safely
-      Logger.info(`✓ Recreating ENUM type '${desiredEnum.name}' due to value removal/reordering`);
+      // Values are removed or reordered - this requires manual intervention
+      const changeDescription = [];
+      if (valuesToRemove.length > 0) {
+        changeDescription.push(`removing values [${valuesToRemove.join(', ')}]`);
+      }
+      if (valuesToRemove.length === 0 && valuesToAdd.length === 0) {
+        // Same values but different order = reordering
+        changeDescription.push(`reordering values`);
+      }
       
-      // Use a safer approach: create temp type, update columns, drop old type
-      const tempTypeName = `${desiredEnum.name}_new`;
-      
-      // 1. Create temporary type with desired values
-      statements.push(this.generateCreateTypeStatement({ 
-        name: tempTypeName, 
-        values: desiredEnum.values 
-      }));
-      
-      // 2. Get all columns that use this ENUM type and update them
-      statements.push(`-- Update columns to use new ENUM type`);
-      statements.push(`DO $$ 
-        DECLARE 
-          rec RECORD;
-        BEGIN
-          FOR rec IN 
-            SELECT table_name, column_name, column_default, is_nullable
-            FROM information_schema.columns 
-            WHERE udt_name = '${desiredEnum.name}' AND table_schema = 'public'
-          LOOP
-            EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE ${tempTypeName} USING %I::text::${tempTypeName}', 
-                          rec.table_name, rec.column_name, rec.column_name);
-          END LOOP;
-        END $$;`);
-      
-      // 3. Drop old type and rename new type
-      statements.push(`DROP TYPE ${desiredEnum.name};`);
-      statements.push(`ALTER TYPE ${tempTypeName} RENAME TO ${desiredEnum.name};`);
+      throw new Error(
+        `ENUM type '${desiredEnum.name}' modification requires manual intervention. ` +
+        `Cannot safely perform: ${changeDescription.join(' and ')}. ` +
+        `Current values: [${currentEnum.values.join(', ')}], ` +
+        `Desired values: [${desiredEnum.values.join(', ')}]. ` +
+        `Removing ENUM values or changing their order can cause data loss and is not supported by pgterra. ` +
+        `Please handle this migration manually or create a new ENUM type with a different name.`
+      );
     }
     
     return statements;

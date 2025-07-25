@@ -229,7 +229,7 @@ describe("ENUM Types", () => {
   });
 
   describe("ENUM Type Modifications", () => {
-    it("should detect when ENUM values are added", async () => {
+    it("should safely add ENUM values using ALTER TYPE ADD VALUE", async () => {
       const initialSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive');
         
@@ -266,7 +266,7 @@ describe("ENUM Types", () => {
       expect(values).toEqual(['active', 'inactive', 'pending']);
     });
 
-    it("should detect when ENUM values are removed", async () => {
+    it("should reject ENUM value removal as unsafe", async () => {
       const initialSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive', 'pending');
         
@@ -289,21 +289,13 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
-
-      // Verify the value was removed
-      const result = await client.query(`
-        SELECT enumlabel 
-        FROM pg_enum 
-        WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'status')
-        ORDER BY enumsortorder
-      `);
-      
-      const values = result.rows.map(row => row.enumlabel);
-      expect(values).toEqual(['active', 'inactive']);
+      // Should throw an error about unsafe value removal
+      await expect(schemaService.apply(updatedSchema)).rejects.toThrow(
+        /ENUM type 'status' modification requires manual intervention.*removing values.*pending/
+      );
     });
 
-    it("should handle ENUM value reordering", async () => {
+    it("should reject ENUM value reordering as unsafe", async () => {
       const initialSchema = `
         CREATE TYPE priority AS ENUM ('low', 'medium', 'high');
         
@@ -326,18 +318,10 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
-
-      // Verify the values were reordered
-      const result = await client.query(`
-        SELECT enumlabel 
-        FROM pg_enum 
-        WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'priority')
-        ORDER BY enumsortorder
-      `);
-      
-      const values = result.rows.map(row => row.enumlabel);
-      expect(values).toEqual(['high', 'medium', 'low']);
+      // Should throw an error about unsafe reordering
+      await expect(schemaService.apply(updatedSchema)).rejects.toThrow(
+        /ENUM type 'priority' modification requires manual intervention.*reordering values/
+      );
     });
   });
 
