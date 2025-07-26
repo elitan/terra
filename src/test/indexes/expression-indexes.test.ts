@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaParser } from "../../core/schema/parser";
 import { DatabaseInspector } from "../../core/schema/inspector";
-import { TEST_DB_CONFIG } from "../utils";
+import { createTestClient } from "../utils";
 import { SchemaDiffer } from "../../core/schema/differ";
 import type { Index, Table } from "../../types/schema";
 
@@ -12,8 +12,7 @@ describe("Expression Index Support", () => {
   let inspector: DatabaseInspector;
 
   beforeEach(async () => {
-    client = new Client(TEST_DB_CONFIG);
-    await client.connect();
+    client = await createTestClient();
 
     parser = new SchemaParser();
     inspector = new DatabaseInspector();

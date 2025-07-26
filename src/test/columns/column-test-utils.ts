@@ -7,7 +7,7 @@ import { MigrationExecutor } from "../../core/migration/executor";
 import { DatabaseService } from "../../core/database/client";
 import type { MigrationPlan } from "../../types/migration";
 import type { Column } from "../../types/schema";
-import { getTableColumns, TEST_DB_CONFIG } from "../utils";
+import { getTableColumns, createTestDatabaseService } from "../utils";
 import {
   BoundaryValues,
   StringEdgeCases,
@@ -24,7 +24,7 @@ export function createColumnTestServices() {
   const parser = new SchemaParser();
   const differ = new SchemaDiffer();
   const inspector = new DatabaseInspector();
-  const databaseService = new DatabaseService(TEST_DB_CONFIG);
+  const databaseService = createTestDatabaseService();
   const executor = new MigrationExecutor(databaseService);
 
   return { parser, differ, inspector, executor, databaseService };

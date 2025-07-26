@@ -98,5 +98,12 @@ Like Terraform for infrastructure, pgterra lets you define *what* you want, not 
 git clone https://github.com/elitan/pgterra.git
 cd pgterra
 bun install
+
+# Set up test database connection
+export DATABASE_URL="postgres://user:password@localhost:5432/test_db"
+
+# Run tests
 bun test
 ```
+
+**Note:** Tests require a `DATABASE_URL` environment variable pointing to a PostgreSQL database. The tests will create and drop tables as needed, so use a dedicated test database.

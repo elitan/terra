@@ -7,7 +7,7 @@ async function setupTests() {
 
   try {
     console.log("⏳ Waiting for PostgreSQL to be ready...");
-    await waitForDb(15000); // Wait up to 15 seconds
+    await waitForDb(30000); // Wait up to 30 seconds
 
     console.log("🔗 Testing database connection...");
     const client = await createTestClient();

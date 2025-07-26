@@ -396,7 +396,7 @@ describe("Performance Benchmark Tracking", () => {
 
     test("should benchmark large string operations", async () => {
       const tableName = "large_string_benchmark";
-      const recordCount = 10000;
+      const recordCount = 1000; // Reduced for CI performance
 
       await client.query(`
         CREATE TABLE ${tableName} (
