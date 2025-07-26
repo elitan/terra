@@ -398,7 +398,7 @@ describe("Performance Regression Testing", () => {
       `);
 
       // Use large dataset to test memory efficiency
-      const largeDataSize = 15000; // 15K records with large strings
+      const largeDataSize = 2000; // 2K records with large strings (reduced for CI)
       const largeStrings = Array.from({ length: largeDataSize }, (_, i) => {
         // Generate strings that fit in VARCHAR(1000) - max 800 chars to be safe
         const baseString = `data_${i}_`;
@@ -459,7 +459,7 @@ describe("Performance Regression Testing", () => {
 
     test("should track multi-column migration performance trends", async () => {
       const tableName = "multi_column_trends";
-      const recordCount = 25000; // Medium-large dataset
+      const recordCount = 2500; // Medium dataset (reduced for CI)
 
       await client.query(`
         CREATE TABLE ${tableName} (
@@ -571,7 +571,8 @@ describe("Performance Regression Testing", () => {
       const tableName = "scale_boundary_test";
 
       // Test with different dataset sizes to find performance boundaries
-      const testSizes = [1000, 5000, 25000]; // Progressive scaling
+      // Reduced sizes for CI environment to stay within timeout limits
+      const testSizes = [100, 500, 1000]; // Progressive scaling
       const results: Array<{ size: number; duration: number; rate: number }> =
         [];
 

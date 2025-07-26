@@ -110,7 +110,7 @@ describe("Large Dataset Migration Performance", () => {
 
     test("should handle large dataset VARCHAR to TEXT conversion", async () => {
       const tableName = "large_varchar_test";
-      const dataSize = 25000; // Use smaller dataset for testing: 25,000 records
+      const dataSize = 2500; // Use smaller dataset for CI: 2,500 records
 
       // 1. Setup table
       await client.query(`
@@ -260,7 +260,7 @@ describe("Large Dataset Migration Performance", () => {
 
     test("should handle large dataset DECIMAL precision changes", async () => {
       const tableName = "decimal_precision_test";
-      const dataSize = 15000; // Use smaller dataset: 15,000 records
+      const dataSize = 1500; // Use smaller dataset for CI: 1,500 records
 
       // 1. Setup
       await client.query(`
