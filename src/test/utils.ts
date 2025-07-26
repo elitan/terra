@@ -2,7 +2,8 @@ import { Client } from "pg";
 import type { DatabaseConfig } from "../types/config";
 import { DatabaseService } from "../core/database/client";
 
-export const TEST_DB_CONFIG: DatabaseConfig = {
+// Legacy config kept for reference only - DO NOT EXPORT
+const LEGACY_TEST_DB_CONFIG: DatabaseConfig = {
   host: "localhost",
   port: 5487,
   database: "sql_terraform_test",
@@ -13,20 +14,23 @@ export const TEST_DB_CONFIG: DatabaseConfig = {
 function getTestDbConfig(): DatabaseConfig {
   const databaseUrl = process.env.DATABASE_URL;
   
-  if (databaseUrl) {
-    // Parse DATABASE_URL if provided
-    const url = new URL(databaseUrl);
-    return {
-      host: url.hostname,
-      port: parseInt(url.port) || 5432,
-      database: url.pathname.slice(1), // Remove leading slash
-      user: url.username,
-      password: url.password,
-    };
+  if (!databaseUrl) {
+    throw new Error(
+      "DATABASE_URL environment variable is required for running tests. " +
+      "Please set it to your PostgreSQL connection string, e.g.: " +
+      "postgres://user:password@localhost:5432/database_name"
+    );
   }
   
-  // Fall back to default config
-  return TEST_DB_CONFIG;
+  // Parse DATABASE_URL
+  const url = new URL(databaseUrl);
+  return {
+    host: url.hostname,
+    port: parseInt(url.port) || 5432,
+    database: url.pathname.slice(1), // Remove leading slash
+    user: url.username,
+    password: url.password,
+  };
 }
 
 export async function createTestClient(): Promise<Client> {
