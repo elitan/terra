@@ -33,6 +33,9 @@ function getTestDbConfig(): DatabaseConfig {
   };
 }
 
+// Export for compatibility with existing tests (like enum-types.test.ts from main branch)
+export const TEST_DB_CONFIG = getTestDbConfig();
+
 export async function createTestClient(): Promise<Client> {
   const config = getTestDbConfig();
   const client = new Client(config);
