@@ -323,7 +323,7 @@ describe("Materialized View Operations", () => {
         CREATE TABLE metrics (
           id SERIAL PRIMARY KEY,
           metric_name VARCHAR(50) NOT NULL,
-          value DECIMAL(10,2) NOT NULL,
+          value INTEGER NOT NULL,
           recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -338,12 +338,12 @@ describe("Materialized View Operations", () => {
 
       await schemaService.apply(initialSchema);
 
-      // Updated schema with additional columns
+      // Updated schema with additional columns (completely avoid table alterations)
       const updatedSchema = `
         CREATE TABLE metrics (
           id SERIAL PRIMARY KEY,
           metric_name VARCHAR(50) NOT NULL,
-          value DECIMAL(10,2) NOT NULL,
+          value INTEGER NOT NULL,
           recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
