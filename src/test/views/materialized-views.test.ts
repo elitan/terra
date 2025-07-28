@@ -369,19 +369,39 @@ describe("Materialized View Operations", () => {
       `);
       expect(matviewExists.rows).toHaveLength(1);
 
-      // Verify the materialized view was updated by checking columns
-      const columnResult = await client.query(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'metric_summary'
-        ORDER BY column_name
-      `);
+      // Test the materialized view by inserting data and refreshing
+      await client.query(`INSERT INTO metrics (metric_name, value) VALUES ('test_metric', 100)`);
+      await client.query(`REFRESH MATERIALIZED VIEW metric_summary`);
       
-      const columnNames = columnResult.rows.map(r => r.column_name);
-      expect(columnNames.length).toBeGreaterThan(3); // Should have more than the original 3 columns
-      expect(columnNames).toContain('min_value');
-      expect(columnNames).toContain('max_value');
-      expect(columnNames).toContain('last_recorded');
+      // Verify the materialized view has the expected columns by querying it
+      const result = await client.query(`SELECT * FROM metric_summary LIMIT 1`);
+      
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        // Check that new columns exist
+        expect(row).toHaveProperty('min_value');
+        expect(row).toHaveProperty('max_value');
+        expect(row).toHaveProperty('last_recorded');
+        // Check original columns still exist
+        expect(row).toHaveProperty('metric_name');
+        expect(row).toHaveProperty('record_count');
+        expect(row).toHaveProperty('avg_value');
+      } else {
+        // If no data, at least verify the materialized view structure by checking columns from pg_attribute
+        const columnResult = await client.query(`
+          SELECT a.attname as column_name
+          FROM pg_attribute a
+          JOIN pg_class c ON a.attrelid = c.oid
+          JOIN pg_namespace n ON c.relnamespace = n.oid
+          WHERE n.nspname = 'public' AND c.relname = 'metric_summary' AND a.attnum > 0
+          ORDER BY a.attname
+        `);
+        const columnNames = columnResult.rows.map(r => r.column_name);
+        expect(columnNames.length).toBeGreaterThan(3);
+        expect(columnNames).toContain('min_value');
+        expect(columnNames).toContain('max_value');
+        expect(columnNames).toContain('last_recorded');
+      }
     });
 
     test("should handle materialized view removal", async () => {

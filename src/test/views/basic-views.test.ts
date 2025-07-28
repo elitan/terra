@@ -403,7 +403,7 @@ describe("Basic View Operations", () => {
         CREATE VIEW employee_hierarchy AS
         WITH RECURSIVE hierarchy AS (
           -- Base case: top-level managers
-          SELECT id, name, manager_id, salary, 1 as level, name as path
+          SELECT id, name, manager_id, salary, 1 as level, CAST(name AS VARCHAR) as path
           FROM employees
           WHERE manager_id IS NULL
           
