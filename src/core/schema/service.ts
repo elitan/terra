@@ -1,12 +1,13 @@
 import { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
-import type { EnumType } from "../../types/schema";
+import type { EnumType, View } from "../../types/schema";
 import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
 import { MigrationPlanner } from "../migration/planner";
 import { MigrationExecutor } from "../migration/executor";
 import { DatabaseService } from "../database/client";
 import { Logger } from "../../utils/logger";
+import { generateCreateViewSQL, generateDropViewSQL, generateCreateOrReplaceViewSQL } from "../../utils/sql";
 
 export class SchemaService {
   private parser: SchemaParser;
@@ -71,8 +72,10 @@ export class SchemaService {
       const parsedSchema = this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const desiredEnums = Array.isArray(parsedSchema) ? [] : parsedSchema.enums;
+      const desiredViews = Array.isArray(parsedSchema) ? [] : parsedSchema.views;
       const currentSchema = await this.inspector.getCurrentSchema(client);
       const currentEnums = await this.inspector.getCurrentEnums(client);
+      const currentViews = await this.inspector.getCurrentViews(client);
       
       // Generate ENUM statements with collision detection
       const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
@@ -94,6 +97,17 @@ export class SchemaService {
           hasChanges: true
         };
         await this.executor.executePlan(client, removalPlan);
+      }
+
+      // Handle VIEW changes after tables and enums are settled
+      const viewStatements = this.generateViewStatements(desiredViews, currentViews);
+      if (viewStatements.length > 0) {
+        const viewPlan = {
+          transactional: viewStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, viewPlan);
       }
     } finally {
       await client.end();
@@ -118,7 +132,7 @@ export class SchemaService {
     } else {
       // parseSchemaFile returns Table[], so wrap it in the expected format
       const tables = this.parser.parseSchemaFile(input);
-      return { tables, enums: [] };
+      return { tables, enums: [], views: [] };
     }
   }
 
@@ -242,5 +256,65 @@ export class SchemaService {
   private generateCreateTypeStatement(enumType: EnumType): string {
     const values = enumType.values.map(value => `'${value}'`).join(', ');
     return `CREATE TYPE ${enumType.name} AS ENUM (${values});`;
+  }
+
+  private generateViewStatements(desiredViews: View[], currentViews: View[]): string[] {
+    const statements: string[] = [];
+    const currentViewMap = new Map(currentViews.map(v => [v.name, v]));
+    const desiredViewNames = new Set(desiredViews.map(v => v.name));
+    
+    // Drop views that are no longer needed
+    for (const currentView of currentViews) {
+      if (!desiredViewNames.has(currentView.name)) {
+        statements.push(generateDropViewSQL(currentView.name, currentView.materialized));
+        Logger.info(`✓ Dropping view '${currentView.name}'`);
+      }
+    }
+    
+    // Create or update views
+    for (const desiredView of desiredViews) {
+      const currentView = currentViewMap.get(desiredView.name);
+      
+      if (!currentView) {
+        // View doesn't exist, create it
+        statements.push(generateCreateViewSQL(desiredView));
+        Logger.info(`✓ Creating view '${desiredView.name}'`);
+      } else {
+        // View exists, check if it needs to be updated
+        if (this.viewNeedsUpdate(desiredView, currentView)) {
+          statements.push(generateCreateOrReplaceViewSQL(desiredView));
+          Logger.info(`✓ Updating view '${desiredView.name}'`);
+        } else {
+          Logger.info(`✓ View '${desiredView.name}' is up to date, skipping`);
+        }
+      }
+    }
+    
+    return statements;
+  }
+
+  private viewNeedsUpdate(desired: View, current: View): boolean {
+    // Check if materialized flag differs
+    if (desired.materialized !== current.materialized) {
+      return true;
+    }
+    
+    // Check if definition differs (normalize whitespace for comparison)
+    const normalizeDefinition = (def: string) => def.replace(/\s+/g, ' ').trim();
+    if (normalizeDefinition(desired.definition) !== normalizeDefinition(current.definition)) {
+      return true;
+    }
+    
+    // Check if check options differ
+    if (desired.checkOption !== current.checkOption) {
+      return true;
+    }
+    
+    // Check if security barrier differs
+    if (desired.securityBarrier !== current.securityBarrier) {
+      return true;
+    }
+    
+    return false;
   }
 }

@@ -9,6 +9,7 @@ import type {
   UniqueConstraint,
   Index,
   EnumType,
+  View,
 } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 
@@ -24,8 +25,8 @@ export class SchemaParser {
     return tables;
   }
 
-  parseSchema(sql: string): { tables: Table[]; enums: EnumType[] } {
-    const { tables, indexes, enums } = this.parseWithCST(sql);
+  parseSchema(sql: string): { tables: Table[]; enums: EnumType[]; views: View[] } {
+    const { tables, indexes, enums, views } = this.parseWithCST(sql);
     
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map(t => [t.name, t]));
@@ -40,7 +41,7 @@ export class SchemaParser {
       }
     }
     
-    return { tables, enums };
+    return { tables, enums, views };
   }
 
   parseCreateTableStatements(sql: string): Table[] {
@@ -53,10 +54,11 @@ export class SchemaParser {
     return indexes;
   }
 
-  private parseWithCST(sql: string): { tables: Table[]; indexes: Index[]; enums: EnumType[] } {
+  private parseWithCST(sql: string): { tables: Table[]; indexes: Index[]; enums: EnumType[]; views: View[] } {
     const tables: Table[] = [];
     const indexes: Index[] = [];
     const enums: EnumType[] = [];
+    const views: View[] = [];
 
     try {
       const cst = parseCST(sql, {
@@ -85,6 +87,11 @@ export class SchemaParser {
             if (enumType) {
               enums.push(enumType);
             }
+          } else if (statement.type === "create_view_stmt") {
+            const view = this.parseCreateViewFromCST(statement, sql);
+            if (view) {
+              views.push(view);
+            }
           } else if (statement.type === "alter_table_stmt") {
             throw new Error(
               "ALTER TABLE statements are not supported in schema definitions. " +
@@ -110,7 +117,7 @@ export class SchemaParser {
       throw error;
     }
 
-    return { tables, indexes, enums };
+    return { tables, indexes, enums, views };
   }
 
   private parseCreateTableFromCST(node: any): Table | null {
@@ -1582,5 +1589,257 @@ export class SchemaParser {
     } catch (error) {
       return null;
     }
+  }
+
+  // VIEW parsing methods
+  private parseCreateViewFromCST(node: any, originalSql: string): View | null {
+    try {
+      // Extract view name
+      const viewName = this.extractViewNameFromCST(node);
+      if (!viewName) return null;
+
+      // Extract view definition (SELECT statement)
+      const definition = this.extractViewDefinitionFromCST(node, originalSql);
+      if (!definition) return null;
+
+      // Check if it's materialized
+      const materialized = this.isViewMaterializedFromCST(node);
+
+      // Extract view options
+      const checkOption = this.extractViewCheckOptionFromCST(node);
+      const securityBarrier = this.extractViewSecurityBarrierFromCST(node);
+
+      return {
+        name: viewName,
+        definition,
+        materialized,
+        checkOption,
+        securityBarrier,
+      };
+    } catch (error) {
+      Logger.warning(
+        `⚠️ Failed to parse CREATE VIEW from CST: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return null;
+    }
+  }
+
+  private extractViewNameFromCST(node: any): string | null {
+    try {
+      // Handle different name structures in the CST
+      if (node.name?.text) {
+        // Remove quotes from quoted identifiers
+        const name = node.name.text;
+        if (name.startsWith('"') && name.endsWith('"')) {
+          return name.slice(1, -1);
+        }
+        return name;
+      }
+      if (node.name?.name) {
+        const name = node.name.name;
+        if (name.startsWith('"') && name.endsWith('"')) {
+          return name.slice(1, -1);
+        }
+        return name;
+      }
+      if (node.table?.name?.text) {
+        const name = node.table.name.text;
+        if (name.startsWith('"') && name.endsWith('"')) {
+          return name.slice(1, -1);
+        }
+        return name;
+      }
+      if (node.table?.name?.name) {
+        const name = node.table.name.name;
+        if (name.startsWith('"') && name.endsWith('"')) {
+          return name.slice(1, -1);
+        }
+        return name;
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private extractViewDefinitionFromCST(node: any, originalSql: string): string | null {
+    try {
+      // Look for the AS clause containing the SELECT statement
+      if (node.clauses && Array.isArray(node.clauses)) {
+        for (const clause of node.clauses) {
+          if (clause.type === "as_clause" && clause.expr) {
+            // The expr should contain the SELECT statement
+            if (clause.expr.type === "select_stmt" && clause.expr.range) {
+              // Use range information to extract original text
+              const [start, end] = clause.expr.range;
+              return originalSql.substring(start, end).trim();
+            }
+          }
+        }
+      }
+      
+      // Fallback: try to get raw text if available
+      if (node.as?.text) {
+        return node.as.text.trim();
+      }
+      
+      return null;
+    } catch (error) {
+      Logger.warning(`⚠️ Failed to extract view definition: ${error}`);
+      return null;
+    }
+  }
+
+  private isViewMaterializedFromCST(node: any): boolean {
+    try {
+      // Check for MATERIALIZED keyword in kinds array
+      if (node.kinds && Array.isArray(node.kinds)) {
+        return node.kinds.some((kind: any) => 
+          kind.type === "relation_kind" && 
+          kind.kindKw?.name === "MATERIALIZED"
+        );
+      }
+      
+      // Fallback checks
+      return node.materializedKw?.name === "MATERIALIZED" || 
+             node.materialized === true ||
+             (node.keywords && node.keywords.some((kw: any) => kw.name === "MATERIALIZED"));
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private extractViewCheckOptionFromCST(node: any): 'CASCADED' | 'LOCAL' | undefined {
+    try {
+      // Look for WITH CHECK OPTION clause
+      if (node.clauses && Array.isArray(node.clauses)) {
+        for (const clause of node.clauses) {
+          if (clause.type === "with_check_option_clause") {
+            // Check if it's LOCAL or default CASCADED
+            if (clause.levelKw?.name === "LOCAL") {
+              return 'LOCAL';
+            }
+            // Default is CASCADED if just WITH CHECK OPTION
+            return 'CASCADED';
+          }
+        }
+      }
+      return undefined;
+    } catch (error) {
+      return undefined;
+    }
+  }
+
+  private extractViewSecurityBarrierFromCST(node: any): boolean | undefined {
+    try {
+      // Look for security_barrier option in postgresql_with_options clause
+      if (node.clauses && Array.isArray(node.clauses)) {
+        for (const clause of node.clauses) {
+          if (clause.type === "postgresql_with_options" && clause.options?.expr?.items) {
+            for (const option of clause.options.expr.items) {
+              if (option.type === "table_option" && 
+                  option.name?.name === "security_barrier") {
+                // Check the value - should be true/false
+                if (option.value?.value === true || option.value?.text === "true") {
+                  return true;
+                }
+                if (option.value?.value === false || option.value?.text === "false") {
+                  return false;
+                }
+                // If no value specified, default is true
+                return true;
+              }
+            }
+          }
+        }
+      }
+      return undefined;
+    } catch (error) {
+      return undefined;
+    }
+  }
+
+  private reconstructSelectStatement(selectNode: any): string {
+    try {
+      // First try to get the raw text if available
+      if (selectNode.text) {
+        return selectNode.text.trim();
+      }
+      
+      // Build SELECT from clauses array
+      let sql = "";
+      
+      if (selectNode.clauses && Array.isArray(selectNode.clauses)) {
+        for (const clause of selectNode.clauses) {
+          if (clause.type === "select_clause") {
+            sql += "SELECT ";
+            if (clause.columns?.items && Array.isArray(clause.columns.items)) {
+              const columnTexts = clause.columns.items.map((col: any) => {
+                return col.text || col.name || "*";
+              });
+              sql += columnTexts.join(", ");
+            } else {
+              sql += "*";
+            }
+          } else if (clause.type === "from_clause") {
+            if (clause.expr?.text || clause.expr?.name) {
+              sql += " FROM " + (clause.expr.text || clause.expr.name);
+            }
+          } else if (clause.type === "where_clause") {
+            if (clause.expr) {
+              // For where clauses, try to reconstruct the expression
+              const whereExpr = this.reconstructExpression(clause.expr);
+              if (whereExpr) {
+                sql += " WHERE " + whereExpr;
+              }
+            }
+          }
+        }
+      }
+      
+      return sql.trim() || "SELECT *";
+    } catch (error) {
+      Logger.warning(`⚠️ Failed to reconstruct SELECT statement: ${error}`);
+      return "SELECT *"; // Fallback
+    }
+  }
+
+  private reconstructExpression(expr: any): string {
+    try {
+      if (expr.text) {
+        return expr.text;
+      }
+      
+      if (expr.type === "binary_expr") {
+        const left = this.reconstructExpression(expr.left) || "";
+        const right = this.reconstructExpression(expr.right) || "";
+        const operator = expr.operator || "=";
+        return `${left} ${operator} ${right}`;
+      }
+      
+      if (expr.type === "identifier") {
+        return expr.name || expr.text || "";
+      }
+      
+      if (expr.type === "boolean_literal") {
+        return expr.value ? "true" : "false";
+      }
+      
+      if (expr.type === "string_literal" || expr.type === "number_literal") {
+        return expr.text || String(expr.value || "");
+      }
+      
+      return "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  // Method to parse standalone CREATE VIEW statements
+  parseCreateViewStatements(sql: string): View[] {
+    const { views } = this.parseWithCST(sql);
+    return views;
   }
 }
