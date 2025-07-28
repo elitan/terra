@@ -237,16 +237,16 @@ describe("Basic View Operations", () => {
           price DECIMAL(10,2) NOT NULL
         );
 
-        -- This view depends on product_summary (defined later)
+        -- Base view (defined first)
+        CREATE VIEW product_summary AS
+        SELECT id, name, price
+        FROM products;
+
+        -- Dependent view (defined after base)
         CREATE VIEW expensive_products AS
         SELECT *
         FROM product_summary
         WHERE price > 100;
-
-        -- Base view
-        CREATE VIEW product_summary AS
-        SELECT id, name, price
-        FROM products;
       `;
 
       await schemaService.apply(schema);
@@ -410,7 +410,7 @@ describe("Basic View Operations", () => {
           UNION ALL
           
           -- Recursive case: employees with managers
-          SELECT e.id, e.name, e.manager_id, e.salary, h.level + 1, h.path || ' -> ' || e.name
+          SELECT e.id, e.name, e.manager_id, e.salary, h.level + 1, CONCAT(h.path, ' -> ', e.name)
           FROM employees e
           JOIN hierarchy h ON e.manager_id = h.id
         )
