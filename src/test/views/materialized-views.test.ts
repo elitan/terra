@@ -361,7 +361,15 @@ describe("Materialized View Operations", () => {
 
       await schemaService.apply(updatedSchema);
 
-      // Verify the materialized view was updated
+      // First check if the materialized view still exists
+      const matviewExists = await client.query(`
+        SELECT matviewname 
+        FROM pg_matviews 
+        WHERE schemaname = 'public' AND matviewname = 'metric_summary'
+      `);
+      expect(matviewExists.rows).toHaveLength(1);
+
+      // Verify the materialized view was updated by checking columns
       const columnResult = await client.query(`
         SELECT column_name 
         FROM information_schema.columns 
@@ -370,6 +378,7 @@ describe("Materialized View Operations", () => {
       `);
       
       const columnNames = columnResult.rows.map(r => r.column_name);
+      expect(columnNames.length).toBeGreaterThan(3); // Should have more than the original 3 columns
       expect(columnNames).toContain('min_value');
       expect(columnNames).toContain('max_value');
       expect(columnNames).toContain('last_recorded');

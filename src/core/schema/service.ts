@@ -301,7 +301,14 @@ export class SchemaService {
     
     // Check if definition differs (normalize whitespace for comparison)
     const normalizeDefinition = (def: string) => def.replace(/\s+/g, ' ').trim();
-    if (normalizeDefinition(desired.definition) !== normalizeDefinition(current.definition)) {
+    const normalizedDesired = normalizeDefinition(desired.definition);
+    const normalizedCurrent = normalizeDefinition(current.definition);
+    
+    if (normalizedDesired !== normalizedCurrent) {
+      // Add some debugging for the test
+      Logger.info(`View '${desired.name}' needs update:`);
+      Logger.info(`  Desired: ${normalizedDesired.substring(0, 100)}...`);
+      Logger.info(`  Current: ${normalizedCurrent.substring(0, 100)}...`);
       return true;
     }
     
