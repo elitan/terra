@@ -118,7 +118,7 @@ export class SchemaService {
     } else {
       // parseSchemaFile returns Table[], so wrap it in the expected format
       const tables = this.parser.parseSchemaFile(input);
-      return { tables, enums: [] };
+      return { tables, enums: [], views: [] };
     }
   }
 

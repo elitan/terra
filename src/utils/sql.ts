@@ -1,4 +1,4 @@
-import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint } from "../types/schema";
+import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View } from "../types/schema";
 
 export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
@@ -236,4 +236,65 @@ export function generateUniqueConstraintClause(uniqueConstraint: UniqueConstrain
   clause += `UNIQUE (${columns})`;
   
   return clause;
+}
+
+// VIEW SQL generation functions
+export function generateCreateViewSQL(view: View): string {
+  let sql = "CREATE ";
+  
+  if (view.materialized) {
+    sql += "MATERIALIZED ";
+  }
+  
+  sql += `VIEW ${view.name} AS ${view.definition}`;
+  
+  // Add WITH CHECK OPTION if specified
+  if (view.checkOption && !view.materialized) {
+    sql += ` WITH ${view.checkOption} CHECK OPTION`;
+  }
+  
+  return sql + ";";
+}
+
+export function generateDropViewSQL(viewName: string, materialized?: boolean): string {
+  let sql = "DROP ";
+  
+  if (materialized) {
+    sql += "MATERIALIZED ";
+  }
+  
+  sql += `VIEW IF EXISTS ${viewName}`;
+  
+  return sql + ";";
+}
+
+export function generateCreateOrReplaceViewSQL(view: View): string {
+  let sql = "CREATE OR REPLACE ";
+  
+  if (view.materialized) {
+    // Note: CREATE OR REPLACE doesn't work with materialized views
+    // We'll need to drop and recreate
+    return generateDropViewSQL(view.name, true) + "\n" + generateCreateViewSQL(view);
+  }
+  
+  sql += `VIEW ${view.name} AS ${view.definition}`;
+  
+  // Add WITH CHECK OPTION if specified
+  if (view.checkOption) {
+    sql += ` WITH ${view.checkOption} CHECK OPTION`;
+  }
+  
+  return sql + ";";
+}
+
+export function generateRefreshMaterializedViewSQL(viewName: string, concurrently: boolean = false): string {
+  let sql = "REFRESH MATERIALIZED VIEW ";
+  
+  if (concurrently) {
+    sql += "CONCURRENTLY ";
+  }
+  
+  sql += viewName;
+  
+  return sql + ";";
 }
