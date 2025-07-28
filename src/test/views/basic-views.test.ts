@@ -410,7 +410,7 @@ describe("Basic View Operations", () => {
           UNION ALL
           
           -- Recursive case: employees with managers
-          SELECT e.id, e.name, e.manager_id, e.salary, h.level + 1, CONCAT(h.path, ' -> ', e.name)
+          SELECT e.id, e.name, e.manager_id, e.salary, h.level + 1, (h.path || ' -> ' || e.name)
           FROM employees e
           JOIN hierarchy h ON e.manager_id = h.id
         )
