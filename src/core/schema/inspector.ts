@@ -8,6 +8,8 @@ import type {
   UniqueConstraint,
   Index,
   EnumType,
+  View,
+  Schema,
 } from "../../types/schema";
 
 export class DatabaseInspector {
@@ -452,5 +454,115 @@ export class DatabaseInspector {
     }
 
     return enums;
+  }
+
+  // Get all views from the database
+  async getCurrentViews(client: Client): Promise<View[]> {
+    const views: View[] = [];
+
+    // Get regular views
+    const viewsResult = await client.query(`
+      SELECT 
+        table_name as view_name,
+        view_definition,
+        check_option,
+        is_updatable,
+        is_insertable_into
+      FROM information_schema.views 
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `);
+
+    for (const row of viewsResult.rows) {
+      const view: View = {
+        name: row.view_name,
+        definition: row.view_definition.trim(),
+        materialized: false,
+      };
+
+      // Set check option if present
+      if (row.check_option && row.check_option !== 'NONE') {
+        view.checkOption = row.check_option as 'CASCADED' | 'LOCAL';
+      }
+
+      views.push(view);
+    }
+
+    // Get materialized views
+    const matViewsResult = await client.query(`
+      SELECT 
+        matviewname as view_name,
+        definition,
+        ispopulated
+      FROM pg_matviews 
+      WHERE schemaname = 'public'
+      ORDER BY matviewname
+    `);
+
+    for (const row of matViewsResult.rows) {
+      const view: View = {
+        name: row.view_name,
+        definition: row.definition.trim(),
+        materialized: true,
+      };
+
+      // Get indexes for materialized views
+      const indexesResult = await client.query(`
+        SELECT 
+          indexname,
+          indexdef
+        FROM pg_indexes 
+        WHERE schemaname = 'public' AND tablename = $1
+      `, [row.view_name]);
+
+      if (indexesResult.rows.length > 0) {
+        view.indexes = indexesResult.rows.map(idx => ({
+          name: idx.indexname,
+          tableName: row.view_name,
+          columns: [], // We'll parse this from indexdef if needed
+          type: 'btree' as const, // Default type
+        }));
+      }
+
+      views.push(view);
+    }
+
+    return views;
+  }
+
+  // Get complete schema including tables, views, and enums
+  async getCompleteSchema(client: Client): Promise<Schema> {
+    const [tables, views, enumTypes] = await Promise.all([
+      this.getCurrentSchema(client),
+      this.getCurrentViews(client), 
+      this.getCurrentEnums(client)
+    ]);
+
+    return {
+      tables,
+      views,
+      enumTypes,
+    };
+  }
+
+  // Helper method to analyze view dependencies
+  async getViewDependencies(client: Client, viewName: string): Promise<string[]> {
+    try {
+      const result = await client.query(`
+        SELECT DISTINCT
+          CASE 
+            WHEN referenced_table_schema = 'public' THEN referenced_table_name
+            ELSE referenced_table_schema || '.' || referenced_table_name
+          END as dependency
+        FROM information_schema.view_table_usage
+        WHERE view_schema = 'public' AND view_name = $1
+        ORDER BY dependency
+      `, [viewName]);
+
+      return result.rows.map(row => row.dependency);
+    } catch (error) {
+      // If the query fails (e.g., permissions), return empty array
+      return [];
+    }
   }
 }

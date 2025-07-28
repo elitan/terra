@@ -166,6 +166,48 @@ pgterra follows the same philosophy as Terraform, Kubernetes, and other modern i
 ## Testing
 ALWAYS use `bun test` to run tests, not `npm test`.
 
+### Database Testing Requirements
+**IMPORTANT**: All integration tests require a live PostgreSQL database. The test suite includes:
+- **Unit tests** (parsing, SQL generation): Work without database ✅
+- **Integration tests** (SchemaService, database operations): **Require database** ❌ without DB
+
+### Running Tests with Live Database
+1. **Start PostgreSQL database**:
+   ```bash
+   docker compose up -d
+   ```
+
+2. **Set DATABASE_URL environment variable**:
+   ```bash
+   export DATABASE_URL="postgres://test_user:test_password@localhost:5487/sql_terraform_test"
+   ```
+
+3. **Run tests**:
+   ```bash
+   # All tests
+   bun test src/test/
+
+   # Specific test suites
+   bun test src/test/views/                    # All VIEW tests
+   bun test src/test/views/basic-views.test.ts # Basic VIEW functionality
+   bun test src/test/views/realistic-business-scenarios.test.ts # Business scenarios
+   ```
+
+4. **Verify database is ready**:
+   ```bash
+   bun run src/test/setup.ts
+   ```
+
+### Test Database Configuration
+- **Host**: localhost:5487
+- **Database**: sql_terraform_test  
+- **User**: test_user
+- **Password**: test_password
+- **Docker container**: Defined in `docker-compose.yml`
+
+### Without Database
+Only unit tests (parsing, SQL generation) will pass. Integration tests will fail with connection errors.
+
 ### Common test commands:
 - `bun test` - Run main test suite (tables, columns, indexes, constraints)
 - `bun run test:watch` - Run tests in watch mode
