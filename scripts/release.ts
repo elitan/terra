@@ -2,6 +2,22 @@
 import { spawnSync } from "child_process";
 import chalk from "chalk";
 
+// Load environment variables from .env file
+const envFile = Bun.file(".env");
+if (await envFile.exists()) {
+  const envContent = await envFile.text();
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith("#")) {
+      const [key, ...valueParts] = trimmed.split("=");
+      if (key && valueParts.length > 0) {
+        const value = valueParts.join("=");
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 type VersionType = "patch" | "minor" | "major";
 
 function runCommand(command: string, args: string[] = []): { success: boolean; output: string } {
@@ -55,6 +71,29 @@ async function main() {
   if (!pullResult.success) {
     console.error(chalk.red("❌ Failed to pull latest changes"));
     process.exit(1);
+  }
+  
+  // Start database if needed
+  console.log(chalk.yellow("🐘 Starting PostgreSQL database..."));
+  const dockerResult = runCommand("docker", ["compose", "up", "-d"]);
+  if (!dockerResult.success) {
+    console.warn(chalk.yellow("⚠️ Could not start Docker database, assuming it's already running"));
+  }
+  
+  // Wait for database to be ready
+  console.log(chalk.yellow("⏳ Waiting for database to be ready..."));
+  for (let i = 0; i < 30; i++) {
+    const pgReadyResult = runCommand("pg_isready", ["-h", "localhost", "-p", "5487", "-U", "test_user"]);
+    if (pgReadyResult.success) {
+      console.log(chalk.green("✅ Database is ready"));
+      break;
+    }
+    if (i === 29) {
+      console.error(chalk.red("❌ Database failed to start within 30 seconds"));
+      process.exit(1);
+    }
+    // Wait 1 second before next attempt
+    await new Promise(resolve => setTimeout(resolve, 1000));
   }
   
   // Run tests
