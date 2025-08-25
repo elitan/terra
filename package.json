@@ -2,10 +2,44 @@
   "name": "pgterra",
   "version": "0.1.0",
   "description": "Declarative schema management for Postgres",
+  "keywords": [
+    "postgres",
+    "postgresql",
+    "schema",
+    "migration",
+    "database",
+    "declarative",
+    "cli",
+    "sql"
+  ],
+  "homepage": "https://github.com/elitan/pgterra#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elitan/pgterra.git"
+  },
+  "bugs": {
+    "url": "https://github.com/elitan/pgterra/issues"
+  },
+  "author": {
+    "name": "Johan Eliasson",
+    "url": "https://github.com/elitan"
+  },
+  "license": "MIT",
   "bin": {
     "pgterra": "./dist/index.js"
   },
   "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir ./dist --target node",
@@ -26,7 +60,10 @@
     "test:all": "bun test src/test",
     "test:constraints": "bun test src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/",
     "test:dependencies": "bun test src/test/dependency-resolution.test.ts",
-    "test:destructive": "bun test src/test/destructive-operations.test.ts"
+    "test:destructive": "bun test src/test/destructive-operations.test.ts",
+    "release:patch": "bun run scripts/release.ts patch",
+    "release:minor": "bun run scripts/release.ts minor",
+    "release:major": "bun run scripts/release.ts major"
   },
   "dependencies": {
     "chalk": "^5.3.0",
