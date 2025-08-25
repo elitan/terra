@@ -115,9 +115,9 @@ async function main() {
   const currentVersion = getCurrentVersion();
   console.log(chalk.blue(`📦 Current version: ${currentVersion}`));
   
-  // Bump version using bun
+  // Bump version using npm
   console.log(chalk.yellow(`⬆️ Bumping ${versionType} version...`));
-  const versionResult = runCommand("bun", ["version", `--${versionType}`]);
+  const versionResult = runCommand("npm", ["version", versionType, "--no-git-tag-version"]);
   if (!versionResult.success) {
     console.error(chalk.red(`❌ Failed to bump ${versionType} version`));
     process.exit(1);
@@ -125,6 +125,21 @@ async function main() {
   
   const newVersion = getCurrentVersion();
   console.log(chalk.green(`✅ Version bumped: ${currentVersion} → ${newVersion}`));
+  
+  // Stage the version change
+  console.log(chalk.yellow("📝 Staging version change..."));
+  const addResult = runCommand("git", ["add", "package.json"]);
+  if (!addResult.success) {
+    console.error(chalk.red("❌ Failed to stage package.json"));
+    process.exit(1);
+  }
+  
+  // Commit the version change
+  const commitResult = runCommand("git", ["commit", "-m", `chore: bump version to ${newVersion}`]);
+  if (!commitResult.success) {
+    console.error(chalk.red("❌ Failed to commit version change"));
+    process.exit(1);
+  }
   
   // Create git tag
   const tag = `v${newVersion}`;
