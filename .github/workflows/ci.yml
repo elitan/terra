@@ -68,7 +68,7 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
 
     - name: Run tests
-      run: bun test --concurrent
+      run: bun test
       env:
         DATABASE_URL: postgres://test_user:test_password@localhost:5488/sql_terraform_test
     
