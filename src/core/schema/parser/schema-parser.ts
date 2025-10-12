@@ -191,11 +191,6 @@ export class SchemaParser {
             if (sequence) {
               sequences.push(sequence);
             }
-          } else if (statement.type === "create_extension_stmt") {
-            const extension = parseCreateExtension(statement);
-            if (extension) {
-              extensions.push(extension);
-            }
           } else if (statement.type === "alter_table_stmt") {
             throw new ParserError(
               "ALTER TABLE statements are not supported in schema definitions. " +
@@ -259,6 +254,9 @@ export class SchemaParser {
 
     let match;
     while ((match = extensionRegex.exec(sql)) !== null) {
+      // Skip if extension name is not captured (shouldn't happen with our regex, but be safe)
+      if (!match[1]) continue;
+
       const extension: Extension = {
         name: match[1],
         schema: match[2] || undefined,

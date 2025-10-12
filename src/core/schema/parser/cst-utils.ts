@@ -92,7 +92,7 @@ export function extractNameAndSchema(fullName: string | null): { name: string | 
   // If qualified (schema.name), split them
   if (fullName.includes('.')) {
     const parts = fullName.split('.');
-    if (parts.length === 2) {
+    if (parts.length === 2 && parts[0] && parts[1]) {
       return { name: parts[1], schema: parts[0] };
     }
   }
