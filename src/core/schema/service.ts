@@ -119,20 +119,19 @@ export class SchemaService {
     if (input === "") {
       return this.parser.parseSchema(input);
     }
-    
+
     // Simple heuristic: if the input contains SQL keywords and is longer than a typical file path,
     // or contains newlines/semicolons, treat it as SQL content rather than a file path
     if (
-      input.includes('CREATE') || 
-      input.includes(';') || 
-      input.includes('\n') || 
+      input.includes('CREATE') ||
+      input.includes(';') ||
+      input.includes('\n') ||
       input.length > 500
     ) {
       return this.parser.parseSchema(input);
     } else {
-      // parseSchemaFile returns Table[], so wrap it in the expected format
-      const tables = this.parser.parseSchemaFile(input);
-      return { tables, enums: [], views: [] };
+      // Treat as file path
+      return this.parser.parseSchemaFile(input);
     }
   }
 

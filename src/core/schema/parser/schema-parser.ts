@@ -18,15 +18,14 @@ export class SchemaParser {
   /**
    * Parse schema from a file path
    */
-  parseSchemaFile(filePath: string): Table[] {
+  parseSchemaFile(filePath: string): { tables: Table[]; enums: EnumType[]; views: View[] } {
     if (!existsSync(filePath)) {
       Logger.error(`✗ Schema file not found: ${filePath}`);
       process.exit(1);
     }
 
     const content = readFileSync(filePath, "utf-8");
-    const { tables } = this.parseSchema(content);
-    return tables;
+    return this.parseSchema(content);
   }
 
   /**
