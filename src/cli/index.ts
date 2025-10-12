@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { loadConfig } from "../core/database/config";
 import { planCommand, applyCommand } from "./commands/index";
+import packageJson from "../../package.json";
 
 export async function runCLI() {
   const program = new Command();
@@ -8,7 +9,7 @@ export async function runCLI() {
   program
     .name("terra")
     .description("Declarative schema management for Postgres")
-    .version("0.1.0");
+    .version(packageJson.version);
 
   program
     .command("plan")
