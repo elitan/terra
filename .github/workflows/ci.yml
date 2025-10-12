@@ -13,18 +13,18 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15
+        image: postgres:17-alpine
         env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_USER: postgres
-          POSTGRES_DB: terra_test
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
         ports:
-          - 5432:5432
+          - 5487:5432
 
       postgres-pgvector:
         image: pgvector/pgvector:0.8.1-pg17
@@ -54,23 +54,18 @@ jobs:
     - name: Wait for PostgreSQL
       run: |
         for i in {1..30}; do
-          if pg_isready -h localhost -p 5432 -U postgres; then
+          if pg_isready -h localhost -p 5487 -U test_user; then
             echo "PostgreSQL is ready"
             break
           fi
           echo "Waiting for PostgreSQL... ($i/30)"
           sleep 2
         done
-    
-    - name: Setup test database
-      run: bun run test:setup
-      env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
 
     - name: Run tests
       run: bun test
       env:
-        DATABASE_URL: postgres://test_user:test_password@localhost:5488/sql_terraform_test
+        DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
     
     - name: Build
       run: bun run build
