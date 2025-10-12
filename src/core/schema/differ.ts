@@ -13,6 +13,7 @@ import {
   generateCreateTableStatement,
   columnsAreDifferent,
   normalizeType,
+  normalizeDefault,
   generateAddPrimaryKeySQL,
   generateDropPrimaryKeySQL,
   generateAddCheckConstraintSQL,
@@ -198,7 +199,11 @@ export class SchemaDiffer {
     const normalizedDesiredType = normalizeType(desiredColumn.type);
     const normalizedCurrentType = normalizeType(currentColumn.type);
     const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
-    const defaultIsChanging = desiredColumn.default !== currentColumn.default;
+
+    // Normalize defaults for comparison (strips type casts like ::text, ::character varying)
+    const normalizedCurrentDefault = normalizeDefault(currentColumn.default);
+    const normalizedDesiredDefault = normalizeDefault(desiredColumn.default);
+    const defaultIsChanging = normalizedDesiredDefault !== normalizedCurrentDefault;
 
     // Step 1: If type is changing and there's a current default that might conflict, drop it first
     if (typeIsChanging && currentColumn.default && defaultIsChanging) {

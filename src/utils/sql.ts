@@ -7,6 +7,13 @@ export function normalizeType(type: string): string {
     text: "TEXT",
     boolean: "BOOLEAN",
     "timestamp without time zone": "TIMESTAMP",
+    // PostgreSQL treats INT and INTEGER as the same type
+    int: "INTEGER",
+    int2: "SMALLINT",
+    int4: "INTEGER",
+    int8: "BIGINT",
+    smallint: "SMALLINT",
+    bigint: "BIGINT",
   };
 
   // Handle VARCHAR with length
@@ -14,7 +21,9 @@ export function normalizeType(type: string): string {
     return type.replace("character varying", "VARCHAR");
   }
 
-  return typeMap[type] || type.toUpperCase();
+  // Normalize to lowercase first for case-insensitive matching
+  const lowerType = type.toLowerCase();
+  return typeMap[lowerType] || type.toUpperCase();
 }
 
 export function normalizeDefault(value: string | null | undefined): string | undefined {
