@@ -1,6 +1,7 @@
 import { Client } from "pg";
 import type { DatabaseConfig } from "../../types/config";
 import { Logger } from "../../utils/logger";
+import { MigrationError } from "../../types/errors";
 
 export class DatabaseService {
   private config: DatabaseConfig;
@@ -28,6 +29,7 @@ export class DatabaseService {
   ): Promise<void> {
     await client.query("BEGIN");
 
+    let currentStatement: string | undefined;
     try {
       for (const statement of statements) {
         if (statement.startsWith("--")) {
@@ -35,6 +37,7 @@ export class DatabaseService {
           continue;
         }
 
+        currentStatement = statement;
         Logger.info("Executing: " + statement);
         await client.query(statement);
         Logger.success("✓ Done");
@@ -44,7 +47,33 @@ export class DatabaseService {
       Logger.success("🎉 All changes applied successfully!");
     } catch (error) {
       await client.query("ROLLBACK");
-      throw error;
+
+      // Check if this is a PostgreSQL error
+      if (error && typeof error === 'object' && 'code' in error) {
+        const pgError = error as any;
+
+        throw new MigrationError(
+          pgError.message || "Transaction failed",
+          currentStatement,
+          {
+            code: pgError.code,
+            detail: pgError.detail,
+            hint: pgError.hint,
+            position: pgError.position,
+          }
+        );
+      }
+
+      // If it's already a MigrationError, re-throw it
+      if (error instanceof MigrationError) {
+        throw error;
+      }
+
+      // Generic error
+      throw new MigrationError(
+        error instanceof Error ? error.message : String(error),
+        currentStatement
+      );
     }
   }
 }

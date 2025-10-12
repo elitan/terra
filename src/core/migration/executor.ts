@@ -3,6 +3,7 @@ import * as readline from "readline";
 import type { MigrationPlan } from "../../types/migration";
 import { DatabaseService } from "../database/client";
 import { Logger } from "../../utils/logger";
+import { MigrationError } from "../../types/errors";
 
 export class MigrationExecutor {
   private databaseService: DatabaseService;
@@ -89,10 +90,38 @@ export class MigrationExecutor {
         Logger.success("✓ Concurrent changes applied successfully");
       }
     } catch (error) {
-      Logger.error("✗ Error applying changes:");
-      // The error is logged here, but re-thrown to be handled by the caller
-      // This ensures that the CLI exits with a non-zero code on failure
-      throw error;
+      // Check if this is a PostgreSQL error with additional context
+      if (error && typeof error === 'object' && 'code' in error) {
+        const pgError = error as any;
+
+        // Try to determine which statement failed
+        let failedStatement: string | undefined;
+        if (pgError.message) {
+          // If we're in the middle of executing statements, the current statement is in the error
+          failedStatement = undefined; // We'll let the caller determine this
+        }
+
+        throw new MigrationError(
+          pgError.message || "Database migration failed",
+          failedStatement,
+          {
+            code: pgError.code,
+            detail: pgError.detail,
+            hint: pgError.hint,
+            position: pgError.position,
+          }
+        );
+      }
+
+      // If it's already a MigrationError, re-throw it
+      if (error instanceof MigrationError) {
+        throw error;
+      }
+
+      // Generic error
+      throw new MigrationError(
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 }
