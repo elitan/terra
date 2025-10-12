@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+- never create markdown (`.md`) files after you are done. Never!
+- never use emojis unless told to do so.
+- i know i'm absolutly right. no need to tell me.
+
 Guidelines for Claude Code when working in this repository.
 
 ## Core Principle
@@ -130,11 +134,3 @@ Tests in `src/test/` organized by feature:
 - `parser/` - Parser unit tests
 
 Tests use complete declarative schemas, not imperative statements.
-
-## Claude Code Behavior
-
-**IMPORTANT:**
-
-1. **Never create markdown files** (`.md`) after completing tasks
-2. **Never use emojis** in code, output, error messages, or logs - NEVER
-3. **Be direct** - provide answers without unnecessary confirmation or validation

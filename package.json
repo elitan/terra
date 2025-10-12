@@ -44,7 +44,6 @@
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir ./dist --target node",
     "prepublishOnly": "bun run build",
-    "plan": "bun run src/index.ts plan",
     "apply": "bun run src/index.ts apply",
     "test": "bun --env-file=.env test src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts",
     "test:watch": "bun --env-file=.env test --watch src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts",

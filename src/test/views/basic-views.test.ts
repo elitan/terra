@@ -36,7 +36,7 @@ describe("Basic View Operations", () => {
         WHERE active = true;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify base table exists
       const tableResult = await client.query(`
@@ -78,7 +78,7 @@ describe("Basic View Operations", () => {
         FROM products;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify view works with data
       await client.query(`INSERT INTO products (name, price) VALUES ('Test Product', 75.50)`);
@@ -117,7 +117,7 @@ describe("Basic View Operations", () => {
         LEFT JOIN categories c ON p.category_id = c.id;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test the view with sample data
       await client.query(`INSERT INTO categories (name) VALUES ('Electronics')`);
@@ -148,7 +148,7 @@ describe("Basic View Operations", () => {
         GROUP BY customer_id;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test aggregation view
       await client.query(`INSERT INTO orders (customer_id, total_amount) VALUES (1, 100.00), (1, 150.00), (2, 75.00)`);
@@ -181,7 +181,7 @@ describe("Basic View Operations", () => {
         FROM sales;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test with sample data
       await client.query(`
@@ -216,7 +216,7 @@ describe("Basic View Operations", () => {
         WHERE created_at >= CURRENT_DATE - INTERVAL '30 days';
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify both views exist
       const viewResult = await client.query(`
@@ -249,7 +249,7 @@ describe("Basic View Operations", () => {
         WHERE price > 100;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Both views should be created successfully
       const viewResult = await client.query(`
@@ -277,7 +277,7 @@ describe("Basic View Operations", () => {
         FROM users;
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated schema with modified view
       const updatedSchema = `
@@ -294,7 +294,7 @@ describe("Basic View Operations", () => {
         WHERE active = true;
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify view was updated
       const viewResult = await client.query(`
@@ -318,7 +318,7 @@ describe("Basic View Operations", () => {
         SELECT * FROM users;
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated schema without view
       const updatedSchema = `
@@ -328,7 +328,7 @@ describe("Basic View Operations", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify view was removed
       const viewResult = await client.query(`
@@ -356,7 +356,7 @@ describe("Basic View Operations", () => {
         WITH CHECK OPTION;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Insert via view should work for active users
       await client.query(`INSERT INTO active_users (email, active) VALUES ('test@example.com', true)`);
@@ -379,7 +379,7 @@ describe("Basic View Operations", () => {
         FROM users;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       const viewResult = await client.query(`
         SELECT COUNT(*) as view_count
@@ -417,7 +417,7 @@ describe("Basic View Operations", () => {
         SELECT * FROM hierarchy;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test hierarchical data
       await client.query(`INSERT INTO employees (name, salary) VALUES ('CEO', 200000)`); // id=1
@@ -455,7 +455,7 @@ describe("Basic View Operations", () => {
         WHERE d.budget < (SELECT COALESCE(SUM(e.salary), 0) FROM employees e WHERE e.department_id = d.id);
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test with sample data
       await client.query(`INSERT INTO departments (name, budget) VALUES ('Engineering', 200000)`);
@@ -480,7 +480,7 @@ describe("Basic View Operations", () => {
         SELECT * FROM nonexistent_table;
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
 
     test("should handle circular view dependencies", async () => {
@@ -497,7 +497,7 @@ describe("Basic View Operations", () => {
         SELECT * FROM view_a;
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
 
     test("should validate view syntax during parsing", async () => {
@@ -506,7 +506,7 @@ describe("Basic View Operations", () => {
         SELEECT * FROM users;  -- Intentional typo
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
   });
 });

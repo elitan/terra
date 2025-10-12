@@ -40,7 +40,7 @@ export class MigrationExecutor {
     });
   }
 
-  async executePlan(client: Client, plan: MigrationPlan): Promise<void> {
+  async executePlan(client: Client, plan: MigrationPlan, autoApprove: boolean = false): Promise<void> {
     if (!plan.hasChanges) {
       Logger.success("No changes needed - database is up to date");
       return;
@@ -50,7 +50,7 @@ export class MigrationExecutor {
     const allStatements = [...plan.transactional, ...plan.concurrent];
     const destructiveOps = this.getDestructiveOperations(allStatements);
 
-    if (destructiveOps.length > 0) {
+    if (destructiveOps.length > 0 && !autoApprove) {
       Logger.warning("\nWARNING: Destructive operations detected:");
       destructiveOps.forEach((stmt) => {
         Logger.error(`   ${stmt}`);

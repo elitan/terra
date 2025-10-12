@@ -29,7 +29,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert some data
       await client.query("INSERT INTO users (name, email) VALUES ('John Doe', 'john@example.com')");
@@ -68,7 +68,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert data
       await client.query("INSERT INTO products (name, price, category) VALUES ('Widget', 9.99, 'Gadgets')");
@@ -92,7 +92,7 @@ describe("Destructive Operation Safety", () => {
       `;
 
       // This should work but ideally with warnings about data loss
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify category data is lost
       const columns = await client.query(`
@@ -114,12 +114,12 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
       await client.query("INSERT INTO temp_data (data) VALUES ('important data')");
 
       // In a production system, this would require --force flag
       // const emptySchema = ``;
-      // await schemaService.apply(emptySchema, { force: true });
+      // await schemaService.apply(emptySchema, { force: true }, true);
 
       // For now, just verify data exists
       const count = await client.query("SELECT COUNT(*) as count FROM temp_data");
@@ -141,7 +141,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert data in all columns
       await client.query(`
@@ -159,7 +159,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify columns are gone but core data remains
       const employee = await client.query("SELECT first_name, last_name, email FROM employees");
@@ -197,7 +197,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       await client.query("INSERT INTO categories (name) VALUES ('Electronics')");
       await client.query("INSERT INTO products (sku, name, price, category_id) VALUES ('WIDGET-001', 'Widget', 99.99, 1)");
@@ -217,7 +217,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify foreign key constraint is also removed
       const constraints = await client.query(`
@@ -261,7 +261,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       await client.query("INSERT INTO accounts (account_number, balance, account_type) VALUES ('ACC-001', 1000.00, 'checking')");
 
@@ -275,7 +275,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify constraints are gone - now dangerous operations are possible
       await client.query("INSERT INTO accounts (account_number, balance, account_type) VALUES ('ACC-002', -500.00, '')");
@@ -299,7 +299,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       await client.query("INSERT INTO departments (name) VALUES ('Engineering')");
       await client.query("INSERT INTO employees (name, department_id) VALUES ('John Doe', 1)");
@@ -318,7 +318,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Now orphaned references are possible
       await client.query("INSERT INTO employees (name, department_id) VALUES ('Jane Doe', 999)");
@@ -338,7 +338,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert precise decimal data
       await client.query("INSERT INTO measurements (value, description) VALUES (123.4567, 'Precise measurement')");
@@ -353,7 +353,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Check for precision loss
       const values = await client.query("SELECT value FROM measurements ORDER BY id");
@@ -370,7 +370,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert mixed data types
       await client.query("INSERT INTO mixed_data (text_field, number_field) VALUES ('Hello World', '123')");
@@ -386,7 +386,7 @@ describe("Destructive Operation Safety", () => {
       `;
 
       // This should fail or require explicit handling
-      await expect(schemaService.apply(updatedSchema)).rejects.toThrow();
+      await expect(schemaService.apply(updatedSchema, true)).rejects.toThrow();
     });
   });
 
@@ -405,7 +405,7 @@ describe("Destructive Operation Safety", () => {
         CREATE INDEX idx_users_created_at ON users (created_at);
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert data that would benefit from indexes
       for (let i = 1; i <= 100; i++) {
@@ -424,7 +424,7 @@ describe("Destructive Operation Safety", () => {
         CREATE INDEX idx_users_email ON users (email);
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify only one index remains
       const indexes = await client.query(`
@@ -450,7 +450,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
       await client.query("INSERT INTO temporary_table (data) VALUES ('test data')");
 
       // Expected safety options (to be implemented):
@@ -464,7 +464,7 @@ describe("Destructive Operation Safety", () => {
 
       // Should require explicit permission for destructive operations
       // await expect(
-      //   schemaService.apply(emptySchema, { allowDropTables: false })
+      //   schemaService.apply(emptySchema, { allowDropTables: false }, true)
       // ).rejects.toThrow(/destructive operation/);
 
       // For now, just verify data exists
@@ -482,7 +482,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
       await client.query("INSERT INTO products (name, price, old_field) VALUES ('Widget', 9.99, 'old data')");
 
       const updatedSchema = `
@@ -513,7 +513,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
       await client.query("INSERT INTO critical_data (important_info, backup_field) VALUES ('Critical info', 'Backup')");
 
       // Simulate a failed migration that should rollback
@@ -526,7 +526,7 @@ describe("Destructive Operation Safety", () => {
       `;
 
       // This should fail and rollback
-      await expect(schemaService.apply(problematicSchema)).rejects.toThrow();
+      await expect(schemaService.apply(problematicSchema, true)).rejects.toThrow();
 
       // Original data should still be intact
       const data = await client.query("SELECT important_info, backup_field FROM critical_data");
@@ -545,7 +545,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
       await client.query("INSERT INTO test_conversions (text_number, valid_number) VALUES ('not a number', '123')");
 
       // Try invalid conversion (should fail and preserve data)
@@ -557,7 +557,7 @@ describe("Destructive Operation Safety", () => {
         );
       `;
 
-      await expect(schemaService.apply(problematicSchema)).rejects.toThrow();
+      await expect(schemaService.apply(problematicSchema, true)).rejects.toThrow();
 
       // Original data should be preserved
       const data = await client.query("SELECT text_number, valid_number FROM test_conversions");

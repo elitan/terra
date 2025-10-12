@@ -86,6 +86,15 @@ export DB_PASSWORD=password
 **Tables & Columns:**
 All PostgreSQL column types, default values, NOT NULL constraints
 
+**Functions & Procedures:**
+User-defined functions and procedures with full PostgreSQL feature support
+
+**Triggers:**
+Table triggers with BEFORE/AFTER/INSTEAD OF timing
+
+**Sequences:**
+Custom sequences with configurable properties
+
 **Constraints:**
 ```sql
 -- Primary keys
@@ -133,6 +142,53 @@ SELECT id, email FROM users WHERE active = true;
 
 CREATE MATERIALIZED VIEW user_stats AS
 SELECT COUNT(*) as total FROM users;
+```
+
+**Functions:**
+```sql
+CREATE FUNCTION calculate_total(quantity INT, price DECIMAL)
+RETURNS DECIMAL
+AS $$
+  SELECT quantity * price
+$$
+LANGUAGE SQL IMMUTABLE;
+```
+
+**Procedures:**
+```sql
+CREATE PROCEDURE archive_old_posts(days_old INT)
+LANGUAGE SQL
+AS $$
+  DELETE FROM posts WHERE created_at < NOW() - INTERVAL '1 day' * days_old;
+$$;
+```
+
+**Triggers:**
+```sql
+-- First create a trigger function
+CREATE FUNCTION update_modified_timestamp()
+RETURNS TRIGGER
+AS $$
+  BEGIN
+    NEW.modified_at = NOW();
+    RETURN NEW;
+  END;
+$$
+LANGUAGE plpgsql;
+
+-- Then create the trigger
+CREATE TRIGGER set_modified_timestamp
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_modified_timestamp();
+```
+
+**Sequences:**
+```sql
+CREATE SEQUENCE custom_id_seq
+START 1000
+INCREMENT 1
+CACHE 20;
 ```
 
 ## Commands

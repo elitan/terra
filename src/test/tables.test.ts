@@ -46,7 +46,7 @@ describe("Table Operations - End to End", () => {
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    await executor.executePlan(client, plan);
+    await executor.executePlan(client, plan, true);
 
     // Verify final state
     const finalTableNames = await getTableNames(client);
@@ -89,7 +89,7 @@ describe("Table Operations - End to End", () => {
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    await executor.executePlan(client, plan);
+    await executor.executePlan(client, plan, true);
 
     // Verify final state
     const finalTableNames = await getTableNames(client);
@@ -124,7 +124,7 @@ describe("Table Operations - End to End", () => {
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    await executor.executePlan(client, plan);
+    await executor.executePlan(client, plan, true);
 
     // Verify final state
     const finalTableNames = await getTableNames(client);
@@ -163,7 +163,7 @@ describe("Table Operations - End to End", () => {
     const desiredTables = parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    await executor.executePlan(client, plan);
+    await executor.executePlan(client, plan, true);
 
     // Verify final state
     const finalTableNames = await getTableNames(client);
@@ -193,7 +193,7 @@ describe("Table Operations - End to End", () => {
 
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-    await executor.executePlan(client, plan);
+    await executor.executePlan(client, plan, true);
 
     // Verify final state - no tables
     const finalTableNames = await getTableNames(client);

@@ -40,7 +40,7 @@ describe("Materialized View Operations", () => {
         GROUP BY sale_date;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify materialized view exists
       const matViewResult = await client.query(`
@@ -75,7 +75,7 @@ describe("Materialized View Operations", () => {
         GROUP BY category;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Add sample data
       await client.query(`
@@ -117,7 +117,7 @@ describe("Materialized View Operations", () => {
 
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify materialized view exists
       const matViewResult = await client.query(`
@@ -155,7 +155,7 @@ describe("Materialized View Operations", () => {
         CREATE UNIQUE INDEX idx_user_summary_username ON user_summary (username);
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Add test data and refresh
       await client.query(`
@@ -195,7 +195,7 @@ describe("Materialized View Operations", () => {
         FROM counters;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Initially empty
       await client.query(`REFRESH MATERIALIZED VIEW counter_summary`);
@@ -235,7 +235,7 @@ describe("Materialized View Operations", () => {
 
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Create unique index manually for concurrent refresh
       await client.query(`CREATE UNIQUE INDEX idx_user_activity_user_id ON user_activity_counts (user_id)`);
@@ -297,7 +297,7 @@ describe("Materialized View Operations", () => {
         GROUP BY DATE_TRUNC('month', order_date);
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify both view and materialized view exist
       const viewResult = await client.query(`
@@ -336,7 +336,7 @@ describe("Materialized View Operations", () => {
         GROUP BY metric_name;
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated schema with additional columns (completely avoid table alterations)
       const updatedSchema = `
@@ -359,7 +359,7 @@ describe("Materialized View Operations", () => {
         GROUP BY metric_name;
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // First check if the materialized view still exists
       const matviewExists = await client.query(`
@@ -419,7 +419,7 @@ describe("Materialized View Operations", () => {
         GROUP BY level;
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated schema without materialized view
       const updatedSchema = `
@@ -430,7 +430,7 @@ describe("Materialized View Operations", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify materialized view was removed
       const matViewResult = await client.query(`
@@ -465,7 +465,7 @@ describe("Materialized View Operations", () => {
         CREATE INDEX idx_category_aggregates_category ON category_aggregates (category);
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Insert test data
       const insertPromises = [];
@@ -513,7 +513,7 @@ describe("Materialized View Operations", () => {
         SELECT COUNT(*) as total FROM temp_table;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Drop the underlying table to cause refresh failure
       await client.query(`DROP TABLE temp_table CASCADE`);
@@ -535,7 +535,7 @@ describe("Materialized View Operations", () => {
         SELECT * FROM simple_table;
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Concurrent refresh should fail without unique index
       await expect(

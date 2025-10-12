@@ -12,14 +12,26 @@ import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
 import { parseCreateType } from "./enum-parser";
 import { parseCreateView } from "./view-parser";
-import type { Table, Index, EnumType, View } from "../../../types/schema";
+import { parseCreateFunction } from "./function-parser";
+import { parseCreateProcedure } from "./procedure-parser";
+import { parseCreateTrigger } from "./trigger-parser";
+import { parseCreateSequence } from "./sequence-parser";
+import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
 export class SchemaParser {
   /**
    * Parse schema from a file path
    */
-  parseSchemaFile(filePath: string): { tables: Table[]; enums: EnumType[]; views: View[] } {
+  parseSchemaFile(filePath: string): {
+    tables: Table[];
+    enums: EnumType[];
+    views: View[];
+    functions: Function[];
+    procedures: Procedure[];
+    triggers: Trigger[];
+    sequences: Sequence[];
+  } {
     if (!existsSync(filePath)) {
       throw new ParserError(
         `Schema file not found: ${filePath}`,
@@ -37,8 +49,16 @@ export class SchemaParser {
   parseSchema(
     sql: string,
     filePath?: string
-  ): { tables: Table[]; enums: EnumType[]; views: View[] } {
-    const { tables, indexes, enums, views } = this.parseWithCST(sql, filePath);
+  ): {
+    tables: Table[];
+    enums: EnumType[];
+    views: View[];
+    functions: Function[];
+    procedures: Procedure[];
+    triggers: Trigger[];
+    sequences: Sequence[];
+  } {
+    const { tables, indexes, enums, views, functions, procedures, triggers, sequences } = this.parseWithCST(sql, filePath);
 
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map((t) => [t.name, t]));
@@ -53,7 +73,7 @@ export class SchemaParser {
       }
     }
 
-    return { tables, enums, views };
+    return { tables, enums, views, functions, procedures, triggers, sequences };
   }
 
   /**
@@ -86,11 +106,24 @@ export class SchemaParser {
   private parseWithCST(
     sql: string,
     filePath?: string
-  ): { tables: Table[]; indexes: Index[]; enums: EnumType[]; views: View[] } {
+  ): {
+    tables: Table[];
+    indexes: Index[];
+    enums: EnumType[];
+    views: View[];
+    functions: Function[];
+    procedures: Procedure[];
+    triggers: Trigger[];
+    sequences: Sequence[];
+  } {
     const tables: Table[] = [];
     const indexes: Index[] = [];
     const enums: EnumType[] = [];
     const views: View[] = [];
+    const functions: Function[] = [];
+    const procedures: Procedure[] = [];
+    const triggers: Trigger[] = [];
+    const sequences: Sequence[] = [];
 
     try {
       const cst = parseCST(sql, {
@@ -123,6 +156,26 @@ export class SchemaParser {
             const view = parseCreateView(statement, sql);
             if (view) {
               views.push(view);
+            }
+          } else if (statement.type === "create_function_stmt") {
+            const func = parseCreateFunction(statement);
+            if (func) {
+              functions.push(func);
+            }
+          } else if (statement.type === "create_procedure_stmt") {
+            const proc = parseCreateProcedure(statement);
+            if (proc) {
+              procedures.push(proc);
+            }
+          } else if (statement.type === "create_trigger_stmt") {
+            const trigger = parseCreateTrigger(statement);
+            if (trigger) {
+              triggers.push(trigger);
+            }
+          } else if (statement.type === "create_sequence_stmt") {
+            const sequence = parseCreateSequence(statement);
+            if (sequence) {
+              sequences.push(sequence);
             }
           } else if (statement.type === "alter_table_stmt") {
             throw new ParserError(
@@ -174,6 +227,6 @@ export class SchemaParser {
       );
     }
 
-    return { tables, indexes, enums, views };
+    return { tables, indexes, enums, views, functions, procedures, triggers, sequences };
   }
 }

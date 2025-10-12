@@ -49,7 +49,7 @@ export async function executeColumnMigration(
 
   const plan: MigrationPlan = migrationStatements;
 
-  await executor.executePlan(client, plan);
+  await executor.executePlan(client, plan, true);
 }
 
 /**

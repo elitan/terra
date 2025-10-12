@@ -1,13 +1,25 @@
 import { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
-import type { EnumType, View } from "../../types/schema";
+import type { EnumType, View, Function, Procedure, Trigger, Sequence } from "../../types/schema";
 import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
 import { SchemaDiffer } from "./differ";
 import { MigrationExecutor } from "../migration/executor";
 import { DatabaseService } from "../database/client";
 import { Logger } from "../../utils/logger";
-import { generateCreateViewSQL, generateDropViewSQL, generateCreateOrReplaceViewSQL } from "../../utils/sql";
+import {
+  generateCreateViewSQL,
+  generateDropViewSQL,
+  generateCreateOrReplaceViewSQL,
+  generateCreateFunctionSQL,
+  generateDropFunctionSQL,
+  generateCreateProcedureSQL,
+  generateDropProcedureSQL,
+  generateCreateTriggerSQL,
+  generateDropTriggerSQL,
+  generateCreateSequenceSQL,
+  generateDropSequenceSQL,
+} from "../../utils/sql";
 
 export class SchemaService {
   private parser: SchemaParser;
@@ -63,8 +75,8 @@ export class SchemaService {
     }
   }
 
-  async apply(schemaFile: string = "schema.sql"): Promise<void> {
-    Logger.info("Applying schema changes...");
+  async apply(schemaFile: string = "schema.sql", autoApprove: boolean = false): Promise<void> {
+    Logger.info("Analyzing schema changes...");
 
     const client = await this.databaseService.createClient();
 
@@ -73,20 +85,124 @@ export class SchemaService {
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const desiredEnums = Array.isArray(parsedSchema) ? [] : parsedSchema.enums;
       const desiredViews = Array.isArray(parsedSchema) ? [] : parsedSchema.views;
+      const desiredFunctions = Array.isArray(parsedSchema) ? [] : parsedSchema.functions;
+      const desiredProcedures = Array.isArray(parsedSchema) ? [] : parsedSchema.procedures;
+      const desiredTriggers = Array.isArray(parsedSchema) ? [] : parsedSchema.triggers;
+      const desiredSequences = Array.isArray(parsedSchema) ? [] : parsedSchema.sequences;
+
       const currentSchema = await this.inspector.getCurrentSchema(client);
       const currentEnums = await this.inspector.getCurrentEnums(client);
       const currentViews = await this.inspector.getCurrentViews(client);
-      
+      const currentFunctions = await this.inspector.getCurrentFunctions(client);
+      const currentProcedures = await this.inspector.getCurrentProcedures(client);
+      const currentTriggers = await this.inspector.getCurrentTriggers(client);
+      const currentSequences = await this.inspector.getCurrentSequences(client);
+
       // Generate ENUM statements with collision detection
       const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
 
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
-      
-      // Prepend ENUM creation statements 
+
+      // Prepend ENUM creation statements
       plan.transactional = [...enumStatements, ...plan.transactional];
 
-      // Execute table changes first
-      await this.executor.executePlan(client, plan);
+      // Generate statements for new features
+      const sequenceStatements = this.generateSequenceStatements(desiredSequences, currentSequences);
+      const functionStatements = this.generateFunctionStatements(desiredFunctions, currentFunctions);
+      const procedureStatements = this.generateProcedureStatements(desiredProcedures, currentProcedures);
+      const viewStatements = this.generateViewStatements(desiredViews, currentViews);
+      const triggerStatements = this.generateTriggerStatements(desiredTriggers, currentTriggers);
+
+      // Calculate total changes
+      const totalChanges = plan.transactional.length + plan.concurrent.length +
+                          sequenceStatements.length + functionStatements.length +
+                          procedureStatements.length + viewStatements.length +
+                          triggerStatements.length;
+
+      // Show plan
+      if (totalChanges === 0) {
+        Logger.success("No changes needed - database is up to date");
+        return;
+      }
+
+      Logger.warning(`Found ${totalChanges} change(s) to apply:`);
+      console.log();
+
+      if (plan.transactional.length > 0) {
+        Logger.info("Transactional changes:");
+        plan.transactional.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      if (plan.concurrent.length > 0) {
+        Logger.info("Concurrent changes (non-transactional):");
+        plan.concurrent.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      if (sequenceStatements.length > 0) {
+        Logger.info("Sequence changes:");
+        sequenceStatements.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      if (functionStatements.length > 0) {
+        Logger.info("Function changes:");
+        functionStatements.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      if (procedureStatements.length > 0) {
+        Logger.info("Procedure changes:");
+        procedureStatements.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      if (viewStatements.length > 0) {
+        Logger.info("View changes:");
+        viewStatements.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      if (triggerStatements.length > 0) {
+        Logger.info("Trigger changes:");
+        triggerStatements.forEach((stmt, i) => {
+          Logger.cyan(`  ${i + 1}. ${stmt}`);
+        });
+      }
+
+      console.log();
+
+      // Prompt for confirmation unless auto-approve is enabled
+      if (!autoApprove) {
+        const confirmed = await this.promptForConfirmation();
+        if (!confirmed) {
+          Logger.info("Apply cancelled");
+          return;
+        }
+      }
+
+      Logger.info("Applying schema changes...");
+
+      // Execute in dependency order:
+      // 1. Sequences (may be referenced by table defaults)
+      if (sequenceStatements.length > 0) {
+        const sequencePlan = {
+          transactional: sequenceStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, sequencePlan, autoApprove);
+      }
+
+      // 2. Tables and enums
+      await this.executor.executePlan(client, plan, autoApprove);
 
       // After table changes, safely remove unused ENUMs
       const enumRemovalStatements = await this.generateEnumRemovalStatements(desiredEnums, currentEnums, client);
@@ -96,22 +212,66 @@ export class SchemaService {
           concurrent: [],
           hasChanges: true
         };
-        await this.executor.executePlan(client, removalPlan);
+        await this.executor.executePlan(client, removalPlan, autoApprove);
       }
 
-      // Handle VIEW changes after tables and enums are settled
-      const viewStatements = this.generateViewStatements(desiredViews, currentViews);
+      // 3. Functions and procedures (triggers depend on functions)
+      if (functionStatements.length > 0) {
+        const functionPlan = {
+          transactional: functionStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, functionPlan, autoApprove);
+      }
+
+      if (procedureStatements.length > 0) {
+        const procedurePlan = {
+          transactional: procedureStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, procedurePlan, autoApprove);
+      }
+
+      // 4. Views
       if (viewStatements.length > 0) {
         const viewPlan = {
           transactional: viewStatements,
           concurrent: [],
           hasChanges: true
         };
-        await this.executor.executePlan(client, viewPlan);
+        await this.executor.executePlan(client, viewPlan, autoApprove);
+      }
+
+      // 5. Triggers (must come after tables, functions, and views)
+      if (triggerStatements.length > 0) {
+        const triggerPlan = {
+          transactional: triggerStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, triggerPlan, autoApprove);
       }
     } finally {
       await client.end();
     }
+  }
+
+  private async promptForConfirmation(): Promise<boolean> {
+    const readline = await import('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    return new Promise((resolve) => {
+      rl.question('Do you want to apply these changes? (yes/no): ', (answer) => {
+        rl.close();
+        const normalized = answer.trim().toLowerCase();
+        resolve(normalized === 'yes' || normalized === 'y');
+      });
+    });
   }
 
   private parseSchemaInput(input: string) {
@@ -297,12 +457,12 @@ export class SchemaService {
     if (desired.materialized !== current.materialized) {
       return true;
     }
-    
+
     // Check if definition differs (normalize whitespace for comparison)
     const normalizeDefinition = (def: string) => def.replace(/\s+/g, ' ').trim();
     const normalizedDesired = normalizeDefinition(desired.definition);
     const normalizedCurrent = normalizeDefinition(current.definition);
-    
+
     if (normalizedDesired !== normalizedCurrent) {
       // Add some debugging for the test
       Logger.info(`View '${desired.name}' needs update:`);
@@ -310,17 +470,185 @@ export class SchemaService {
       Logger.info(`  Current: ${normalizedCurrent.substring(0, 100)}...`);
       return true;
     }
-    
+
     // Check if check options differ
     if (desired.checkOption !== current.checkOption) {
       return true;
     }
-    
+
     // Check if security barrier differs
     if (desired.securityBarrier !== current.securityBarrier) {
       return true;
     }
-    
+
     return false;
+  }
+
+  private generateSequenceStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {
+    const statements: string[] = [];
+    const currentSequenceMap = new Map(currentSequences.map(s => [s.name, s]));
+    const desiredSequenceNames = new Set(desiredSequences.map(s => s.name));
+
+    // Drop sequences that are no longer needed
+    for (const currentSeq of currentSequences) {
+      if (!desiredSequenceNames.has(currentSeq.name)) {
+        statements.push(generateDropSequenceSQL(currentSeq.name));
+        Logger.info(`Dropping sequence '${currentSeq.name}'`);
+      }
+    }
+
+    // Create or update sequences
+    for (const desiredSeq of desiredSequences) {
+      const currentSeq = currentSequenceMap.get(desiredSeq.name);
+
+      if (!currentSeq) {
+        statements.push(generateCreateSequenceSQL(desiredSeq));
+        Logger.info(`Creating sequence '${desiredSeq.name}'`);
+      } else {
+        if (this.sequenceNeedsUpdate(desiredSeq, currentSeq)) {
+          statements.push(generateDropSequenceSQL(currentSeq.name));
+          statements.push(generateCreateSequenceSQL(desiredSeq));
+          Logger.info(`Updating sequence '${desiredSeq.name}'`);
+        } else {
+          Logger.info(`Sequence '${desiredSeq.name}' is up to date, skipping`);
+        }
+      }
+    }
+
+    return statements;
+  }
+
+  private sequenceNeedsUpdate(desired: Sequence, current: Sequence): boolean {
+    return desired.increment !== current.increment ||
+           desired.minValue !== current.minValue ||
+           desired.maxValue !== current.maxValue ||
+           desired.start !== current.start ||
+           desired.cache !== current.cache ||
+           desired.cycle !== current.cycle;
+  }
+
+  private generateFunctionStatements(desiredFunctions: Function[], currentFunctions: Function[]): string[] {
+    const statements: string[] = [];
+    const currentFunctionMap = new Map(currentFunctions.map(f => [f.name, f]));
+    const desiredFunctionNames = new Set(desiredFunctions.map(f => f.name));
+
+    // Drop functions that are no longer needed
+    for (const currentFunc of currentFunctions) {
+      if (!desiredFunctionNames.has(currentFunc.name)) {
+        statements.push(generateDropFunctionSQL(currentFunc));
+        Logger.info(`Dropping function '${currentFunc.name}'`);
+      }
+    }
+
+    // Create or update functions
+    for (const desiredFunc of desiredFunctions) {
+      const currentFunc = currentFunctionMap.get(desiredFunc.name);
+
+      if (!currentFunc) {
+        statements.push(generateCreateFunctionSQL(desiredFunc));
+        Logger.info(`Creating function '${desiredFunc.name}'`);
+      } else {
+        if (this.functionNeedsUpdate(desiredFunc, currentFunc)) {
+          statements.push(generateDropFunctionSQL(currentFunc));
+          statements.push(generateCreateFunctionSQL(desiredFunc));
+          Logger.info(`Updating function '${desiredFunc.name}'`);
+        } else {
+          Logger.info(`Function '${desiredFunc.name}' is up to date, skipping`);
+        }
+      }
+    }
+
+    return statements;
+  }
+
+  private functionNeedsUpdate(desired: Function, current: Function): boolean {
+    const normalizeBody = (body: string) => body.replace(/\s+/g, ' ').trim();
+    return normalizeBody(desired.body) !== normalizeBody(current.body) ||
+           desired.returnType !== current.returnType ||
+           desired.language !== current.language ||
+           desired.volatility !== current.volatility;
+  }
+
+  private generateProcedureStatements(desiredProcedures: Procedure[], currentProcedures: Procedure[]): string[] {
+    const statements: string[] = [];
+    const currentProcedureMap = new Map(currentProcedures.map(p => [p.name, p]));
+    const desiredProcedureNames = new Set(desiredProcedures.map(p => p.name));
+
+    // Drop procedures that are no longer needed
+    for (const currentProc of currentProcedures) {
+      if (!desiredProcedureNames.has(currentProc.name)) {
+        statements.push(generateDropProcedureSQL(currentProc));
+        Logger.info(`Dropping procedure '${currentProc.name}'`);
+      }
+    }
+
+    // Create or update procedures
+    for (const desiredProc of desiredProcedures) {
+      const currentProc = currentProcedureMap.get(desiredProc.name);
+
+      if (!currentProc) {
+        statements.push(generateCreateProcedureSQL(desiredProc));
+        Logger.info(`Creating procedure '${desiredProc.name}'`);
+      } else {
+        if (this.procedureNeedsUpdate(desiredProc, currentProc)) {
+          statements.push(generateDropProcedureSQL(currentProc));
+          statements.push(generateCreateProcedureSQL(desiredProc));
+          Logger.info(`Updating procedure '${desiredProc.name}'`);
+        } else {
+          Logger.info(`Procedure '${desiredProc.name}' is up to date, skipping`);
+        }
+      }
+    }
+
+    return statements;
+  }
+
+  private procedureNeedsUpdate(desired: Procedure, current: Procedure): boolean {
+    const normalizeBody = (body: string) => body.replace(/\s+/g, ' ').trim();
+    return normalizeBody(desired.body) !== normalizeBody(current.body) ||
+           desired.language !== current.language;
+  }
+
+  private generateTriggerStatements(desiredTriggers: Trigger[], currentTriggers: Trigger[]): string[] {
+    const statements: string[] = [];
+    const currentTriggerMap = new Map(currentTriggers.map(t => [`${t.tableName}.${t.name}`, t]));
+    const desiredTriggerKeys = new Set(desiredTriggers.map(t => `${t.tableName}.${t.name}`));
+
+    // Drop triggers that are no longer needed
+    for (const currentTrig of currentTriggers) {
+      const key = `${currentTrig.tableName}.${currentTrig.name}`;
+      if (!desiredTriggerKeys.has(key)) {
+        statements.push(generateDropTriggerSQL(currentTrig));
+        Logger.info(`Dropping trigger '${currentTrig.name}' on '${currentTrig.tableName}'`);
+      }
+    }
+
+    // Create or update triggers
+    for (const desiredTrig of desiredTriggers) {
+      const key = `${desiredTrig.tableName}.${desiredTrig.name}`;
+      const currentTrig = currentTriggerMap.get(key);
+
+      if (!currentTrig) {
+        statements.push(generateCreateTriggerSQL(desiredTrig));
+        Logger.info(`Creating trigger '${desiredTrig.name}' on '${desiredTrig.tableName}'`);
+      } else {
+        if (this.triggerNeedsUpdate(desiredTrig, currentTrig)) {
+          statements.push(generateDropTriggerSQL(currentTrig));
+          statements.push(generateCreateTriggerSQL(desiredTrig));
+          Logger.info(`Updating trigger '${desiredTrig.name}' on '${desiredTrig.tableName}'`);
+        } else {
+          Logger.info(`Trigger '${desiredTrig.name}' is up to date, skipping`);
+        }
+      }
+    }
+
+    return statements;
+  }
+
+  private triggerNeedsUpdate(desired: Trigger, current: Trigger): boolean {
+    return desired.timing !== current.timing ||
+           desired.forEach !== current.forEach ||
+           desired.functionName !== current.functionName ||
+           JSON.stringify(desired.events) !== JSON.stringify(current.events);
   }
 }

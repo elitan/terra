@@ -1,4 +1,4 @@
-import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View } from "../types/schema";
+import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence } from "../types/schema";
 
 export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
@@ -288,12 +288,168 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
 
 export function generateRefreshMaterializedViewSQL(viewName: string, concurrently: boolean = false): string {
   let sql = "REFRESH MATERIALIZED VIEW ";
-  
+
   if (concurrently) {
     sql += "CONCURRENTLY ";
   }
-  
+
   sql += viewName;
-  
+
   return sql + ";";
+}
+
+// FUNCTION SQL generation functions
+export function generateCreateFunctionSQL(func: Function): string {
+  let sql = `CREATE FUNCTION ${func.name}(`;
+
+  // Add parameters
+  if (func.parameters.length > 0) {
+    const params = func.parameters.map(p => {
+      let param = "";
+      if (p.mode) param += `${p.mode} `;
+      if (p.name) param += `${p.name} `;
+      param += p.type;
+      if (p.default) param += ` DEFAULT ${p.default}`;
+      return param;
+    });
+    sql += params.join(", ");
+  }
+
+  sql += `) RETURNS ${func.returnType}`;
+  sql += ` AS $$ ${func.body} $$`;
+  sql += ` LANGUAGE ${func.language}`;
+
+  if (func.volatility) {
+    sql += ` ${func.volatility}`;
+  }
+
+  if (func.parallel) {
+    sql += ` PARALLEL ${func.parallel}`;
+  }
+
+  if (func.securityDefiner) {
+    sql += " SECURITY DEFINER";
+  }
+
+  if (func.strict) {
+    sql += " STRICT";
+  }
+
+  if (func.cost !== undefined) {
+    sql += ` COST ${func.cost}`;
+  }
+
+  if (func.rows !== undefined) {
+    sql += ` ROWS ${func.rows}`;
+  }
+
+  return sql + ";";
+}
+
+export function generateDropFunctionSQL(func: Function): string {
+  const paramTypes = func.parameters.map(p => p.type).join(", ");
+  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes});`;
+}
+
+// PROCEDURE SQL generation functions
+export function generateCreateProcedureSQL(proc: Procedure): string {
+  let sql = `CREATE PROCEDURE ${proc.name}(`;
+
+  // Add parameters
+  if (proc.parameters.length > 0) {
+    const params = proc.parameters.map(p => {
+      let param = "";
+      if (p.mode) param += `${p.mode} `;
+      if (p.name) param += `${p.name} `;
+      param += p.type;
+      if (p.default) param += ` DEFAULT ${p.default}`;
+      return param;
+    });
+    sql += params.join(", ");
+  }
+
+  sql += `) LANGUAGE ${proc.language}`;
+  sql += ` AS $$ ${proc.body} $$`;
+
+  if (proc.securityDefiner) {
+    sql += " SECURITY DEFINER";
+  }
+
+  return sql + ";";
+}
+
+export function generateDropProcedureSQL(proc: Procedure): string {
+  const paramTypes = proc.parameters.map(p => p.type).join(", ");
+  return `DROP PROCEDURE IF EXISTS ${proc.name}(${paramTypes});`;
+}
+
+// TRIGGER SQL generation functions
+export function generateCreateTriggerSQL(trigger: Trigger): string {
+  let sql = `CREATE TRIGGER ${trigger.name}`;
+  sql += ` ${trigger.timing}`;
+  sql += ` ${trigger.events.join(" OR ")}`;
+  sql += ` ON ${trigger.tableName}`;
+
+  if (trigger.forEach) {
+    sql += ` FOR EACH ${trigger.forEach}`;
+  }
+
+  if (trigger.when) {
+    sql += ` WHEN (${trigger.when})`;
+  }
+
+  sql += ` EXECUTE FUNCTION ${trigger.functionName}(`;
+  if (trigger.functionArgs && trigger.functionArgs.length > 0) {
+    sql += trigger.functionArgs.join(", ");
+  }
+  sql += ")";
+
+  return sql + ";";
+}
+
+export function generateDropTriggerSQL(trigger: Trigger): string {
+  return `DROP TRIGGER IF EXISTS ${trigger.name} ON ${trigger.tableName};`;
+}
+
+// SEQUENCE SQL generation functions
+export function generateCreateSequenceSQL(seq: Sequence): string {
+  let sql = `CREATE SEQUENCE ${seq.name}`;
+
+  if (seq.dataType) {
+    sql += ` AS ${seq.dataType}`;
+  }
+
+  if (seq.increment !== undefined) {
+    sql += ` INCREMENT ${seq.increment}`;
+  }
+
+  if (seq.minValue !== undefined) {
+    sql += ` MINVALUE ${seq.minValue}`;
+  }
+
+  if (seq.maxValue !== undefined) {
+    sql += ` MAXVALUE ${seq.maxValue}`;
+  }
+
+  if (seq.start !== undefined) {
+    sql += ` START ${seq.start}`;
+  }
+
+  if (seq.cache !== undefined) {
+    sql += ` CACHE ${seq.cache}`;
+  }
+
+  if (seq.cycle !== undefined) {
+    sql += seq.cycle ? " CYCLE" : " NO CYCLE";
+  }
+
+  if (seq.ownedBy) {
+    sql += ` OWNED BY ${seq.ownedBy}`;
+  }
+
+  return sql + ";";
+}
+
+export function generateDropSequenceSQL(sequenceName: string): string {
+  return `DROP SEQUENCE IF EXISTS ${sequenceName};`;
 }

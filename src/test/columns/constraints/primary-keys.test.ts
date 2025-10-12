@@ -260,7 +260,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -303,7 +303,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -348,7 +348,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -415,7 +415,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify table was created with correct primary key
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -471,7 +471,7 @@ describe("Primary Key Support", () => {
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       // Should throw an error due to duplicate values
-      await expect(executor.executePlan(client, plan)).rejects.toThrow();
+      await expect(executor.executePlan(client, plan, true)).rejects.toThrow();
 
       // 4. Verify original state is preserved
       const result = await client.query("SELECT COUNT(*) FROM users");
@@ -510,7 +510,7 @@ describe("Primary Key Support", () => {
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       // Should throw an error due to NULL values
-      await expect(executor.executePlan(client, plan)).rejects.toThrow();
+      await expect(executor.executePlan(client, plan, true)).rejects.toThrow();
 
       // 4. Verify original state is preserved
       const result = await client.query("SELECT COUNT(*) FROM users");
@@ -586,7 +586,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -624,7 +624,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -664,7 +664,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -706,7 +706,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);
@@ -771,7 +771,7 @@ describe("Primary Key Support", () => {
       const desiredTables = parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
-      await executor.executePlan(client, plan);
+      await executor.executePlan(client, plan, true);
 
       // 4. Verify final state
       const finalSchema = await inspector.getCurrentSchema(client);

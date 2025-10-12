@@ -10,6 +10,10 @@ import type {
   EnumType,
   View,
   Schema,
+  Function,
+  Procedure,
+  Trigger,
+  Sequence,
 } from "../../types/schema";
 
 export class DatabaseInspector {
@@ -530,19 +534,226 @@ export class DatabaseInspector {
     return views;
   }
 
-  // Get complete schema including tables, views, and enums
+  // Get complete schema including all database objects
   async getCompleteSchema(client: Client): Promise<Schema> {
-    const [tables, views, enumTypes] = await Promise.all([
+    const [tables, views, enumTypes, functions, procedures, triggers, sequences] = await Promise.all([
       this.getCurrentSchema(client),
-      this.getCurrentViews(client), 
-      this.getCurrentEnums(client)
+      this.getCurrentViews(client),
+      this.getCurrentEnums(client),
+      this.getCurrentFunctions(client),
+      this.getCurrentProcedures(client),
+      this.getCurrentTriggers(client),
+      this.getCurrentSequences(client),
     ]);
 
     return {
       tables,
       views,
       enumTypes,
+      functions,
+      procedures,
+      triggers,
+      sequences,
     };
+  }
+
+  // Get all functions from the database
+  async getCurrentFunctions(client: Client): Promise<Function[]> {
+    const result = await client.query(`
+      SELECT
+        p.proname as function_name,
+        pg_get_function_arguments(p.oid) as arguments,
+        pg_get_function_result(p.oid) as return_type,
+        l.lanname as language,
+        p.prosrc as source_code,
+        CASE p.provolatile
+          WHEN 'i' THEN 'IMMUTABLE'
+          WHEN 's' THEN 'STABLE'
+          WHEN 'v' THEN 'VOLATILE'
+        END as volatility,
+        CASE p.proparallel
+          WHEN 's' THEN 'SAFE'
+          WHEN 'u' THEN 'UNSAFE'
+          WHEN 'r' THEN 'RESTRICTED'
+        END as parallel,
+        p.prosecdef as security_definer,
+        p.proisstrict as is_strict,
+        p.procost as cost,
+        p.prorows as rows
+      FROM pg_proc p
+      JOIN pg_namespace n ON p.pronamespace = n.oid
+      JOIN pg_language l ON p.prolang = l.oid
+      LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
+      WHERE n.nspname = 'public'
+        AND p.prokind = 'f'
+        AND d.objid IS NULL
+      ORDER BY p.proname
+    `);
+
+    return result.rows.map((row: any) => ({
+      name: row.function_name,
+      parameters: this.parseFunctionArguments(row.arguments),
+      returnType: row.return_type,
+      language: row.language,
+      body: row.source_code,
+      volatility: row.volatility,
+      parallel: row.parallel,
+      securityDefiner: row.security_definer || undefined,
+      strict: row.is_strict || undefined,
+      cost: row.cost !== 100 ? row.cost : undefined,
+      rows: row.rows !== 1000 ? row.rows : undefined,
+    }));
+  }
+
+  // Get all procedures from the database
+  async getCurrentProcedures(client: Client): Promise<Procedure[]> {
+    const result = await client.query(`
+      SELECT
+        p.proname as procedure_name,
+        pg_get_function_arguments(p.oid) as arguments,
+        l.lanname as language,
+        p.prosrc as source_code,
+        p.prosecdef as security_definer
+      FROM pg_proc p
+      JOIN pg_namespace n ON p.pronamespace = n.oid
+      JOIN pg_language l ON p.prolang = l.oid
+      LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
+      WHERE n.nspname = 'public'
+        AND p.prokind = 'p'
+        AND d.objid IS NULL
+      ORDER BY p.proname
+    `);
+
+    return result.rows.map((row: any) => ({
+      name: row.procedure_name,
+      parameters: this.parseFunctionArguments(row.arguments),
+      language: row.language,
+      body: row.source_code,
+      securityDefiner: row.security_definer || undefined,
+    }));
+  }
+
+  // Get all triggers from the database
+  async getCurrentTriggers(client: Client): Promise<Trigger[]> {
+    const result = await client.query(`
+      SELECT
+        t.tgname as trigger_name,
+        c.relname as table_name,
+        CASE
+          WHEN t.tgtype & 1 = 1 THEN 'ROW'
+          ELSE 'STATEMENT'
+        END as for_each,
+        CASE
+          WHEN t.tgtype & 2 = 2 THEN 'BEFORE'
+          WHEN t.tgtype & 64 = 64 THEN 'INSTEAD OF'
+          ELSE 'AFTER'
+        END as timing,
+        CASE WHEN t.tgtype & 4 = 4 THEN true ELSE false END as on_insert,
+        CASE WHEN t.tgtype & 8 = 8 THEN true ELSE false END as on_delete,
+        CASE WHEN t.tgtype & 16 = 16 THEN true ELSE false END as on_update,
+        CASE WHEN t.tgtype & 32 = 32 THEN true ELSE false END as on_truncate,
+        p.proname as function_name,
+        pg_get_triggerdef(t.oid) as trigger_def
+      FROM pg_trigger t
+      JOIN pg_class c ON t.tgrelid = c.oid
+      JOIN pg_namespace n ON c.relnamespace = n.oid
+      JOIN pg_proc p ON t.tgfoid = p.oid
+      WHERE n.nspname = 'public'
+        AND NOT t.tgisinternal
+      ORDER BY c.relname, t.tgname
+    `);
+
+    return result.rows.map((row: any) => {
+      const events: Trigger['events'] = [];
+      if (row.on_insert) events.push('INSERT');
+      if (row.on_update) events.push('UPDATE');
+      if (row.on_delete) events.push('DELETE');
+      if (row.on_truncate) events.push('TRUNCATE');
+
+      return {
+        name: row.trigger_name,
+        tableName: row.table_name,
+        timing: row.timing,
+        events,
+        forEach: row.for_each,
+        functionName: row.function_name,
+      };
+    });
+  }
+
+  // Get all sequences from the database
+  async getCurrentSequences(client: Client): Promise<Sequence[]> {
+    const result = await client.query(`
+      SELECT
+        c.relname as sequence_name,
+        s.seqtypid::regtype::text as data_type,
+        s.seqincrement as increment,
+        s.seqmin as min_value,
+        s.seqmax as max_value,
+        s.seqstart as start,
+        s.seqcache as cache,
+        s.seqcycle as cycle,
+        pg_get_serial_sequence(
+          quote_ident(n2.nspname) || '.' || quote_ident(c2.relname),
+          a.attname
+        ) as owned_by_table_column
+      FROM pg_class c
+      JOIN pg_namespace n ON c.relnamespace = n.oid
+      LEFT JOIN pg_sequence s ON s.seqrelid = c.oid
+      LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
+      LEFT JOIN pg_attrdef ad ON ad.oid = d.refobjid
+      LEFT JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+      LEFT JOIN pg_class c2 ON c2.oid = a.attrelid
+      LEFT JOIN pg_namespace n2 ON c2.relnamespace = n2.oid
+      WHERE c.relkind = 'S'
+        AND n.nspname = 'public'
+      ORDER BY c.relname
+    `);
+
+    return result.rows.map((row: any) => {
+      const dataType = row.data_type === 'bigint' ? 'BIGINT'
+                     : row.data_type === 'smallint' ? 'SMALLINT'
+                     : 'INTEGER';
+
+      return {
+        name: row.sequence_name,
+        dataType: dataType !== 'BIGINT' ? dataType : undefined,
+        increment: row.increment !== 1 ? row.increment : undefined,
+        minValue: row.min_value,
+        maxValue: row.max_value,
+        start: row.start !== 1 ? row.start : undefined,
+        cache: row.cache !== 1 ? row.cache : undefined,
+        cycle: row.cycle || undefined,
+        ownedBy: row.owned_by_table_column || undefined,
+      };
+    });
+  }
+
+  // Helper method to parse function arguments string from PostgreSQL
+  private parseFunctionArguments(argsString: string): any[] {
+    if (!argsString || argsString.trim() === '') {
+      return [];
+    }
+
+    // This is a simplified parser - PostgreSQL's format is complex
+    // Example: "a integer, b text DEFAULT 'hello'::text"
+    const params: any[] = [];
+    const argParts = argsString.split(',').map(s => s.trim());
+
+    for (const arg of argParts) {
+      const match = arg.match(/^(?:(IN|OUT|INOUT|VARIADIC)\s+)?(?:(\w+)\s+)?(.+?)(?:\s+DEFAULT\s+(.+))?$/i);
+      if (match) {
+        const [, mode, name, type, defaultVal] = match;
+        params.push({
+          name: name || undefined,
+          type: type.trim(),
+          mode: mode?.toUpperCase() || undefined,
+          default: defaultVal || undefined,
+        });
+      }
+    }
+
+    return params;
   }
 
   // Helper method to analyze view dependencies
@@ -550,7 +761,7 @@ export class DatabaseInspector {
     try {
       const result = await client.query(`
         SELECT DISTINCT
-          CASE 
+          CASE
             WHEN referenced_table_schema = 'public' THEN referenced_table_name
             ELSE referenced_table_schema || '.' || referenced_table_name
           END as dependency

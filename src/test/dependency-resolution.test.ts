@@ -57,7 +57,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify all tables exist
       const tables = await client.query(`
@@ -132,7 +132,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test the full dependency chain
       await client.query("INSERT INTO customers (name) VALUES ('Test Customer')");
@@ -163,7 +163,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // For circular dependencies, one FK constraint should be added after table creation
       const constraints = await client.query(`
@@ -213,7 +213,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(createSchema);
+      await schemaService.apply(createSchema, true);
 
       // Insert some data
       await client.query("INSERT INTO customers (name) VALUES ('Test')");
@@ -223,7 +223,7 @@ describe("Dependency Resolution", () => {
       // Now drop all tables
       const emptySchema = ``;
 
-      await schemaService.apply(emptySchema);
+      await schemaService.apply(emptySchema, true);
 
       // Verify all tables are gone
       const tables = await client.query(`
@@ -257,7 +257,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Remove products table (which is referenced by order_items and references categories)
       const updatedSchema = `
@@ -273,7 +273,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       const tables = await client.query(`
         SELECT table_name 
@@ -301,7 +301,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Both tables should exist
       const tables = await client.query(`
@@ -337,7 +337,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Remove users table (which is referenced by posts)
       const updatedSchema = `
@@ -348,7 +348,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Should succeed - foreign key was dropped first
       const tables = await client.query(`
@@ -395,7 +395,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       await client.query("INSERT INTO students (name) VALUES ('Alice'), ('Bob')");
       await client.query("INSERT INTO courses (name) VALUES ('Math'), ('Science')");
@@ -415,7 +415,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Create category hierarchy
       await client.query("INSERT INTO categories (name, parent_id) VALUES ('Electronics', NULL)");
@@ -462,7 +462,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       await client.query("INSERT INTO users (username, email) VALUES ('testuser', 'test@example.com')");
       await client.query("INSERT INTO user_preferences (user_id, preference_key, preference_value) VALUES (1, 'theme', 'dark')");
@@ -488,7 +488,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Insert data with careful ordering due to circular dependency
       await client.query("INSERT INTO teams (name) VALUES ('Red Team')");
@@ -513,7 +513,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
 
     test("should handle missing column references", async () => {
@@ -530,7 +530,7 @@ describe("Dependency Resolution", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
   });
 });

@@ -30,7 +30,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify check constraint exists
       const result = await client.query(`
@@ -64,7 +64,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test constraint validation
       // Valid insert
@@ -101,7 +101,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify all constraints
       const result = await client.query(`
@@ -130,7 +130,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test column constraints
       await expect(
@@ -153,7 +153,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Insert some data
       await client.query("INSERT INTO accounts (username, balance) VALUES ('user1', 100)");
@@ -167,7 +167,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify constraint was added
       const result = await client.query(`
@@ -196,7 +196,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       const updatedSchema = `
         CREATE TABLE products (
@@ -206,7 +206,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify constraint was dropped
       const result = await client.query(`
@@ -234,7 +234,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Update constraint to allow higher prices
       const updatedSchema = `
@@ -246,7 +246,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Should now allow prices up to 9999.99
       await client.query("INSERT INTO products (name, price) VALUES ('Expensive', 5000)");
@@ -270,7 +270,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Valid project
       await client.query(`
@@ -311,7 +311,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Valid: no discount
       await client.query(`
@@ -357,7 +357,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Valid user
       await client.query(`
@@ -395,7 +395,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Valid: 1 year subscription
       await client.query(`
@@ -434,7 +434,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // For complex validations that would require subqueries,
       // users should use triggers instead
@@ -463,7 +463,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       const result = await client.query(`
         SELECT conname
@@ -491,7 +491,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Add new column, constraints should remain
       const updatedSchema = `
@@ -505,7 +505,7 @@ describe("Check Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify constraint still exists and works
       await expect(

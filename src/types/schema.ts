@@ -62,6 +62,58 @@ export interface View {
   dependencies?: string[]; // Tables/views this view depends on
 }
 
+export interface FunctionParameter {
+  name?: string;
+  type: string;
+  mode?: 'IN' | 'OUT' | 'INOUT' | 'VARIADIC';
+  default?: string;
+}
+
+export interface Function {
+  name: string;
+  parameters: FunctionParameter[];
+  returnType: string;
+  language: string;
+  body: string;
+  volatility?: 'VOLATILE' | 'STABLE' | 'IMMUTABLE';
+  parallel?: 'SAFE' | 'UNSAFE' | 'RESTRICTED';
+  securityDefiner?: boolean;
+  strict?: boolean;
+  cost?: number;
+  rows?: number;
+}
+
+export interface Procedure {
+  name: string;
+  parameters: FunctionParameter[];
+  language: string;
+  body: string;
+  securityDefiner?: boolean;
+}
+
+export interface Trigger {
+  name: string;
+  tableName: string;
+  timing: 'BEFORE' | 'AFTER' | 'INSTEAD OF';
+  events: ('INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE')[];
+  forEach?: 'ROW' | 'STATEMENT';
+  when?: string;
+  functionName: string;
+  functionArgs?: string[];
+}
+
+export interface Sequence {
+  name: string;
+  dataType?: 'SMALLINT' | 'INTEGER' | 'BIGINT';
+  increment?: number;
+  minValue?: number;
+  maxValue?: number;
+  start?: number;
+  cache?: number;
+  cycle?: boolean;
+  ownedBy?: string;
+}
+
 export interface Table {
   name: string;
   columns: Column[];
@@ -76,4 +128,8 @@ export interface Schema {
   tables: Table[];
   views: View[];
   enumTypes: EnumType[];
+  functions?: Function[];
+  procedures?: Procedure[];
+  triggers?: Trigger[];
+  sequences?: Sequence[];
 }

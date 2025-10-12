@@ -29,7 +29,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Define desired schema with changes
       const desiredSchema = `
@@ -77,7 +77,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
       `;
 
       // Apply schema
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Plan with same schema
       const plan = await schemaService.plan(schema);
@@ -103,7 +103,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Desired schema removes temp_data
       const desiredSchema = `
@@ -134,7 +134,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify table was created
       const tables = await client.query(`
@@ -170,7 +170,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(schema1);
+      await schemaService.apply(schema1, true);
 
       // Step 2: Add column
       const schema2 = `
@@ -181,7 +181,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(schema2);
+      await schemaService.apply(schema2, true);
 
       // Step 3: Add another table with foreign key
       const schema3 = `
@@ -199,7 +199,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(schema3);
+      await schemaService.apply(schema3, true);
 
       // Verify final state
       const tables = await client.query(`
@@ -241,7 +241,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify both tables exist
       const tables = await client.query(`
@@ -276,7 +276,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Modified schema - remove bio, add email, change books structure
       const modifiedSchema = `

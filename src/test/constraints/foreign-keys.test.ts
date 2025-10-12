@@ -35,7 +35,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify foreign key exists
       const result = await client.query(`
@@ -81,7 +81,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Test CASCADE behavior
       await client.query("INSERT INTO users (email) VALUES ('test@example.com')");
@@ -110,7 +110,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       await client.query("INSERT INTO categories (code, name) VALUES ('ELEC', 'Electronics')");
       await client.query("INSERT INTO products (name, category_code) VALUES ('Laptop', 'ELEC')");
@@ -140,7 +140,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify composite foreign key
       const result = await client.query(`
@@ -169,7 +169,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated schema with foreign key
       const updatedSchema = `
@@ -186,7 +186,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify foreign key was added
       const result = await client.query(`
@@ -216,7 +216,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated schema without foreign key
       const updatedSchema = `
@@ -232,7 +232,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Verify foreign key was dropped
       const result = await client.query(`
@@ -261,7 +261,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Updated: ON DELETE CASCADE
       const updatedSchema = `
@@ -278,7 +278,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       // Test new CASCADE behavior
       await client.query("INSERT INTO users (email) VALUES ('test@example.com')");
@@ -306,7 +306,7 @@ describe("Foreign Key Constraints", () => {
       `;
 
       // Should create customers first, then orders
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       const tables = await client.query(`
         SELECT table_name 
@@ -335,13 +335,13 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Drop all tables
       const emptySchema = ``;
 
       // Should drop employees first, then departments
-      await schemaService.apply(emptySchema);
+      await schemaService.apply(emptySchema, true);
 
       const tables = await client.query(`
         SELECT COUNT(*) as table_count
@@ -372,7 +372,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Verify all constraints exist
       const result = await client.query(`
@@ -396,7 +396,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
 
     test("should fail when referencing non-existent column", async () => {
@@ -414,7 +414,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema)).rejects.toThrow();
+      await expect(schemaService.apply(schema, true)).rejects.toThrow();
     });
 
     test("should validate foreign key data integrity", async () => {
@@ -432,7 +432,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Try to insert employee with non-existent department
       await expect(
@@ -452,7 +452,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       // Insert CEO (no manager)
       await client.query("INSERT INTO employees (name, manager_id) VALUES ('CEO', NULL)");
@@ -481,7 +481,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema);
+      await schemaService.apply(schema, true);
 
       const result = await client.query(`
         SELECT constraint_name
@@ -511,7 +511,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema);
+      await schemaService.apply(initialSchema, true);
 
       // Add new column, foreign key should remain
       const updatedSchema = `
@@ -529,7 +529,7 @@ describe("Foreign Key Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema);
+      await schemaService.apply(updatedSchema, true);
 
       const result = await client.query(`
         SELECT COUNT(*) as fk_count
