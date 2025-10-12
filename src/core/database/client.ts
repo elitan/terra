@@ -3,6 +3,11 @@ import type { DatabaseConfig } from "../../types/config";
 import { Logger } from "../../utils/logger";
 import { MigrationError } from "../../types/errors";
 
+export interface AdvisoryLockOptions {
+  lockName: string;
+  lockTimeout: number; // in milliseconds
+}
+
 export class DatabaseService {
   private config: DatabaseConfig;
 
@@ -74,6 +79,68 @@ export class DatabaseService {
         error instanceof Error ? error.message : String(error),
         currentStatement
       );
+    }
+  }
+
+  /**
+   * Acquire an advisory lock to prevent concurrent migrations.
+   * Uses PostgreSQL's advisory lock mechanism with a timeout.
+   */
+  async acquireAdvisoryLock(client: Client, options: AdvisoryLockOptions): Promise<void> {
+    const startTime = Date.now();
+    const timeoutMs = options.lockTimeout;
+
+    Logger.info(`Attempting to acquire advisory lock '${options.lockName}'...`);
+
+    // Convert lock name to integer key using PostgreSQL's hashtext function
+    const lockKeyResult = await client.query(
+      "SELECT hashtext($1)::bigint as lock_key",
+      [options.lockName]
+    );
+    const lockKey = lockKeyResult.rows[0].lock_key;
+
+    // Try to acquire the lock with timeout logic
+    while (true) {
+      const result = await client.query(
+        "SELECT pg_try_advisory_lock($1) as acquired",
+        [lockKey]
+      );
+
+      if (result.rows[0].acquired) {
+        Logger.success(`Advisory lock '${options.lockName}' acquired`);
+        return;
+      }
+
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= timeoutMs) {
+        throw new MigrationError(
+          `Failed to acquire advisory lock '${options.lockName}' within ${timeoutMs / 1000}s. ` +
+          `Another migration may be in progress. Please wait and try again.`
+        );
+      }
+
+      // Wait 100ms before retrying
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  /**
+   * Release an advisory lock after migration completion.
+   */
+  async releaseAdvisoryLock(client: Client, lockName: string): Promise<void> {
+    try {
+      // Convert lock name to integer key using PostgreSQL's hashtext function
+      const lockKeyResult = await client.query(
+        "SELECT hashtext($1)::bigint as lock_key",
+        [lockName]
+      );
+      const lockKey = lockKeyResult.rows[0].lock_key;
+
+      await client.query("SELECT pg_advisory_unlock($1)", [lockKey]);
+      Logger.info(`Advisory lock '${lockName}' released`);
+    } catch (error) {
+      // Log but don't throw - lock will be released when connection closes anyway
+      Logger.warning(`Failed to explicitly release advisory lock '${lockName}': ${error}`);
     }
   }
 }

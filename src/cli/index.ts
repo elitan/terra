@@ -16,6 +16,8 @@ export async function runCLI() {
     .description("Apply schema changes to database")
     .option("-f, --file <file>", "Schema file path", "schema.sql")
     .option("--auto-approve", "Skip confirmation prompt")
+    .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "terra_migrate_execute")
+    .option("--lock-timeout <seconds>", "Maximum time to wait for advisory lock in seconds", "10")
     .action(async (options) => {
       const config = loadConfig();
       await applyCommand(options, config);

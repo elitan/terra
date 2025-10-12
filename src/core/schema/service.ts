@@ -5,7 +5,7 @@ import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
 import { SchemaDiffer } from "./differ";
 import { MigrationExecutor } from "../migration/executor";
-import { DatabaseService } from "../database/client";
+import { DatabaseService, type AdvisoryLockOptions } from "../database/client";
 import { Logger } from "../../utils/logger";
 import {
   generateCreateViewSQL,
@@ -75,12 +75,20 @@ export class SchemaService {
     }
   }
 
-  async apply(schemaFile: string = "schema.sql", autoApprove: boolean = false): Promise<void> {
+  async apply(
+    schemaFile: string = "schema.sql",
+    autoApprove: boolean = false,
+    lockOptions?: AdvisoryLockOptions
+  ): Promise<void> {
     Logger.info("Analyzing schema changes...");
 
     const client = await this.databaseService.createClient();
 
     try {
+      // Acquire advisory lock if options provided
+      if (lockOptions) {
+        await this.databaseService.acquireAdvisoryLock(client, lockOptions);
+      }
       const parsedSchema = this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const desiredEnums = Array.isArray(parsedSchema) ? [] : parsedSchema.enums;
@@ -254,6 +262,10 @@ export class SchemaService {
         await this.executor.executePlan(client, triggerPlan, autoApprove);
       }
     } finally {
+      // Release advisory lock if it was acquired
+      if (lockOptions) {
+        await this.databaseService.releaseAdvisoryLock(client, lockOptions.lockName);
+      }
       await client.end();
     }
   }
