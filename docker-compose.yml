@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_DB: sql_terraform_test
       POSTGRES_USER: test_user
@@ -17,5 +17,22 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-pgvector:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_DB: sql_terraform_test
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+    ports:
+      - "5488:5432"
+    volumes:
+      - postgres_pgvector_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d sql_terraform_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_test_data:
+  postgres_pgvector_data:
