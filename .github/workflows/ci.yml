@@ -70,7 +70,7 @@ jobs:
     - name: Run tests
       run: bun test
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
+        DATABASE_URL: postgres://test_user:test_password@localhost:5488/sql_terraform_test
     
     - name: Build
       run: bun run build
