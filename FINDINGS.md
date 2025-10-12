@@ -194,7 +194,7 @@ class ParserError extends Error {
 | Issue | Priority | Effort | Impact | Status |
 |-------|----------|--------|--------|--------|
 | #1: Fix parseSchemaFile return type | P0 | 15 min | Bug fix - ENUMs/VIEWs work from files | ✅ DONE |
-| #2: Better error messages | P2 | 2 hours | User experience | |
+| #2: Better error messages | P2 | 2 hours | User experience | ✅ DONE |
 | #3: Verify dependency resolver | P2 | 1 hour | Correctness | |
 
 ---
