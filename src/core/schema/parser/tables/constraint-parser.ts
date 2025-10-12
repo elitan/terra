@@ -76,7 +76,7 @@ export function extractAllConstraints(
     }
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract constraints: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract constraints: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 
@@ -123,7 +123,7 @@ function extractColumnConstraints(
     }
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract column constraints for ${columnName}`
+      `Failed to extract column constraints for ${columnName}`
     );
   }
 }
@@ -170,7 +170,7 @@ function extractNamedConstraint(
       }
     }
   } catch (error) {
-    Logger.warning(`⚠️ Failed to extract named constraint ${constraintName}`);
+    Logger.warning(`Failed to extract named constraint ${constraintName}`);
   }
 
   return tableLevelPrimaryKey;
@@ -205,7 +205,7 @@ export function parseCheckConstraint(node: any): CheckConstraint | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse check constraint: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse check constraint: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -240,7 +240,7 @@ function parseColumnCheckConstraint(
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse column-level check constraint: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse column-level check constraint: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -318,7 +318,7 @@ export function parseForeignKey(node: any): ForeignKeyConstraint | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse foreign key constraint: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse foreign key constraint: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -433,7 +433,7 @@ export function parseUniqueConstraint(node: any): UniqueConstraint | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse unique constraint: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse unique constraint: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -457,7 +457,7 @@ function parseColumnUniqueConstraint(
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse column-level unique constraint: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse column-level unique constraint: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -521,7 +521,7 @@ function buildPrimaryKey(
   // Validate that we don't have both column-level and table-level primary keys
   if (columnPrimaryKeys.length > 0 && tableLevelPrimaryKey) {
     Logger.warning(
-      `⚠️ Table ${tableName} has both column-level and table-level primary key definitions. Using table-level definition.`
+      `Table ${tableName} has both column-level and table-level primary key definitions. Using table-level definition.`
     );
     return tableLevelPrimaryKey;
   }

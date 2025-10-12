@@ -64,7 +64,7 @@ export function parseCreateIndex(node: any): Index | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse CREATE INDEX from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE INDEX from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -148,7 +148,7 @@ function extractIndexColumnsAndExpressions(node: any): {
     }
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract index columns: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract index columns: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 
@@ -263,7 +263,7 @@ function extractIndexWhereClause(node: any): string | undefined {
     return undefined;
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract WHERE clause: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract WHERE clause: ${error instanceof Error ? error.message : String(error)}`
     );
     return undefined;
   }
@@ -314,7 +314,7 @@ function extractIndexStorageParameters(
     return Object.keys(parameters).length > 0 ? parameters : undefined;
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract storage parameters: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract storage parameters: ${error instanceof Error ? error.message : String(error)}`
     );
     return undefined;
   }
@@ -342,7 +342,7 @@ function extractIndexTablespace(node: any): string | undefined {
     return undefined;
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract tablespace: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract tablespace: ${error instanceof Error ? error.message : String(error)}`
     );
     return undefined;
   }

@@ -120,11 +120,11 @@ export function serializeDefaultValue(expr: any): string {
       return expr;
     }
 
-    Logger.warning(`⚠️ Unable to serialize default value: ${JSON.stringify(expr)}`);
+    Logger.warning(`Unable to serialize default value: ${JSON.stringify(expr)}`);
     return "NULL";
   } catch (error) {
     Logger.warning(
-      `⚠️ Error serializing default value: ${error instanceof Error ? error.message : String(error)}`
+      `Error serializing default value: ${error instanceof Error ? error.message : String(error)}`
     );
     return "NULL";
   }

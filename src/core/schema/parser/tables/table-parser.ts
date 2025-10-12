@@ -45,7 +45,7 @@ export function parseCreateTable(node: any): Table | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse CREATE TABLE from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE TABLE from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }

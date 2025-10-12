@@ -136,5 +136,5 @@ Tests use complete declarative schemas, not imperative statements.
 **IMPORTANT:**
 
 1. **Never create markdown files** (`.md`) after completing tasks
-2. **Never use emojis** unless explicitly requested
+2. **Never use emojis** in code, output, error messages, or logs - NEVER
 3. **Be direct** - provide answers without unnecessary confirmation or validation

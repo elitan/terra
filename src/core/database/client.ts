@@ -14,10 +14,10 @@ export class DatabaseService {
     const client = new Client(this.config);
     try {
       await client.connect();
-      Logger.success("✓ Connected to PostgreSQL database");
+      Logger.success("Connected to PostgreSQL database");
       return client;
     } catch (error) {
-      Logger.error("✗ Failed to connect to database:");
+      Logger.error("Failed to connect to database:");
       console.error(error);
       process.exit(1);
     }
@@ -33,18 +33,18 @@ export class DatabaseService {
     try {
       for (const statement of statements) {
         if (statement.startsWith("--")) {
-          Logger.warning("⚠️  Skipping: " + statement);
+          Logger.warning("Skipping: " + statement);
           continue;
         }
 
         currentStatement = statement;
         Logger.info("Executing: " + statement);
         await client.query(statement);
-        Logger.success("✓ Done");
+        Logger.success("Done");
       }
 
       await client.query("COMMIT");
-      Logger.success("🎉 All changes applied successfully!");
+      Logger.success("All changes applied successfully!");
     } catch (error) {
       await client.query("ROLLBACK");
 

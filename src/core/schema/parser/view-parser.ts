@@ -36,7 +36,7 @@ export function parseCreateView(node: any, originalSql: string): View | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse CREATE VIEW from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE VIEW from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -109,7 +109,7 @@ function extractViewDefinition(node: any, originalSql: string): string | null {
 
     return null;
   } catch (error) {
-    Logger.warning(`⚠️ Failed to extract view definition: ${error}`);
+    Logger.warning(`Failed to extract view definition: ${error}`);
     return null;
   }
 }

@@ -28,7 +28,7 @@ export function extractColumns(node: any): Column[] {
     }
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract columns: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract columns: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 
@@ -61,7 +61,7 @@ export function parseColumn(node: any): Column | null {
     };
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to parse column from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse column from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }

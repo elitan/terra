@@ -21,7 +21,7 @@ export function parseCreateType(node: any): EnumType | null {
     if (!isEnumType(node)) {
       // For now, we only support ENUM types
       Logger.warning(
-        `⚠️ Unsupported type definition: ${typeName}. Only ENUM types are currently supported.`
+        `Unsupported type definition: ${typeName}. Only ENUM types are currently supported.`
       );
       return null;
     }
@@ -47,7 +47,7 @@ export function parseCreateType(node: any): EnumType | null {
 
     // For other parsing errors, log and return null
     Logger.warning(
-      `⚠️ Failed to parse CREATE TYPE from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE TYPE from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
@@ -94,7 +94,7 @@ function extractEnumValues(node: any): string[] {
     }
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to extract ENUM values: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to extract ENUM values: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 

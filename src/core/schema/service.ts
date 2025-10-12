@@ -25,7 +25,7 @@ export class SchemaService {
   }
 
   async plan(schemaFile: string = "schema.sql"): Promise<MigrationPlan> {
-    Logger.info("📋 Analyzing schema changes...");
+    Logger.info("Analyzing schema changes...");
 
     const client = await this.databaseService.createClient();
 
@@ -36,10 +36,10 @@ export class SchemaService {
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
 
       if (!plan.hasChanges) {
-        Logger.success("✓ No changes needed - database is up to date");
+        Logger.success("No changes needed - database is up to date");
       } else {
         const totalChanges = plan.transactional.length + plan.concurrent.length;
-        Logger.warning(`📝 Found ${totalChanges} change(s) to apply:`);
+        Logger.warning(`Found ${totalChanges} change(s) to apply:`);
         console.log();
 
         if (plan.transactional.length > 0) {
@@ -64,7 +64,7 @@ export class SchemaService {
   }
 
   async apply(schemaFile: string = "schema.sql"): Promise<void> {
-    Logger.info("🚀 Applying schema changes...");
+    Logger.info("Applying schema changes...");
 
     const client = await this.databaseService.createClient();
 
@@ -153,7 +153,7 @@ export class SchemaService {
         // Check if values are identical in order and content
         if (JSON.stringify(currentValues) === JSON.stringify(desiredValues)) {
           // Values match exactly, skip modification
-          Logger.info(`✓ ENUM type '${desiredEnum.name}' already exists with matching values, skipping creation`);
+          Logger.info(`ENUM type '${desiredEnum.name}' already exists with matching values, skipping creation`);
         } else {
           // Values differ, generate modification statements
           const modificationStatements = this.generateEnumModificationStatements(desiredEnum, currentEnum);
@@ -178,10 +178,10 @@ export class SchemaService {
         
         if (!isUsed) {
           statements.push(`DROP TYPE ${currentEnum.name};`);
-          Logger.info(`✓ Dropping unused ENUM type '${currentEnum.name}'`);
+          Logger.info(`Dropping unused ENUM type '${currentEnum.name}'`);
         } else {
           Logger.warning(
-            `⚠️ ENUM type '${currentEnum.name}' is not in schema but is still referenced by table columns. ` +
+            `ENUM type '${currentEnum.name}' is not in schema but is still referenced by table columns. ` +
             `Cannot auto-drop. Remove column references first.`
           );
         }
@@ -221,12 +221,12 @@ export class SchemaService {
     
     if (valuesIdentical) {
       // No changes needed
-      Logger.info(`✓ ENUM type '${desiredEnum.name}' values already match, no changes needed`);
+      Logger.info(`ENUM type '${desiredEnum.name}' values already match, no changes needed`);
     } else if (isOnlyAppending) {
       // Only adding values at the end - safe operation using ALTER TYPE ADD VALUE
       for (const value of valuesToAdd) {
         statements.push(`ALTER TYPE ${desiredEnum.name} ADD VALUE '${value}';`);
-        Logger.info(`✓ Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
+        Logger.info(`Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
       }
     } else {
       // Values are removed or reordered - this requires manual intervention
@@ -266,7 +266,7 @@ export class SchemaService {
     for (const currentView of currentViews) {
       if (!desiredViewNames.has(currentView.name)) {
         statements.push(generateDropViewSQL(currentView.name, currentView.materialized));
-        Logger.info(`✓ Dropping view '${currentView.name}'`);
+        Logger.info(`Dropping view '${currentView.name}'`);
       }
     }
     
@@ -277,14 +277,14 @@ export class SchemaService {
       if (!currentView) {
         // View doesn't exist, create it
         statements.push(generateCreateViewSQL(desiredView));
-        Logger.info(`✓ Creating view '${desiredView.name}'`);
+        Logger.info(`Creating view '${desiredView.name}'`);
       } else {
         // View exists, check if it needs to be updated
         if (this.viewNeedsUpdate(desiredView, currentView)) {
           statements.push(generateCreateOrReplaceViewSQL(desiredView));
-          Logger.info(`✓ Updating view '${desiredView.name}'`);
+          Logger.info(`Updating view '${desiredView.name}'`);
         } else {
-          Logger.info(`✓ View '${desiredView.name}' is up to date, skipping`);
+          Logger.info(`View '${desiredView.name}' is up to date, skipping`);
         }
       }
     }

@@ -166,14 +166,14 @@ export function serializeExpression(expr: any): string {
 
     // Log what we're missing for debugging
     Logger.warning(
-      `⚠️ Unhandled expression type: ${expr.type || "undefined"}, structure: ${JSON.stringify(expr, null, 2)}`
+      `Unhandled expression type: ${expr.type || "undefined"}, structure: ${JSON.stringify(expr, null, 2)}`
     );
 
     // Final fallback
     return "unknown_expression";
   } catch (error) {
     Logger.warning(
-      `⚠️ Failed to serialize expression: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to serialize expression: ${error instanceof Error ? error.message : String(error)}`
     );
     return "unknown_expression";
   }

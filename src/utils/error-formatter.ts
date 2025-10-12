@@ -53,7 +53,7 @@ export class ErrorFormatter {
 
     // Header
     lines.push("");
-    lines.push(chalk.red.bold("✗ Parser Error"));
+    lines.push(chalk.red.bold("Parser Error"));
 
     // Location
     if (error.filePath) {
@@ -83,8 +83,8 @@ export class ErrorFormatter {
     const suggestion = this.getParserSuggestion(error);
     if (suggestion) {
       lines.push("");
-      lines.push(chalk.cyan("  💡 Suggestion:"));
-      lines.push(chalk.cyan(`     ${suggestion}`));
+      lines.push(chalk.cyan("  Suggestion:"));
+      lines.push(chalk.cyan(`    ${suggestion}`));
     }
 
     lines.push("");
@@ -100,7 +100,7 @@ export class ErrorFormatter {
 
     // Header
     lines.push("");
-    lines.push(chalk.red.bold("✗ Migration Error"));
+    lines.push(chalk.red.bold("Migration Error"));
     lines.push("");
 
     // Message
@@ -128,8 +128,8 @@ export class ErrorFormatter {
 
       if (error.pgError.hint) {
         lines.push("");
-        lines.push(chalk.cyan("  💡 Hint:"));
-        lines.push(chalk.cyan(this.wrapText(error.pgError.hint, "     ")));
+        lines.push(chalk.cyan("  Hint:"));
+        lines.push(chalk.cyan(this.wrapText(error.pgError.hint, "    ")));
       }
     }
 
@@ -145,7 +145,7 @@ export class ErrorFormatter {
     const lines: string[] = [];
 
     lines.push("");
-    lines.push(chalk.red.bold("✗ Dependency Error"));
+    lines.push(chalk.red.bold("Dependency Error"));
     lines.push("");
     lines.push(this.wrapText(error.message, "  "));
 
@@ -169,7 +169,7 @@ export class ErrorFormatter {
     const lines: string[] = [];
 
     lines.push("");
-    lines.push(chalk.red.bold("✗ Validation Error"));
+    lines.push(chalk.red.bold("Validation Error"));
     lines.push("");
     lines.push(this.wrapText(error.message, "  "));
 
@@ -196,7 +196,7 @@ export class ErrorFormatter {
     const lines: string[] = [];
 
     lines.push("");
-    lines.push(chalk.red.bold(`✗ ${error.name || 'Terra Error'}`));
+    lines.push(chalk.red.bold(error.name || 'Terra Error'));
     lines.push("");
     lines.push(this.wrapText(error.message, "  "));
 
@@ -217,7 +217,7 @@ export class ErrorFormatter {
    * Format generic JavaScript errors
    */
   private static formatGenericError(error: Error): string {
-    return `\n${chalk.red.bold("✗ Error")}\n\n  ${error.message}\n`;
+    return `\n${chalk.red.bold("Error")}\n\n  ${error.message}\n`;
   }
 
   /**

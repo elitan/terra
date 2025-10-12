@@ -42,7 +42,7 @@ export class MigrationExecutor {
 
   async executePlan(client: Client, plan: MigrationPlan): Promise<void> {
     if (!plan.hasChanges) {
-      Logger.success("✓ No changes needed - database is up to date");
+      Logger.success("No changes needed - database is up to date");
       return;
     }
 
@@ -51,7 +51,7 @@ export class MigrationExecutor {
     const destructiveOps = this.getDestructiveOperations(allStatements);
 
     if (destructiveOps.length > 0) {
-      Logger.warning("\n⚠️  WARNING: Destructive operations detected:");
+      Logger.warning("\nWARNING: Destructive operations detected:");
       destructiveOps.forEach((stmt) => {
         Logger.error(`   ${stmt}`);
       });
@@ -76,7 +76,7 @@ export class MigrationExecutor {
           client,
           plan.transactional
         );
-        Logger.success("✓ Transactional changes applied successfully");
+        Logger.success("Transactional changes applied successfully");
       }
 
       // Step 2: Execute all concurrent statements individually
@@ -85,9 +85,9 @@ export class MigrationExecutor {
         for (const statement of plan.concurrent) {
           Logger.info(`Executing: ${statement}`);
           await client.query(statement);
-          Logger.success(`✓ Executed: ${statement}`);
+          Logger.success(`Executed: ${statement}`);
         }
-        Logger.success("✓ Concurrent changes applied successfully");
+        Logger.success("Concurrent changes applied successfully");
       }
     } catch (error) {
       // Check if this is a PostgreSQL error with additional context
