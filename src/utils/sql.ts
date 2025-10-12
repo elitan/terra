@@ -17,6 +17,23 @@ export function normalizeType(type: string): string {
   return typeMap[type] || type.toUpperCase();
 }
 
+export function normalizeDefault(value: string | null | undefined): string | undefined {
+  // Treat null and undefined as "no default"
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  // Trim first to handle leading/trailing whitespace
+  let normalized = value.trim();
+
+  // Strip PostgreSQL's type cast suffix (::typename or ::typename(params))
+  // This regex handles multi-word types like "timestamp without time zone" and "character varying"
+  // Examples: '100::integer', 'hello'::character varying', 'CURRENT_TIMESTAMP::timestamp without time zone'
+  normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\([^)]*\))?$/i, '');
+
+  return normalized.trim();
+}
+
 export function columnsAreDifferent(desired: Column, current: Column): boolean {
   const normalizedDesiredType = normalizeType(desired.type);
   const normalizedCurrentType = normalizeType(current.type);
@@ -53,9 +70,9 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
   }
 
   // Check if defaults are different
-  // Handle null vs undefined defaults - treat null and undefined as equivalent "no default"
-  const currentDefault = current.default === null ? undefined : current.default;
-  const desiredDefault = desired.default === null ? undefined : desired.default;
+  // Normalize defaults to handle PostgreSQL's type cast annotations (::typename)
+  const currentDefault = normalizeDefault(current.default);
+  const desiredDefault = normalizeDefault(desired.default);
 
   // Only consider it different if one has a non-null/non-undefined default and the other doesn't
   if (currentDefault !== desiredDefault) {
