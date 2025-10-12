@@ -1,69 +1,77 @@
 # Terra
 
-Declarative schema management for Postgres. Define your desired schema, Terra handles the migrations.
+Declarative PostgreSQL schema management. Write CREATE statements, Terra generates the migrations.
 
-## Quick Start
+## Install
 
 ```bash
-npm install -g terra
+npm install -g pgterra
 ```
 
-## How it works
+## Usage
 
-**1. Start with a schema:**
+**1. Create schema.sql:**
 
 ```sql
--- schema.sql
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  email VARCHAR(255) NOT NULL UNIQUE,
-  created_at TIMESTAMP DEFAULT NOW()
+  email VARCHAR(255) NOT NULL UNIQUE
 );
 ```
 
+**2. Preview changes:**
+
 ```bash
-terra apply  # Creates the table
+terra plan
 ```
 
-**2. Update your schema declaratively:**
+**3. Apply:**
+
+```bash
+terra apply
+```
+
+**4. Update schema.sql:**
 
 ```sql
--- schema.sql
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE,
-  full_name VARCHAR(200) NOT NULL,  -- new column
-  is_active BOOLEAN DEFAULT true,   -- another new column
-  created_at TIMESTAMP DEFAULT NOW()
+  name VARCHAR(100) NOT NULL,        -- added
+  active BOOLEAN DEFAULT true        -- added
 );
 
-CREATE TABLE posts (                 -- new table
+CREATE TABLE posts (                 -- added
   id SERIAL PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
-  user_id INTEGER REFERENCES users(id),
-  created_at TIMESTAMP DEFAULT NOW()
+  user_id INTEGER NOT NULL,
+  CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE INDEX idx_user_email ON users (LOWER(email));  -- added
 ```
 
-**3. Terra calculates the migration:**
+**5. Terra generates the ALTER statements:**
 
 ```bash
 $ terra plan
-📋 Analyzing schema changes...
+ALTER TABLE users ADD COLUMN name VARCHAR(100) NOT NULL
+ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT true
+CREATE TABLE posts (...)
+CREATE INDEX idx_user_email ON users (LOWER(email))
 
-Planned changes:
-  1. ALTER TABLE users ADD COLUMN full_name VARCHAR(200) NOT NULL
-  2. ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT true
-  3. CREATE TABLE posts (id SERIAL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT NOW())
-
-$ terra apply  # Applies the changes safely
+$ terra apply
 ```
-
-**That's it.** No migration files, no manual ALTER statements, no dependency ordering. Just define what you want.
 
 ## Configuration
 
-Set your database connection:
+Database connection via `DATABASE_URL` or individual variables:
+
+```bash
+export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
+```
+
+Or:
 
 ```bash
 export DB_HOST=localhost
@@ -73,37 +81,82 @@ export DB_USER=postgres
 export DB_PASSWORD=password
 ```
 
-## Features
+## What's supported
 
-- ✅ Tables, columns, and data types
-- ✅ Primary keys, foreign keys, check constraints, unique constraints  
-- ✅ Indexes (btree, gin, gist, partial, expression-based)
-- ✅ ENUM types
-- ✅ Dependency resolution for complex schemas
-- ✅ Data-safe migrations with validation
-- ✅ Destructive operation protection
+**Tables & Columns:**
+All PostgreSQL column types, default values, NOT NULL constraints
 
-## Why declarative?
+**Constraints:**
+```sql
+-- Primary keys
+id SERIAL PRIMARY KEY
 
-Like Terraform for infrastructure, Terra lets you define *what* you want, not *how* to get there:
+-- Foreign keys with actions
+CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 
-- **Version control your complete schema** - not scattered migration files
-- **No migration ordering issues** - Terra handles dependencies
-- **Easier code reviews** - see the full schema state, not just changes
-- **Safe schema changes** - preview before applying, with rollback support
+-- Check constraints
+CONSTRAINT check_positive CHECK (quantity > 0)
+
+-- Unique constraints
+email VARCHAR(255) UNIQUE
+CONSTRAINT unique_email UNIQUE (email, domain)
+```
+
+**Indexes:**
+```sql
+-- Basic
+CREATE INDEX idx_email ON users (email);
+
+-- Partial
+CREATE INDEX idx_active_users ON users (email) WHERE active = true;
+
+-- Expression
+CREATE INDEX idx_lower_email ON users (LOWER(email));
+
+-- Concurrent (built automatically when safe)
+```
+
+**ENUM types:**
+```sql
+CREATE TYPE status AS ENUM ('pending', 'active', 'inactive');
+
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  status status NOT NULL
+);
+```
+
+**Views:**
+```sql
+CREATE VIEW active_users AS
+SELECT id, email FROM users WHERE active = true;
+
+CREATE MATERIALIZED VIEW user_stats AS
+SELECT COUNT(*) as total FROM users;
+```
+
+## Commands
+
+```bash
+terra plan                    # Preview changes
+terra plan -f custom.sql      # Use custom schema file
+terra apply                   # Apply changes
+terra apply -f custom.sql     # Apply from custom file
+```
 
 ## Development
+
+Requires [Bun](https://bun.sh):
 
 ```bash
 git clone https://github.com/elitan/terra.git
 cd terra
 bun install
 
-# Set up test database connection
-export DATABASE_URL="postgres://user:password@localhost:5432/test_db"
+# Start test database
+docker compose up -d
 
 # Run tests
+export DATABASE_URL="postgres://test_user:test_password@localhost:5487/sql_terraform_test"
 bun test
 ```
-
-**Note:** Tests require a `DATABASE_URL` environment variable pointing to a PostgreSQL database. The tests will create and drop tables as needed, so use a dedicated test database.
