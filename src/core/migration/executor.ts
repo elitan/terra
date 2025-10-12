@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import * as readline from "readline";
 import type { MigrationPlan } from "../../types/migration";
 import { DatabaseService } from "../database/client";
 import { Logger } from "../../utils/logger";
@@ -10,10 +11,60 @@ export class MigrationExecutor {
     this.databaseService = databaseService;
   }
 
+  private isDestructiveOperation(statement: string): boolean {
+    const upperStatement = statement.trim().toUpperCase();
+    return (
+      upperStatement.startsWith("DROP TABLE") ||
+      upperStatement.includes("DROP COLUMN") ||
+      upperStatement.startsWith("DROP TYPE") ||
+      upperStatement.startsWith("DROP VIEW")
+    );
+  }
+
+  private getDestructiveOperations(statements: string[]): string[] {
+    return statements.filter((stmt) => this.isDestructiveOperation(stmt));
+  }
+
+  private async promptConfirmation(message: string): Promise<boolean> {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    return new Promise((resolve) => {
+      rl.question(message, (answer) => {
+        rl.close();
+        resolve(answer.toLowerCase() === "y" || answer.toLowerCase() === "yes");
+      });
+    });
+  }
+
   async executePlan(client: Client, plan: MigrationPlan): Promise<void> {
     if (!plan.hasChanges) {
       Logger.success("✓ No changes needed - database is up to date");
       return;
+    }
+
+    // Check for destructive operations
+    const allStatements = [...plan.transactional, ...plan.concurrent];
+    const destructiveOps = this.getDestructiveOperations(allStatements);
+
+    if (destructiveOps.length > 0) {
+      Logger.warning("\n⚠️  WARNING: Destructive operations detected:");
+      destructiveOps.forEach((stmt) => {
+        Logger.error(`   ${stmt}`);
+      });
+      console.log();
+
+      const confirmed = await this.promptConfirmation(
+        "These operations may result in data loss. Continue? (y/N): "
+      );
+
+      if (!confirmed) {
+        Logger.info("Migration cancelled by user");
+        return;
+      }
+      console.log();
     }
 
     try {
