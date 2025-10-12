@@ -306,7 +306,7 @@ bun test              # Both
 | Issue | Priority | Effort | Impact | Status |
 |-------|----------|--------|--------|--------|
 | Remove MigrationPlanner | P1 | 15 min | Code quality | ✅ DONE |
-| Fix CLI version | P1 | 5 min | Professionalism | |
+| Fix CLI version | P1 | 5 min | Professionalism | ✅ DONE |
 | Split parser into modules | P1 | 2-3 hours | Maintainability | |
 
 ### MEDIUM (Do If Time)
@@ -327,7 +327,7 @@ For a **pragmatic early MVP**, focus on these **quick wins**:
 1. ✅ **DATABASE_URL support** (15 min) - Huge UX win
 2. ✅ **Interactive confirmations** (30 min) - Prevents disasters
 3. ✅ **Remove MigrationPlanner** (15 min) - Cleaner architecture
-4. **Fix CLI version** (5 min) - Professionalism
+4. ✅ **Fix CLI version** (5 min) - Professionalism
 
 ### Why This Order?
 - Gives immediate wins with minimal effort
