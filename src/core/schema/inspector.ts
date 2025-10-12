@@ -443,7 +443,9 @@ export class DatabaseInspector {
       FROM pg_type t
       JOIN pg_enum e ON t.oid = e.enumtypid
       JOIN pg_namespace n ON t.typnamespace = n.oid
+      LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
+        AND d.objid IS NULL  -- Exclude extension-owned types
       ORDER BY t.typname, e.enumsortorder
     `, [schemas]);
 
@@ -472,18 +474,22 @@ export class DatabaseInspector {
   async getCurrentViews(client: Client, schemas: string[] = ['public']): Promise<View[]> {
     const views: View[] = [];
 
-    // Get regular views
+    // Get regular views (excluding extension-owned views)
     const viewsResult = await client.query(`
       SELECT
-        table_name as view_name,
-        table_schema as schema_name,
-        view_definition,
-        check_option,
-        is_updatable,
-        is_insertable_into
-      FROM information_schema.views
-      WHERE table_schema = ANY($1::text[])
-      ORDER BY table_name
+        v.table_name as view_name,
+        v.table_schema as schema_name,
+        v.view_definition,
+        v.check_option,
+        v.is_updatable,
+        v.is_insertable_into
+      FROM information_schema.views v
+      JOIN pg_class c ON c.relname = v.table_name
+      JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = v.table_schema
+      LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+      WHERE v.table_schema = ANY($1::text[])
+        AND d.objid IS NULL  -- Exclude extension-owned views
+      ORDER BY v.table_name
     `, [schemas]);
 
     for (const row of viewsResult.rows) {
@@ -502,16 +508,20 @@ export class DatabaseInspector {
       views.push(view);
     }
 
-    // Get materialized views
+    // Get materialized views (excluding extension-owned)
     const matViewsResult = await client.query(`
       SELECT
-        matviewname as view_name,
-        schemaname as schema_name,
-        definition,
-        ispopulated
-      FROM pg_matviews
-      WHERE schemaname = ANY($1::text[])
-      ORDER BY matviewname
+        m.matviewname as view_name,
+        m.schemaname as schema_name,
+        m.definition,
+        m.ispopulated
+      FROM pg_matviews m
+      JOIN pg_class c ON c.relname = m.matviewname
+      JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = m.schemaname
+      LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+      WHERE m.schemaname = ANY($1::text[])
+        AND d.objid IS NULL  -- Exclude extension-owned materialized views
+      ORDER BY m.matviewname
     `, [schemas]);
 
     for (const row of matViewsResult.rows) {
@@ -721,11 +731,13 @@ export class DatabaseInspector {
       JOIN pg_namespace n ON c.relnamespace = n.oid
       LEFT JOIN pg_sequence s ON s.seqrelid = c.oid
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
+      LEFT JOIN pg_depend de ON de.objid = c.oid AND de.deptype = 'e'
       LEFT JOIN pg_class c2 ON c2.oid = d.refobjid
       LEFT JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
       LEFT JOIN pg_namespace n2 ON c2.relnamespace = n2.oid
       WHERE c.relkind = 'S'
         AND n.nspname = ANY($1::text[])
+        AND de.objid IS NULL  -- Exclude extension-owned sequences
       ORDER BY c.relname
     `, [schemas]);
 
