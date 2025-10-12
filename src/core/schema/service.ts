@@ -36,7 +36,7 @@ export class SchemaService {
     this.executor = new MigrationExecutor(databaseService);
   }
 
-  async plan(schemaFile: string = "schema.sql"): Promise<MigrationPlan> {
+  async plan(schemaFile: string): Promise<MigrationPlan> {
     Logger.info("Analyzing schema changes...");
 
     const client = await this.databaseService.createClient();
@@ -76,7 +76,7 @@ export class SchemaService {
   }
 
   async apply(
-    schemaFile: string = "schema.sql",
+    schemaFile: string,
     autoApprove: boolean = false,
     lockOptions?: AdvisoryLockOptions,
     dryRun: boolean = false

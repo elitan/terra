@@ -14,7 +14,7 @@ export async function runCLI() {
   program
     .command("apply")
     .description("Apply schema changes to database")
-    .option("-f, --file <file>", "Schema file path", "schema.sql")
+    .requiredOption("-f, --file <file>", "Schema file path")
     .option("-u, --url <url>", "Database connection string (overrides DATABASE_URL)")
     .option("--auto-approve", "Skip confirmation prompt")
     .option("--dry-run", "Show migration plan without executing changes")
