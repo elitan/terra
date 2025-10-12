@@ -693,17 +693,17 @@ export class DatabaseInspector {
         s.seqstart as start,
         s.seqcache as cache,
         s.seqcycle as cycle,
-        pg_get_serial_sequence(
-          quote_ident(n2.nspname) || '.' || quote_ident(c2.relname),
-          a.attname
-        ) as owned_by_table_column
+        CASE
+          WHEN d.deptype = 'a' THEN
+            quote_ident(n2.nspname) || '.' || quote_ident(c2.relname) || '.' || quote_ident(a.attname)
+          ELSE NULL
+        END as owned_by_table_column
       FROM pg_class c
       JOIN pg_namespace n ON c.relnamespace = n.oid
       LEFT JOIN pg_sequence s ON s.seqrelid = c.oid
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
-      LEFT JOIN pg_attrdef ad ON ad.oid = d.refobjid
-      LEFT JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
-      LEFT JOIN pg_class c2 ON c2.oid = a.attrelid
+      LEFT JOIN pg_class c2 ON c2.oid = d.refobjid
+      LEFT JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
       LEFT JOIN pg_namespace n2 ON c2.relnamespace = n2.oid
       WHERE c.relkind = 'S'
         AND n.nspname = 'public'
@@ -744,12 +744,14 @@ export class DatabaseInspector {
       const match = arg.match(/^(?:(IN|OUT|INOUT|VARIADIC)\s+)?(?:(\w+)\s+)?(.+?)(?:\s+DEFAULT\s+(.+))?$/i);
       if (match) {
         const [, mode, name, type, defaultVal] = match;
-        params.push({
-          name: name || undefined,
-          type: type.trim(),
-          mode: mode?.toUpperCase() || undefined,
-          default: defaultVal || undefined,
-        });
+        if (type) {
+          params.push({
+            name: name || undefined,
+            type: type.trim(),
+            mode: mode?.toUpperCase() || undefined,
+            default: defaultVal || undefined,
+          });
+        }
       }
     }
 

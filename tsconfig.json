@@ -15,6 +15,7 @@
     "sourceMap": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
 
     // Best practices
     "strict": true,

@@ -502,21 +502,24 @@ export class SchemaService {
     const desiredSequenceNames = new Set(desiredSequences.map(s => s.name));
 
     // Drop sequences that are no longer needed
+    // Skip sequences owned by table columns (created by SERIAL) as they're managed automatically
     for (const currentSeq of currentSequences) {
-      if (!desiredSequenceNames.has(currentSeq.name)) {
+      if (!desiredSequenceNames.has(currentSeq.name) && !currentSeq.ownedBy) {
         statements.push(generateDropSequenceSQL(currentSeq.name));
         Logger.info(`Dropping sequence '${currentSeq.name}'`);
       }
     }
 
     // Create or update sequences
+    // Skip sequences owned by table columns (created by SERIAL) as they're managed automatically
     for (const desiredSeq of desiredSequences) {
       const currentSeq = currentSequenceMap.get(desiredSeq.name);
 
       if (!currentSeq) {
         statements.push(generateCreateSequenceSQL(desiredSeq));
         Logger.info(`Creating sequence '${desiredSeq.name}'`);
-      } else {
+      } else if (!currentSeq.ownedBy) {
+        // Only update sequences that are not owned by table columns
         if (this.sequenceNeedsUpdate(desiredSeq, currentSeq)) {
           statements.push(generateDropSequenceSQL(currentSeq.name));
           statements.push(generateCreateSequenceSQL(desiredSeq));
@@ -524,6 +527,8 @@ export class SchemaService {
         } else {
           Logger.info(`Sequence '${desiredSeq.name}' is up to date, skipping`);
         }
+      } else {
+        Logger.info(`Sequence '${desiredSeq.name}' is owned by a table column, skipping`);
       }
     }
 

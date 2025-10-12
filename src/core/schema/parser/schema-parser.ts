@@ -209,8 +209,8 @@ export class SchemaParser {
         // Extract line and column from error message if available
         // CST errors have format like: "--> undefined:12:48" or "--> filename:12:48"
         const lineColMatch = error.message.match(/-->\s+(?:.*?):(\d+):(\d+)/);
-        const line = lineColMatch ? parseInt(lineColMatch[1]) : undefined;
-        const column = lineColMatch ? parseInt(lineColMatch[2]) : undefined;
+        const line = lineColMatch?.[1] ? parseInt(lineColMatch[1]) : undefined;
+        const column = lineColMatch?.[2] ? parseInt(lineColMatch[2]) : undefined;
 
         throw new ParserError(
           error.message,
