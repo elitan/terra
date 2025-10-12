@@ -14,6 +14,7 @@ import type {
   Procedure,
   Trigger,
   Sequence,
+  Extension,
 } from "../../types/schema";
 
 export class DatabaseInspector {
@@ -558,7 +559,7 @@ export class DatabaseInspector {
 
   // Get complete schema including all database objects
   async getCompleteSchema(client: Client, schemas: string[] = ['public']): Promise<Schema> {
-    const [tables, views, enumTypes, functions, procedures, triggers, sequences] = await Promise.all([
+    const [tables, views, enumTypes, functions, procedures, triggers, sequences, extensions] = await Promise.all([
       this.getCurrentSchema(client, schemas),
       this.getCurrentViews(client, schemas),
       this.getCurrentEnums(client, schemas),
@@ -566,6 +567,7 @@ export class DatabaseInspector {
       this.getCurrentProcedures(client, schemas),
       this.getCurrentTriggers(client, schemas),
       this.getCurrentSequences(client, schemas),
+      this.getCurrentExtensions(client, schemas),
     ]);
 
     return {
@@ -576,6 +578,7 @@ export class DatabaseInspector {
       procedures,
       triggers,
       sequences,
+      extensions,
     };
   }
 
@@ -788,6 +791,28 @@ export class DatabaseInspector {
     }
 
     return params;
+  }
+
+  // Get all extensions from the database
+  // Only returns extensions that were explicitly installed by users, not system extensions
+  async getCurrentExtensions(client: Client, schemas: string[] = ['public']): Promise<Extension[]> {
+    const result = await client.query(`
+      SELECT
+        e.extname as extension_name,
+        n.nspname as schema_name,
+        e.extversion as version
+      FROM pg_extension e
+      JOIN pg_namespace n ON e.extnamespace = n.oid
+      WHERE n.nspname = ANY($1::text[])
+        AND e.extname != 'plpgsql'  -- Exclude built-in extensions
+      ORDER BY e.extname
+    `, [schemas]);
+
+    return result.rows.map((row: any) => ({
+      name: row.extension_name,
+      schema: row.schema_name,
+      version: row.version || undefined,
+    }));
   }
 
   // Helper method to analyze view dependencies

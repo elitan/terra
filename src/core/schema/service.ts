@@ -1,6 +1,6 @@
 import { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
-import type { EnumType, View, Function, Procedure, Trigger, Sequence } from "../../types/schema";
+import type { EnumType, View, Function, Procedure, Trigger, Sequence, Extension } from "../../types/schema";
 import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
 import { SchemaDiffer } from "./differ";
@@ -99,6 +99,7 @@ export class SchemaService {
       const desiredProcedures = Array.isArray(parsedSchema) ? [] : parsedSchema.procedures;
       const desiredTriggers = Array.isArray(parsedSchema) ? [] : parsedSchema.triggers;
       const desiredSequences = Array.isArray(parsedSchema) ? [] : parsedSchema.sequences;
+      const desiredExtensions = Array.isArray(parsedSchema) ? [] : parsedSchema.extensions;
 
       // Validate that all schema references are in the managed schemas list
       this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
@@ -111,14 +112,19 @@ export class SchemaService {
       const currentProcedures = await this.inspector.getCurrentProcedures(client, schemas);
       const currentTriggers = await this.inspector.getCurrentTriggers(client, schemas);
       const currentSequences = await this.inspector.getCurrentSequences(client, schemas);
+      const currentExtensions = await this.inspector.getCurrentExtensions(client, schemas);
+
+      // Generate extension statements (CREATE first, DROP last)
+      const { create: extensionCreateStatements, drop: extensionDropStatements } =
+        this.generateExtensionStatements(desiredExtensions, currentExtensions);
 
       // Generate ENUM statements with collision detection
       const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
 
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Prepend ENUM creation statements
-      plan.transactional = [...enumStatements, ...plan.transactional];
+      // Prepend extension CREATE and ENUM creation statements
+      plan.transactional = [...extensionCreateStatements, ...enumStatements, ...plan.transactional];
 
       // Generate statements for new features
       const sequenceStatements = this.generateSequenceStatements(desiredSequences, currentSequences);
@@ -131,7 +137,7 @@ export class SchemaService {
       const totalChanges = plan.transactional.length + plan.concurrent.length +
                           sequenceStatements.length + functionStatements.length +
                           procedureStatements.length + viewStatements.length +
-                          triggerStatements.length;
+                          triggerStatements.length + extensionDropStatements.length;
 
       // Show plan
       if (totalChanges === 0) {
@@ -272,6 +278,16 @@ export class SchemaService {
           hasChanges: true
         };
         await this.executor.executePlan(client, triggerPlan, autoApprove);
+      }
+
+      // 6. Drop extensions (must come LAST, after all dependent objects are dropped)
+      if (extensionDropStatements.length > 0) {
+        const extensionDropPlan = {
+          transactional: extensionDropStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, extensionDropPlan, autoApprove);
       }
     } finally {
       // Release advisory lock if it was acquired (skip in dry-run mode)
@@ -545,6 +561,63 @@ export class SchemaService {
     }
 
     return false;
+  }
+
+  private generateExtensionStatements(desiredExtensions: Extension[], currentExtensions: Extension[]): {
+    create: string[];
+    drop: string[];
+  } {
+    const createStatements: string[] = [];
+    const dropStatements: string[] = [];
+    const currentExtensionMap = new Map(currentExtensions.map(e => [e.name, e]));
+    const desiredExtensionNames = new Set(desiredExtensions.map(e => e.name));
+
+    // Determine which extensions to drop (executed LAST, after all dependent objects are removed)
+    for (const currentExt of currentExtensions) {
+      if (!desiredExtensionNames.has(currentExt.name)) {
+        // Use CASCADE to drop all dependent objects (types, functions, etc.)
+        dropStatements.push(`DROP EXTENSION IF EXISTS ${currentExt.name} CASCADE;`);
+        Logger.info(`Dropping extension '${currentExt.name}' (CASCADE will drop dependent objects)`);
+      }
+    }
+
+    // Create extensions (these will be executed FIRST, before all dependent objects)
+    for (const desiredExt of desiredExtensions) {
+      const currentExt = currentExtensionMap.get(desiredExt.name);
+
+      if (!currentExt) {
+        createStatements.push(this.generateCreateExtensionSQL(desiredExt));
+        Logger.info(`Creating extension '${desiredExt.name}'`);
+      } else {
+        // Check if version differs
+        if (desiredExt.version && currentExt.version !== desiredExt.version) {
+          Logger.warning(`Extension '${desiredExt.name}' version differs (current: ${currentExt.version}, desired: ${desiredExt.version}). Manual update may be required.`);
+        } else {
+          Logger.info(`Extension '${desiredExt.name}' already exists, skipping`);
+        }
+      }
+    }
+
+    return { create: createStatements, drop: dropStatements };
+  }
+
+  private generateCreateExtensionSQL(extension: Extension): string {
+    let sql = `CREATE EXTENSION IF NOT EXISTS ${extension.name}`;
+
+    if (extension.schema) {
+      sql += ` SCHEMA ${extension.schema}`;
+    }
+
+    if (extension.version) {
+      sql += ` VERSION '${extension.version}'`;
+    }
+
+    if (extension.cascade) {
+      sql += ` CASCADE`;
+    }
+
+    sql += ';';
+    return sql;
   }
 
   private generateSequenceStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {

@@ -16,7 +16,8 @@ import { parseCreateFunction } from "./function-parser";
 import { parseCreateProcedure } from "./procedure-parser";
 import { parseCreateTrigger } from "./trigger-parser";
 import { parseCreateSequence } from "./sequence-parser";
-import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence } from "../../../types/schema";
+import { parseCreateExtension } from "./extension-parser";
+import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence, Extension } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
 export class SchemaParser {
@@ -31,6 +32,7 @@ export class SchemaParser {
     procedures: Procedure[];
     triggers: Trigger[];
     sequences: Sequence[];
+    extensions: Extension[];
   } {
     if (!existsSync(filePath)) {
       throw new ParserError(
@@ -57,8 +59,9 @@ export class SchemaParser {
     procedures: Procedure[];
     triggers: Trigger[];
     sequences: Sequence[];
+    extensions: Extension[];
   } {
-    const { tables, indexes, enums, views, functions, procedures, triggers, sequences } = this.parseWithCST(sql, filePath);
+    const { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions } = this.parseWithCST(sql, filePath);
 
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map((t) => [t.name, t]));
@@ -73,7 +76,7 @@ export class SchemaParser {
       }
     }
 
-    return { tables, enums, views, functions, procedures, triggers, sequences };
+    return { tables, enums, views, functions, procedures, triggers, sequences, extensions };
   }
 
   /**
@@ -115,6 +118,7 @@ export class SchemaParser {
     procedures: Procedure[];
     triggers: Trigger[];
     sequences: Sequence[];
+    extensions: Extension[];
   } {
     const tables: Table[] = [];
     const indexes: Index[] = [];
@@ -124,9 +128,19 @@ export class SchemaParser {
     const procedures: Procedure[] = [];
     const triggers: Trigger[] = [];
     const sequences: Sequence[] = [];
+    const extensions: Extension[] = [];
+
+    // First, extract CREATE EXTENSION statements manually (sql-parser-cst doesn't support them yet)
+    const extensionMatches = this.extractExtensionStatements(sql);
+    extensions.push(...extensionMatches);
+
+    // Remove CREATE EXTENSION statements from SQL before parsing with CST
+    let sqlWithoutExtensions = sql;
+    const extensionRegex = /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)(?:\s+WITH\s+)?(?:\s+SCHEMA\s+(\w+))?(?:\s+VERSION\s+'([^']+)')?(?:\s+CASCADE)?[^;]*;/gi;
+    sqlWithoutExtensions = sqlWithoutExtensions.replace(extensionRegex, '');
 
     try {
-      const cst = parseCST(sql, {
+      const cst = parseCST(sqlWithoutExtensions, {
         dialect: "postgresql",
         includeSpaces: true,
         includeNewlines: true,
@@ -176,6 +190,11 @@ export class SchemaParser {
             const sequence = parseCreateSequence(statement);
             if (sequence) {
               sequences.push(sequence);
+            }
+          } else if (statement.type === "create_extension_stmt") {
+            const extension = parseCreateExtension(statement);
+            if (extension) {
+              extensions.push(extension);
             }
           } else if (statement.type === "alter_table_stmt") {
             throw new ParserError(
@@ -227,6 +246,28 @@ export class SchemaParser {
       );
     }
 
-    return { tables, indexes, enums, views, functions, procedures, triggers, sequences };
+    return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions };
+  }
+
+  /**
+   * Extract CREATE EXTENSION statements manually using regex
+   * This is a workaround until sql-parser-cst supports CREATE EXTENSION
+   */
+  private extractExtensionStatements(sql: string): Extension[] {
+    const extensions: Extension[] = [];
+    const extensionRegex = /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)(?:\s+WITH\s+)?(?:\s+SCHEMA\s+(\w+))?(?:\s+VERSION\s+'([^']+)')?(\s+CASCADE)?[^;]*;/gi;
+
+    let match;
+    while ((match = extensionRegex.exec(sql)) !== null) {
+      const extension: Extension = {
+        name: match[1],
+        schema: match[2] || undefined,
+        version: match[3] || undefined,
+        cascade: !!match[4],
+      };
+      extensions.push(extension);
+    }
+
+    return extensions;
   }
 }

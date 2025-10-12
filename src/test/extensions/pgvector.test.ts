@@ -97,11 +97,11 @@ describe("Extension Support - pgvector", () => {
     });
 
     test("should not try to drop pgvector types on empty schema apply", async () => {
-      // Install pgvector
-      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
-
+      // Install pgvector via schema
       // Create a user table with vector column
       const initialSchema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
         CREATE TABLE documents (
           id SERIAL PRIMARY KEY,
           content TEXT,
@@ -118,9 +118,11 @@ describe("Extension Support - pgvector", () => {
       `);
       expect(tables1.rows).toHaveLength(1);
 
-      // Now apply empty schema (drop all user tables)
-      const emptySchema = ``;
-      await schemaService.apply(emptySchema, ['public'], true);
+      // Now apply schema without table but keep extension
+      const schemaWithoutTable = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+      `;
+      await schemaService.apply(schemaWithoutTable, ['public'], true);
 
       // Verify user table was dropped
       const tables2 = await client.query(`
@@ -129,7 +131,7 @@ describe("Extension Support - pgvector", () => {
       `);
       expect(tables2.rows).toHaveLength(0);
 
-      // But pgvector type should still exist
+      // But pgvector extension should still exist
       const vectorType = await client.query(`
         SELECT typname FROM pg_type t
         JOIN pg_namespace n ON t.typnamespace = n.oid
@@ -139,10 +141,9 @@ describe("Extension Support - pgvector", () => {
     });
 
     test("should allow using pgvector types in schema", async () => {
-      // Install pgvector
-      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
-
       const schema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
         CREATE TABLE embeddings (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100),
@@ -184,11 +185,10 @@ describe("Extension Support - pgvector", () => {
     });
 
     test("should handle mix of user and extension types", async () => {
-      // Install pgvector
-      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
-
-      // Create user enum type
+      // Create user enum type and install extension
       const schema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
         CREATE TYPE status AS ENUM ('pending', 'active', 'archived');
 
         CREATE TABLE items (
@@ -230,6 +230,160 @@ describe("Extension Support - pgvector", () => {
 
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].embedding).toBe('[1,2,3]');
+    });
+  });
+
+  describe("CREATE EXTENSION Support", () => {
+    test("should create extension when specified in schema", async () => {
+      const schema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
+        CREATE TABLE documents (
+          id SERIAL PRIMARY KEY,
+          content TEXT,
+          embedding vector(1536)
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      // Verify extension was created
+      const extResult = await client.query(`
+        SELECT extname, extversion FROM pg_extension WHERE extname = 'vector'
+      `);
+      expect(extResult.rows).toHaveLength(1);
+      expect(extResult.rows[0].extname).toBe('vector');
+
+      // Verify table was created with vector column
+      const tableResult = await client.query(`
+        SELECT column_name, udt_name
+        FROM information_schema.columns
+        WHERE table_name = 'documents' AND column_name = 'embedding'
+      `);
+      expect(tableResult.rows).toHaveLength(1);
+      expect(tableResult.rows[0].udt_name).toBe('vector');
+    });
+
+    test("should be idempotent when extension already exists", async () => {
+      // Manually create extension first
+      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+
+      const schema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
+        CREATE TABLE items (
+          id SERIAL PRIMARY KEY,
+          vec vector(768)
+        );
+      `;
+
+      // Apply schema twice
+      await schemaService.apply(schema, ['public'], true);
+      await schemaService.apply(schema, ['public'], true);
+
+      // Extension should still exist once
+      const extResult = await client.query(`
+        SELECT COUNT(*) as count FROM pg_extension WHERE extname = 'vector'
+      `);
+      expect(parseInt(extResult.rows[0].count)).toBe(1);
+    });
+
+    test("should drop extension when removed from schema", async () => {
+      const schemaWithExtension = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
+        CREATE TABLE docs (
+          id SERIAL PRIMARY KEY,
+          content TEXT
+        );
+      `;
+
+      await schemaService.apply(schemaWithExtension, ['public'], true);
+
+      // Verify extension exists
+      let extResult = await client.query(`
+        SELECT extname FROM pg_extension WHERE extname = 'vector'
+      `);
+      expect(extResult.rows).toHaveLength(1);
+
+      // Apply schema without extension - Terra should drop it with CASCADE
+      const schemaWithoutExtension = `
+        CREATE TABLE docs (
+          id SERIAL PRIMARY KEY,
+          content TEXT
+        );
+      `;
+
+      await schemaService.apply(schemaWithoutExtension, ['public'], true);
+
+      // Extension should be dropped
+      extResult = await client.query(`
+        SELECT extname FROM pg_extension WHERE extname = 'vector'
+      `);
+      expect(extResult.rows).toHaveLength(0);
+    });
+
+    test("should handle multiple extensions", async () => {
+      const schema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+        CREATE TABLE products (
+          id SERIAL PRIMARY KEY,
+          name TEXT,
+          embedding vector(512)
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      // Verify both extensions exist
+      const extResult = await client.query(`
+        SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pg_trgm')
+        ORDER BY extname
+      `);
+      expect(extResult.rows).toHaveLength(2);
+      expect(extResult.rows[0].extname).toBe('pg_trgm');
+      expect(extResult.rows[1].extname).toBe('vector');
+    });
+
+    test("should create extensions before tables that use them", async () => {
+      const schema = `
+        CREATE EXTENSION IF NOT EXISTS vector;
+
+        CREATE TABLE embeddings (
+          id SERIAL PRIMARY KEY,
+          vec vector(256)
+        );
+      `;
+
+      // This should not fail - extension should be created first
+      await schemaService.apply(schema, ['public'], true);
+
+      // Verify both extension and table exist
+      const extResult = await client.query(`
+        SELECT extname FROM pg_extension WHERE extname = 'vector'
+      `);
+      expect(extResult.rows).toHaveLength(1);
+
+      const tableResult = await client.query(`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_name = 'embeddings'
+      `);
+      expect(tableResult.rows).toHaveLength(1);
+    });
+
+    test("should detect and report existing extensions", async () => {
+      // Manually install extension
+      await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+
+      // Get current extensions
+      const extensions = await inspector.getCurrentExtensions(client, ['public']);
+
+      const vectorExt = extensions.find(e => e.name === 'vector');
+      expect(vectorExt).toBeDefined();
+      expect(vectorExt?.name).toBe('vector');
+      expect(vectorExt?.schema).toBe('public');
     });
   });
 });

@@ -121,6 +121,13 @@ export interface Sequence {
   ownedBy?: string;
 }
 
+export interface Extension {
+  name: string;
+  schema?: string; // Schema where extension is installed, defaults to 'public'
+  version?: string; // Extension version
+  cascade?: boolean; // If true, install dependencies
+}
+
 export interface Table {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
@@ -140,4 +147,5 @@ export interface Schema {
   procedures?: Procedure[];
   triggers?: Trigger[];
   sequences?: Sequence[];
+  extensions?: Extension[];
 }

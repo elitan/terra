@@ -51,11 +51,11 @@ export function createTestDatabaseService(): DatabaseService {
 export async function cleanDatabase(client: Client): Promise<void> {
   // Drop all tables in the public schema
   const result = await client.query(`
-    SELECT 
+    SELECT
       schemaname,
       tablename,
       quote_ident(tablename) as quoted_tablename
-    FROM pg_tables 
+    FROM pg_tables
     WHERE schemaname = 'public'
   `);
 
@@ -68,12 +68,26 @@ export async function cleanDatabase(client: Client): Promise<void> {
   const typeResult = await client.query(`
     SELECT typname
     FROM pg_type
-    WHERE typtype = 'e' 
+    WHERE typtype = 'e'
       AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
   `);
 
   for (const row of typeResult.rows) {
     await client.query(`DROP TYPE IF EXISTS ${row.typname} CASCADE`);
+  }
+
+  // Drop all extensions in the public schema (except built-in ones like plpgsql)
+  const extResult = await client.query(`
+    SELECT e.extname
+    FROM pg_extension e
+    JOIN pg_namespace n ON e.extnamespace = n.oid
+    WHERE n.nspname = 'public'
+      AND e.extname != 'plpgsql'
+  `);
+
+  for (const row of extResult.rows) {
+    // Use quote_ident to properly handle extension names with special characters (like uuid-ossp)
+    await client.query(`DROP EXTENSION IF EXISTS ${client.escapeIdentifier(row.extname)} CASCADE`);
   }
 }
 
