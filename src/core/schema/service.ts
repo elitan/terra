@@ -3,7 +3,7 @@ import type { MigrationPlan } from "../../types/migration";
 import type { EnumType, View } from "../../types/schema";
 import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
-import { MigrationPlanner } from "../migration/planner";
+import { SchemaDiffer } from "./differ";
 import { MigrationExecutor } from "../migration/executor";
 import { DatabaseService } from "../database/client";
 import { Logger } from "../../utils/logger";
@@ -12,7 +12,7 @@ import { generateCreateViewSQL, generateDropViewSQL, generateCreateOrReplaceView
 export class SchemaService {
   private parser: SchemaParser;
   private inspector: DatabaseInspector;
-  private planner: MigrationPlanner;
+  private differ: SchemaDiffer;
   private executor: MigrationExecutor;
   private databaseService: DatabaseService;
 
@@ -20,7 +20,7 @@ export class SchemaService {
     this.databaseService = databaseService;
     this.parser = new SchemaParser();
     this.inspector = new DatabaseInspector();
-    this.planner = new MigrationPlanner();
+    this.differ = new SchemaDiffer();
     this.executor = new MigrationExecutor(databaseService);
   }
 
@@ -33,7 +33,7 @@ export class SchemaService {
       const parsedSchema = this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const currentSchema = await this.inspector.getCurrentSchema(client);
-      const plan = this.planner.generatePlan(desiredSchema, currentSchema);
+      const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
 
       if (!plan.hasChanges) {
         Logger.success("✓ No changes needed - database is up to date");
@@ -79,8 +79,8 @@ export class SchemaService {
       
       // Generate ENUM statements with collision detection
       const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
-      
-      const plan = this.planner.generatePlan(desiredSchema, currentSchema);
+
+      const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
       
       // Prepend ENUM creation statements 
       plan.transactional = [...enumStatements, ...plan.transactional];

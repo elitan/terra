@@ -303,11 +303,11 @@ bun test              # Both
 | Add destructive confirmations | P0 | 30 min | Safety | ✅ DONE |
 
 ### HIGH (Do Next)
-| Issue | Priority | Effort | Impact |
-|-------|----------|--------|--------|
-| Remove MigrationPlanner | P1 | 15 min | Code quality |
-| Fix CLI version | P1 | 5 min | Professionalism |
-| Split parser into modules | P1 | 2-3 hours | Maintainability |
+| Issue | Priority | Effort | Impact | Status |
+|-------|----------|--------|--------|--------|
+| Remove MigrationPlanner | P1 | 15 min | Code quality | ✅ DONE |
+| Fix CLI version | P1 | 5 min | Professionalism | |
+| Split parser into modules | P1 | 2-3 hours | Maintainability | |
 
 ### MEDIUM (Do If Time)
 | Issue | Priority | Effort | Impact |
@@ -326,7 +326,7 @@ For a **pragmatic early MVP**, focus on these **quick wins**:
 ### Phase 1: Quick Fixes (45 min total)
 1. ✅ **DATABASE_URL support** (15 min) - Huge UX win
 2. ✅ **Interactive confirmations** (30 min) - Prevents disasters
-3. **Remove MigrationPlanner** (15 min) - Cleaner architecture
+3. ✅ **Remove MigrationPlanner** (15 min) - Cleaner architecture
 4. **Fix CLI version** (5 min) - Professionalism
 
 ### Why This Order?
