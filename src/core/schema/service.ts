@@ -77,6 +77,7 @@ export class SchemaService {
 
   async apply(
     schemaFile: string,
+    schemas: string[] = ['public'],
     autoApprove: boolean = false,
     lockOptions?: AdvisoryLockOptions,
     dryRun: boolean = false
@@ -99,13 +100,17 @@ export class SchemaService {
       const desiredTriggers = Array.isArray(parsedSchema) ? [] : parsedSchema.triggers;
       const desiredSequences = Array.isArray(parsedSchema) ? [] : parsedSchema.sequences;
 
-      const currentSchema = await this.inspector.getCurrentSchema(client);
-      const currentEnums = await this.inspector.getCurrentEnums(client);
-      const currentViews = await this.inspector.getCurrentViews(client);
-      const currentFunctions = await this.inspector.getCurrentFunctions(client);
-      const currentProcedures = await this.inspector.getCurrentProcedures(client);
-      const currentTriggers = await this.inspector.getCurrentTriggers(client);
-      const currentSequences = await this.inspector.getCurrentSequences(client);
+      // Validate that all schema references are in the managed schemas list
+      this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
+        desiredFunctions, desiredProcedures, desiredTriggers, desiredSequences);
+
+      const currentSchema = await this.inspector.getCurrentSchema(client, schemas);
+      const currentEnums = await this.inspector.getCurrentEnums(client, schemas);
+      const currentViews = await this.inspector.getCurrentViews(client, schemas);
+      const currentFunctions = await this.inspector.getCurrentFunctions(client, schemas);
+      const currentProcedures = await this.inspector.getCurrentProcedures(client, schemas);
+      const currentTriggers = await this.inspector.getCurrentTriggers(client, schemas);
+      const currentSequences = await this.inspector.getCurrentSequences(client, schemas);
 
       // Generate ENUM statements with collision detection
       const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
@@ -220,7 +225,7 @@ export class SchemaService {
       await this.executor.executePlan(client, plan, autoApprove);
 
       // After table changes, safely remove unused ENUMs
-      const enumRemovalStatements = await this.generateEnumRemovalStatements(desiredEnums, currentEnums, client);
+      const enumRemovalStatements = await this.generateEnumRemovalStatements(desiredEnums, currentEnums, client, schemas);
       if (enumRemovalStatements.length > 0) {
         const removalPlan = {
           transactional: enumRemovalStatements,
@@ -346,14 +351,14 @@ export class SchemaService {
     return statements;
   }
 
-  private async generateEnumRemovalStatements(desiredEnums: EnumType[], currentEnums: EnumType[], client: Client): Promise<string[]> {
+  private async generateEnumRemovalStatements(desiredEnums: EnumType[], currentEnums: EnumType[], client: Client, schemas: string[]): Promise<string[]> {
     const statements: string[] = [];
     const desiredEnumNames = new Set(desiredEnums.map(e => e.name));
-    
+
     for (const currentEnum of currentEnums) {
       if (!desiredEnumNames.has(currentEnum.name)) {
         // ENUM is not in desired schema, check if it's safe to drop
-        const isUsed = await this.isEnumTypeUsed(currentEnum.name, client);
+        const isUsed = await this.isEnumTypeUsed(currentEnum.name, client, schemas);
         
         if (!isUsed) {
           statements.push(`DROP TYPE ${currentEnum.name};`);
@@ -370,14 +375,53 @@ export class SchemaService {
     return statements;
   }
 
-  private async isEnumTypeUsed(enumName: string, client: Client): Promise<boolean> {
+  private async isEnumTypeUsed(enumName: string, client: Client, schemas: string[]): Promise<boolean> {
     const result = await client.query(`
       SELECT COUNT(*) as usage_count
-      FROM information_schema.columns 
-      WHERE udt_name = $1 AND table_schema = 'public'
-    `, [enumName]);
-    
+      FROM information_schema.columns
+      WHERE udt_name = $1 AND table_schema = ANY($2::text[])
+    `, [enumName, schemas]);
+
     return parseInt(result.rows[0].usage_count) > 0;
+  }
+
+  private validateSchemaReferences(
+    managedSchemas: string[],
+    tables: any[],
+    enums: any[],
+    views: any[],
+    functions: any[],
+    procedures: any[],
+    triggers: any[],
+    sequences: any[]
+  ): void {
+    const errors: string[] = [];
+
+    // Helper to check schema reference
+    const checkSchema = (objType: string, objName: string, objSchema: string | undefined) => {
+      const schema = objSchema || 'public'; // Default to 'public' if not specified
+      if (!managedSchemas.includes(schema)) {
+        errors.push(`${objType} '${objSchema ? objSchema + '.' : ''}${objName}' references schema '${schema}' which is not in the managed schema list: [${managedSchemas.join(', ')}]`);
+      }
+    };
+
+    // Check all object types
+    tables.forEach(t => checkSchema('Table', t.name, t.schema));
+    enums.forEach(e => checkSchema('ENUM type', e.name, e.schema));
+    views.forEach(v => checkSchema('View', v.name, v.schema));
+    functions.forEach(f => checkSchema('Function', f.name, f.schema));
+    procedures.forEach(p => checkSchema('Procedure', p.name, p.schema));
+    triggers.forEach(t => checkSchema('Trigger', t.name, t.schema));
+    sequences.forEach(s => checkSchema('Sequence', s.name, s.schema));
+
+    if (errors.length > 0) {
+      throw new Error(
+        `Schema validation failed:\n${errors.join('\n')}\n\n` +
+        `To fix this, either:\n` +
+        `1. Add the missing schema(s) using -s flag: terra apply -s ${managedSchemas.join(' -s ')} -s <missing_schema>\n` +
+        `2. Remove or modify the objects to use only managed schemas`
+      );
+    }
   }
 
   private generateEnumModificationStatements(desiredEnum: EnumType, currentEnum: EnumType): string[] {

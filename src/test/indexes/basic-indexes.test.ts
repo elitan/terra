@@ -157,7 +157,7 @@ describe("PostgreSQL Basic Index Support", () => {
       `);
 
       // Test the getTableIndexes method
-      const indexes = await inspector.getTableIndexes(client, "test_users");
+      const indexes = await inspector.getTableIndexes(client, "test_users", "public");
       expect(indexes).toHaveLength(1);
 
       if (indexes.length > 0) {
@@ -181,7 +181,7 @@ describe("PostgreSQL Basic Index Support", () => {
         CREATE UNIQUE INDEX idx_test_users_username ON test_users (username);
       `);
 
-      const indexes = await inspector.getTableIndexes(client, "test_users");
+      const indexes = await inspector.getTableIndexes(client, "test_users", "public");
       expect(indexes).toHaveLength(1);
 
       if (indexes.length > 0) {
@@ -202,7 +202,7 @@ describe("PostgreSQL Basic Index Support", () => {
         CREATE INDEX idx_test_docs_metadata ON test_docs USING GIN (metadata);
       `);
 
-      const indexes = await inspector.getTableIndexes(client, "test_docs");
+      const indexes = await inspector.getTableIndexes(client, "test_docs", "public");
       expect(indexes).toHaveLength(1);
 
       if (indexes.length > 0) {
@@ -222,7 +222,7 @@ describe("PostgreSQL Basic Index Support", () => {
         CREATE INDEX idx_test_users_email ON test_users (email);
       `);
 
-      const indexes = await inspector.getTableIndexes(client, "test_users");
+      const indexes = await inspector.getTableIndexes(client, "test_users", "public");
       expect(indexes).toHaveLength(1);
 
       if (indexes.length > 0) {

@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { extractNameAndSchema } from "./cst-utils";
 import type { Procedure, FunctionParameter } from "../../../types/schema";
 
 /**
@@ -12,7 +13,8 @@ import type { Procedure, FunctionParameter } from "../../../types/schema";
  */
 export function parseCreateProcedure(node: any): Procedure | null {
   try {
-    const name = extractProcedureName(node);
+    const fullName = node.name?.text || node.name?.name || null;
+    const { name, schema } = extractNameAndSchema(fullName);
     if (!name) return null;
 
     const parameters = extractProcedureParameters(node);
@@ -33,6 +35,7 @@ export function parseCreateProcedure(node: any): Procedure | null {
 
     return {
       name,
+      schema,
       parameters,
       language,
       body,

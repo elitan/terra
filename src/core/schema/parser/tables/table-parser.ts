@@ -6,7 +6,7 @@
  */
 
 import { Logger } from "../../../../utils/logger";
-import { extractTableNameFromCST } from "../cst-utils";
+import { extractTableNameFromCST, extractSchemaFromCST } from "../cst-utils";
 import { extractColumns } from "./column-parser";
 import { extractAllConstraints } from "./constraint-parser";
 import type { Table } from "../../../../types/schema";
@@ -16,9 +16,11 @@ import type { Table } from "../../../../types/schema";
  */
 export function parseCreateTable(node: any): Table | null {
   try {
-    // Extract table name
+    // Extract table name and schema
     const tableName = extractTableNameFromCST(node);
     if (!tableName) return null;
+
+    const schema = extractSchemaFromCST(node);
 
     // Extract columns
     const columns = extractColumns(node);
@@ -28,6 +30,7 @@ export function parseCreateTable(node: any): Table | null {
 
     return {
       name: tableName,
+      schema,
       columns,
       primaryKey: constraints.primaryKey,
       foreignKeys:

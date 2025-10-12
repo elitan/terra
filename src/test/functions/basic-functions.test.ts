@@ -24,7 +24,7 @@ describe("Functions", () => {
       LANGUAGE SQL;
     `;
 
-    await schemaService.apply(schema, true);
+    await schemaService.apply(schema, ['public'], true);
 
     const client = await databaseService.createClient();
     try {
@@ -45,7 +45,7 @@ describe("Functions", () => {
       LANGUAGE SQL;
     `;
 
-    await schemaService.apply(schema1, true);
+    await schemaService.apply(schema1, ['public'], true);
 
     const schema2 = `
       CREATE FUNCTION multiply(a INT, b INT)
@@ -56,7 +56,7 @@ describe("Functions", () => {
       LANGUAGE SQL;
     `;
 
-    await schemaService.apply(schema2, true);
+    await schemaService.apply(schema2, ['public'], true);
 
     const client = await databaseService.createClient();
     try {
@@ -77,11 +77,11 @@ describe("Functions", () => {
       LANGUAGE SQL;
     `;
 
-    await schemaService.apply(schema1, true);
+    await schemaService.apply(schema1, ['public'], true);
 
     const schema2 = ``;
 
-    await schemaService.apply(schema2, true);
+    await schemaService.apply(schema2, ['public'], true);
 
     const client = await databaseService.createClient();
     try {

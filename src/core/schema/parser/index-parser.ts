@@ -19,9 +19,11 @@ export function parseCreateIndex(node: any): Index | null {
     const indexName = extractIndexName(node);
     if (!indexName) return null;
 
-    // Extract table name
+    // Extract table name and schema
     const tableName = extractIndexTableName(node);
     if (!tableName) return null;
+
+    const schema = extractIndexSchema(node);
 
     // Extract columns and detect expressions
     const indexColumnInfo = extractIndexColumnsAndExpressions(node);
@@ -50,6 +52,7 @@ export function parseCreateIndex(node: any): Index | null {
     return {
       name: indexName,
       tableName,
+      schema,
       columns: indexColumnInfo.columns,
       type: indexType,
       unique,
@@ -82,13 +85,44 @@ function extractIndexName(node: any): string | null {
 }
 
 /**
- * Extract table name from CST
+ * Extract table name from CST (without schema qualifier)
  */
 function extractIndexTableName(node: any): string | null {
   try {
-    return node.table?.text || node.table?.name || null;
+    const fullName = node.table?.text || node.table?.name || null;
+    if (!fullName) return null;
+
+    // If qualified (schema.table), extract only the table name
+    if (fullName.includes('.')) {
+      const parts = fullName.split('.');
+      return parts[parts.length - 1];
+    }
+
+    return fullName;
   } catch (error) {
     return null;
+  }
+}
+
+/**
+ * Extract schema name from CST (for qualified table names)
+ */
+function extractIndexSchema(node: any): string | undefined {
+  try {
+    const fullName = node.table?.text || node.table?.name || null;
+    if (!fullName) return undefined;
+
+    // If qualified (schema.table), extract the schema
+    if (fullName.includes('.')) {
+      const parts = fullName.split('.');
+      if (parts.length === 2) {
+        return parts[0];
+      }
+    }
+
+    return undefined;
+  } catch (error) {
+    return undefined;
   }
 }
 

@@ -90,7 +90,8 @@ describe("Partial Index Support", () => {
 
       const indexes = await inspector.getTableIndexes(
         client,
-        "partial_test_users"
+        "partial_test_users",
+        "public"
       );
       expect(indexes).toHaveLength(1);
 
@@ -119,7 +120,7 @@ describe("Partial Index Support", () => {
         CREATE INDEX idx_partial_status ON mixed_test (status) WHERE active = true;
       `);
 
-      const indexes = await inspector.getTableIndexes(client, "mixed_test");
+      const indexes = await inspector.getTableIndexes(client, "mixed_test", "public");
       expect(indexes).toHaveLength(2);
 
       const regularIndex = indexes.find(

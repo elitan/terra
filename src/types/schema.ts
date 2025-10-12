@@ -36,6 +36,7 @@ export interface UniqueConstraint {
 export interface Index {
   name: string;
   tableName: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: string[];
   type?: "btree" | "hash" | "gist" | "spgist" | "gin" | "brin";
   unique?: boolean;
@@ -48,11 +49,13 @@ export interface Index {
 
 export interface EnumType {
   name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   values: string[];
 }
 
 export interface View {
   name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   definition: string; // The SELECT statement
   materialized?: boolean;
   columns?: Column[]; // For typed views or materialized views
@@ -71,6 +74,7 @@ export interface FunctionParameter {
 
 export interface Function {
   name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   parameters: FunctionParameter[];
   returnType: string;
   language: string;
@@ -85,6 +89,7 @@ export interface Function {
 
 export interface Procedure {
   name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   parameters: FunctionParameter[];
   language: string;
   body: string;
@@ -94,6 +99,7 @@ export interface Procedure {
 export interface Trigger {
   name: string;
   tableName: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   timing: 'BEFORE' | 'AFTER' | 'INSTEAD OF';
   events: ('INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE')[];
   forEach?: 'ROW' | 'STATEMENT';
@@ -104,6 +110,7 @@ export interface Trigger {
 
 export interface Sequence {
   name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   dataType?: 'SMALLINT' | 'INTEGER' | 'BIGINT';
   increment?: number;
   minValue?: number;
@@ -116,6 +123,7 @@ export interface Sequence {
 
 export interface Table {
   name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: Column[];
   primaryKey?: PrimaryKeyConstraint;
   foreignKeys?: ForeignKeyConstraint[];

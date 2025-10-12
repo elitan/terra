@@ -31,7 +31,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify ENUM type exists
       const result = await client.query(`
@@ -68,7 +68,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify both ENUM types exist
       const result = await client.query(`
@@ -93,7 +93,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify ENUM type exists with correct values
       const result = await client.query(`
@@ -120,7 +120,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
 			// Test that we can insert valid ENUM values
 			await client.query(`INSERT INTO users (name, status) VALUES ('John', 'active')`);
@@ -145,7 +145,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
 			// Test that invalid ENUM values are rejected
 			await expect(
@@ -164,7 +164,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
 			// Insert without specifying priority (should use default)
 			await client.query(`INSERT INTO tasks (title) VALUES ('Test task')`);
@@ -186,7 +186,7 @@ describe("ENUM Types", () => {
       `;
 
       // This should work because the dependency resolver should create ENUMs first
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       const result = await client.query(`
         SELECT typname 
@@ -213,7 +213,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify both tables use the same ENUM type
       const result = await client.query(`
@@ -240,7 +240,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       const updatedSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive', 'pending');
@@ -252,7 +252,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema, true);
+      await schemaService.apply(updatedSchema, ['public'], true);
 
       // Verify the new value was added
       const result = await client.query(`
@@ -277,7 +277,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       const updatedSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive');
@@ -290,7 +290,7 @@ describe("ENUM Types", () => {
       `;
 
       // Should throw an error about unsafe value removal
-      await expect(schemaService.apply(updatedSchema, true)).rejects.toThrow(
+      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow(
         /ENUM type 'status' modification requires manual intervention.*removing values.*pending/
       );
     });
@@ -306,7 +306,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       const updatedSchema = `
         CREATE TYPE priority AS ENUM ('high', 'medium', 'low');
@@ -319,7 +319,7 @@ describe("ENUM Types", () => {
       `;
 
       // Should throw an error about unsafe reordering
-      await expect(schemaService.apply(updatedSchema, true)).rejects.toThrow(
+      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow(
         /ENUM type 'priority' modification requires manual intervention.*reordering values/
       );
     });
@@ -338,7 +338,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       const updatedSchema = `
         CREATE TABLE users (
@@ -348,7 +348,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema, true);
+      await schemaService.apply(updatedSchema, ['public'], true);
 
       // Verify unused ENUM types were removed
       const result = await client.query(`
@@ -376,7 +376,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       const updatedSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive');
@@ -394,7 +394,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema, true);
+      await schemaService.apply(updatedSchema, ['public'], true);
 
       // Verify ENUM type is still there since products table uses it
       const result = await client.query(`
@@ -426,7 +426,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify both tables and ENUM types exist
       const enumResult = await client.query(`
@@ -466,7 +466,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Test inserting with both ENUM values
       await client.query(`
@@ -495,7 +495,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema, true)).rejects.toThrow();
+      await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
     });
 
     it("should reject ENUM types with duplicate values", async () => {
@@ -509,7 +509,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema, true)).rejects.toThrow();
+      await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
     });
 
     it("should reject empty ENUM types", async () => {
@@ -522,7 +522,7 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema, true)).rejects.toThrow();
+      await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
     });
   });
 });

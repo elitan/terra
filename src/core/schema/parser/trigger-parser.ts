@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { extractNameAndSchema } from "./cst-utils";
 import type { Trigger } from "../../../types/schema";
 
 /**
@@ -12,10 +13,12 @@ import type { Trigger } from "../../../types/schema";
  */
 export function parseCreateTrigger(node: any): Trigger | null {
   try {
-    const name = extractTriggerName(node);
+    const fullName = node.name?.text || node.name?.name || null;
+    const { name, schema } = extractNameAndSchema(fullName);
     if (!name) return null;
 
-    const tableName = extractTableName(node);
+    const tableFullName = node.table?.text || node.table?.name || null;
+    const { name: tableName, schema: tableSchema } = extractNameAndSchema(tableFullName);
     if (!tableName) {
       Logger.warning(`Trigger '${name}' missing table name`);
       return null;
@@ -46,6 +49,7 @@ export function parseCreateTrigger(node: any): Trigger | null {
     return {
       name,
       tableName,
+      schema: schema || tableSchema, // Use trigger's schema or fall back to table's schema
       timing,
       events,
       forEach,

@@ -30,7 +30,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify unique constraint exists
       const result = await client.query(`
@@ -73,7 +73,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Verify composite unique constraint
       const result = await client.query(`
@@ -105,7 +105,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // PostgreSQL creates implicit constraint names for column-level UNIQUE
       const result = await client.query(`
@@ -139,7 +139,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // PostgreSQL allows multiple NULLs in unique columns
       await client.query("INSERT INTO employees (employee_code, social_security_number) VALUES ('EMP001', NULL)");
@@ -166,7 +166,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       // Insert some data
       await client.query("INSERT INTO users (email, username) VALUES ('user1@example.com', 'user1')");
@@ -182,7 +182,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema, true);
+      await schemaService.apply(updatedSchema, ['public'], true);
 
       // Verify constraints were added
       const result = await client.query(`
@@ -210,7 +210,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       const updatedSchema = `
         CREATE TABLE products (
@@ -220,7 +220,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema, true);
+      await schemaService.apply(updatedSchema, ['public'], true);
 
       // Verify constraint was dropped
       const result = await client.query(`
@@ -248,7 +248,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       // Insert duplicate emails
       await client.query("INSERT INTO users (email) VALUES ('duplicate@example.com')");
@@ -263,7 +263,7 @@ describe("Unique Constraints", () => {
       `;
 
       // Should fail because duplicates exist
-      await expect(schemaService.apply(updatedSchema, true)).rejects.toThrow();
+      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow();
     });
   });
 
@@ -281,7 +281,7 @@ describe("Unique Constraints", () => {
         CREATE UNIQUE INDEX unique_col2_idx ON test_table (col2);
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Check constraints
       const constraints = await client.query(`
@@ -324,7 +324,7 @@ describe("Unique Constraints", () => {
         CREATE UNIQUE INDEX unique_inactive_email ON users (email) WHERE is_active = false AND deleted_at IS NULL;
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Can have same email for active and inactive users (different indexes apply)
       await client.query("INSERT INTO users (email, is_active) VALUES ('test@example.com', true)");
@@ -354,7 +354,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Note: Our parser doesn't support DEFERRABLE syntax (sql-parser-cst limitation)
       // So the constraint is created as non-deferrable and enforced immediately
@@ -391,7 +391,7 @@ describe("Unique Constraints", () => {
         CREATE UNIQUE INDEX unique_lower_username ON users (LOWER(username));
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       await client.query("INSERT INTO users (email, username) VALUES ('John@Example.com', 'JohnDoe')");
       
@@ -426,7 +426,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(schema, true);
+      await schemaService.apply(schema, ['public'], true);
 
       // Without inheritance, tables are separate - can have same national_id
       await client.query("INSERT INTO persons (national_id, name) VALUES ('123456789', 'John Doe')");
@@ -448,7 +448,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(initialSchema, true);
+      await schemaService.apply(initialSchema, ['public'], true);
 
       // Add columns, unique constraint should remain
       const updatedSchema = `
@@ -462,7 +462,7 @@ describe("Unique Constraints", () => {
         );
       `;
 
-      await schemaService.apply(updatedSchema, true);
+      await schemaService.apply(updatedSchema, ['public'], true);
 
       // Test constraint still works
       await client.query("INSERT INTO products (sku, name, price) VALUES ('PROD-001', 'Product 1', 99.99)");

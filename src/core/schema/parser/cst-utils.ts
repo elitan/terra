@@ -42,14 +42,62 @@ export function findNodesByType(node: any, type: string): any[] {
 }
 
 /**
- * Extract table name from CST node
+ * Extract table name from CST node (without schema qualifier)
  */
 export function extractTableNameFromCST(node: any): string | null {
   try {
-    return node.name?.text || node.name?.name || null;
+    const fullName = node.name?.text || node.name?.name || null;
+    if (!fullName) return null;
+
+    // If qualified (schema.table), extract only the table name
+    if (fullName.includes('.')) {
+      const parts = fullName.split('.');
+      return parts[parts.length - 1];
+    }
+
+    return fullName;
   } catch (error) {
     return null;
   }
+}
+
+/**
+ * Extract schema name from CST node (for qualified names like schema.table)
+ */
+export function extractSchemaFromCST(node: any): string | undefined {
+  try {
+    const fullName = node.name?.text || node.name?.name || null;
+    if (!fullName) return undefined;
+
+    // If qualified (schema.table), extract the schema
+    if (fullName.includes('.')) {
+      const parts = fullName.split('.');
+      if (parts.length === 2) {
+        return parts[0];
+      }
+    }
+
+    return undefined;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+/**
+ * Extract both name and schema from a qualified identifier (e.g., schema.name)
+ */
+export function extractNameAndSchema(fullName: string | null): { name: string | null; schema: string | undefined } {
+  if (!fullName) return { name: null, schema: undefined };
+
+  // If qualified (schema.name), split them
+  if (fullName.includes('.')) {
+    const parts = fullName.split('.');
+    if (parts.length === 2) {
+      return { name: parts[1], schema: parts[0] };
+    }
+  }
+
+  return { name: fullName, schema: undefined };
 }
 
 /**

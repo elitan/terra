@@ -252,7 +252,8 @@ describe("Concurrent Index Operations", () => {
       // Verify index was created
       const indexes = await inspector.getTableIndexes(
         client,
-        "concurrent_test"
+        "concurrent_test",
+        "public"
       );
       const emailIndex = indexes.find(
         (idx) => idx.name === "idx_concurrent_test_email"
@@ -287,7 +288,7 @@ describe("Concurrent Index Operations", () => {
       `);
 
       // Verify index exists
-      let indexes = await inspector.getTableIndexes(client, "drop_test");
+      let indexes = await inspector.getTableIndexes(client, "drop_test", "public");
       expect(indexes).toHaveLength(1);
 
       // Drop index concurrently
@@ -296,7 +297,7 @@ describe("Concurrent Index Operations", () => {
       `);
 
       // Verify index is gone
-      indexes = await inspector.getTableIndexes(client, "drop_test");
+      indexes = await inspector.getTableIndexes(client, "drop_test", "public");
       expect(indexes).toHaveLength(0);
     });
   });
@@ -335,7 +336,8 @@ describe("Concurrent Index Operations", () => {
       // Verify index was created
       const indexes = await inspector.getTableIndexes(
         client,
-        "performance_test"
+        "performance_test",
+        "public"
       );
       expect(indexes).toHaveLength(1);
 

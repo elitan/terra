@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { extractNameAndSchema } from "./cst-utils";
 import type { Sequence } from "../../../types/schema";
 
 /**
@@ -12,7 +13,8 @@ import type { Sequence } from "../../../types/schema";
  */
 export function parseCreateSequence(node: any): Sequence | null {
   try {
-    const name = extractSequenceName(node);
+    const fullName = node.name?.text || node.name?.name || null;
+    const { name, schema } = extractNameAndSchema(fullName);
     if (!name) return null;
 
     const dataType = extractDataType(node);
@@ -26,6 +28,7 @@ export function parseCreateSequence(node: any): Sequence | null {
 
     return {
       name,
+      schema,
       dataType,
       increment,
       minValue,

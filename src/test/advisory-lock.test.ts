@@ -29,7 +29,7 @@ describe("Advisory Lock", () => {
     `;
 
     // Apply with lock options
-    await schemaService.apply(schema, true, {
+    await schemaService.apply(schema, ['public'], true, {
       lockName: "test_lock",
       lockTimeout: 5000
     });
@@ -177,11 +177,11 @@ describe("Advisory Lock", () => {
     `;
 
     // First, create the table
-    await schemaService.apply(validSchema, true);
+    await schemaService.apply(validSchema, ['public'], true);
 
     // Try to apply invalid schema with lock
     try {
-      await schemaService.apply(invalidSchema, true, {
+      await schemaService.apply(invalidSchema, ['public'], true, {
         lockName: "failure_test_lock",
         lockTimeout: 5000
       });
@@ -218,7 +218,7 @@ describe("Advisory Lock", () => {
     `;
 
     // Apply without lock options
-    await schemaService.apply(schema, true);
+    await schemaService.apply(schema, ['public'], true);
 
     // Verify table was created
     const tables = await client.query(`
@@ -239,7 +239,7 @@ describe("Advisory Lock", () => {
     `;
 
     // Apply with default lock name
-    await schemaService.apply(schema, true, {
+    await schemaService.apply(schema, ['public'], true, {
       lockName: "terra_migrate_execute", // default from CLI
       lockTimeout: 10000
     });

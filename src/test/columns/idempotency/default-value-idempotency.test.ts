@@ -37,7 +37,7 @@ describe("Default Value Idempotency - Issue #11", () => {
     `;
 
     // Apply schema first time
-    await service.apply(schema, true);
+    await service.apply(schema, ['public'], true);
 
     // Verify columns were created with defaults
     const columns = await getTableColumns(client, "users");
@@ -69,7 +69,7 @@ describe("Default Value Idempotency - Issue #11", () => {
       );
     `;
 
-    await service.apply(initialSchema, true);
+    await service.apply(initialSchema, ['public'], true);
 
     // Step 2: Apply changes (set default for name, change age type, drop age default)
     const modifiedSchema = `
@@ -83,7 +83,7 @@ describe("Default Value Idempotency - Issue #11", () => {
     const plan1 = await service.plan(modifiedSchema);
     expect(plan1.hasChanges).toBe(true);
 
-    await service.apply(modifiedSchema, true);
+    await service.apply(modifiedSchema, ['public'], true);
 
     // Verify the changes were applied
     const columns = await getTableColumns(client, "users");
@@ -115,7 +115,7 @@ describe("Default Value Idempotency - Issue #11", () => {
     `;
 
     // Apply schema first time
-    await service.apply(schema, true);
+    await service.apply(schema, ['public'], true);
 
     // Verify all columns have defaults
     const columns = await getTableColumns(client, "test_defaults");
@@ -145,7 +145,7 @@ describe("Default Value Idempotency - Issue #11", () => {
       );
     `;
 
-    await service.apply(schema1, true);
+    await service.apply(schema1, ['public'], true);
 
     // Change defaults
     const schema2 = `
@@ -174,7 +174,7 @@ describe("Default Value Idempotency - Issue #11", () => {
       );
     `;
 
-    await service.apply(schema1, true);
+    await service.apply(schema1, ['public'], true);
 
     // Add defaults
     const schema2 = `
@@ -189,7 +189,7 @@ describe("Default Value Idempotency - Issue #11", () => {
     expect(plan1.hasChanges).toBe(true);
     expect(plan1.transactional.some(s => s.includes("SET DEFAULT"))).toBe(true);
 
-    await service.apply(schema2, true);
+    await service.apply(schema2, ['public'], true);
 
     // Remove defaults
     const schema3 = `

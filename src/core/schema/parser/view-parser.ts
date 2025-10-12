@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { extractNameAndSchema } from "./cst-utils";
 import type { View } from "../../../types/schema";
 
 /**
@@ -12,8 +13,9 @@ import type { View } from "../../../types/schema";
  */
 export function parseCreateView(node: any, originalSql: string): View | null {
   try {
-    // Extract view name
-    const viewName = extractViewName(node);
+    // Extract view name and schema
+    const fullName = extractViewFullName(node);
+    const { name: viewName, schema } = extractNameAndSchema(fullName);
     if (!viewName) return null;
 
     // Extract view definition (SELECT statement)
@@ -29,6 +31,7 @@ export function parseCreateView(node: any, originalSql: string): View | null {
 
     return {
       name: viewName,
+      schema,
       definition,
       materialized,
       checkOption,
@@ -43,9 +46,9 @@ export function parseCreateView(node: any, originalSql: string): View | null {
 }
 
 /**
- * Extract view name from CST node
+ * Extract view full name (possibly qualified with schema) from CST node
  */
-function extractViewName(node: any): string | null {
+function extractViewFullName(node: any): string | null {
   try {
     // Handle different name structures in the CST
     if (node.name?.text) {

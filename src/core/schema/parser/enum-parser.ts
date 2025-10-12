@@ -5,7 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
-import { extractStringValueFromCST } from "./cst-utils";
+import { extractStringValueFromCST, extractNameAndSchema } from "./cst-utils";
 import type { EnumType } from "../../../types/schema";
 
 /**
@@ -13,8 +13,9 @@ import type { EnumType } from "../../../types/schema";
  */
 export function parseCreateType(node: any): EnumType | null {
   try {
-    // Extract type name
-    const typeName = extractTypeName(node);
+    // Extract type name and schema
+    const fullName = node.name?.text || node.name?.name || null;
+    const { name: typeName, schema } = extractNameAndSchema(fullName);
     if (!typeName) return null;
 
     // Check if this is an ENUM type
@@ -37,6 +38,7 @@ export function parseCreateType(node: any): EnumType | null {
 
     return {
       name: typeName,
+      schema,
       values: enumValues,
     };
   } catch (error) {

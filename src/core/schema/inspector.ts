@@ -17,33 +17,34 @@ import type {
 } from "../../types/schema";
 
 export class DatabaseInspector {
-  async getCurrentSchema(client: Client): Promise<Table[]> {
+  async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
     const tables: Table[] = [];
 
-    // Get all tables
+    // Get all tables from specified schemas
     const tablesResult = await client.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-    `);
+      SELECT table_name, table_schema
+      FROM information_schema.tables
+      WHERE table_schema = ANY($1::text[]) AND table_type = 'BASE TABLE'
+    `, [schemas]);
 
     for (const row of tablesResult.rows) {
       const tableName = row.table_name;
+      const tableSchema = row.table_schema;
 
       // Get columns for each table
       const columnsResult = await client.query(
         `
-        SELECT 
+        SELECT
           column_name,
           data_type,
           character_maximum_length,
           is_nullable,
           column_default
-        FROM information_schema.columns 
-        WHERE table_name = $1 AND table_schema = 'public'
+        FROM information_schema.columns
+        WHERE table_name = $1 AND table_schema = $2
         ORDER BY ordinal_position
       `,
-        [tableName]
+        [tableName, tableSchema]
       );
 
       const columns: Column[] = columnsResult.rows.map((col: any) => {
@@ -66,22 +67,23 @@ export class DatabaseInspector {
       });
 
       // Get primary key constraint for this table
-      const primaryKey = await this.getPrimaryKeyConstraint(client, tableName);
+      const primaryKey = await this.getPrimaryKeyConstraint(client, tableName, tableSchema);
 
       // Get foreign key constraints for this table
-      const foreignKeys = await this.getForeignKeyConstraints(client, tableName);
+      const foreignKeys = await this.getForeignKeyConstraints(client, tableName, tableSchema);
 
       // Get check constraints for this table
-      const checkConstraints = await this.getCheckConstraints(client, tableName);
+      const checkConstraints = await this.getCheckConstraints(client, tableName, tableSchema);
 
       // Get unique constraints for this table
-      const uniqueConstraints = await this.getUniqueConstraints(client, tableName);
+      const uniqueConstraints = await this.getUniqueConstraints(client, tableName, tableSchema);
 
       // Get indexes for this table
-      const indexes = await this.getTableIndexes(client, tableName);
+      const indexes = await this.getTableIndexes(client, tableName, tableSchema);
 
       tables.push({
         name: tableName,
+        schema: tableSchema,
         columns,
         primaryKey,
         foreignKeys: foreignKeys.length > 0 ? foreignKeys : undefined,
@@ -96,23 +98,24 @@ export class DatabaseInspector {
 
   private async getPrimaryKeyConstraint(
     client: Client,
-    tableName: string
+    tableName: string,
+    tableSchema: string
   ): Promise<PrimaryKeyConstraint | undefined> {
     const result = await client.query(
       `
-      SELECT 
+      SELECT
         tc.constraint_name,
         kcu.column_name,
         kcu.ordinal_position
       FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu 
+      JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
-      WHERE tc.table_name = $1 
-        AND tc.table_schema = 'public'
+      WHERE tc.table_name = $1
+        AND tc.table_schema = $2
         AND tc.constraint_type = 'PRIMARY KEY'
       ORDER BY kcu.ordinal_position
       `,
-      [tableName]
+      [tableName, tableSchema]
     );
 
     if (result.rows.length === 0) {
@@ -129,12 +132,13 @@ export class DatabaseInspector {
     };
   }
 
-  async getTableIndexes(client: Client, tableName: string): Promise<Index[]> {
+  async getTableIndexes(client: Client, tableName: string, tableSchema: string): Promise<Index[]> {
     const result = await client.query(
       `
-      SELECT 
+      SELECT
         i.indexname as index_name,
         i.tablename as table_name,
+        i.schemaname as table_schema,
         i.indexdef as index_definition,
         ix.indisunique as is_unique,
         am.amname as access_method,
@@ -143,8 +147,8 @@ export class DatabaseInspector {
         ts.spcname as tablespace_name,
         -- Extract storage parameters (reloptions)
         ic.reloptions as storage_options,
-        CASE 
-          WHEN ix.indexprs IS NOT NULL THEN 
+        CASE
+          WHEN ix.indexprs IS NOT NULL THEN
             -- Extract expression from the full index definition
             -- Use a more specific regex to extract content between USING btree ( and )
             regexp_replace(
@@ -153,8 +157,8 @@ export class DatabaseInspector {
             )
           ELSE NULL
         END as expression_def,
-        CASE 
-          WHEN ix.indexprs IS NULL THEN 
+        CASE
+          WHEN ix.indexprs IS NULL THEN
             -- Regular column-based index
             ARRAY(
               SELECT a.attname
@@ -163,12 +167,12 @@ export class DatabaseInspector {
                 AND a.attnum = ANY(ix.indkey)
               ORDER BY array_position(ix.indkey, a.attnum)
             )
-          ELSE 
+          ELSE
             -- Expression index - no simple column names
             ARRAY[]::text[]
         END as column_names,
-        CASE 
-          WHEN ix.indpred IS NOT NULL THEN 
+        CASE
+          WHEN ix.indpred IS NOT NULL THEN
             regexp_replace(
               pg_get_expr(ix.indpred, ix.indrelid),
               '^\\((.*)\\)$', '\\1'  -- Remove outer parentheses
@@ -187,22 +191,23 @@ export class DatabaseInspector {
       JOIN pg_class ic ON ic.oid = ix.indexrelid
       -- Left join with pg_tablespace to get tablespace name
       LEFT JOIN pg_tablespace ts ON ts.oid = ic.reltablespace
-      WHERE i.tablename = $1 
-        AND i.schemaname = 'public'
+      WHERE i.tablename = $1
+        AND i.schemaname = $2
         AND NOT ix.indisprimary  -- Exclude primary key indexes
         AND NOT EXISTS (  -- Exclude unique constraint indexes
-          SELECT 1 FROM pg_constraint con 
-          WHERE con.conindid = ix.indexrelid 
+          SELECT 1 FROM pg_constraint con
+          WHERE con.conindid = ix.indexrelid
           AND con.contype = 'u'
         )
       ORDER BY i.indexname
       `,
-      [tableName]
+      [tableName, tableSchema]
     );
 
     return result.rows.map((row: any) => ({
       name: row.index_name,
       tableName: row.table_name,
+      schema: row.table_schema,
       columns: row.column_names || [],
       type: this.mapPostgreSQLIndexType(row.access_method),
       unique: row.is_unique,
@@ -255,10 +260,10 @@ export class DatabaseInspector {
     }
   }
 
-  async getForeignKeyConstraints(client: Client, tableName: string): Promise<ForeignKeyConstraint[]> {
+  async getForeignKeyConstraints(client: Client, tableName: string, tableSchema: string): Promise<ForeignKeyConstraint[]> {
     const result = await client.query(
       `
-      SELECT 
+      SELECT
         tc.constraint_name,
         kcu.column_name,
         ccu.table_name AS referenced_table,
@@ -266,18 +271,18 @@ export class DatabaseInspector {
         rc.delete_rule,
         rc.update_rule
       FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu 
+      JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
-      JOIN information_schema.constraint_column_usage ccu 
+      JOIN information_schema.constraint_column_usage ccu
         ON ccu.constraint_name = tc.constraint_name
       JOIN information_schema.referential_constraints rc
         ON rc.constraint_name = tc.constraint_name
-      WHERE tc.table_name = $1 
-        AND tc.table_schema = 'public'
+      WHERE tc.table_name = $1
+        AND tc.table_schema = $2
         AND tc.constraint_type = 'FOREIGN KEY'
       ORDER BY tc.constraint_name, kcu.ordinal_position
       `,
-      [tableName]
+      [tableName, tableSchema]
     );
 
     if (result.rows.length === 0) {
@@ -338,20 +343,20 @@ export class DatabaseInspector {
     }
   }
 
-  async getCheckConstraints(client: Client, tableName: string): Promise<CheckConstraint[]> {
+  async getCheckConstraints(client: Client, tableName: string, tableSchema: string): Promise<CheckConstraint[]> {
     const result = await client.query(
       `
-      SELECT 
+      SELECT
         conname as constraint_name,
         pg_get_constraintdef(c.oid) as constraint_def
       FROM pg_constraint c
       JOIN pg_class t ON c.conrelid = t.oid
-      WHERE t.relname = $1 
-        AND t.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+      WHERE t.relname = $1
+        AND t.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $2)
         AND c.contype = 'c'
       ORDER BY c.conname
       `,
-      [tableName]
+      [tableName, tableSchema]
     );
 
     if (result.rows.length === 0) {
@@ -380,22 +385,22 @@ export class DatabaseInspector {
     return checkConstraints;
   }
 
-  async getUniqueConstraints(client: Client, tableName: string): Promise<UniqueConstraint[]> {
+  async getUniqueConstraints(client: Client, tableName: string, tableSchema: string): Promise<UniqueConstraint[]> {
     const result = await client.query(
       `
-      SELECT 
+      SELECT
         tc.constraint_name,
         kcu.column_name,
         kcu.ordinal_position
       FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu 
+      JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
-      WHERE tc.table_name = $1 
-        AND tc.table_schema = 'public'
+      WHERE tc.table_name = $1
+        AND tc.table_schema = $2
         AND tc.constraint_type = 'UNIQUE'
       ORDER BY tc.constraint_name, kcu.ordinal_position
       `,
-      [tableName]
+      [tableName, tableSchema]
     );
 
     if (result.rows.length === 0) {
@@ -428,58 +433,63 @@ export class DatabaseInspector {
     return uniqueConstraints;
   }
 
-  async getCurrentEnums(client: Client): Promise<EnumType[]> {
+  async getCurrentEnums(client: Client, schemas: string[] = ['public']): Promise<EnumType[]> {
     const enumsResult = await client.query(`
-      SELECT 
+      SELECT
         t.typname as enum_name,
+        n.nspname as schema_name,
         e.enumlabel as enum_value,
         e.enumsortorder
       FROM pg_type t
       JOIN pg_enum e ON t.oid = e.enumtypid
-      WHERE t.typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      WHERE n.nspname = ANY($1::text[])
       ORDER BY t.typname, e.enumsortorder
-    `);
+    `, [schemas]);
 
-    const enumGroups = new Map<string, string[]>();
-    
+    const enumGroups = new Map<string, { schema: string; values: string[] }>();
+
     for (const row of enumsResult.rows) {
       const enumName = row.enum_name;
+      const schemaName = row.schema_name;
       const enumValue = row.enum_value;
-      
+
       if (!enumGroups.has(enumName)) {
-        enumGroups.set(enumName, []);
+        enumGroups.set(enumName, { schema: schemaName, values: [] });
       }
-      enumGroups.get(enumName)!.push(enumValue);
+      enumGroups.get(enumName)!.values.push(enumValue);
     }
 
     const enums: EnumType[] = [];
-    for (const [name, values] of enumGroups) {
-      enums.push({ name, values });
+    for (const [name, data] of enumGroups) {
+      enums.push({ name, schema: data.schema, values: data.values });
     }
 
     return enums;
   }
 
   // Get all views from the database
-  async getCurrentViews(client: Client): Promise<View[]> {
+  async getCurrentViews(client: Client, schemas: string[] = ['public']): Promise<View[]> {
     const views: View[] = [];
 
     // Get regular views
     const viewsResult = await client.query(`
-      SELECT 
+      SELECT
         table_name as view_name,
+        table_schema as schema_name,
         view_definition,
         check_option,
         is_updatable,
         is_insertable_into
-      FROM information_schema.views 
-      WHERE table_schema = 'public'
+      FROM information_schema.views
+      WHERE table_schema = ANY($1::text[])
       ORDER BY table_name
-    `);
+    `, [schemas]);
 
     for (const row of viewsResult.rows) {
       const view: View = {
         name: row.view_name,
+        schema: row.schema_name,
         definition: row.view_definition.trim(),
         materialized: false,
       };
@@ -494,30 +504,32 @@ export class DatabaseInspector {
 
     // Get materialized views
     const matViewsResult = await client.query(`
-      SELECT 
+      SELECT
         matviewname as view_name,
+        schemaname as schema_name,
         definition,
         ispopulated
-      FROM pg_matviews 
-      WHERE schemaname = 'public'
+      FROM pg_matviews
+      WHERE schemaname = ANY($1::text[])
       ORDER BY matviewname
-    `);
+    `, [schemas]);
 
     for (const row of matViewsResult.rows) {
       const view: View = {
         name: row.view_name,
+        schema: row.schema_name,
         definition: row.definition.trim(),
         materialized: true,
       };
 
       // Get indexes for materialized views
       const indexesResult = await client.query(`
-        SELECT 
+        SELECT
           indexname,
           indexdef
-        FROM pg_indexes 
-        WHERE schemaname = 'public' AND tablename = $1
-      `, [row.view_name]);
+        FROM pg_indexes
+        WHERE schemaname = $1 AND tablename = $2
+      `, [row.schema_name, row.view_name]);
 
       if (indexesResult.rows.length > 0) {
         view.indexes = indexesResult.rows.map(idx => ({
@@ -535,15 +547,15 @@ export class DatabaseInspector {
   }
 
   // Get complete schema including all database objects
-  async getCompleteSchema(client: Client): Promise<Schema> {
+  async getCompleteSchema(client: Client, schemas: string[] = ['public']): Promise<Schema> {
     const [tables, views, enumTypes, functions, procedures, triggers, sequences] = await Promise.all([
-      this.getCurrentSchema(client),
-      this.getCurrentViews(client),
-      this.getCurrentEnums(client),
-      this.getCurrentFunctions(client),
-      this.getCurrentProcedures(client),
-      this.getCurrentTriggers(client),
-      this.getCurrentSequences(client),
+      this.getCurrentSchema(client, schemas),
+      this.getCurrentViews(client, schemas),
+      this.getCurrentEnums(client, schemas),
+      this.getCurrentFunctions(client, schemas),
+      this.getCurrentProcedures(client, schemas),
+      this.getCurrentTriggers(client, schemas),
+      this.getCurrentSequences(client, schemas),
     ]);
 
     return {
@@ -558,10 +570,11 @@ export class DatabaseInspector {
   }
 
   // Get all functions from the database
-  async getCurrentFunctions(client: Client): Promise<Function[]> {
+  async getCurrentFunctions(client: Client, schemas: string[] = ['public']): Promise<Function[]> {
     const result = await client.query(`
       SELECT
         p.proname as function_name,
+        n.nspname as schema_name,
         pg_get_function_arguments(p.oid) as arguments,
         pg_get_function_result(p.oid) as return_type,
         l.lanname as language,
@@ -584,14 +597,15 @@ export class DatabaseInspector {
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
       LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = ANY($1::text[])
         AND p.prokind = 'f'
         AND d.objid IS NULL
       ORDER BY p.proname
-    `);
+    `, [schemas]);
 
     return result.rows.map((row: any) => ({
       name: row.function_name,
+      schema: row.schema_name,
       parameters: this.parseFunctionArguments(row.arguments),
       returnType: row.return_type,
       language: row.language,
@@ -606,10 +620,11 @@ export class DatabaseInspector {
   }
 
   // Get all procedures from the database
-  async getCurrentProcedures(client: Client): Promise<Procedure[]> {
+  async getCurrentProcedures(client: Client, schemas: string[] = ['public']): Promise<Procedure[]> {
     const result = await client.query(`
       SELECT
         p.proname as procedure_name,
+        n.nspname as schema_name,
         pg_get_function_arguments(p.oid) as arguments,
         l.lanname as language,
         p.prosrc as source_code,
@@ -618,14 +633,15 @@ export class DatabaseInspector {
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
       LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = ANY($1::text[])
         AND p.prokind = 'p'
         AND d.objid IS NULL
       ORDER BY p.proname
-    `);
+    `, [schemas]);
 
     return result.rows.map((row: any) => ({
       name: row.procedure_name,
+      schema: row.schema_name,
       parameters: this.parseFunctionArguments(row.arguments),
       language: row.language,
       body: row.source_code,
@@ -634,11 +650,12 @@ export class DatabaseInspector {
   }
 
   // Get all triggers from the database
-  async getCurrentTriggers(client: Client): Promise<Trigger[]> {
+  async getCurrentTriggers(client: Client, schemas: string[] = ['public']): Promise<Trigger[]> {
     const result = await client.query(`
       SELECT
         t.tgname as trigger_name,
         c.relname as table_name,
+        n.nspname as schema_name,
         CASE
           WHEN t.tgtype & 1 = 1 THEN 'ROW'
           ELSE 'STATEMENT'
@@ -658,10 +675,10 @@ export class DatabaseInspector {
       JOIN pg_class c ON t.tgrelid = c.oid
       JOIN pg_namespace n ON c.relnamespace = n.oid
       JOIN pg_proc p ON t.tgfoid = p.oid
-      WHERE n.nspname = 'public'
+      WHERE n.nspname = ANY($1::text[])
         AND NOT t.tgisinternal
       ORDER BY c.relname, t.tgname
-    `);
+    `, [schemas]);
 
     return result.rows.map((row: any) => {
       const events: Trigger['events'] = [];
@@ -673,6 +690,7 @@ export class DatabaseInspector {
       return {
         name: row.trigger_name,
         tableName: row.table_name,
+        schema: row.schema_name,
         timing: row.timing,
         events,
         forEach: row.for_each,
@@ -682,10 +700,11 @@ export class DatabaseInspector {
   }
 
   // Get all sequences from the database
-  async getCurrentSequences(client: Client): Promise<Sequence[]> {
+  async getCurrentSequences(client: Client, schemas: string[] = ['public']): Promise<Sequence[]> {
     const result = await client.query(`
       SELECT
         c.relname as sequence_name,
+        n.nspname as schema_name,
         s.seqtypid::regtype::text as data_type,
         s.seqincrement as increment,
         s.seqmin as min_value,
@@ -706,9 +725,9 @@ export class DatabaseInspector {
       LEFT JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
       LEFT JOIN pg_namespace n2 ON c2.relnamespace = n2.oid
       WHERE c.relkind = 'S'
-        AND n.nspname = 'public'
+        AND n.nspname = ANY($1::text[])
       ORDER BY c.relname
-    `);
+    `, [schemas]);
 
     return result.rows.map((row: any) => {
       const dataType = row.data_type === 'bigint' ? 'BIGINT'
@@ -717,6 +736,7 @@ export class DatabaseInspector {
 
       return {
         name: row.sequence_name,
+        schema: row.schema_name,
         dataType: dataType !== 'BIGINT' ? dataType : undefined,
         increment: row.increment !== 1 ? row.increment : undefined,
         minValue: row.min_value,

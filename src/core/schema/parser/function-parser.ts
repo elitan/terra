@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { extractNameAndSchema } from "./cst-utils";
 import type { Function, FunctionParameter } from "../../../types/schema";
 
 /**
@@ -12,7 +13,8 @@ import type { Function, FunctionParameter } from "../../../types/schema";
  */
 export function parseCreateFunction(node: any): Function | null {
   try {
-    const name = extractFunctionName(node);
+    const fullName = node.name?.text || node.name?.name || null;
+    const { name, schema } = extractNameAndSchema(fullName);
     if (!name) return null;
 
     const parameters = extractFunctionParameters(node);
@@ -43,6 +45,7 @@ export function parseCreateFunction(node: any): Function | null {
 
     return {
       name,
+      schema,
       parameters,
       returnType,
       language,

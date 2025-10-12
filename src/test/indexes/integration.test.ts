@@ -241,7 +241,8 @@ describe("Index Integration Tests", () => {
       // Verify index was created by checking it exists
       const indexes = await inspector.getTableIndexes(
         client,
-        "performance_test"
+        "performance_test",
+        "public"
       );
       expect(indexes).toHaveLength(1);
       expect(indexes[0]!.name).toBe("idx_performance_test_email");

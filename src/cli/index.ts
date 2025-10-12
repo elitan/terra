@@ -3,6 +3,10 @@ import { loadConfig } from "../core/database/config";
 import { applyCommand } from "./commands/index";
 import packageJson from "../../package.json";
 
+function collectSchemas(value: string, previous: string[]) {
+  return previous.concat([value]);
+}
+
 export async function runCLI() {
   const program = new Command();
 
@@ -16,6 +20,7 @@ export async function runCLI() {
     .description("Apply schema changes to database")
     .requiredOption("-f, --file <file>", "Schema file path")
     .option("-u, --url <url>", "Database connection string (overrides DATABASE_URL)")
+    .option("-s, --schema <schema>", "Database schema to manage (can be specified multiple times, defaults to 'public')", collectSchemas, [])
     .option("--auto-approve", "Skip confirmation prompt")
     .option("--dry-run", "Show migration plan without executing changes")
     .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "terra_migrate_execute")
