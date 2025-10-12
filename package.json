@@ -65,9 +65,11 @@
     "release:major": "bun run scripts/release.ts major"
   },
   "dependencies": {
+    "boxen": "^8.0.1",
     "chalk": "^5.3.0",
     "commander": "^11.1.0",
     "diff": "^5.1.0",
+    "ora": "^9.0.0",
     "pg": "^8.11.3",
     "sql-parser-cst": "^0.33.1"
   },

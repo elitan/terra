@@ -37,8 +37,6 @@ export class SchemaService {
   }
 
   async plan(schemaFile: string): Promise<MigrationPlan> {
-    Logger.info("Analyzing schema changes...");
-
     const client = await this.databaseService.createClient();
 
     try {
@@ -82,8 +80,6 @@ export class SchemaService {
     lockOptions?: AdvisoryLockOptions,
     dryRun: boolean = false
   ): Promise<void> {
-    Logger.info("Analyzing schema changes...");
-
     const client = await this.databaseService.createClient();
 
     try {
@@ -145,56 +141,28 @@ export class SchemaService {
         return;
       }
 
-      Logger.warning(`Found ${totalChanges} change(s) to apply:`);
-      console.log();
+      const { OutputFormatter } = await import("../../utils/output-formatter");
 
-      if (plan.transactional.length > 0) {
-        Logger.info("Transactional changes:");
-        plan.transactional.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
+      Logger.print(OutputFormatter.summary(`${totalChanges} changes`));
+
+      // Combine all transactional statements
+      const allTransactional = [
+        ...plan.transactional,
+        ...sequenceStatements,
+        ...functionStatements,
+        ...procedureStatements,
+        ...viewStatements,
+        ...triggerStatements
+      ];
+
+      if (allTransactional.length > 0) {
+        Logger.print(OutputFormatter.section("Transactional"));
+        Logger.print(OutputFormatter.box(allTransactional));
       }
 
       if (plan.concurrent.length > 0) {
-        Logger.info("Concurrent changes (non-transactional):");
-        plan.concurrent.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
-      }
-
-      if (sequenceStatements.length > 0) {
-        Logger.info("Sequence changes:");
-        sequenceStatements.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
-      }
-
-      if (functionStatements.length > 0) {
-        Logger.info("Function changes:");
-        functionStatements.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
-      }
-
-      if (procedureStatements.length > 0) {
-        Logger.info("Procedure changes:");
-        procedureStatements.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
-      }
-
-      if (viewStatements.length > 0) {
-        Logger.info("View changes:");
-        viewStatements.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
-      }
-
-      if (triggerStatements.length > 0) {
-        Logger.info("Trigger changes:");
-        triggerStatements.forEach((stmt, i) => {
-          Logger.cyan(`  ${i + 1}. ${stmt}`);
-        });
+        Logger.print(OutputFormatter.warningSection("Concurrent (non-transactional)"));
+        Logger.print(OutputFormatter.box(plan.concurrent));
       }
 
       console.log();
@@ -213,8 +181,6 @@ export class SchemaService {
           return;
         }
       }
-
-      Logger.info("Applying schema changes...");
 
       // Execute in dependency order:
       // 1. Sequences (may be referenced by table defaults)

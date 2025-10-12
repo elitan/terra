@@ -46,48 +46,33 @@ export class MigrationExecutor {
       return;
     }
 
-    // Check for destructive operations
-    const allStatements = [...plan.transactional, ...plan.concurrent];
-    const destructiveOps = this.getDestructiveOperations(allStatements);
-
-    if (destructiveOps.length > 0 && !autoApprove) {
-      Logger.warning("\nWARNING: Destructive operations detected:");
-      destructiveOps.forEach((stmt) => {
-        Logger.error(`   ${stmt}`);
-      });
-      console.log();
-
-      const confirmed = await this.promptConfirmation(
-        "These operations may result in data loss. Continue? (y/N): "
-      );
-
-      if (!confirmed) {
-        Logger.info("Migration cancelled by user");
-        return;
-      }
-      console.log();
-    }
 
     try {
       // Step 1: Execute all transactional statements within a single transaction
       if (plan.transactional.length > 0) {
-        Logger.info("Applying transactional changes...");
         await this.databaseService.executeInTransaction(
           client,
           plan.transactional
         );
-        Logger.success("Transactional changes applied successfully");
       }
 
       // Step 2: Execute all concurrent statements individually
       if (plan.concurrent.length > 0) {
-        Logger.info("Applying concurrent changes (these may take a while)...");
+        const ora = (await import("ora")).default;
+
         for (const statement of plan.concurrent) {
-          Logger.info(`Executing: ${statement}`);
-          await client.query(statement);
-          Logger.success(`Executed: ${statement}`);
+          const spinner = ora({ text: "Applying concurrent change (may take a while)...", color: "white" }).start();
+          const startTime = Date.now();
+
+          try {
+            await client.query(statement);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            spinner.stopAndPersist({ symbol: "✔", text: `Applied concurrent change (${elapsed}s)` });
+          } catch (error) {
+            spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply concurrent change" });
+            throw error;
+          }
         }
-        Logger.success("Concurrent changes applied successfully");
       }
     } catch (error) {
       // Check if this is a PostgreSQL error with additional context

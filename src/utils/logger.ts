@@ -20,4 +20,8 @@ export class Logger {
   static cyan(message: string) {
     console.log(chalk.cyan(message));
   }
+
+  static print(message: string) {
+    console.log(message);
+  }
 }

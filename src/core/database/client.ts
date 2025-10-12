@@ -19,7 +19,6 @@ export class DatabaseService {
     const client = new Client(this.config);
     try {
       await client.connect();
-      Logger.success("Connected to PostgreSQL database");
       return client;
     } catch (error) {
       Logger.error("Failed to connect to database:");
@@ -32,26 +31,30 @@ export class DatabaseService {
     client: Client,
     statements: string[]
   ): Promise<void> {
+    const ora = (await import("ora")).default;
+    const spinner = ora({ text: "Applying changes...", color: "white" }).start();
+    const startTime = Date.now();
+
     await client.query("BEGIN");
 
     let currentStatement: string | undefined;
     try {
       for (const statement of statements) {
         if (statement.startsWith("--")) {
-          Logger.warning("Skipping: " + statement);
           continue;
         }
 
         currentStatement = statement;
-        Logger.info("Executing: " + statement);
         await client.query(statement);
-        Logger.success("Done");
       }
 
       await client.query("COMMIT");
-      Logger.success("All changes applied successfully!");
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
     } catch (error) {
       await client.query("ROLLBACK");
+      spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply changes" });
 
       // Check if this is a PostgreSQL error
       if (error && typeof error === 'object' && 'code' in error) {
@@ -90,8 +93,6 @@ export class DatabaseService {
     const startTime = Date.now();
     const timeoutMs = options.lockTimeout;
 
-    Logger.info(`Attempting to acquire advisory lock '${options.lockName}'...`);
-
     // Convert lock name to integer key using PostgreSQL's hashtext function
     const lockKeyResult = await client.query(
       "SELECT hashtext($1)::bigint as lock_key",
@@ -107,7 +108,6 @@ export class DatabaseService {
       );
 
       if (result.rows[0].acquired) {
-        Logger.success(`Advisory lock '${options.lockName}' acquired`);
         return;
       }
 
@@ -137,7 +137,6 @@ export class DatabaseService {
       const lockKey = lockKeyResult.rows[0].lock_key;
 
       await client.query("SELECT pg_advisory_unlock($1)", [lockKey]);
-      Logger.info(`Advisory lock '${lockName}' released`);
     } catch (error) {
       // Log but don't throw - lock will be released when connection closes anyway
       Logger.warning(`Failed to explicitly release advisory lock '${lockName}': ${error}`);
