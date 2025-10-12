@@ -15,11 +15,12 @@ export async function runCLI() {
     .command("apply")
     .description("Apply schema changes to database")
     .option("-f, --file <file>", "Schema file path", "schema.sql")
+    .option("-u, --url <url>", "Database connection string (overrides DATABASE_URL)")
     .option("--auto-approve", "Skip confirmation prompt")
     .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "terra_migrate_execute")
     .option("--lock-timeout <seconds>", "Maximum time to wait for advisory lock in seconds", "10")
     .action(async (options) => {
-      const config = loadConfig();
+      const config = loadConfig(options.url);
       await applyCommand(options, config);
     });
 

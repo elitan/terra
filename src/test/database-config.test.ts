@@ -176,6 +176,64 @@ describe("Database Configuration", () => {
       expect(config.user).toBe("urluser");
       expect(config.password).toBe("urlpass");
     });
+
+    test("should prioritize URL override over DATABASE_URL", () => {
+      process.env.DATABASE_URL = "postgres://envuser:envpass@envhost:5433/envdb";
+      const urlOverride = "postgres://cliuser:clipass@clihost:5434/clidb";
+
+      const config = loadConfig(urlOverride);
+
+      // Should use URL override values, not DATABASE_URL
+      expect(config.host).toBe("clihost");
+      expect(config.port).toBe(5434);
+      expect(config.database).toBe("clidb");
+      expect(config.user).toBe("cliuser");
+      expect(config.password).toBe("clipass");
+    });
+
+    test("should prioritize URL override over individual env vars", () => {
+      process.env.DB_HOST = "ignored-host";
+      process.env.DB_PORT = "9999";
+      process.env.DB_NAME = "ignored-db";
+      process.env.DB_USER = "ignored-user";
+      process.env.DB_PASSWORD = "ignored-pass";
+      const urlOverride = "postgres://cliuser:clipass@clihost:5434/clidb";
+
+      const config = loadConfig(urlOverride);
+
+      // Should use URL override values
+      expect(config.host).toBe("clihost");
+      expect(config.port).toBe(5434);
+      expect(config.database).toBe("clidb");
+      expect(config.user).toBe("cliuser");
+      expect(config.password).toBe("clipass");
+    });
+
+    test("should fall back to DATABASE_URL when URL override is undefined", () => {
+      process.env.DATABASE_URL = "postgres://envuser:envpass@envhost:5433/envdb";
+
+      const config = loadConfig(undefined);
+
+      // Should use DATABASE_URL values
+      expect(config.host).toBe("envhost");
+      expect(config.port).toBe(5433);
+      expect(config.database).toBe("envdb");
+      expect(config.user).toBe("envuser");
+      expect(config.password).toBe("envpass");
+    });
+
+    test("should fall back to DATABASE_URL when URL override is empty string", () => {
+      process.env.DATABASE_URL = "postgres://envuser:envpass@envhost:5433/envdb";
+
+      const config = loadConfig("");
+
+      // Should use DATABASE_URL values
+      expect(config.host).toBe("envhost");
+      expect(config.port).toBe(5433);
+      expect(config.database).toBe("envdb");
+      expect(config.user).toBe("envuser");
+      expect(config.password).toBe("envpass");
+    });
   });
 
   describe("Edge cases", () => {

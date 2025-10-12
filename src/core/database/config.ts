@@ -12,9 +12,9 @@ function parseDatabaseUrl(url: string): DatabaseConfig {
   };
 }
 
-export function loadConfig(): DatabaseConfig {
-  // Support DATABASE_URL (standard) or individual vars
-  const databaseUrl = process.env.DATABASE_URL;
+export function loadConfig(urlOverride?: string): DatabaseConfig {
+  // Priority: command-line URL > DATABASE_URL > individual vars
+  const databaseUrl = urlOverride || process.env.DATABASE_URL;
   if (databaseUrl && databaseUrl.trim()) {
     return parseDatabaseUrl(databaseUrl);
   }
