@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
 import { DatabaseService } from "../../core/database/client";
-import { createTestClient, cleanDatabase, TEST_DB_CONFIG } from "../utils";
+import { createTestClient, cleanDatabase, getTestDbConfig } from "../utils";
 
 describe("Basic View Operations", () => {
   let client: Client;
@@ -11,7 +11,7 @@ describe("Basic View Operations", () => {
   beforeEach(async () => {
     client = await createTestClient();
     await cleanDatabase(client);
-    const databaseService = new DatabaseService(TEST_DB_CONFIG);
+    const databaseService = new DatabaseService(getTestDbConfig());
     schemaService = new SchemaService(databaseService);
   });
 

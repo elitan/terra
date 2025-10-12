@@ -13,7 +13,7 @@ const LEGACY_TEST_DB_CONFIG: DatabaseConfig = {
 
 function getTestDbConfig(): DatabaseConfig {
   const databaseUrl = process.env.DATABASE_URL;
-  
+
   if (!databaseUrl) {
     throw new Error(
       "DATABASE_URL environment variable is required for running tests. " +
@@ -21,23 +21,61 @@ function getTestDbConfig(): DatabaseConfig {
       "postgres://user:password@localhost:5432/database_name"
     );
   }
-  
+
   // Parse DATABASE_URL
   const url = new URL(databaseUrl);
+  const baseDatabase = url.pathname.slice(1); // Remove leading slash
+
+  // Generate unique database name per test file for parallel execution
+  // Use the test file path as a seed for consistent DB names across runs
+  const testFilePath = Bun.main || 'default';
+  const hash = Bun.hash(testFilePath).toString(36).slice(0, 8);
+  const uniqueDatabase = `${baseDatabase}_${hash}`;
+
   return {
     host: url.hostname,
     port: parseInt(url.port) || 5432,
-    database: url.pathname.slice(1), // Remove leading slash
+    database: uniqueDatabase,
     user: url.username,
     password: url.password,
   };
 }
 
 // Export for compatibility with existing tests (like enum-types.test.ts from main branch)
+// Note: This will return the same config for the current test file
 export const TEST_DB_CONFIG = getTestDbConfig();
+
+// Export factory function for when you need the config
+export { getTestDbConfig };
+
+async function ensureTestDatabase(config: DatabaseConfig): Promise<void> {
+  // Connect to postgres database to create test database if needed
+  const adminClient = new Client({
+    ...config,
+    database: 'postgres',
+  });
+
+  try {
+    await adminClient.connect();
+
+    // Check if database exists
+    const result = await adminClient.query(
+      'SELECT 1 FROM pg_database WHERE datname = $1',
+      [config.database]
+    );
+
+    if (result.rows.length === 0) {
+      // Database doesn't exist, create it
+      await adminClient.query(`CREATE DATABASE ${adminClient.escapeIdentifier(config.database)}`);
+    }
+  } finally {
+    await adminClient.end();
+  }
+}
 
 export async function createTestClient(): Promise<Client> {
   const config = getTestDbConfig();
+  await ensureTestDatabase(config);
   const client = new Client(config);
   await client.connect();
   return client;
