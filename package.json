@@ -1,5 +1,5 @@
 {
-  "name": "pgterra",
+  "name": "terra",
   "version": "0.1.2",
   "description": "Declarative schema management for Postgres",
   "keywords": [
@@ -12,13 +12,13 @@
     "cli",
     "sql"
   ],
-  "homepage": "https://github.com/elitan/pgterra#readme",
+  "homepage": "https://github.com/elitan/terra#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/elitan/pgterra.git"
+    "url": "https://github.com/elitan/terra.git"
   },
   "bugs": {
-    "url": "https://github.com/elitan/pgterra/issues"
+    "url": "https://github.com/elitan/terra/issues"
   },
   "author": {
     "name": "Johan Eliasson",
@@ -26,7 +26,7 @@
   },
   "license": "MIT",
   "bin": {
-    "pgterra": "./dist/index.js"
+    "terra": "./dist/index.js"
   },
   "type": "module",
   "files": [

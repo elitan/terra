@@ -16,7 +16,7 @@ jobs:
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
-          POSTGRES_DB: pgterra_test
+          POSTGRES_DB: terra_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -50,12 +50,12 @@ jobs:
     - name: Setup test database
       run: bun run test:setup
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/pgterra_test
-    
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
+
     - name: Run tests
       run: bun test
       env:
-        DATABASE_URL: postgres://postgres:postgres@localhost:5432/pgterra_test
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
     
     - name: Build
       run: bun run build

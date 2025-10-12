@@ -161,7 +161,7 @@ async function main() {
   console.log(chalk.green("✅ Release process completed successfully!"));
   console.log(chalk.blue(`🎉 Release ${tag} has been created and pushed to GitHub`));
   console.log(chalk.gray("GitHub Actions will now handle publishing to npm automatically."));
-  console.log(chalk.gray(`Monitor the release at: https://github.com/elitan/pgterra/releases/tag/${tag}`));
+  console.log(chalk.gray(`Monitor the release at: https://github.com/elitan/terra/releases/tag/${tag}`));
 }
 
 main().catch((error) => {

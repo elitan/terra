@@ -245,7 +245,7 @@ export class SchemaService {
         `Cannot safely perform: ${changeDescription.join(' and ')}. ` +
         `Current values: [${currentEnum.values.join(', ')}], ` +
         `Desired values: [${desiredEnum.values.join(', ')}]. ` +
-        `Removing ENUM values or changing their order can cause data loss and is not supported by pgterra. ` +
+        `Removing ENUM values or changing their order can cause data loss and is not supported by Terra. ` +
         `Please handle this migration manually or create a new ENUM type with a different name.`
       );
     }

@@ -6,7 +6,7 @@ export async function runCLI() {
   const program = new Command();
 
   program
-    .name("pgterra")
+    .name("terra")
     .description("Declarative schema management for Postgres")
     .version("0.1.0");
 

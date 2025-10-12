@@ -1,4 +1,4 @@
-# pgterra Phase 2: Advanced PostgreSQL Features
+# Terra Phase 2: Advanced PostgreSQL Features
 
 ## Overview
 
@@ -23,7 +23,7 @@ Tests needed:
 - Cross-table ENUM type usage
 - ENUM type dependency resolution
 
-**Why Critical**: ENUM types are used in almost every production PostgreSQL application but are completely missing from pgterra.
+**Why Critical**: ENUM types are used in almost every production PostgreSQL application but are completely missing from Terra.
 
 ### 2. JSON/JSONB Column Types (`src/test/types/json-types.test.ts`)
 **Priority: HIGH**

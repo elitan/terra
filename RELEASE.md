@@ -1,6 +1,6 @@
 # Release Process
 
-This document outlines the automated release process for pgterra.
+This document outlines the automated release process for Terra.
 
 ## Quick Start
 
@@ -80,7 +80,7 @@ If you need to rollback a release:
 
 ```bash
 # Unpublish from npm (within 24 hours)
-npm unpublish pgterra@0.1.1
+npm unpublish terra@0.1.1
 
 # Delete GitHub release
 gh release delete v0.1.1
@@ -126,7 +126,7 @@ bun run release:patch
 ### GitHub Actions Fails
 
 Check the Actions tab in GitHub repository for detailed logs:
-https://github.com/elitan/pgterra/actions
+https://github.com/elitan/terra/actions
 
 **Common issues:**
 - Missing `NPM_TOKEN` secret
@@ -135,6 +135,6 @@ https://github.com/elitan/pgterra/actions
 
 ## Monitoring Releases
 
-- **GitHub Releases**: https://github.com/elitan/pgterra/releases
-- **NPM Package**: https://www.npmjs.com/package/pgterra
-- **GitHub Actions**: https://github.com/elitan/pgterra/actions
+- **GitHub Releases**: https://github.com/elitan/terra/releases
+- **NPM Package**: https://www.npmjs.com/package/terra
+- **GitHub Actions**: https://github.com/elitan/terra/actions

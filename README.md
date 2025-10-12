@@ -1,11 +1,11 @@
-# pgterra
+# Terra
 
-Declarative schema management for Postgres. Define your desired schema, pgterra handles the migrations.
+Declarative schema management for Postgres. Define your desired schema, Terra handles the migrations.
 
 ## Quick Start
 
 ```bash
-npm install -g pgterra
+npm install -g terra
 ```
 
 ## How it works
@@ -22,7 +22,7 @@ CREATE TABLE users (
 ```
 
 ```bash
-pgterra apply  # Creates the table
+terra apply  # Creates the table
 ```
 
 **2. Update your schema declaratively:**
@@ -45,18 +45,18 @@ CREATE TABLE posts (                 -- new table
 );
 ```
 
-**3. pgterra calculates the migration:**
+**3. Terra calculates the migration:**
 
 ```bash
-$ pgterra plan
+$ terra plan
 📋 Analyzing schema changes...
 
 Planned changes:
   1. ALTER TABLE users ADD COLUMN full_name VARCHAR(200) NOT NULL
-  2. ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT true  
+  2. ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT true
   3. CREATE TABLE posts (id SERIAL PRIMARY KEY, title VARCHAR(255) NOT NULL, user_id INTEGER REFERENCES users(id), created_at TIMESTAMP DEFAULT NOW())
 
-$ pgterra apply  # Applies the changes safely
+$ terra apply  # Applies the changes safely
 ```
 
 **That's it.** No migration files, no manual ALTER statements, no dependency ordering. Just define what you want.
@@ -85,18 +85,18 @@ export DB_PASSWORD=password
 
 ## Why declarative?
 
-Like Terraform for infrastructure, pgterra lets you define *what* you want, not *how* to get there:
+Like Terraform for infrastructure, Terra lets you define *what* you want, not *how* to get there:
 
 - **Version control your complete schema** - not scattered migration files
-- **No migration ordering issues** - pgterra handles dependencies
+- **No migration ordering issues** - Terra handles dependencies
 - **Easier code reviews** - see the full schema state, not just changes
 - **Safe schema changes** - preview before applying, with rollback support
 
 ## Development
 
 ```bash
-git clone https://github.com/elitan/pgterra.git
-cd pgterra
+git clone https://github.com/elitan/terra.git
+cd terra
 bun install
 
 # Set up test database connection

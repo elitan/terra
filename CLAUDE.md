@@ -2,11 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# pgterra Development Philosophy & Guidelines
+# Terra Development Philosophy & Guidelines
 
 ## Core Philosophy: Declarative Schema Management
 
-pgterra is a **declarative** PostgreSQL schema management tool. This means:
+Terra is a **declarative** PostgreSQL schema management tool. This means:
 
 ### ✅ What We Support (Declarative)
 
@@ -45,7 +45,7 @@ DROP TABLE old_table;
 1. **Simplicity**: Users only need to think about their desired schema, not migration steps
 2. **Idempotency**: Running the same schema file multiple times produces the same result
 3. **Version Control**: Schema files represent complete states, making diffs meaningful
-4. **Reliability**: pgterra figures out the optimal migration path automatically
+4. **Reliability**: Terra figures out the optimal migration path automatically
 
 ## Handling Complex Scenarios
 
@@ -147,11 +147,11 @@ test("should add foreign key", async () => {
 
 ## User Documentation
 
-Always remind users that pgterra is declarative:
+Always remind users that Terra is declarative:
 
 - "Define what you want, not how to get there"
 - "Your schema file should represent the complete desired state"
-- "pgterra figures out the migration steps automatically"
+- "Terra figures out the migration steps automatically"
 
 ## Migration Generation
 
@@ -159,7 +159,7 @@ The **differ** is responsible for generating any necessary `ALTER`, `DROP`, or o
 
 ## Summary
 
-pgterra follows the same philosophy as Terraform, Kubernetes, and other modern infrastructure tools: **declarative configuration**. This makes schemas easier to understand, version control, and maintain.
+Terra follows the same philosophy as Terraform, Kubernetes, and other modern infrastructure tools: **declarative configuration**. This makes schemas easier to understand, version control, and maintain.
 
 # Development Commands
 
