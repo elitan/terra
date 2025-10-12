@@ -1,3 +1,0 @@
-[test]
-# Run tests concurrently for better performance
-concurrent = true
