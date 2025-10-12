@@ -3,7 +3,7 @@ import { DatabaseService } from "../../core/database/client";
 import type { DatabaseConfig } from "../../types/config";
 
 export async function applyCommand(
-  options: { file: string; autoApprove: boolean; lockName: string; lockTimeout: string },
+  options: { file: string; autoApprove: boolean; dryRun: boolean; lockName: string; lockTimeout: string },
   config: DatabaseConfig
 ) {
   const databaseService = new DatabaseService(config);
@@ -17,5 +17,5 @@ export async function applyCommand(
   await schemaService.apply(options.file, options.autoApprove, {
     lockName: options.lockName,
     lockTimeout: lockTimeout * 1000 // Convert seconds to milliseconds
-  });
+  }, options.dryRun);
 }

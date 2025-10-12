@@ -17,6 +17,7 @@ export async function runCLI() {
     .option("-f, --file <file>", "Schema file path", "schema.sql")
     .option("-u, --url <url>", "Database connection string (overrides DATABASE_URL)")
     .option("--auto-approve", "Skip confirmation prompt")
+    .option("--dry-run", "Show migration plan without executing changes")
     .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "terra_migrate_execute")
     .option("--lock-timeout <seconds>", "Maximum time to wait for advisory lock in seconds", "10")
     .action(async (options) => {

@@ -78,15 +78,16 @@ export class SchemaService {
   async apply(
     schemaFile: string = "schema.sql",
     autoApprove: boolean = false,
-    lockOptions?: AdvisoryLockOptions
+    lockOptions?: AdvisoryLockOptions,
+    dryRun: boolean = false
   ): Promise<void> {
     Logger.info("Analyzing schema changes...");
 
     const client = await this.databaseService.createClient();
 
     try {
-      // Acquire advisory lock if options provided
-      if (lockOptions) {
+      // Acquire advisory lock if options provided (skip in dry-run mode)
+      if (lockOptions && !dryRun) {
         await this.databaseService.acquireAdvisoryLock(client, lockOptions);
       }
       const parsedSchema = this.parseSchemaInput(schemaFile);
@@ -187,6 +188,12 @@ export class SchemaService {
 
       console.log();
 
+      // Exit early if dry-run mode
+      if (dryRun) {
+        Logger.info("Dry run complete - no changes were made");
+        return;
+      }
+
       // Prompt for confirmation unless auto-approve is enabled
       if (!autoApprove) {
         const confirmed = await this.promptForConfirmation();
@@ -262,8 +269,8 @@ export class SchemaService {
         await this.executor.executePlan(client, triggerPlan, autoApprove);
       }
     } finally {
-      // Release advisory lock if it was acquired
-      if (lockOptions) {
+      // Release advisory lock if it was acquired (skip in dry-run mode)
+      if (lockOptions && !dryRun) {
         await this.databaseService.releaseAdvisoryLock(client, lockOptions.lockName);
       }
       await client.end();
