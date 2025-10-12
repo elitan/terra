@@ -191,11 +191,11 @@ class ParserError extends Error {
 | Split parser into modules | P1 | 2-3 hours | Maintainability | ✅ DONE |
 
 ### REMAINING (Priority Order)
-| Issue | Priority | Effort | Impact |
-|-------|----------|--------|--------|
-| #1: Fix parseSchemaFile return type | P0 | 15 min | Bug fix - ENUMs/VIEWs work from files |
-| #2: Better error messages | P2 | 2 hours | User experience |
-| #3: Verify dependency resolver | P2 | 1 hour | Correctness |
+| Issue | Priority | Effort | Impact | Status |
+|-------|----------|--------|--------|--------|
+| #1: Fix parseSchemaFile return type | P0 | 15 min | Bug fix - ENUMs/VIEWs work from files | ✅ DONE |
+| #2: Better error messages | P2 | 2 hours | User experience | |
+| #3: Verify dependency resolver | P2 | 1 hour | Correctness | |
 
 ---
 
