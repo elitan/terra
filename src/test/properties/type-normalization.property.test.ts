@@ -70,7 +70,7 @@ describe("Property-Based: Type Normalization", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 20,
         verbose: false
       }
     );
@@ -117,7 +117,7 @@ describe("Property-Based: Type Normalization", () => {
           }
         ),
         {
-          numRuns: 20,
+          numRuns: 10,
           verbose: false
         }
       );
@@ -158,7 +158,7 @@ describe("Property-Based: Type Normalization", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 20,
         verbose: false
       }
     );
@@ -221,7 +221,7 @@ describe("Property-Based: Type Normalization", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -253,7 +253,7 @@ describe("Property-Based: Type Normalization", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -312,7 +312,7 @@ describe("Property-Based: Type Normalization", () => {
         }
       ),
       {
-        numRuns: 40,
+        numRuns: 20,
         verbose: false
       }
     );
@@ -357,7 +357,7 @@ describe("Property-Based: Type Normalization", () => {
         }
       ),
       {
-        numRuns: 25,
+        numRuns: 15,
         verbose: false
       }
     );

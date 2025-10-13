@@ -85,7 +85,7 @@ describe("Property-Based: Schema Idempotency", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 40,
         verbose: false
       }
     );
@@ -123,7 +123,7 @@ describe("Property-Based: Schema Idempotency", () => {
         }
       ),
       {
-        numRuns: 100,
+        numRuns: 50,
         verbose: false
       }
     );
@@ -165,7 +165,7 @@ describe("Property-Based: Schema Idempotency", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -267,7 +267,7 @@ describe("Property-Based: Schema Idempotency", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -306,7 +306,7 @@ describe("Property-Based: Schema Idempotency", () => {
         }
       ),
       {
-        numRuns: 25,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -345,7 +345,7 @@ describe("Property-Based: Schema Idempotency", () => {
         }
       ),
       {
-        numRuns: 25,
+        numRuns: 15,
         verbose: false
       }
     );

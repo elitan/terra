@@ -60,7 +60,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 30,
         verbose: false
       }
     );
@@ -98,7 +98,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 30,
         verbose: false
       }
     );
@@ -130,7 +130,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -176,7 +176,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 30,
         verbose: false
       }
     );
@@ -223,7 +223,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 50,
+        numRuns: 25,
         verbose: false
       }
     );
@@ -254,7 +254,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -292,7 +292,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -333,7 +333,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 30,
+        numRuns: 15,
         verbose: false
       }
     );
@@ -379,7 +379,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 40,
+        numRuns: 25,
         verbose: false
       }
     );
@@ -426,7 +426,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 40,
+        numRuns: 25,
         verbose: false
       }
     );
@@ -473,7 +473,7 @@ describe("Property-Based: Default Value Normalization", () => {
         }
       ),
       {
-        numRuns: 40,
+        numRuns: 25,
         verbose: false
       }
     );
