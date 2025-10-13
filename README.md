@@ -232,3 +232,7 @@ docker compose up -d
 export DATABASE_URL="postgres://test_user:test_password@localhost:5487/sql_terraform_test"
 bun test
 ```
+
+## License
+
+MIT
