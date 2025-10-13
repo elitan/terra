@@ -60,6 +60,8 @@
     "test:constraints": "bun --env-file=.env test src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/",
     "test:dependencies": "bun --env-file=.env test src/test/dependency-resolution.test.ts",
     "test:destructive": "bun --env-file=.env test src/test/destructive-operations.test.ts",
+    "test:properties": "bun --env-file=.env test src/test/properties/",
+    "test:properties:watch": "bun --env-file=.env test --watch src/test/properties/",
     "release:patch": "bun run scripts/release.ts patch",
     "release:minor": "bun run scripts/release.ts minor",
     "release:major": "bun run scripts/release.ts major"
@@ -77,7 +79,8 @@
     "@types/bun": "latest",
     "@types/diff": "^5.0.8",
     "@types/pg": "^8.10.9",
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "fast-check": "^4.3.0"
   },
   "peerDependencies": {
     "typescript": "^5.8.3"
