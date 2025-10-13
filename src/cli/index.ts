@@ -13,7 +13,7 @@ export async function runCLI() {
   program
     .name("terra")
     .description("Declarative schema management for Postgres")
-    .version(packageJson.version);
+    .version(packageJson.version, "-v, --version");
 
   program
     .command("apply")
