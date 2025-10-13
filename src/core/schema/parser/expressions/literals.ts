@@ -73,6 +73,8 @@ export function serializeDefaultValue(expr: any): string {
       return serializeStringLiteral(expr);
     } else if (expr.type === "boolean_literal") {
       return serializeBooleanLiteral(expr);
+    } else if (expr.type === "null_literal") {
+      return serializeNullLiteral();
     } else if (expr.type === "keyword") {
       return serializeKeyword(expr);
     } else if (expr.type === "function_call" || expr.type === "func_call") {

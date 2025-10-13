@@ -35,6 +35,12 @@ export function normalizeDefault(value: string | null | undefined): string | und
   // Trim first to handle leading/trailing whitespace
   let normalized = value.trim();
 
+  // Treat the string "NULL" as equivalent to undefined (no explicit default)
+  // PostgreSQL stores DEFAULT NULL as null in column_default
+  if (normalized.toUpperCase() === 'NULL') {
+    return undefined;
+  }
+
   // Strip PostgreSQL's type cast suffix (::typename or ::typename(params))
   // This regex handles multi-word types like "timestamp without time zone" and "character varying"
   // Examples: '100::integer', 'hello'::character varying', 'CURRENT_TIMESTAMP::timestamp without time zone'

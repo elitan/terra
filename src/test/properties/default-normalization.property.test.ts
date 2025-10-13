@@ -260,7 +260,7 @@ describe("Property-Based: Default Value Normalization", () => {
     );
   }, { timeout: 90000 });
 
-  test.skip("property: explicit NULL default is idempotent", async () => {
+  test("property: explicit NULL default is idempotent", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.constantFrom('TEXT', 'INTEGER', 'BOOLEAN'),
