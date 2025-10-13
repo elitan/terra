@@ -17,7 +17,8 @@ import { parseCreateProcedure } from "./procedure-parser";
 import { parseCreateTrigger } from "./trigger-parser";
 import { parseCreateSequence } from "./sequence-parser";
 import { parseCreateExtension } from "./extension-parser";
-import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence, Extension } from "../../../types/schema";
+import { parseCreateSchema } from "./schema-definition-parser";
+import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
 export class SchemaParser {
@@ -33,6 +34,8 @@ export class SchemaParser {
     triggers: Trigger[];
     sequences: Sequence[];
     extensions: Extension[];
+    schemas: SchemaDefinition[];
+    comments: Comment[];
   } {
     if (!existsSync(filePath)) {
       throw new ParserError(
@@ -60,8 +63,10 @@ export class SchemaParser {
     triggers: Trigger[];
     sequences: Sequence[];
     extensions: Extension[];
+    schemas: SchemaDefinition[];
+    comments: Comment[];
   } {
-    const { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions } = this.parseWithCST(sql, filePath);
+    const { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments } = this.parseWithCST(sql, filePath);
 
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map((t) => [t.name, t]));
@@ -76,7 +81,7 @@ export class SchemaParser {
       }
     }
 
-    return { tables, enums, views, functions, procedures, triggers, sequences, extensions };
+    return { tables, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
   }
 
   /**
@@ -119,6 +124,8 @@ export class SchemaParser {
     triggers: Trigger[];
     sequences: Sequence[];
     extensions: Extension[];
+    schemas: SchemaDefinition[];
+    comments: Comment[];
   } {
     const tables: Table[] = [];
     const indexes: Index[] = [];
@@ -129,18 +136,27 @@ export class SchemaParser {
     const triggers: Trigger[] = [];
     const sequences: Sequence[] = [];
     const extensions: Extension[] = [];
+    const schemas: SchemaDefinition[] = [];
+    const comments: Comment[] = [];
 
     // First, extract CREATE EXTENSION statements manually (sql-parser-cst doesn't support them yet)
     const extensionMatches = this.extractExtensionStatements(sql);
     extensions.push(...extensionMatches);
 
-    // Remove CREATE EXTENSION statements from SQL before parsing with CST
-    let sqlWithoutExtensions = sql;
+    // Extract COMMENT ON statements manually (sql-parser-cst doesn't support them yet)
+    const commentMatches = this.extractCommentStatements(sql);
+    comments.push(...commentMatches);
+
+    // Remove CREATE EXTENSION and COMMENT ON statements from SQL before parsing with CST
+    let cleanedSql = sql;
     const extensionRegex = /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)(?:\s+WITH\s+)?(?:\s+SCHEMA\s+(\w+))?(?:\s+VERSION\s+'([^']+)')?(?:\s+CASCADE)?[^;]*;/gi;
-    sqlWithoutExtensions = sqlWithoutExtensions.replace(extensionRegex, '');
+    cleanedSql = cleanedSql.replace(extensionRegex, '');
+
+    const commentRegex = /COMMENT\s+ON\s+(?:SCHEMA|TABLE|COLUMN|VIEW|FUNCTION|INDEX|TYPE)\s+[^;]+;/gi;
+    cleanedSql = cleanedSql.replace(commentRegex, '');
 
     try {
-      const cst = parseCST(sqlWithoutExtensions, {
+      const cst = parseCST(cleanedSql, {
         dialect: "postgresql",
         includeSpaces: true,
         includeNewlines: true,
@@ -190,6 +206,11 @@ export class SchemaParser {
             const sequence = parseCreateSequence(statement);
             if (sequence) {
               sequences.push(sequence);
+            }
+          } else if (statement.type === "create_schema_stmt") {
+            const schema = parseCreateSchema(statement);
+            if (schema) {
+              schemas.push(schema);
             }
           } else if (statement.type === "alter_table_stmt") {
             throw new ParserError(
@@ -241,7 +262,7 @@ export class SchemaParser {
       );
     }
 
-    return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions };
+    return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
   }
 
   /**
@@ -267,5 +288,31 @@ export class SchemaParser {
     }
 
     return extensions;
+  }
+
+  /**
+   * Extract COMMENT ON statements manually using regex
+   * This is a workaround until sql-parser-cst supports COMMENT ON
+   */
+  private extractCommentStatements(sql: string): Comment[] {
+    const comments: Comment[] = [];
+    const commentRegex = /COMMENT\s+ON\s+(SCHEMA|TABLE|COLUMN|VIEW|FUNCTION|INDEX|TYPE)\s+([^\s]+(?:\s+IS)?)\s+IS\s+'([^']+)';/gi;
+
+    let match;
+    while ((match = commentRegex.exec(sql)) !== null) {
+      const objectType = match[1].toUpperCase() as Comment['objectType'];
+      const objectPath = match[2].replace(/\s+IS$/, '').trim();
+      const commentText = match[3];
+
+      const comment: Comment = {
+        objectType,
+        objectName: objectPath,
+        comment: commentText,
+      };
+
+      comments.push(comment);
+    }
+
+    return comments;
   }
 }

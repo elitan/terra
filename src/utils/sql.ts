@@ -1,5 +1,15 @@
 import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence } from "../types/schema";
 
+/**
+ * Get qualified table name with schema prefix if present
+ */
+export function getQualifiedTableName(table: Table | string, schema?: string): string {
+  if (typeof table === 'string') {
+    return schema ? `${schema}.${table}` : table;
+  }
+  return table.schema ? `${table.schema}.${table.name}` : table.name;
+}
+
 export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
   const typeMap: Record<string, string> = {
@@ -131,7 +141,8 @@ export function generateCreateTableStatement(table: Table): string {
     }
   }
 
-  return `CREATE TABLE ${table.name} (\n  ${columnDefs.join(",\n  ")}\n);`;
+  const qualifiedName = getQualifiedTableName(table);
+  return `CREATE TABLE ${qualifiedName} (\n  ${columnDefs.join(",\n  ")}\n);`;
 }
 
 export function generatePrimaryKeyClause(

@@ -128,6 +128,22 @@ export interface Extension {
   cascade?: boolean; // If true, install dependencies
 }
 
+export interface SchemaDefinition {
+  name: string;
+  owner?: string;
+  ifNotExists?: boolean;
+}
+
+export type CommentObjectType = 'SCHEMA' | 'TABLE' | 'COLUMN' | 'VIEW' | 'FUNCTION' | 'INDEX' | 'TYPE';
+
+export interface Comment {
+  objectType: CommentObjectType;
+  objectName: string;
+  schemaName?: string;
+  columnName?: string;
+  comment: string;
+}
+
 export interface Table {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
@@ -148,4 +164,6 @@ export interface Schema {
   triggers?: Trigger[];
   sequences?: Sequence[];
   extensions?: Extension[];
+  schemas?: SchemaDefinition[];
+  comments?: Comment[];
 }

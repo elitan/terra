@@ -46,6 +46,12 @@ export function findNodesByType(node: any, type: string): any[] {
  */
 export function extractTableNameFromCST(node: any): string | null {
   try {
+    // Handle member_expr type (schema.table notation)
+    if (node.name?.type === 'member_expr') {
+      return node.name.property?.name || node.name.property?.text || null;
+    }
+
+    // Handle direct identifier
     const fullName = node.name?.text || node.name?.name || null;
     if (!fullName) return null;
 
@@ -66,6 +72,12 @@ export function extractTableNameFromCST(node: any): string | null {
  */
 export function extractSchemaFromCST(node: any): string | undefined {
   try {
+    // Handle member_expr type (schema.table notation)
+    if (node.name?.type === 'member_expr') {
+      return node.name.object?.name || node.name.object?.text || undefined;
+    }
+
+    // Handle direct identifier
     const fullName = node.name?.text || node.name?.name || null;
     if (!fullName) return undefined;
 

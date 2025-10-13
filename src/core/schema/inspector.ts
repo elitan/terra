@@ -15,6 +15,8 @@ import type {
   Trigger,
   Sequence,
   Extension,
+  SchemaDefinition,
+  Comment,
 } from "../../types/schema";
 
 export class DatabaseInspector {
@@ -559,7 +561,7 @@ export class DatabaseInspector {
 
   // Get complete schema including all database objects
   async getCompleteSchema(client: Client, schemas: string[] = ['public']): Promise<Schema> {
-    const [tables, views, enumTypes, functions, procedures, triggers, sequences, extensions] = await Promise.all([
+    const [tables, views, enumTypes, functions, procedures, triggers, sequences, extensions, schemaDefinitions, comments] = await Promise.all([
       this.getCurrentSchema(client, schemas),
       this.getCurrentViews(client, schemas),
       this.getCurrentEnums(client, schemas),
@@ -568,6 +570,8 @@ export class DatabaseInspector {
       this.getCurrentTriggers(client, schemas),
       this.getCurrentSequences(client, schemas),
       this.getCurrentExtensions(client, schemas),
+      this.getCurrentSchemas(client, schemas),
+      this.getCurrentComments(client, schemas),
     ]);
 
     return {
@@ -579,6 +583,8 @@ export class DatabaseInspector {
       triggers,
       sequences,
       extensions,
+      schemas: schemaDefinitions,
+      comments,
     };
   }
 
@@ -812,6 +818,69 @@ export class DatabaseInspector {
       name: row.extension_name,
       schema: row.schema_name,
       version: row.version || undefined,
+    }));
+  }
+
+  // Get all user-created schemas from the database
+  async getCurrentSchemas(client: Client, schemas: string[] = ['public']): Promise<SchemaDefinition[]> {
+    const result = await client.query(`
+      SELECT
+        n.nspname as schema_name,
+        pg_get_userbyid(n.nspowner) as owner
+      FROM pg_namespace n
+      WHERE n.nspname = ANY($1::text[])
+        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND n.nspname NOT LIKE 'pg_%'
+      ORDER BY n.nspname
+    `, [schemas]);
+
+    return result.rows.map((row: any) => ({
+      name: row.schema_name,
+      owner: row.owner || undefined,
+      ifNotExists: false,
+    }));
+  }
+
+  // Get all comments from the database
+  async getCurrentComments(client: Client, schemas: string[] = ['public']): Promise<Comment[]> {
+    const comments: Comment[] = [];
+
+    const result = await client.query(`
+      SELECT
+        CASE c.relkind
+          WHEN 'r' THEN 'TABLE'
+          WHEN 'v' THEN 'VIEW'
+          WHEN 'm' THEN 'VIEW'
+          WHEN 'i' THEN 'INDEX'
+        END as object_type,
+        c.relname as object_name,
+        n.nspname as schema_name,
+        d.description as comment
+      FROM pg_class c
+      JOIN pg_namespace n ON c.relnamespace = n.oid
+      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+      WHERE n.nspname = ANY($1::text[])
+        AND c.relkind IN ('r', 'v', 'm', 'i')
+
+      UNION ALL
+
+      SELECT
+        'SCHEMA' as object_type,
+        n.nspname as object_name,
+        NULL as schema_name,
+        d.description as comment
+      FROM pg_namespace n
+      JOIN pg_description d ON d.objoid = n.oid
+      WHERE n.nspname = ANY($1::text[])
+
+      ORDER BY object_type, object_name
+    `, [schemas]);
+
+    return result.rows.map((row: any) => ({
+      objectType: row.object_type as Comment['objectType'],
+      objectName: row.object_name,
+      schemaName: row.schema_name || undefined,
+      comment: row.comment,
     }));
   }
 

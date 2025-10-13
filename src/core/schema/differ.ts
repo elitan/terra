@@ -22,6 +22,7 @@ import {
   generateDropForeignKeySQL,
   generateAddUniqueConstraintSQL,
   generateDropUniqueConstraintSQL,
+  getQualifiedTableName,
 } from "../../utils/sql";
 
 export class SchemaDiffer {
@@ -48,11 +49,13 @@ export class SchemaDiffer {
       } else {
         // Handle existing tables - ORDER MATTERS!
         const currentTable = currentTables.get(table.name)!;
+        const qualifiedName = getQualifiedTableName(table);
 
         // 1. First handle primary key changes that involve dropping constraints
         const primaryKeyDropStatements = this.generatePrimaryKeyDropStatements(
           table,
-          currentTable
+          currentTable,
+          qualifiedName
         );
         statements.push(...primaryKeyDropStatements);
 
@@ -66,7 +69,8 @@ export class SchemaDiffer {
         // 3. Finally handle primary key additions/modifications
         const primaryKeyAddStatements = this.generatePrimaryKeyAddStatements(
           table,
-          currentTable
+          currentTable,
+          qualifiedName
         );
         statements.push(...primaryKeyAddStatements);
 
@@ -81,7 +85,8 @@ export class SchemaDiffer {
         // Note: Skip explicit FK constraint drops if they'll be auto-dropped by column changes
         const constraintStatements = this.generateConstraintStatementsWithColumnContext(
           table,
-          currentTable
+          currentTable,
+          qualifiedName
         );
         statements.push(...constraintStatements);
       }
@@ -104,13 +109,14 @@ export class SchemaDiffer {
     // Handle constraints for new tables (created after table creation)
     for (const table of desiredSchema) {
       if (!currentTables.has(table.name)) {
+        const qualifiedName = getQualifiedTableName(table);
         // Generate foreign key constraints
         if (table.foreignKeys && table.foreignKeys.length > 0) {
           for (const fk of table.foreignKeys) {
-            statements.push(generateAddForeignKeySQL(table.name, fk));
+            statements.push(generateAddForeignKeySQL(qualifiedName, fk));
           }
         }
-        
+
         // Note: Check and unique constraints are already included in CREATE TABLE
         // Only foreign keys need to be added separately
       }
@@ -119,7 +125,8 @@ export class SchemaDiffer {
     // Handle dropped tables - constraint changes are handled above, just drop tables
     const tablesToDrop = currentSchema.filter(table => !desiredTables.has(table.name));
     for (const table of tablesToDrop) {
-      statements.push(`DROP TABLE ${table.name} CASCADE;`);
+      const qualifiedName = table.schema ? `${table.schema}.${table.name}` : table.name;
+      statements.push(`DROP TABLE ${qualifiedName} CASCADE;`);
     }
 
     // Separate statements into transactional and concurrent
@@ -154,10 +161,12 @@ export class SchemaDiffer {
       desiredTable.columns.map((c) => [c.name, c])
     );
 
+    const qualifiedTableName = getQualifiedTableName(desiredTable);
+
     // Add new columns
     for (const column of desiredTable.columns) {
       if (!currentColumns.has(column.name)) {
-        let statement = `ALTER TABLE ${desiredTable.name} ADD COLUMN ${column.name} ${column.type}`;
+        let statement = `ALTER TABLE ${qualifiedTableName} ADD COLUMN ${column.name} ${column.type}`;
         if (!column.nullable) statement += " NOT NULL";
         if (column.default) statement += ` DEFAULT ${column.default}`;
         statements.push(statement + ";");
@@ -168,7 +177,7 @@ export class SchemaDiffer {
           // Handle actual column modifications
           const modificationStatements =
             this.generateColumnModificationStatements(
-              desiredTable.name,
+              qualifiedTableName,
               column,
               currentColumn
             );
@@ -181,7 +190,7 @@ export class SchemaDiffer {
     for (const column of currentTable.columns) {
       if (!desiredColumns.has(column.name)) {
         statements.push(
-          `ALTER TABLE ${desiredTable.name} DROP COLUMN ${column.name};`
+          `ALTER TABLE ${qualifiedTableName} DROP COLUMN ${column.name};`
         );
       }
     }
@@ -451,7 +460,8 @@ export class SchemaDiffer {
 
   private generatePrimaryKeyDropStatements(
     desiredTable: Table,
-    currentTable: Table
+    currentTable: Table,
+    qualifiedName: string
   ): string[] {
     const statements: string[] = [];
 
@@ -467,7 +477,7 @@ export class SchemaDiffer {
     ) {
       statements.push(
         generateDropPrimaryKeySQL(
-          desiredTable.name,
+          qualifiedName,
           primaryKeyChange.currentPK!.name!
         )
       );
@@ -478,7 +488,8 @@ export class SchemaDiffer {
 
   private generatePrimaryKeyAddStatements(
     desiredTable: Table,
-    currentTable: Table
+    currentTable: Table,
+    qualifiedName: string
   ): string[] {
     const statements: string[] = [];
 
@@ -490,7 +501,7 @@ export class SchemaDiffer {
     // Only handle adds and the add part of modify operations
     if (primaryKeyChange.type === "add" || primaryKeyChange.type === "modify") {
       statements.push(
-        generateAddPrimaryKeySQL(desiredTable.name, primaryKeyChange.desiredPK!)
+        generateAddPrimaryKeySQL(qualifiedName, primaryKeyChange.desiredPK!)
       );
     }
 
@@ -683,7 +694,8 @@ export class SchemaDiffer {
 
   private generateConstraintStatementsWithColumnContext(
     desiredTable: Table,
-    currentTable: Table
+    currentTable: Table,
+    qualifiedName: string
   ): string[] {
     const statements: string[] = [];
 
@@ -694,7 +706,7 @@ export class SchemaDiffer {
 
     // Handle check constraints
     const checkStatements = this.generateCheckConstraintStatements(
-      desiredTable.name,
+      qualifiedName,
       desiredTable.checkConstraints || [],
       currentTable.checkConstraints || []
     );
@@ -702,7 +714,7 @@ export class SchemaDiffer {
 
     // Handle foreign key constraints (skip those that reference dropped columns)
     const foreignKeyStatements = this.generateForeignKeyStatements(
-      desiredTable.name,
+      qualifiedName,
       desiredTable.foreignKeys || [],
       currentTable.foreignKeys || [],
       droppedColumns
@@ -711,7 +723,7 @@ export class SchemaDiffer {
 
     // Handle unique constraints
     const uniqueStatements = this.generateUniqueConstraintStatements(
-      desiredTable.name,
+      qualifiedName,
       desiredTable.uniqueConstraints || [],
       currentTable.uniqueConstraints || []
     );
