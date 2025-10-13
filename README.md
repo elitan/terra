@@ -1,4 +1,20 @@
-# Terra
+<div align="center">
+  <img src="assets/readme-hero.png" alt="Terra - Declarative PostgreSQL schema management" />
+  <br />
+  <br />
+  <a href="https://github.com/elitan/terra/blob/main/LICENSE">
+    <img alt="MIT License" src="https://img.shields.io/github/license/elitan/terra" />
+  </a>
+  <a href="https://github.com/elitan/terra/stargazers">
+    <img alt="GitHub Stars" src="https://img.shields.io/github/stars/elitan/terra?style=social" />
+  </a>
+  <br />
+  <a href="https://x.com/elitasson">
+    <img alt="Twitter Follow" src="https://img.shields.io/twitter/follow/elitasson?style=social" />
+  </a>
+</div>
+
+<br />
 
 Declarative PostgreSQL schema management. Write CREATE statements, Terra generates the migrations.
 
