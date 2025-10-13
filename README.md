@@ -2,9 +2,6 @@
   <img src="assets/readme-hero.png" alt="Terra - Declarative PostgreSQL schema management" />
   <br />
   <br />
-  <a href="https://github.com/elitan/terra/blob/main/LICENSE">
-    <img alt="MIT License" src="https://img.shields.io/github/license/elitan/terra" />
-  </a>
   <a href="https://github.com/elitan/terra/stargazers">
     <img alt="GitHub Stars" src="https://img.shields.io/github/stars/elitan/terra?style=social" />
   </a>
