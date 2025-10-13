@@ -16,7 +16,9 @@
 
 <br />
 
-Declarative PostgreSQL schema management. Write CREATE statements, Terra generates the migrations.
+# Terra
+
+Declarative PostgreSQL schema management. 
 
 ## Install
 
