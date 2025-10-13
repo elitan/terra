@@ -155,6 +155,10 @@ export class SchemaParser {
     const commentRegex = /COMMENT\s+ON\s+(?:SCHEMA|TABLE|COLUMN|VIEW|FUNCTION|INDEX|TYPE)\s+[^;]+;/gi;
     cleanedSql = cleanedSql.replace(commentRegex, '');
 
+    // Preprocess PostGIS types to work around sql-parser-cst limitations
+    // Convert geography(point, 4326) -> geography('POINT', 4326)
+    cleanedSql = this.preprocessPostGISTypes(cleanedSql);
+
     try {
       const cst = parseCST(cleanedSql, {
         dialect: "postgresql",
@@ -314,5 +318,37 @@ export class SchemaParser {
     }
 
     return comments;
+  }
+
+  /**
+   * Preprocess PostGIS spatial types to work around sql-parser-cst limitations
+   * Converts unquoted geometry type names to string literals
+   * e.g., geography(point, 4326) -> geography('POINT', 4326)
+   */
+  private preprocessPostGISTypes(sql: string): string {
+    const spatialTypes = ['geography', 'geometry'];
+    const geometryTypes = [
+      'point', 'linestring', 'polygon', 'multipoint',
+      'multilinestring', 'multipolygon', 'geometrycollection',
+      'circularstring', 'compoundcurve', 'curvepolygon',
+      'multicurve', 'multisurface', 'polyhedralsurface',
+      'tin', 'triangle'
+    ];
+
+    let result = sql;
+
+    for (const spatialType of spatialTypes) {
+      for (const geomType of geometryTypes) {
+        const pattern = new RegExp(
+          `(${spatialType})\\s*\\(\\s*(${geomType})\\b`,
+          'gi'
+        );
+        result = result.replace(pattern, (match, spatial, geom) => {
+          return `${spatial}('${geom.toUpperCase()}'`;
+        });
+      }
+    }
+
+    return result;
   }
 }

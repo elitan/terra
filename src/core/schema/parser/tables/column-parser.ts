@@ -83,7 +83,13 @@ function extractDataType(node: any): string {
     // Handle type parameters (e.g., VARCHAR(255), DECIMAL(10,2))
     if (dataType.params?.expr?.items) {
       const params = dataType.params.expr.items
-        .map((item: any) => item.text || item.value)
+        .map((item: any) => {
+          // Handle string literals (including PostGIS types preprocessed as strings)
+          if (item.type === 'string_literal') {
+            return item.value;
+          }
+          return item.text || item.value;
+        })
         .join(",");
       type += `(${params})`;
     }

@@ -38,14 +38,19 @@ export class DatabaseInspector {
       const columnsResult = await client.query(
         `
         SELECT
-          column_name,
-          data_type,
-          character_maximum_length,
-          is_nullable,
-          column_default
-        FROM information_schema.columns
-        WHERE table_name = $1 AND table_schema = $2
-        ORDER BY ordinal_position
+          c.column_name,
+          c.data_type,
+          c.udt_name,
+          c.character_maximum_length,
+          c.is_nullable,
+          c.column_default,
+          format_type(a.atttypid, a.atttypmod) as pg_type
+        FROM information_schema.columns c
+        JOIN pg_attribute a ON a.attname = c.column_name
+        JOIN pg_class cls ON cls.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = cls.relnamespace
+        WHERE cls.relname = $1 AND n.nspname = $2 AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
       `,
         [tableName, tableSchema]
       );
@@ -59,6 +64,11 @@ export class DatabaseInspector {
           col.character_maximum_length
         ) {
           type = `character varying(${col.character_maximum_length})`;
+        }
+        // Handle USER-DEFINED types (including PostGIS types)
+        else if (col.data_type === "USER-DEFINED") {
+          // Use PostgreSQL's format_type which gives us the full type definition
+          type = col.pg_type;
         }
 
         return {
