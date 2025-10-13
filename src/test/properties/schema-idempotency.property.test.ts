@@ -31,9 +31,43 @@ describe("Property-Based: Schema Idempotency", () => {
   test("property: apply(schema) is always idempotent", async () => {
     await fc.assert(
       fc.asyncProperty(
-        tableSchema,
-        async (schema) => {
+        fc.constantFrom('idempotency_test'),
+        fc.array(
+          fc.record({
+            name: fc.constantFrom('col1', 'col2', 'col3', 'value', 'name'),
+            type: fc.constantFrom('TEXT', 'INTEGER', 'VARCHAR(255)', 'BOOLEAN'),
+            notNull: fc.boolean()
+          }),
+          { minLength: 1, maxLength: 3 }
+        ),
+        async (tableName, columns) => {
           try {
+            // Clean database before each property iteration
+            await cleanDatabase(client);
+
+            // Ensure unique column names
+            const uniqueColumns = Array.from(
+              new Map(columns.map(c => [c.name, c])).values()
+            );
+
+            const columnDefs = uniqueColumns.map(col => {
+              let def = `${col.name} ${col.type}`;
+              if (col.notNull) {
+                const defaultVal = col.type === 'TEXT' || col.type.includes('VARCHAR')
+                  ? "'default'"
+                  : col.type === 'BOOLEAN' ? 'true' : '0';
+                def += ` NOT NULL DEFAULT ${defaultVal}`;
+              }
+              return def;
+            }).join(',\n      ');
+
+            const schema = `
+              CREATE TABLE ${tableName} (
+                id SERIAL PRIMARY KEY,
+                ${columnDefs}
+              );
+            `.trim();
+
             // First apply
             await service.apply(schema, ['public'], true);
 
@@ -45,8 +79,7 @@ describe("Property-Based: Schema Idempotency", () => {
             expect(plan.transactional.length).toBe(0);
             expect(plan.concurrent.length).toBe(0);
           } catch (error) {
-            // Log schema that caused failure for debugging
-            console.error('Failed schema:', schema);
+            console.error('Failed with columns:', columns);
             throw error;
           }
         }
@@ -105,6 +138,9 @@ describe("Property-Based: Schema Idempotency", () => {
         fc.boolean(),
         async (colType, tblName, colName, notNull) => {
           try {
+            // Clean database before each property iteration
+            await cleanDatabase(client);
+
             const schema = `
               CREATE TABLE ${tblName} (
                 id SERIAL PRIMARY KEY,
@@ -139,12 +175,15 @@ describe("Property-Based: Schema Idempotency", () => {
     await fc.assert(
       fc.asyncProperty(
         fc.record({
-          tableName: fc.constantFrom('test1', 'test2', 'test3'),
+          tableName: fc.constantFrom('data_test'),
           columnName: fc.constantFrom('name', 'value', 'description')
         }),
         testDataArray('TEXT'),
         async ({ tableName, columnName }, testData) => {
           try {
+            // Clean database before each property iteration
+            await cleanDatabase(client);
+
             // Simple schema with TEXT column
             const schema = `
               CREATE TABLE ${tableName} (
@@ -196,6 +235,9 @@ describe("Property-Based: Schema Idempotency", () => {
         fc.constantFrom('col'),
         async (colType, tblName, colName) => {
           try {
+            // Clean database before each property iteration
+            await cleanDatabase(client);
+
             const schema = `
               CREATE TABLE ${tblName} (
                 id SERIAL PRIMARY KEY,
@@ -235,7 +277,7 @@ describe("Property-Based: Schema Idempotency", () => {
     await fc.assert(
       fc.asyncProperty(
         fc.record({
-          tableName: fc.constantFrom('test1', 'test2', 'test3'),
+          tableName: fc.constantFrom('nullable_test'),
           columnCount: fc.integer({ min: 1, max: 4 })
         }),
         async ({ tableName, columnCount }) => {
@@ -274,7 +316,7 @@ describe("Property-Based: Schema Idempotency", () => {
     await fc.assert(
       fc.asyncProperty(
         fc.record({
-          tableName: fc.constantFrom('test1', 'test2', 'test3'),
+          tableName: fc.constantFrom('notnull_test'),
           columnCount: fc.integer({ min: 1, max: 4 })
         }),
         async ({ tableName, columnCount }) => {

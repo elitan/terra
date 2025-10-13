@@ -271,15 +271,20 @@ describe("Property-Based: Type Normalization", () => {
         columnName,
         async (type1, type2, defaultValue, tblName, colName) => {
           try {
-            // Skip if types aren't in the same category (e.g., SMALLINT vs BIGINT might have range issues)
-            const isSameCategory =
-              (type1.toLowerCase().includes('int') && !type1.toLowerCase().includes('big') && !type1.toLowerCase().includes('small') &&
-               type2.toLowerCase().includes('int') && !type2.toLowerCase().includes('big') && !type2.toLowerCase().includes('small')) ||
-              (type1.toLowerCase().includes('small') && type2.toLowerCase().includes('small')) ||
-              (type1.toLowerCase().includes('big') && type2.toLowerCase().includes('big'));
+            // Clean database before each property iteration
+            await cleanDatabase(client);
 
-            if (!isSameCategory) {
-              return;
+            // Skip if types aren't in the same category (e.g., SMALLINT vs BIGINT vs INTEGER)
+            const getCategory = (t: string) => {
+              const lower = t.toLowerCase();
+              if (lower.includes('small') || lower === 'int2') return 'small';
+              if (lower.includes('big') || lower === 'int8') return 'big';
+              if (lower.includes('int') || lower === 'int4') return 'regular';
+              return 'other';
+            };
+
+            if (getCategory(type1) !== getCategory(type2)) {
+              return; // Skip incompatible type pairs
             }
 
             const schema1 = `
