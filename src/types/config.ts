@@ -4,4 +4,5 @@ export interface DatabaseConfig {
   database: string;
   user: string;
   password: string;
+  ssl?: boolean | { rejectUnauthorized?: boolean };
 }

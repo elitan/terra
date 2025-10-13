@@ -236,6 +236,66 @@ describe("Database Configuration", () => {
     });
   });
 
+  describe("SSL mode parsing", () => {
+    test("should parse sslmode=require", () => {
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db?sslmode=require";
+
+      const config = loadConfig();
+
+      expect(config.ssl).toEqual({ rejectUnauthorized: false });
+    });
+
+    test("should parse sslmode=prefer", () => {
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db?sslmode=prefer";
+
+      const config = loadConfig();
+
+      expect(config.ssl).toEqual({ rejectUnauthorized: false });
+    });
+
+    test("should parse sslmode=disable", () => {
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db?sslmode=disable";
+
+      const config = loadConfig();
+
+      expect(config.ssl).toBe(false);
+    });
+
+    test("should parse sslmode=verify-ca", () => {
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db?sslmode=verify-ca";
+
+      const config = loadConfig();
+
+      expect(config.ssl).toEqual({ rejectUnauthorized: true });
+    });
+
+    test("should parse sslmode=verify-full", () => {
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db?sslmode=verify-full";
+
+      const config = loadConfig();
+
+      expect(config.ssl).toEqual({ rejectUnauthorized: true });
+    });
+
+    test("should not set ssl when sslmode is not specified", () => {
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+
+      const config = loadConfig();
+
+      expect(config.ssl).toBeUndefined();
+    });
+
+    test("should handle Neon-style URL with sslmode", () => {
+      process.env.DATABASE_URL = "postgresql://user:pass@ep-twilight-moon.eu-central-1.aws.neon.tech/neondb?sslmode=require";
+
+      const config = loadConfig();
+
+      expect(config.host).toBe("ep-twilight-moon.eu-central-1.aws.neon.tech");
+      expect(config.database).toBe("neondb");
+      expect(config.ssl).toEqual({ rejectUnauthorized: false });
+    });
+  });
+
   describe("Edge cases", () => {
     test("should handle empty DATABASE_URL by falling back to individual vars", () => {
       process.env.DATABASE_URL = "";
