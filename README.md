@@ -17,7 +17,7 @@
 
 # Terra
 
-Declarative PostgreSQL schema management. 
+Declarative PostgreSQL schema management.
 
 ## Install
 
