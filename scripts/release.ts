@@ -32,8 +32,8 @@ function runCommand(command: string, args: string[] = []): { success: boolean; o
   };
 }
 
-function getCurrentVersion(): string {
-  const packageJson = require("../package.json");
+async function getCurrentVersion(): Promise<string> {
+  const packageJson = await Bun.file("package.json").json();
   return packageJson.version;
 }
 
@@ -112,9 +112,9 @@ async function main() {
     process.exit(1);
   }
   
-  const currentVersion = getCurrentVersion();
+  const currentVersion = await getCurrentVersion();
   console.log(chalk.blue(`📦 Current version: ${currentVersion}`));
-  
+
   // Bump version using npm
   console.log(chalk.yellow(`⬆️ Bumping ${versionType} version...`));
   const versionResult = runCommand("npm", ["version", versionType, "--no-git-tag-version"]);
@@ -122,8 +122,8 @@ async function main() {
     console.error(chalk.red(`❌ Failed to bump ${versionType} version`));
     process.exit(1);
   }
-  
-  const newVersion = getCurrentVersion();
+
+  const newVersion = await getCurrentVersion();
   console.log(chalk.green(`✅ Version bumped: ${currentVersion} → ${newVersion}`));
   
   // Stage the version change

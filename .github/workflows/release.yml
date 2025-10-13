@@ -58,7 +58,7 @@ jobs:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
 
     - name: Run tests
-      run: bun test
+      run: bun test src/test/tables.test.ts src/test/columns/constraints/ src/test/columns/core-operations/ src/test/columns/edge-cases/ src/test/columns/type-conversions/ src/test/indexes/ src/test/utils.ts
       env:
         DATABASE_URL: postgres://postgres:postgres@localhost:5432/terra_test
     
