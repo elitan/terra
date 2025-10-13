@@ -332,3 +332,183 @@ export const testDataForType = (type: string): fc.Arbitrary<any> => {
 export const testDataArray = (type: string) => {
   return fc.array(testDataForType(type), { minLength: 5, maxLength: 20 });
 };
+
+/**
+ * Foreign key action types (ON DELETE / ON UPDATE)
+ */
+export const fkAction = fc.constantFrom(
+  'CASCADE',
+  'SET NULL',
+  'SET DEFAULT',
+  'RESTRICT',
+  'NO ACTION'
+);
+
+/**
+ * Constraint name generator
+ */
+export const constraintName = (prefix: string) => fc.constantFrom(
+  `${prefix}_constraint`,
+  `${prefix}_fk`,
+  `${prefix}_unique`,
+  `${prefix}_check`
+);
+
+/**
+ * Generate a foreign key constraint definition
+ * Returns a table pair with parent table, child table, and FK constraint
+ */
+export const foreignKeyConstraint = fc.record({
+  parentTable: tableName,
+  childTable: tableName,
+  parentColumn: columnName,
+  childColumn: columnName,
+  onDelete: fkAction,
+  onUpdate: fkAction,
+  constraintName: constraintName('fk')
+}).filter(fk => fk.parentTable !== fk.childTable); // Ensure different tables
+
+/**
+ * Generate a unique constraint definition
+ */
+export const uniqueConstraint = fc.record({
+  tableName: tableName,
+  columns: fc.array(columnName, { minLength: 1, maxLength: 3 }),
+  constraintName: constraintName('uq')
+}).map(uc => ({
+  ...uc,
+  // Ensure unique column names
+  columns: Array.from(new Set(uc.columns))
+}));
+
+/**
+ * Generate a check constraint expression
+ * Only generates numeric comparisons to ensure type compatibility
+ */
+export const checkExpression = fc.oneof(
+  fc.record({
+    column: columnName,
+    operator: fc.constantFrom('>', '>=', '<', '<='),
+    value: fc.integer({ min: 0, max: 100 })
+  }).map(e => `${e.column} ${e.operator} ${e.value}`),
+
+  fc.record({
+    column: columnName,
+    min: fc.integer({ min: 0, max: 50 }),
+    max: fc.integer({ min: 51, max: 100 })
+  }).map(e => `${e.column} BETWEEN ${e.min} AND ${e.max}`)
+);
+
+/**
+ * Generate a check constraint definition
+ */
+export const checkConstraint = fc.record({
+  tableName: tableName,
+  expression: checkExpression,
+  constraintName: constraintName('chk')
+});
+
+/**
+ * Generate an index name
+ */
+export const indexName = fc.constantFrom(
+  'idx_users',
+  'idx_products',
+  'idx_orders',
+  'idx_items',
+  'idx_created',
+  'idx_status'
+);
+
+/**
+ * Generate a WHERE clause for partial indexes
+ */
+export const partialIndexWhere = fc.oneof(
+  fc.constant('active = true'),
+  fc.constant('deleted = false'),
+  fc.constant('status = \'active\''),
+  fc.record({
+    column: columnName,
+    operator: fc.constantFrom('>', '>='),
+    value: fc.integer({ min: 0, max: 100 })
+  }).map(e => `${e.column} ${e.operator} ${e.value}`),
+  fc.constant('created_at > CURRENT_DATE - INTERVAL \'30 days\'')
+);
+
+/**
+ * Generate an index definition
+ */
+export const indexDefinition = fc.record({
+  name: indexName,
+  tableName: tableName,
+  columns: fc.array(columnName, { minLength: 1, maxLength: 3 }),
+  unique: fc.boolean(),
+  method: fc.constantFrom('btree', 'hash', 'gin', 'gist'),
+  where: fc.option(partialIndexWhere, { nil: null })
+}).map(idx => ({
+  ...idx,
+  // Ensure unique column names
+  columns: Array.from(new Set(idx.columns))
+}));
+
+/**
+ * Generate an expression index definition
+ */
+export const expressionIndex = fc.record({
+  name: indexName,
+  tableName: tableName,
+  column: columnName,
+  expression: fc.constantFrom(
+    'LOWER',
+    'UPPER',
+    'TRIM',
+    'LENGTH'
+  )
+}).map(idx => ({
+  name: idx.name,
+  tableName: idx.tableName,
+  expression: `${idx.expression}(${idx.column})`
+}));
+
+/**
+ * Generate a simple SELECT query for views
+ */
+export const simpleViewQuery = fc.record({
+  sourceTable: tableName,
+  columns: fc.array(columnName, { minLength: 1, maxLength: 4 }),
+  whereClause: fc.option(partialIndexWhere, { nil: null })
+}).map(q => {
+  const uniqueCols = Array.from(new Set(q.columns));
+  const cols = uniqueCols.join(', ');
+  const where = q.whereClause ? ` WHERE ${q.whereClause}` : '';
+  return {
+    sourceTable: q.sourceTable,
+    query: `SELECT ${cols} FROM ${q.sourceTable}${where}`
+  };
+});
+
+/**
+ * Generate a view definition
+ */
+export const viewDefinition = fc.record({
+  viewName: fc.constantFrom('active_view', 'summary_view', 'recent_view', 'filtered_view'),
+  sourceTable: tableName,
+  query: simpleViewQuery
+}).map(v => ({
+  viewName: v.viewName,
+  sourceTable: v.query.sourceTable,
+  query: v.query.query
+}));
+
+/**
+ * Generate a materialized view definition
+ */
+export const materializedViewDefinition = fc.record({
+  viewName: fc.constantFrom('active_mv', 'summary_mv', 'recent_mv', 'stats_mv'),
+  sourceTable: tableName,
+  query: simpleViewQuery
+}).map(v => ({
+  viewName: v.viewName,
+  sourceTable: v.query.sourceTable,
+  query: v.query.query
+}));
