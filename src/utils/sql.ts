@@ -16,6 +16,7 @@ export function normalizeType(type: string): string {
     "character varying": "VARCHAR",
     text: "TEXT",
     boolean: "BOOLEAN",
+    bool: "BOOLEAN",
     "timestamp without time zone": "TIMESTAMP",
     // PostgreSQL treats INT and INTEGER as the same type
     int: "INTEGER",
