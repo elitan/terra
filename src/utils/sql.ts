@@ -24,11 +24,22 @@ export function normalizeType(type: string): string {
     int8: "BIGINT",
     smallint: "SMALLINT",
     bigint: "BIGINT",
+    // PostgreSQL treats DECIMAL and NUMERIC as the same type
+    decimal: "NUMERIC",
   };
 
   // Handle VARCHAR with length
   if (type.startsWith("character varying")) {
     return type.replace("character varying", "VARCHAR");
+  }
+
+  // Handle NUMERIC/DECIMAL with precision and scale
+  if (type.toLowerCase().startsWith("numeric(") || type.toLowerCase().startsWith("decimal(")) {
+    // Extract precision and scale: numeric(10,2) -> NUMERIC(10,2)
+    const match = type.match(/^(numeric|decimal)\((\d+),(\d+)\)$/i);
+    if (match) {
+      return `NUMERIC(${match[2]},${match[3]})`;
+    }
   }
 
   // Normalize to lowercase first for case-insensitive matching
@@ -108,6 +119,23 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
     return true;
   }
 
+  // Check if generated column info is different
+  if (desired.generated || current.generated) {
+    // If one has generated and the other doesn't, they're different
+    if (!desired.generated || !current.generated) {
+      return true;
+    }
+
+    // Compare generated properties
+    if (
+      desired.generated.always !== current.generated.always ||
+      desired.generated.stored !== current.generated.stored ||
+      desired.generated.expression !== current.generated.expression
+    ) {
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -116,6 +144,9 @@ export function generateCreateTableStatement(table: Table): string {
     let def = `${col.name} ${col.type}`;
     if (!col.nullable) def += " NOT NULL";
     if (col.default) def += ` DEFAULT ${col.default}`;
+    if (col.generated) {
+      def += ` GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+    }
     return def;
   });
 

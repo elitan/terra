@@ -3,6 +3,11 @@ export interface Column {
   type: string;
   nullable: boolean;
   default?: string;
+  generated?: {
+    always: boolean;
+    expression: string;
+    stored: boolean;
+  };
 }
 
 export interface PrimaryKeyConstraint {

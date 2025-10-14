@@ -169,6 +169,9 @@ export class SchemaDiffer {
         let statement = `ALTER TABLE ${qualifiedTableName} ADD COLUMN ${column.name} ${column.type}`;
         if (!column.nullable) statement += " NOT NULL";
         if (column.default) statement += ` DEFAULT ${column.default}`;
+        if (column.generated) {
+          statement += ` GENERATED ${column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${column.generated.expression}) ${column.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+        }
         statements.push(statement + ";");
       } else {
         // Check for column modifications
@@ -204,6 +207,28 @@ export class SchemaDiffer {
     currentColumn: Column
   ): string[] {
     const statements: string[] = [];
+
+    // Special handling for generated columns - they need drop and recreate
+    const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
+      (!desiredColumn.generated || !currentColumn.generated ||
+       desiredColumn.generated.expression !== currentColumn.generated.expression ||
+       desiredColumn.generated.always !== currentColumn.generated.always ||
+       desiredColumn.generated.stored !== currentColumn.generated.stored);
+
+    if (generatedChanging) {
+      // Drop the column and recreate it
+      statements.push(`ALTER TABLE ${tableName} DROP COLUMN ${desiredColumn.name};`);
+
+      let addStatement = `ALTER TABLE ${tableName} ADD COLUMN ${desiredColumn.name} ${desiredColumn.type}`;
+      if (!desiredColumn.nullable) addStatement += " NOT NULL";
+      if (desiredColumn.default) addStatement += ` DEFAULT ${desiredColumn.default}`;
+      if (desiredColumn.generated) {
+        addStatement += ` GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+      }
+      statements.push(addStatement + ";");
+
+      return statements;
+    }
 
     const normalizedDesiredType = normalizeType(desiredColumn.type);
     const normalizedCurrentType = normalizeType(currentColumn.type);

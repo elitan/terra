@@ -38,15 +38,23 @@ export class DatabaseInspector {
       const columnsResult = await client.query(
         `
         SELECT
-          c.column_name,
-          c.data_type,
-          c.udt_name,
-          c.character_maximum_length,
-          c.is_nullable,
-          c.column_default,
-          format_type(a.atttypid, a.atttypmod) as pg_type
-        FROM information_schema.columns c
-        JOIN pg_attribute a ON a.attname = c.column_name
+          a.attname as column_name,
+          format_type(a.atttypid, a.atttypmod) as data_type,
+          format_type(a.atttypid, a.atttypmod) as pg_type,
+          CASE
+            WHEN a.atttypmod > 0 AND format_type(a.atttypid, a.atttypmod) LIKE '%(%'
+            THEN substring(format_type(a.atttypid, a.atttypmod) FROM '\\((\\d+)')::int
+            ELSE NULL
+          END as character_maximum_length,
+          NOT a.attnotnull as is_nullable,
+          pg_get_expr(ad.adbin, ad.adrelid) as column_default,
+          a.attgenerated,
+          CASE
+            WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
+            ELSE NULL
+          END as generation_expression
+        FROM pg_attribute a
+        LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = cls.relnamespace
         WHERE cls.relname = $1 AND n.nspname = $2 AND a.attnum > 0 AND NOT a.attisdropped
@@ -56,26 +64,33 @@ export class DatabaseInspector {
       );
 
       const columns: Column[] = columnsResult.rows.map((col: any) => {
-        let type = col.data_type;
+        let type = col.pg_type;
 
-        // Handle character varying with length
-        if (
-          col.data_type === "character varying" &&
-          col.character_maximum_length
-        ) {
-          type = `character varying(${col.character_maximum_length})`;
-        }
-        // Handle USER-DEFINED types (including PostGIS types)
-        else if (col.data_type === "USER-DEFINED") {
-          // Use PostgreSQL's format_type which gives us the full type definition
-          type = col.pg_type;
+        // Parse generated column info
+        let generated: Column['generated'] | undefined = undefined;
+        let defaultValue = col.column_default;
+
+        if (col.attgenerated && col.attgenerated !== '') {
+          const always = col.attgenerated === 's' || col.attgenerated === 'a';
+          const stored = col.attgenerated === 's';
+          const expression = col.generation_expression || '';
+
+          generated = {
+            always,
+            expression,
+            stored,
+          };
+
+          // Generated columns don't have defaults in the traditional sense
+          defaultValue = undefined;
         }
 
         return {
           name: col.column_name,
           type: type,
-          nullable: col.is_nullable === "YES",
-          default: col.column_default,
+          nullable: col.is_nullable,
+          default: defaultValue,
+          generated,
         };
       });
 

@@ -5,7 +5,7 @@
  */
 
 import { Logger } from "../../../../utils/logger";
-import { serializeDefaultValue } from "../expressions";
+import { serializeDefaultValue, serializeExpression } from "../expressions";
 import type { Column } from "../../../../types/schema";
 
 /**
@@ -58,11 +58,15 @@ export function parseColumn(node: any): Column | null {
     // Extract default value
     const defaultValue = extractDefaultValue(node);
 
+    // Extract generated column info
+    const generated = extractGeneratedColumn(node);
+
     return {
       name,
       type,
       nullable: !constraints.notNull && !constraints.primary,
       default: defaultValue,
+      generated,
     };
   } catch (error) {
     Logger.warning(
@@ -148,6 +152,39 @@ function extractDefaultValue(node: any): string | undefined {
     }
   } catch (error) {
     // Ignore extraction errors
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract generated column info from column CST node
+ */
+function extractGeneratedColumn(node: any): Column['generated'] | undefined {
+  try {
+    if (node.constraints && Array.isArray(node.constraints)) {
+      for (const constraint of node.constraints) {
+        if (constraint.type === "constraint_generated") {
+          const always = constraint.generatedKw?.some((kw: any) =>
+            kw.text?.toUpperCase() === "ALWAYS"
+          ) ?? false;
+
+          const stored = constraint.storageKw?.text?.toUpperCase() === "STORED";
+
+          const expression = constraint.expr ? serializeExpression(constraint.expr) : "";
+
+          return {
+            always,
+            expression,
+            stored,
+          };
+        }
+      }
+    }
+  } catch (error) {
+    Logger.warning(
+      `Failed to extract generated column info: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 
   return undefined;

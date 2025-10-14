@@ -364,6 +364,34 @@ export class SchemaParser {
   private preprocessReservedKeywords(sql: string): string {
     let result = sql;
 
+    // Find all GENERATED ALWAYS AS (...) blocks to skip processing inside them
+    // We need to preserve SQL keywords like CAST, CASE inside these expressions
+    const generatedBlocks: Array<{start: number, end: number}> = [];
+    const generatedPattern = /GENERATED\s+ALWAYS\s+AS\s*\(/gi;
+    let match;
+
+    while ((match = generatedPattern.exec(sql)) !== null) {
+      const startPos = match.index + match[0].length - 1; // Position of opening '('
+      let depth = 1;
+      let pos = startPos + 1;
+
+      // Find the matching closing parenthesis
+      while (pos < sql.length && depth > 0) {
+        if (sql[pos] === '(') depth++;
+        else if (sql[pos] === ')') depth--;
+        pos++;
+      }
+
+      if (depth === 0) {
+        generatedBlocks.push({ start: startPos, end: pos });
+      }
+    }
+
+    // Helper function to check if a position is inside a GENERATED block
+    const isInsideGeneratedBlock = (pos: number): boolean => {
+      return generatedBlocks.some(block => pos >= block.start && pos < block.end);
+    };
+
     // List of SQL keywords that should NOT be quoted (structural keywords)
     const structuralKeywords = new Set([
       'CREATE', 'TABLE', 'INDEX', 'VIEW', 'TYPE', 'ENUM', 'FUNCTION', 'PROCEDURE',
@@ -387,42 +415,56 @@ export class SchemaParser {
 
     // Pattern to match column definitions: word followed by a data type
     // This matches: "identifier TYPE" where TYPE could be INT, VARCHAR, etc.
-    const columnPattern = /\b([a-z_][a-z0-9_]*)\s+(INT|INTEGER|BIGINT|SMALLINT|SERIAL|BIGSERIAL|SMALLSERIAL|DECIMAL|NUMERIC|REAL|DOUBLE|FLOAT|BOOLEAN|BOOL|CHAR|VARCHAR|TEXT|DATE|TIME|TIMESTAMP|TIMESTAMPTZ|INTERVAL|JSON|JSONB|UUID|BYTEA|ARRAY|POINT|LINE|LSEG|BOX|PATH|POLYGON|CIRCLE|CIDR|INET|MACADDR|BIT|VARBIT|MONEY|XML|TSVECTOR|TSQUERY|GEOMETRY|GEOGRAPHY)\b/gi;
+    // Must be preceded by newline, comma, or opening paren to avoid matching inside expressions
+    const columnPattern = /(^|[\n,\(])\s*([a-z_][a-z0-9_]*)\s+(INT|INTEGER|BIGINT|SMALLINT|SERIAL|BIGSERIAL|SMALLSERIAL|DECIMAL|NUMERIC|REAL|DOUBLE|FLOAT|BOOLEAN|BOOL|CHAR|VARCHAR|TEXT|DATE|TIME|TIMESTAMP|TIMESTAMPTZ|INTERVAL|JSON|JSONB|UUID|BYTEA|ARRAY|POINT|LINE|LSEG|BOX|PATH|POLYGON|CIRCLE|CIDR|INET|MACADDR|BIT|VARBIT|MONEY|XML|TSVECTOR|TSQUERY|GEOMETRY|GEOGRAPHY)\b/gi;
 
-    result = result.replace(columnPattern, (match, identifier, type) => {
+    result = result.replace(columnPattern, (match, prefix, identifier, type, offset) => {
+      // Skip if this match is inside a GENERATED ALWAYS AS block
+      if (isInsideGeneratedBlock(offset)) {
+        return match;
+      }
+
       const upperIdent = identifier.toUpperCase();
 
       // Check if this identifier is a reserved keyword but NOT a structural keyword
       if (upperIdent in postgresqlKeywords && !structuralKeywords.has(upperIdent)) {
-        return `"${identifier}" ${type}`;
+        return `${prefix}"${identifier}" ${type}`;
       }
 
       return match;
     });
 
-    // Pattern to match identifiers in constraint/index column lists: (col1, col2, ...)
+    // Pattern to match identifiers in constraint/index column lists and expressions: (col1, col2, ...)
     // This handles UNIQUE (company_id, year) or PRIMARY KEY (id, year)
+    // AND handles column references inside GENERATED expressions like cast(year as text)
     const constraintPattern = /\(([^)]+)\)/g;
 
-    result = result.replace(constraintPattern, (match, contents) => {
-      const columns = contents.split(',').map((col: string) => {
-        const trimmed = col.trim();
-        const identMatch = trimmed.match(/^([a-z_][a-z0-9_]*)/i);
+    result = result.replace(constraintPattern, (match, contents, offset) => {
+      // Process ALL identifiers, including those inside GENERATED blocks
+      // We need to quote reserved identifiers like "year" even inside expressions
 
-        if (identMatch) {
-          const identifier = identMatch[1];
-          const upperIdent = identifier.toUpperCase();
+      // SQL keywords that must NOT be quoted (they need to function as keywords)
+      const sqlKeywords = new Set(['CAST', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'LOWER', 'UPPER', 'TRIM', 'SUBSTRING', 'COALESCE', 'NULLIF', 'REGEXP_REPLACE']);
 
-          // Check if this identifier is a reserved keyword but NOT a structural keyword
-          if (upperIdent in postgresqlKeywords && !structuralKeywords.has(upperIdent)) {
-            return trimmed.replace(identifier, `"${identifier}"`);
-          }
+      // Replace all identifiers within the parentheses
+      // But skip identifiers that are already quoted
+      const processed = contents.replace(/\b([a-z_][a-z0-9_]*)\b/gi, (identMatch, identifier, offset) => {
+        // Check if this identifier is already quoted (has a " before it)
+        if (offset > 0 && contents[offset - 1] === '"') {
+          return identifier; // Already quoted, leave it alone
         }
 
-        return trimmed;
+        const upperIdent = identifier.toUpperCase();
+
+        // Check if this identifier is a reserved keyword but NOT a structural/SQL keyword
+        if (upperIdent in postgresqlKeywords && !structuralKeywords.has(upperIdent) && !sqlKeywords.has(upperIdent)) {
+          return `"${identifier}"`;
+        }
+
+        return identifier;
       });
 
-      return `(${columns.join(', ')})`;
+      return `(${processed})`;
     });
 
     return result;

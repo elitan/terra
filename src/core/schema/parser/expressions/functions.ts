@@ -53,11 +53,25 @@ export function serializeFunctionCall(expr: any, serializeExpr: (e: any) => stri
 export function serializeCaseExpr(expr: any, serializeExpr: (e: any) => string): string {
   let result = "CASE";
 
+  // Handle CASE expr WHEN ... (simple case)
   if (expr.expr) {
     result += ` ${serializeExpr(expr.expr)}`;
   }
 
-  if (expr.whenList && Array.isArray(expr.whenList)) {
+  // Handle clauses (when/else)
+  if (expr.clauses && Array.isArray(expr.clauses)) {
+    for (const clause of expr.clauses) {
+      if (clause.type === "case_when") {
+        const condition = serializeExpr(clause.condition);
+        const clauseResult = serializeExpr(clause.result);
+        result += ` WHEN ${condition} THEN ${clauseResult}`;
+      } else if (clause.type === "case_else") {
+        result += ` ELSE ${serializeExpr(clause.result)}`;
+      }
+    }
+  }
+  // Legacy support for whenList structure
+  else if (expr.whenList && Array.isArray(expr.whenList)) {
     for (const whenClause of expr.whenList) {
       const when = serializeExpr(whenClause.when);
       const then = serializeExpr(whenClause.then);
@@ -65,6 +79,7 @@ export function serializeCaseExpr(expr: any, serializeExpr: (e: any) => string):
     }
   }
 
+  // Legacy support for else property
   if (expr.else) {
     result += ` ELSE ${serializeExpr(expr.else)}`;
   }
