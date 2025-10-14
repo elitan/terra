@@ -361,7 +361,8 @@ export class SchemaService {
         const isUsed = await this.isEnumTypeUsed(currentEnum.name, client, schemas);
         
         if (!isUsed) {
-          statements.push(`DROP TYPE ${currentEnum.name};`);
+          const fullName = currentEnum.schema ? `${currentEnum.schema}.${currentEnum.name}` : currentEnum.name;
+          statements.push(`DROP TYPE ${fullName};`);
           Logger.info(`Dropping unused ENUM type '${currentEnum.name}'`);
         } else {
           Logger.warning(
@@ -447,8 +448,9 @@ export class SchemaService {
       Logger.info(`ENUM type '${desiredEnum.name}' values already match, no changes needed`);
     } else if (isOnlyAppending) {
       // Only adding values at the end - safe operation using ALTER TYPE ADD VALUE
+      const fullName = desiredEnum.schema ? `${desiredEnum.schema}.${desiredEnum.name}` : desiredEnum.name;
       for (const value of valuesToAdd) {
-        statements.push(`ALTER TYPE ${desiredEnum.name} ADD VALUE '${value}';`);
+        statements.push(`ALTER TYPE ${fullName} ADD VALUE '${value}';`);
         Logger.info(`Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
       }
     } else {
@@ -477,7 +479,8 @@ export class SchemaService {
 
   private generateCreateTypeStatement(enumType: EnumType): string {
     const values = enumType.values.map(value => `'${value}'`).join(', ');
-    return `CREATE TYPE ${enumType.name} AS ENUM (${values});`;
+    const fullName = enumType.schema ? `${enumType.schema}.${enumType.name}` : enumType.name;
+    return `CREATE TYPE ${fullName} AS ENUM (${values});`;
   }
 
   private generateViewStatements(desiredViews: View[], currentViews: View[]): string[] {

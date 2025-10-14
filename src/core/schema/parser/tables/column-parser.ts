@@ -87,6 +87,14 @@ function extractDataType(node: any): string {
 
     // Get the type name
     let type = dataType.name?.text || dataType.name?.name || "UNKNOWN";
+
+    // Handle schema-qualified types that were preprocessed into quoted identifiers
+    // e.g., "my_schema.my_enum" should be stored as is (with quotes removed)
+    if (type.startsWith('"') && type.endsWith('"') && type.includes('.')) {
+      // Remove quotes and preserve the schema.type format
+      return type.slice(1, -1);
+    }
+
     type = type.toUpperCase();
 
     // Handle type parameters (e.g., VARCHAR(255), DECIMAL(10,2))

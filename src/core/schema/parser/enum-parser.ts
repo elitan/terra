@@ -14,8 +14,22 @@ import type { EnumType } from "../../../types/schema";
 export function parseCreateType(node: any): EnumType | null {
   try {
     // Extract type name and schema
-    const fullName = node.name?.text || node.name?.name || null;
-    const { name: typeName, schema } = extractNameAndSchema(fullName);
+    let fullName: string | null = null;
+    let schema: string | undefined;
+    let typeName: string | null = null;
+
+    // Handle member_expr (schema.typename)
+    if (node.name?.type === 'member_expr') {
+      schema = node.name.object?.text || node.name.object?.name || undefined;
+      typeName = node.name.property?.text || node.name.property?.name || null;
+    } else {
+      // Handle simple identifier or fallback
+      fullName = node.name?.text || node.name?.name || null;
+      const result = extractNameAndSchema(fullName);
+      typeName = result.name;
+      schema = result.schema;
+    }
+
     if (!typeName) return null;
 
     // Check if this is an ENUM type

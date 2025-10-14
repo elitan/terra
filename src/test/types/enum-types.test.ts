@@ -488,7 +488,7 @@ describe("ENUM Types", () => {
       const schema = `
         CREATE TYPE status AS ENUM ('active', 'inactive');
         CREATE TYPE status AS ENUM ('pending', 'complete');
-        
+
         CREATE TABLE users (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL
@@ -501,7 +501,7 @@ describe("ENUM Types", () => {
     it("should reject ENUM types with duplicate values", async () => {
       const schema = `
         CREATE TYPE status AS ENUM ('active', 'inactive', 'active');
-        
+
         CREATE TABLE users (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
@@ -515,7 +515,7 @@ describe("ENUM Types", () => {
     it("should reject empty ENUM types", async () => {
       const schema = `
         CREATE TYPE empty_enum AS ENUM ();
-        
+
         CREATE TABLE test (
           id SERIAL PRIMARY KEY,
           empty_field empty_enum
@@ -523,6 +523,75 @@ describe("ENUM Types", () => {
       `;
 
       await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
+    });
+  });
+
+  describe("Schema-Qualified ENUM Types", () => {
+    it("should handle schema-qualified ENUM types in column definitions", async () => {
+      const schema = `
+        CREATE SCHEMA myapp;
+
+        CREATE TYPE myapp.status AS ENUM ('active', 'inactive', 'pending');
+
+        CREATE TABLE myapp.users (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          status myapp.status NOT NULL
+        );
+      `;
+
+      await schemaService.apply(schema, ['myapp'], true);
+
+      const result = await client.query(`
+        SELECT column_name, udt_schema, udt_name
+        FROM information_schema.columns
+        WHERE table_schema = 'myapp' AND table_name = 'users' AND column_name = 'status'
+      `);
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].udt_schema).toBe('myapp');
+      expect(result.rows[0].udt_name).toBe('status');
+    });
+
+    it("should handle schema-qualified ENUM types with default values", async () => {
+      const schema = `
+        CREATE SCHEMA app;
+
+        CREATE TYPE app.priority AS ENUM ('low', 'medium', 'high');
+
+        CREATE TABLE app.tasks (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          priority app.priority NOT NULL DEFAULT 'medium'
+        );
+      `;
+
+      await schemaService.apply(schema, ['app'], true);
+
+      await client.query(`INSERT INTO app.tasks (title) VALUES ('Test task')`);
+      const result = await client.query(`SELECT title, priority FROM app.tasks`);
+      expect(result.rows[0]).toEqual({ title: 'Test task', priority: 'medium' });
+    });
+
+    it("should handle schema-qualified ENUM types with multiple constraints", async () => {
+      const schema = `
+        CREATE SCHEMA myapp;
+
+        CREATE TYPE myapp.user_role AS ENUM ('admin', 'user', 'guest');
+
+        CREATE TABLE myapp.users (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          role myapp.user_role NOT NULL,
+          UNIQUE (name, role)
+        );
+      `;
+
+      await schemaService.apply(schema, ['myapp'], true);
+
+      await client.query(`INSERT INTO myapp.users (name, role) VALUES ('John', 'admin')`);
+      await expect(
+        client.query(`INSERT INTO myapp.users (name, role) VALUES ('John', 'admin')`)
+      ).rejects.toThrow();
     });
   });
 });

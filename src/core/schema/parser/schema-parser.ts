@@ -163,6 +163,10 @@ export class SchemaParser {
     // Convert year int -> "year" int
     cleanedSql = this.preprocessReservedKeywords(cleanedSql);
 
+    // Preprocess schema-qualified type names to work around sql-parser-cst limitations
+    // Convert schema_name.type_name -> "schema_name.type_name"
+    cleanedSql = this.preprocessSchemaQualifiedTypes(cleanedSql);
+
     try {
       const cst = parseCST(cleanedSql, {
         dialect: "postgresql",
@@ -440,6 +444,12 @@ export class SchemaParser {
     const constraintPattern = /\(([^)]+)\)/g;
 
     result = result.replace(constraintPattern, (match, contents, offset) => {
+      // Skip ENUM definitions - check if preceded by "AS ENUM"
+      const preContext = result.substring(Math.max(0, offset - 20), offset);
+      if (/AS\s+ENUM\s*$/i.test(preContext)) {
+        return match; // Don't process ENUM values
+      }
+
       // Process ALL identifiers, including those inside GENERATED blocks
       // We need to quote reserved identifiers like "year" even inside expressions
 
@@ -447,7 +457,7 @@ export class SchemaParser {
       const sqlKeywords = new Set(['CAST', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'LOWER', 'UPPER', 'TRIM', 'SUBSTRING', 'COALESCE', 'NULLIF', 'REGEXP_REPLACE']);
 
       // Replace all identifiers within the parentheses
-      // But skip identifiers that are already quoted
+      // But skip identifiers that are already quoted or string literals
       const processed = contents.replace(/\b([a-z_][a-z0-9_]*)\b/gi, (identMatch, identifier, offset) => {
         // Check if this identifier is already quoted (has a " before it)
         if (offset > 0 && contents[offset - 1] === '"') {
@@ -468,5 +478,20 @@ export class SchemaParser {
     });
 
     return result;
+  }
+
+  /**
+   * Preprocess schema-qualified type names to work around sql-parser-cst limitations
+   * Converts schema.type_name to a quoted composite string "schema.type_name"
+   * e.g., my_schema.my_enum -> "my_schema.my_enum"
+   */
+  private preprocessSchemaQualifiedTypes(sql: string): string {
+    // Pattern matches column definitions with schema-qualified types
+    // Matches: column_name schema.type_name
+    // Must be preceded by whitespace, comma, or opening paren (start of column definition)
+    // Schema name and type name must not be inside quotes (to avoid modifying DEFAULT 'value')
+    const qualifiedTypePattern = /((?:^|[\s,\(])[a-z_][a-z0-9_]*\s+)([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)(?=\s*(?:,|\)|NOT|NULL|DEFAULT|CHECK|UNIQUE|PRIMARY|REFERENCES|CONSTRAINT|;))/gi;
+
+    return sql.replace(qualifiedTypePattern, '$1"$2.$3"');
   }
 }
