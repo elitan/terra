@@ -232,13 +232,13 @@ export class SchemaParser {
     const schemas: SchemaDefinition[] = [];
     const comments: Comment[] = [];
 
-    // Handle empty SQL
+    // Auto-quote reserved keywords that are commonly used as column names
+    sql = this.autoQuoteReservedKeywords(sql);
+
+    // Handle empty SQL (after keyword quoting to preserve empty checks correctly)
     if (!sql || sql.trim() === '') {
       return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
     }
-
-    // Auto-quote reserved keywords that are commonly used as column names
-    sql = this.autoQuoteReservedKeywords(sql);
 
     try {
       const ast = await parse(sql);
