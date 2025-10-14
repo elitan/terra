@@ -208,16 +208,10 @@ export class DatabaseInspector {
           ELSE NULL
         END as where_clause
       FROM pg_indexes i
-      JOIN pg_class c ON c.relname = i.tablename
-      JOIN pg_index ix ON ix.indexrelid = (
-        SELECT oid FROM pg_class WHERE relname = i.indexname
-      )
-      JOIN pg_am am ON am.oid = (
-        SELECT pg_class.relam FROM pg_class WHERE relname = i.indexname
-      )
-      -- Join with pg_class again to get the index relation for storage options
-      JOIN pg_class ic ON ic.oid = ix.indexrelid
-      -- Left join with pg_tablespace to get tablespace name
+      JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = i.schemaname)
+      JOIN pg_class ic ON ic.relname = i.indexname AND ic.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = i.schemaname)
+      JOIN pg_index ix ON ix.indexrelid = ic.oid
+      JOIN pg_am am ON am.oid = ic.relam
       LEFT JOIN pg_tablespace ts ON ts.oid = ic.reltablespace
       WHERE i.tablename = $1
         AND i.schemaname = $2

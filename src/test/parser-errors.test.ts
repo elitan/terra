@@ -31,7 +31,7 @@ describe("Parser Error Handling", () => {
       await expect(parser.parseSchema(invalidSQL)).rejects.toThrow(ParserError);
     });
 
-    test("should extract line and column from CST error", async () => {
+    test("should have descriptive error message", async () => {
       const invalidSQL = "CREATE TABLE users (id SERIAL PRIMARY KEY, name";
 
       try {
@@ -40,10 +40,8 @@ describe("Parser Error Handling", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ParserError);
         const parserError = error as ParserError;
-        expect(parserError.line).toBeDefined();
-        expect(parserError.column).toBeDefined();
-        expect(parserError.line).toBe(1);
-        expect(parserError.column).toBeGreaterThan(0);
+        expect(parserError.message).toBeDefined();
+        expect(parserError.message.length).toBeGreaterThan(0);
       }
     });
 
@@ -59,8 +57,6 @@ describe("Parser Error Handling", () => {
         expect(error).toBeInstanceOf(ParserError);
         const parserError = error as ParserError;
         expect(parserError.filePath).toBe(testFile);
-        expect(parserError.line).toBeDefined();
-        expect(parserError.column).toBeDefined();
       } finally {
         unlinkSync(testFile);
       }

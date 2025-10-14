@@ -32,6 +32,37 @@ export class SchemaParser {
   }
 
   /**
+   * Auto-quote common reserved keywords when used as identifiers
+   */
+  private autoQuoteReservedKeywords(sql: string): string {
+    // List of commonly used PostgreSQL reserved keywords that users might use as column names
+    const keywords = [
+      'user', 'year', 'month', 'day', 'hour', 'minute', 'second',
+      'order', 'group', 'limit', 'offset', 'table', 'column',
+      'index', 'key', 'value', 'check', 'comment', 'status'
+    ];
+
+    // Pattern to match unquoted identifiers in column definitions
+    // This handles: column_name TYPE constraints
+    for (const keyword of keywords) {
+      // Match keyword followed by a space and a type (INT, VARCHAR, etc.)
+      // Make sure it's not already quoted
+      const pattern = new RegExp(`\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
+      sql = sql.replace(pattern, `"${keyword}"`);
+
+      // Also match in UNIQUE constraints: UNIQUE (column1, keyword, column3)
+      const uniquePattern = new RegExp(`(UNIQUE\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      sql = sql.replace(uniquePattern, `$1"${keyword}"`);
+
+      // Also match in PRIMARY KEY and FOREIGN KEY constraints
+      const keyPattern = new RegExp(`((?:PRIMARY|FOREIGN)\\s+KEY\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      sql = sql.replace(keyPattern, `$1"${keyword}"`);
+    }
+
+    return sql;
+  }
+
+  /**
    * Parse schema from a file path
    */
   async parseSchemaFile(filePath: string): Promise<{
@@ -152,6 +183,14 @@ export class SchemaParser {
     const extensions: Extension[] = [];
     const schemas: SchemaDefinition[] = [];
     const comments: Comment[] = [];
+
+    // Handle empty SQL
+    if (!sql || sql.trim() === '') {
+      return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+    }
+
+    // Auto-quote reserved keywords that are commonly used as column names
+    sql = this.autoQuoteReservedKeywords(sql);
 
     try {
       const ast = await parse(sql);
