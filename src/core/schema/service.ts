@@ -40,7 +40,7 @@ export class SchemaService {
     const client = await this.databaseService.createClient();
 
     try {
-      const parsedSchema = this.parseSchemaInput(schemaFile);
+      const parsedSchema = await this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const currentSchema = await this.inspector.getCurrentSchema(client);
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
@@ -87,7 +87,7 @@ export class SchemaService {
       if (lockOptions && !dryRun) {
         await this.databaseService.acquireAdvisoryLock(client, lockOptions);
       }
-      const parsedSchema = this.parseSchemaInput(schemaFile);
+      const parsedSchema = await this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const desiredEnums = Array.isArray(parsedSchema) ? [] : parsedSchema.enums;
       const desiredViews = Array.isArray(parsedSchema) ? [] : parsedSchema.views;
@@ -298,10 +298,10 @@ export class SchemaService {
     });
   }
 
-  private parseSchemaInput(input: string) {
+  private async parseSchemaInput(input: string) {
     // Handle empty string as empty SQL content (not a filename)
     if (input === "") {
-      return this.parser.parseSchema(input);
+      return await this.parser.parseSchema(input);
     }
 
     // Simple heuristic: if the input contains SQL keywords and is longer than a typical file path,
@@ -312,10 +312,10 @@ export class SchemaService {
       input.includes('\n') ||
       input.length > 500
     ) {
-      return this.parser.parseSchema(input);
+      return await this.parser.parseSchema(input);
     } else {
       // Treat as file path
-      return this.parser.parseSchemaFile(input);
+      return await this.parser.parseSchemaFile(input);
     }
   }
 

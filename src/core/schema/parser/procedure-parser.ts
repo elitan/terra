@@ -5,16 +5,18 @@
  */
 
 import { Logger } from "../../../utils/logger";
-import { extractNameAndSchema } from "./cst-utils";
 import type { Procedure, FunctionParameter } from "../../../types/schema";
 
 /**
- * Parse CREATE PROCEDURE statement from CST
+ * Parse CREATE PROCEDURE statement from pgsql-parser AST
  */
 export function parseCreateProcedure(node: any): Procedure | null {
+  Logger.warning("Procedure parsing not yet fully implemented for pgsql-parser");
+  return null;
   try {
     const fullName = node.name?.text || node.name?.name || null;
-    const { name, schema } = extractNameAndSchema(fullName);
+    const name = fullName;
+    const schema: string | undefined = undefined;
     if (!name) return null;
 
     const parameters = extractProcedureParameters(node);

@@ -1,32 +1,31 @@
 /**
  * Table Parser
  *
- * Handles parsing of CREATE TABLE statements from CST.
+ * Handles parsing of CREATE TABLE statements from pgsql-parser AST.
  * Coordinates column and constraint extraction.
  */
 
 import { Logger } from "../../../../utils/logger";
-import { extractTableNameFromCST, extractSchemaFromCST } from "../cst-utils";
 import { extractColumns } from "./column-parser";
 import { extractAllConstraints } from "./constraint-parser";
 import type { Table } from "../../../../types/schema";
 
 /**
- * Parse CREATE TABLE statement from CST
+ * Parse CREATE TABLE statement from pgsql-parser AST
  */
-export function parseCreateTable(node: any): Table | null {
+export function parseCreateTable(stmt: any): Table | null {
   try {
-    // Extract table name and schema
-    const tableName = extractTableNameFromCST(node);
+    const relation = stmt.relation;
+    if (!relation) return null;
+
+    const tableName = relation.relname;
     if (!tableName) return null;
 
-    const schema = extractSchemaFromCST(node);
+    const schema = relation.schemaname || undefined;
 
-    // Extract columns
-    const columns = extractColumns(node);
+    const columns = extractColumns(stmt.tableElts || []);
 
-    // Extract ALL constraints in a unified way
-    const constraints = extractAllConstraints(node, tableName);
+    const constraints = extractAllConstraints(stmt.tableElts || [], tableName);
 
     return {
       name: tableName,
@@ -48,7 +47,7 @@ export function parseCreateTable(node: any): Table | null {
     };
   } catch (error) {
     Logger.warning(
-      `Failed to parse CREATE TABLE from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE TABLE: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }

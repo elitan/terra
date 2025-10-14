@@ -5,16 +5,18 @@
  */
 
 import { Logger } from "../../../utils/logger";
-import { extractNameAndSchema } from "./cst-utils";
 import type { Sequence } from "../../../types/schema";
 
 /**
- * Parse CREATE SEQUENCE statement from CST
+ * Parse CREATE SEQUENCE statement from pgsql-parser AST
  */
 export function parseCreateSequence(node: any): Sequence | null {
+  Logger.warning("Sequence parsing not yet fully implemented for pgsql-parser");
+  return null;
   try {
     const fullName = node.name?.text || node.name?.name || null;
-    const { name, schema } = extractNameAndSchema(fullName);
+    const name = fullName;
+    const schema: string | undefined = undefined;
     if (!name) return null;
 
     const dataType = extractDataType(node);
