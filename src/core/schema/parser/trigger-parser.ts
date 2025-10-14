@@ -11,16 +11,14 @@ import type { Trigger } from "../../../types/schema";
  * Parse CREATE TRIGGER statement from pgsql-parser AST
  */
 export function parseCreateTrigger(node: any): Trigger | null {
-  Logger.warning("Trigger parsing not yet fully implemented for pgsql-parser");
-  return null;
   try {
-    const fullName = node.name?.text || node.name?.name || null;
-    const name = fullName;
-    const schema: string | undefined = undefined;
-    if (!name) return null;
+    const name = node.trigname;
+    if (!name) {
+      Logger.warning("Trigger missing name");
+      return null;
+    }
 
-    const tableFullName = node.table?.text || node.table?.name || null;
-    const { name: tableName, schema: tableSchema } = extractNameAndSchema(tableFullName);
+    const tableName = node.relation?.relname;
     if (!tableName) {
       Logger.warning(`Trigger '${name}' missing table name`);
       return null;
@@ -51,7 +49,7 @@ export function parseCreateTrigger(node: any): Trigger | null {
     return {
       name,
       tableName,
-      schema: schema || tableSchema, // Use trigger's schema or fall back to table's schema
+      schema: undefined, // TODO: Extract schema if specified
       timing,
       events,
       forEach,
@@ -61,76 +59,55 @@ export function parseCreateTrigger(node: any): Trigger | null {
     };
   } catch (error) {
     Logger.warning(
-      `Failed to parse CREATE TRIGGER from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE TRIGGER: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
 }
 
 /**
- * Extract trigger name from CST node
- */
-function extractTriggerName(node: any): string | null {
-  try {
-    return node.name?.name || node.name?.text || null;
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Extract table name from trigger target
- */
-function extractTableName(node: any): string | null {
-  try {
-    return node.target?.table?.name || node.target?.table?.text || null;
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Extract timing (BEFORE, AFTER, INSTEAD OF)
+ * Extract timing from pgsql-parser AST
+ * timing field may be missing for AFTER (the default)
+ * timing is a bitmask: 2=BEFORE, 64=INSTEAD OF, otherwise AFTER
  */
 function extractTiming(node: any): Trigger['timing'] | null {
   try {
-    const timeKw = node.timeKw?.name || node.timeKw?.text;
-    if (timeKw === "BEFORE" || timeKw === "AFTER") {
-      return timeKw;
+    const timing = node.timing;
+
+    // If timing is undefined or 0, it's AFTER (the default)
+    if (timing === undefined || timing === null || timing === 0) {
+      return "AFTER";
     }
 
-    if (timeKw === "INSTEAD" && node.ofKw) {
+    // Check bitmask values
+    if (timing & 64) {
       return "INSTEAD OF";
+    } else if (timing & 2) {
+      return "BEFORE";
+    } else {
+      return "AFTER";
     }
-
-    return null;
   } catch (error) {
     return null;
   }
 }
 
 /**
- * Extract trigger events (INSERT, UPDATE, DELETE, TRUNCATE)
+ * Extract trigger events from pgsql-parser AST
+ * events is a bitmask: 4=INSERT, 8=DELETE, 16=UPDATE, 32=TRUNCATE
  */
 function extractEvents(node: any): Trigger['events'] {
   const events: Trigger['events'] = [];
 
   try {
-    if (node.event) {
-      const eventKw = node.event.eventKw?.name || node.event.eventKw?.text;
-      if (eventKw === "INSERT" || eventKw === "UPDATE" || eventKw === "DELETE" || eventKw === "TRUNCATE") {
-        events.push(eventKw);
-      }
-    }
+    const eventsBitmask = node.events;
+    if (eventsBitmask === undefined || eventsBitmask === null) return events;
 
-    if (node.events && Array.isArray(node.events)) {
-      for (const event of node.events) {
-        const eventKw = event.eventKw?.name || event.eventKw?.text;
-        if (eventKw === "INSERT" || eventKw === "UPDATE" || eventKw === "DELETE" || eventKw === "TRUNCATE") {
-          events.push(eventKw);
-        }
-      }
-    }
+    // Check each bit in the bitmask
+    if (eventsBitmask & 4) events.push("INSERT");
+    if (eventsBitmask & 8) events.push("DELETE");
+    if (eventsBitmask & 16) events.push("UPDATE");
+    if (eventsBitmask & 32) events.push("TRUNCATE");
   } catch (error) {
     Logger.warning(
       `Failed to extract trigger events: ${error instanceof Error ? error.message : String(error)}`
@@ -141,18 +118,15 @@ function extractEvents(node: any): Trigger['events'] {
 }
 
 /**
- * Extract FOR EACH clause (ROW or STATEMENT)
+ * Extract FOR EACH from pgsql-parser AST
+ * row is a boolean: true=FOR EACH ROW, false=FOR EACH STATEMENT
  */
 function extractForEach(node: any): Trigger['forEach'] | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "for_each_clause") {
-        const itemKw = clause.itemKw?.name || clause.itemKw?.text;
-        if (itemKw === "ROW" || itemKw === "STATEMENT") {
-          return itemKw;
-        }
-      }
+    if (node.row === true) {
+      return "ROW";
+    } else if (node.row === false) {
+      return "STATEMENT";
     }
     return undefined;
   } catch (error) {
@@ -161,16 +135,13 @@ function extractForEach(node: any): Trigger['forEach'] | undefined {
 }
 
 /**
- * Extract WHEN clause condition
+ * Extract WHEN clause condition from pgsql-parser AST
  */
 function extractWhen(node: any): string | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "when_clause") {
-        return clause.condition?.text || undefined;
-      }
-    }
+    // whenClause would contain the condition expression
+    // For now, return undefined as complex expression parsing is needed
+    // TODO: Implement expression parsing if needed
     return undefined;
   } catch (error) {
     return undefined;
@@ -178,29 +149,30 @@ function extractWhen(node: any): string | undefined {
 }
 
 /**
- * Extract function name from EXECUTE clause
+ * Extract function name from pgsql-parser AST
+ * funcname is an array of String nodes
  */
 function extractFunctionName(node: any): string | null {
   try {
-    if (node.body) {
-      return node.body.name?.name || node.body.name?.text || null;
-    }
-    return null;
+    if (!node.funcname || !Array.isArray(node.funcname)) return null;
+
+    // Extract the last element which is the function name
+    const names = node.funcname.map((n: any) => n.String?.sval).filter(Boolean);
+    return names.length > 0 ? names[names.length - 1] : null;
   } catch (error) {
     return null;
   }
 }
 
 /**
- * Extract function arguments from EXECUTE clause
+ * Extract function arguments from pgsql-parser AST
  */
 function extractFunctionArgs(node: any): string[] | undefined {
   try {
-    if (node.body && node.body.args) {
-      const items = node.body.args.expr?.items || [];
-      if (items.length > 0) {
-        return items.map((item: any) => item.text || item.value || "");
-      }
+    if (node.args && Array.isArray(node.args) && node.args.length > 0) {
+      // TODO: Parse argument expressions
+      // For now return undefined as expression parsing is complex
+      return undefined;
     }
     return undefined;
   } catch (error) {

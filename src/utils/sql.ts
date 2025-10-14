@@ -422,7 +422,8 @@ export function generateCreateFunctionSQL(func: Function): string {
 
 export function generateDropFunctionSQL(func: Function): string {
   const paramTypes = func.parameters.map(p => p.type).join(", ");
-  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes});`;
+  // Use CASCADE to automatically drop dependent triggers
+  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes}) CASCADE;`;
 }
 
 // PROCEDURE SQL generation functions

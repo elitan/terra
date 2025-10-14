@@ -11,13 +11,13 @@ import type { Function, FunctionParameter } from "../../../types/schema";
  * Parse CREATE FUNCTION statement from pgsql-parser AST
  */
 export function parseCreateFunction(node: any): Function | null {
-  Logger.warning("Function parsing not yet fully implemented for pgsql-parser");
-  return null;
   try {
-    const fullName = node.name?.text || node.name?.name || null;
-    const name = fullName;
-    const schema: string | undefined = undefined;
-    if (!name) return null;
+    // Extract function name from funcname array
+    const name = extractFunctionName(node);
+    if (!name) {
+      Logger.warning("Function missing name");
+      return null;
+    }
 
     const parameters = extractFunctionParameters(node);
     const returnType = extractReturnType(node);
@@ -47,7 +47,7 @@ export function parseCreateFunction(node: any): Function | null {
 
     return {
       name,
-      schema,
+      schema: undefined, // TODO: Extract schema if specified
       parameters,
       returnType,
       language,
@@ -61,49 +61,62 @@ export function parseCreateFunction(node: any): Function | null {
     };
   } catch (error) {
     Logger.warning(
-      `Failed to parse CREATE FUNCTION from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse CREATE FUNCTION: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
 }
 
 /**
- * Extract function name from CST node
+ * Extract function name from pgsql-parser AST node
+ * funcname is an array of String nodes
  */
 function extractFunctionName(node: any): string | null {
   try {
-    return node.name?.name || node.name?.text || null;
+    if (!node.funcname || !Array.isArray(node.funcname)) return null;
+
+    // Extract the last element which is the function name
+    // (earlier elements would be schema names)
+    const names = node.funcname.map((n: any) => n.String?.sval).filter(Boolean);
+    return names.length > 0 ? names[names.length - 1] : null;
   } catch (error) {
     return null;
   }
 }
 
 /**
- * Extract function parameters from CST node
+ * Extract function parameters from pgsql-parser AST node
  */
 function extractFunctionParameters(node: any): FunctionParameter[] {
   const parameters: FunctionParameter[] = [];
 
   try {
-    const items = node.params?.expr?.items || [];
+    if (!node.parameters || !Array.isArray(node.parameters)) {
+      return parameters;
+    }
 
-    for (const item of items) {
-      if (item.type === "function_param") {
-        const param: FunctionParameter = {
-          name: item.name?.name || item.name?.text,
-          type: extractDataType(item.dataType),
-        };
+    for (const paramNode of node.parameters) {
+      const fpNode = paramNode.FunctionParameter;
+      if (!fpNode) continue;
 
-        if (item.mode) {
-          param.mode = item.mode.name || item.mode.text;
+      const param: FunctionParameter = {
+        name: fpNode.name || undefined,
+        type: extractDataType(fpNode.argType),
+      };
+
+      // Mode is stored as FUNC_PARAM_IN, FUNC_PARAM_OUT, etc.
+      if (fpNode.mode) {
+        const modeStr = fpNode.mode.replace('FUNC_PARAM_', '');
+        if (modeStr !== 'DEFAULT') {
+          param.mode = modeStr as 'IN' | 'OUT' | 'INOUT' | 'VARIADIC';
         }
-
-        if (item.default) {
-          param.default = extractDefaultValue(item.default);
-        }
-
-        parameters.push(param);
       }
+
+      if (fpNode.defexpr) {
+        param.default = extractDefaultValue(fpNode.defexpr);
+      }
+
+      parameters.push(param);
     }
   } catch (error) {
     Logger.warning(
@@ -115,21 +128,31 @@ function extractFunctionParameters(node: any): FunctionParameter[] {
 }
 
 /**
- * Extract data type from CST node
+ * Extract data type from pgsql-parser AST node
+ * Type info is in names array: ["pg_catalog", "int4"] -> "integer"
  */
 function extractDataType(dataTypeNode: any): string {
   if (!dataTypeNode) return "unknown";
 
   try {
-    if (dataTypeNode.type === "named_data_type") {
-      let typeName = dataTypeNode.name?.name || dataTypeNode.name?.text || "unknown";
+    if (dataTypeNode.names && Array.isArray(dataTypeNode.names)) {
+      const typeNames = dataTypeNode.names.map((n: any) => n.String?.sval).filter(Boolean);
 
-      if (dataTypeNode.size && dataTypeNode.size.expr) {
-        const size = dataTypeNode.size.expr.text || dataTypeNode.size.expr.value;
-        typeName += `(${size})`;
-      }
+      // Use the last name (skip schema like pg_catalog)
+      const typeName = typeNames.length > 0 ? typeNames[typeNames.length - 1] : "unknown";
 
-      return typeName;
+      // Map PostgreSQL internal type names to standard names
+      const typeMap: Record<string, string> = {
+        'int4': 'integer',
+        'int2': 'smallint',
+        'int8': 'bigint',
+        'float4': 'real',
+        'float8': 'double precision',
+        'bool': 'boolean',
+        'varchar': 'character varying'
+      };
+
+      return typeMap[typeName] || typeName;
     }
 
     return "unknown";
@@ -153,15 +176,12 @@ function extractDefaultValue(defaultNode: any): string {
 }
 
 /**
- * Extract return type from RETURNS clause
+ * Extract return type from pgsql-parser AST
  */
 function extractReturnType(node: any): string | null {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "returns_clause") {
-        return extractDataType(clause.dataType);
-      }
+    if (node.returnType) {
+      return extractDataType(node.returnType);
     }
     return null;
   } catch (error) {
@@ -170,14 +190,16 @@ function extractReturnType(node: any): string | null {
 }
 
 /**
- * Extract language from LANGUAGE clause
+ * Extract language from options array in pgsql-parser AST
  */
 function extractLanguage(node: any): string | null {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "language_clause") {
-        return clause.name?.name || clause.name?.text || null;
+    if (!node.options || !Array.isArray(node.options)) return null;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'language') {
+        return defElem.arg?.String?.sval || null;
       }
     }
     return null;
@@ -187,15 +209,20 @@ function extractLanguage(node: any): string | null {
 }
 
 /**
- * Extract function body from AS clause
+ * Extract function body from options array (AS clause)
  */
 function extractFunctionBody(node: any): string | null {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "as_clause") {
-        if (clause.expr && clause.expr.type === "string_literal") {
-          return clause.expr.value || clause.expr.text || null;
+    if (!node.options || !Array.isArray(node.options)) return null;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'as') {
+        // Body is in a List with items containing String nodes
+        const listItems = defElem.arg?.List?.items;
+        if (listItems && Array.isArray(listItems)) {
+          const bodyParts = listItems.map((item: any) => item.String?.sval).filter(Boolean);
+          return bodyParts.join('\n') || null;
         }
       }
     }
@@ -206,14 +233,16 @@ function extractFunctionBody(node: any): string | null {
 }
 
 /**
- * Extract volatility (VOLATILE, STABLE, IMMUTABLE)
+ * Extract volatility from options (VOLATILE, STABLE, IMMUTABLE)
  */
 function extractVolatility(node: any): Function['volatility'] | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "volatility_clause") {
-        const value = clause.volatilityKw?.name || clause.volatilityKw?.text;
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'volatility') {
+        const value = defElem.arg?.String?.sval?.toUpperCase();
         if (value === "VOLATILE" || value === "STABLE" || value === "IMMUTABLE") {
           return value as Function['volatility'];
         }
@@ -226,14 +255,16 @@ function extractVolatility(node: any): Function['volatility'] | undefined {
 }
 
 /**
- * Extract parallel setting (SAFE, UNSAFE, RESTRICTED)
+ * Extract parallel setting from options (SAFE, UNSAFE, RESTRICTED)
  */
 function extractParallel(node: any): Function['parallel'] | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "parallel_clause") {
-        const value = clause.parallelKw?.name || clause.parallelKw?.text;
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'parallel') {
+        const value = defElem.arg?.String?.sval?.toUpperCase();
         if (value === "SAFE" || value === "UNSAFE" || value === "RESTRICTED") {
           return value as Function['parallel'];
         }
@@ -246,15 +277,16 @@ function extractParallel(node: any): Function['parallel'] | undefined {
 }
 
 /**
- * Extract SECURITY DEFINER flag
+ * Extract SECURITY DEFINER flag from options
  */
 function extractSecurityDefiner(node: any): boolean | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "security_clause") {
-        const security = clause.securityKw?.name || clause.securityKw?.text;
-        return security === "DEFINER";
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'security') {
+        return defElem.arg?.Integer?.ival === 1;
       }
     }
     return undefined;
@@ -264,14 +296,16 @@ function extractSecurityDefiner(node: any): boolean | undefined {
 }
 
 /**
- * Extract STRICT flag (RETURNS NULL ON NULL INPUT)
+ * Extract STRICT flag from options
  */
 function extractStrict(node: any): boolean | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "strict_clause" || clause.type === "null_input_clause") {
-        return true;
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'strict') {
+        return defElem.arg?.Integer?.ival === 1;
       }
     }
     return undefined;
@@ -281,14 +315,16 @@ function extractStrict(node: any): boolean | undefined {
 }
 
 /**
- * Extract COST value
+ * Extract COST value from options
  */
 function extractCost(node: any): number | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "cost_clause") {
-        return clause.value?.value || clause.value?.text;
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'cost') {
+        return defElem.arg?.Integer?.ival || defElem.arg?.Float?.fval;
       }
     }
     return undefined;
@@ -298,14 +334,16 @@ function extractCost(node: any): number | undefined {
 }
 
 /**
- * Extract ROWS value
+ * Extract ROWS value from options
  */
 function extractRows(node: any): number | undefined {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "rows_clause") {
-        return clause.value?.value || clause.value?.text;
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === 'rows') {
+        return defElem.arg?.Integer?.ival || defElem.arg?.Float?.fval;
       }
     }
     return undefined;
