@@ -346,7 +346,7 @@ export class SchemaDiffer {
         desiredNormalized.includes("numeric") ||
         desiredNormalized.includes("integer") ||
         desiredNormalized.includes("int") ||
-        desiredNormalized.includes("boolean")
+        desiredNormalized.includes("bool")
       ) {
         return true;
       }
@@ -382,8 +382,8 @@ export class SchemaDiffer {
         // For string to integer conversion, first convert to numeric to handle decimal strings, then truncate
         return `TRUNC(${columnName}::DECIMAL)::integer`;
       }
-      if (desiredNormalized.includes("boolean")) {
-        return `${columnName}::boolean`;
+      if (desiredNormalized.includes("bool")) {
+        return `CASE WHEN LOWER(regexp_replace(${columnName}, '\\s', '', 'g')) IN ('true', 't', 'yes', 'y', 'on', '1') THEN true WHEN LOWER(regexp_replace(${columnName}, '\\s', '', 'g')) IN ('false', 'f', 'no', 'n', 'off', '0') THEN false ELSE NULL END`;
       }
     }
 
