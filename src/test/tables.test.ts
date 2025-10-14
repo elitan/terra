@@ -43,7 +43,7 @@ describe("Table Operations - End to End", () => {
 
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
-    const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+    const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
     await executor.executePlan(client, plan, true);
@@ -86,7 +86,7 @@ describe("Table Operations - End to End", () => {
 
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
-    const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+    const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
     await executor.executePlan(client, plan, true);
@@ -121,7 +121,7 @@ describe("Table Operations - End to End", () => {
 
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
-    const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+    const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
     await executor.executePlan(client, plan, true);
@@ -160,7 +160,7 @@ describe("Table Operations - End to End", () => {
 
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
-    const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+    const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
     await executor.executePlan(client, plan, true);
@@ -188,7 +188,7 @@ describe("Table Operations - End to End", () => {
 
     // 3. Parse desired state and apply diff
     const initialSchema = await inspector.getCurrentSchema(client);
-    const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+    const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
     expect(desiredTables).toHaveLength(0);
 
     const plan = differ.generateMigrationPlan(desiredTables, initialSchema);

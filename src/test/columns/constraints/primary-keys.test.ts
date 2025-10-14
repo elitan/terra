@@ -40,7 +40,7 @@ describe("Primary Key Support", () => {
         );
       `;
 
-      const tables = parser.parseCreateTableStatements(sql);
+      const tables = await parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
       const table = tables[0];
@@ -60,7 +60,7 @@ describe("Primary Key Support", () => {
         );
       `;
 
-      const tables = parser.parseCreateTableStatements(sql);
+      const tables = await parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
       const table = tables[0];
@@ -78,7 +78,7 @@ describe("Primary Key Support", () => {
         );
       `;
 
-      const tables = parser.parseCreateTableStatements(sql);
+      const tables = await parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
       const table = tables[0];
@@ -96,7 +96,7 @@ describe("Primary Key Support", () => {
         );
       `;
 
-      const tables = parser.parseCreateTableStatements(sql);
+      const tables = await parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
       const table = tables[0];
@@ -114,7 +114,7 @@ describe("Primary Key Support", () => {
         );
       `;
 
-      const tables = parser.parseCreateTableStatements(sql);
+      const tables = await parser.parseCreateTableStatements(sql);
 
       expect(tables).toHaveLength(1);
       const table = tables[0];
@@ -257,7 +257,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -300,7 +300,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -345,7 +345,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -390,7 +390,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       // 4. Verify no migration statements generated
@@ -412,7 +412,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -467,7 +467,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration - should fail
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       // Should throw an error due to duplicate values
@@ -506,7 +506,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration - should fail
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       // Should throw an error due to NULL values
@@ -539,7 +539,7 @@ describe("Primary Key Support", () => {
       `;
 
       // Parser should handle gracefully by using table-level definition
-      const tables = parser.parseCreateTableStatements(duplicateSQL);
+      const tables = await parser.parseCreateTableStatements(duplicateSQL);
 
       expect(tables).toHaveLength(1);
       expect(tables[0]!.primaryKey).toBeDefined();
@@ -583,7 +583,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -621,7 +621,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -661,7 +661,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -703,7 +703,7 @@ describe("Primary Key Support", () => {
 
       // 3. Execute migration
       const initialSchema = await inspector.getCurrentSchema(client);
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);
@@ -768,7 +768,7 @@ describe("Primary Key Support", () => {
         );
       `;
 
-      const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+      const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
       const plan = differ.generateMigrationPlan(desiredTables, initialSchema);
 
       await executor.executePlan(client, plan, true);

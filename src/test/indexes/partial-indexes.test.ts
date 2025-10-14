@@ -23,13 +23,13 @@ describe("Partial Index Support", () => {
   });
 
   describe("Parser Support", () => {
-    test("should parse partial indexes with WHERE clause", () => {
+    test("should parse partial indexes with WHERE clause", async () => {
       const sql = `
         CREATE INDEX idx_active_users ON users (email) WHERE active = true;
         CREATE INDEX idx_recent_orders ON orders (created_at) WHERE created_at > '2023-01-01';
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(2);
 
@@ -46,13 +46,13 @@ describe("Partial Index Support", () => {
       expect(indexes[1]!.where).toBe("created_at > '2023-01-01'");
     });
 
-    test("should parse complex WHERE conditions", () => {
+    test("should parse complex WHERE conditions", async () => {
       const sql = `
         CREATE INDEX idx_complex_condition ON orders (customer_id) 
         WHERE status = 'active' AND created_at > NOW() - INTERVAL '30 days';
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       // The parser may not handle complex expressions perfectly, so check for key parts
@@ -60,13 +60,13 @@ describe("Partial Index Support", () => {
       expect(indexes[0]!.where).toContain("created_at");
     });
 
-    test("should parse unique partial indexes", () => {
+    test("should parse unique partial indexes", async () => {
       const sql = `
         CREATE UNIQUE INDEX idx_unique_active_email ON users (email) 
         WHERE active = true;
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       expect(indexes[0]!.unique).toBe(true);
@@ -140,7 +140,7 @@ describe("Partial Index Support", () => {
   });
 
   describe("Schema Differ Support", () => {
-    test("should handle partial index changes", () => {
+    test("should handle partial index changes", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -200,7 +200,7 @@ describe("Partial Index Support", () => {
       );
     });
 
-    test("should detect when partial conditions change", () => {
+    test("should detect when partial conditions change", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 

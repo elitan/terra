@@ -10,13 +10,13 @@ describe("View Parsing", () => {
   });
 
   describe("Basic View Parsing", () => {
-    test("should parse simple CREATE VIEW statement", () => {
+    test("should parse simple CREATE VIEW statement", async () => {
       const sql = `
         CREATE VIEW user_emails AS
         SELECT id, email FROM users;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -26,13 +26,13 @@ describe("View Parsing", () => {
       expect(view.materialized).toBeFalsy();
     });
 
-    test("should parse CREATE MATERIALIZED VIEW statement", () => {
+    test("should parse CREATE MATERIALIZED VIEW statement", async () => {
       const sql = `
         CREATE MATERIALIZED VIEW user_stats AS
         SELECT COUNT(*) as total_users FROM users;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -42,13 +42,13 @@ describe("View Parsing", () => {
       expect(view.definition).toContain('COUNT');
     });
 
-    test("should parse CREATE OR REPLACE VIEW statement", () => {
+    test("should parse CREATE OR REPLACE VIEW statement", async () => {
       const sql = `
         CREATE OR REPLACE VIEW user_summary AS
         SELECT id, name, email FROM users WHERE active = true;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -56,7 +56,7 @@ describe("View Parsing", () => {
       expect(view.definition).toContain('WHERE active');
     });
 
-    test("should parse views with complex SELECT statements", () => {
+    test("should parse views with complex SELECT statements", async () => {
       const sql = `
         CREATE VIEW sales_report AS
         SELECT 
@@ -74,7 +74,7 @@ describe("View Parsing", () => {
         ORDER BY total_sales DESC;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -84,7 +84,7 @@ describe("View Parsing", () => {
       expect(view.definition).toContain('HAVING');
     });
 
-    test("should parse views with CTEs", () => {
+    test("should parse views with CTEs", async () => {
       const sql = `
         CREATE VIEW employee_hierarchy AS
         WITH RECURSIVE hierarchy AS (
@@ -99,7 +99,7 @@ describe("View Parsing", () => {
         SELECT * FROM hierarchy ORDER BY level, name;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -108,7 +108,7 @@ describe("View Parsing", () => {
       expect(view.definition).toContain('UNION ALL');
     });
 
-    test("should parse views with window functions", () => {
+    test("should parse views with window functions", async () => {
       const sql = `
         CREATE VIEW sales_rankings AS
         SELECT 
@@ -121,7 +121,7 @@ describe("View Parsing", () => {
         FROM sales;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -133,7 +133,7 @@ describe("View Parsing", () => {
   });
 
   describe("View Options Parsing", () => {
-    test("should parse WITH CHECK OPTION", () => {
+    test("should parse WITH CHECK OPTION", async () => {
       const sql = `
         CREATE VIEW active_users AS
         SELECT id, email, active FROM users
@@ -141,7 +141,7 @@ describe("View Parsing", () => {
         WITH CHECK OPTION;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -149,7 +149,7 @@ describe("View Parsing", () => {
       expect(view.checkOption).toBe('CASCADED'); // Default
     });
 
-    test("should parse WITH LOCAL CHECK OPTION", () => {
+    test("should parse WITH LOCAL CHECK OPTION", async () => {
       const sql = `
         CREATE VIEW local_active_users AS
         SELECT id, email FROM users
@@ -157,14 +157,14 @@ describe("View Parsing", () => {
         WITH LOCAL CHECK OPTION;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
       expect(view.checkOption).toBe('LOCAL');
     });
 
-    test("should parse WITH CASCADED CHECK OPTION", () => {
+    test("should parse WITH CASCADED CHECK OPTION", async () => {
       const sql = `
         CREATE VIEW cascaded_active_users AS
         SELECT id, email FROM users
@@ -172,21 +172,21 @@ describe("View Parsing", () => {
         WITH CASCADED CHECK OPTION;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
       expect(view.checkOption).toBe('CASCADED');
     });
 
-    test("should parse security_barrier option", () => {
+    test("should parse security_barrier option", async () => {
       const sql = `
         CREATE VIEW secure_users AS
         SELECT id, email FROM users
         WITH (security_barrier = true);
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -195,7 +195,7 @@ describe("View Parsing", () => {
   });
 
   describe("Multiple Views Parsing", () => {
-    test("should parse multiple views in single schema", () => {
+    test("should parse multiple views in single schema", async () => {
       const sql = `
         CREATE TABLE users (
           id SERIAL PRIMARY KEY,
@@ -217,7 +217,7 @@ describe("View Parsing", () => {
         FROM users;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.tables).toHaveLength(1);
       expect(result.views).toHaveLength(3);
 
@@ -231,7 +231,7 @@ describe("View Parsing", () => {
       expect(regularViews).toHaveLength(2);
     });
 
-    test("should handle view dependencies correctly", () => {
+    test("should handle view dependencies correctly", async () => {
       const sql = `
         CREATE TABLE orders (
           id SERIAL PRIMARY KEY,
@@ -249,7 +249,7 @@ describe("View Parsing", () => {
         SELECT COUNT(*) as total_orders FROM high_value_completed_orders;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.tables).toHaveLength(1);
       expect(result.views).toHaveLength(3);
 
@@ -264,26 +264,26 @@ describe("View Parsing", () => {
   });
 
   describe("Edge Cases and Error Handling", () => {
-    test("should handle views with quoted identifiers", () => {
+    test("should handle views with quoted identifiers", async () => {
       const sql = `
         CREATE VIEW "user-emails" AS
         SELECT "user_id", "email_address" FROM "user_profiles";
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
       expect(view.name).toBe('user-emails');
     });
 
-    test("should handle views with schema-qualified table names", () => {
+    test("should handle views with schema-qualified table names", async () => {
       const sql = `
         CREATE VIEW public_users AS
         SELECT id, email FROM public.users;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -291,7 +291,7 @@ describe("View Parsing", () => {
       expect(view.definition).toContain('public.users');
     });
 
-    test("should handle views with complex expressions", () => {
+    test("should handle views with complex expressions", async () => {
       const sql = `
         CREATE VIEW user_analytics AS
         SELECT 
@@ -308,7 +308,7 @@ describe("View Parsing", () => {
         FROM users;
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -318,24 +318,24 @@ describe("View Parsing", () => {
       expect(view.definition).toContain('COALESCE');
     });
 
-    test("should reject invalid view syntax", () => {
+    test("should reject invalid view syntax", async () => {
       const sql = `
         CREATE VIEW invalid_view AS
         SELEECT * FROM users;  -- Typo in SELECT
       `;
 
-      expect(() => parser.parseSchema(sql)).toThrow();
+      await expect(parser.parseSchema(sql)).rejects.toThrow();
     });
 
-    test("should handle empty view definitions gracefully", () => {
+    test("should handle empty view definitions gracefully", async () => {
       const sql = `
         CREATE VIEW empty_view AS;
       `;
 
-      expect(() => parser.parseSchema(sql)).toThrow();
+      await expect(parser.parseSchema(sql)).rejects.toThrow();
     });
 
-    test("should parse views with comments and whitespace", () => {
+    test("should parse views with comments and whitespace", async () => {
       const sql = `
         -- This is a comment
         CREATE VIEW /* inline comment */ user_summary AS
@@ -347,7 +347,7 @@ describe("View Parsing", () => {
         WHERE active = true;  -- Only active users
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.views).toHaveLength(1);
 
       const view = result.views[0];
@@ -356,7 +356,7 @@ describe("View Parsing", () => {
   });
 
   describe("Parser Integration", () => {
-    test("should integrate with existing table and enum parsing", () => {
+    test("should integrate with existing table and enum parsing", async () => {
       const sql = `
         CREATE TYPE user_status AS ENUM ('active', 'inactive', 'suspended');
 
@@ -372,7 +372,7 @@ describe("View Parsing", () => {
         CREATE INDEX idx_users_email ON users (email);
       `;
 
-      const result = parser.parseSchema(sql);
+      const result = await parser.parseSchema(sql);
       expect(result.tables).toHaveLength(1);
       expect(result.views).toHaveLength(1);
       expect(result.enums).toHaveLength(1);
