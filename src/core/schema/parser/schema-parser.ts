@@ -32,6 +32,52 @@ export class SchemaParser {
   }
 
   /**
+   * Extract error context from pgsql-parser error message
+   */
+  private extractErrorContext(errorMessage: string, sql: string): { line?: number; column?: number; snippet?: string } {
+    // pgsql-parser errors sometimes contain position info like:
+    // "syntax error at or near "something" at line X"
+    // or just "syntax error at or near "something""
+
+    // Try to extract quoted text that caused the error
+    const nearMatch = errorMessage.match(/at or near "([^"]+)"/);
+    const problemText = nearMatch ? nearMatch[1] : null;
+
+    if (!problemText) {
+      return {};
+    }
+
+    // Find the first occurrence of the problem text in the SQL
+    const lines = sql.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const lineText = lines[i];
+      const col = lineText.indexOf(problemText);
+
+      if (col !== -1) {
+        // Found it! Extract context
+        const line = i + 1;
+        const column = col + 1;
+
+        // Get snippet: current line + 2 lines before and after
+        const start = Math.max(0, i - 2);
+        const end = Math.min(lines.length, i + 3);
+        const contextLines = lines.slice(start, end);
+
+        // Add line numbers and highlight the problem line
+        const snippet = contextLines.map((l, idx) => {
+          const lineNum = start + idx + 1;
+          const marker = lineNum === line ? '→' : ' ';
+          return `${marker} ${lineNum.toString().padStart(4)} | ${l}`;
+        }).join('\n');
+
+        return { line, column, snippet };
+      }
+    }
+
+    return {};
+  }
+
+  /**
    * Auto-quote common reserved keywords when used as identifiers
    */
   private autoQuoteReservedKeywords(sql: string): string {
@@ -280,9 +326,15 @@ export class SchemaParser {
       }
 
       if (error instanceof Error) {
+        // Try to extract line/column info from pgsql-parser error message
+        const { line, column, snippet } = this.extractErrorContext(error.message, sql);
+
         throw new ParserError(
           error.message,
-          filePath
+          filePath,
+          line,
+          column,
+          snippet
         );
       }
 
