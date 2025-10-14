@@ -117,9 +117,9 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
       expect(plan.hasChanges).toBe(true);
 
-      // Should include DROP TABLE statement
+      // Should include DROP TABLE statement (may include schema prefix and CASCADE)
       const hasDropTable = plan.transactional.some(stmt =>
-        stmt.includes("DROP TABLE temp_data")
+        stmt.toUpperCase().includes("DROP TABLE") && stmt.includes("temp_data")
       );
       expect(hasDropTable).toBe(true);
     });
