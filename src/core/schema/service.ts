@@ -122,12 +122,19 @@ export class SchemaService {
         this.generateExtensionStatements(desiredExtensions, currentExtensions);
 
       // Generate ENUM statements with collision detection
-      const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
+      const { transactional: enumCreateStatements, concurrent: enumAddValueStatements } =
+        this.generateEnumStatements(desiredEnums, currentEnums);
 
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
 
       // Prepend schema CREATE, extension CREATE, and ENUM creation statements
-      plan.transactional = [...schemaStatements, ...extensionCreateStatements, ...enumStatements, ...plan.transactional];
+      plan.transactional = [...schemaStatements, ...extensionCreateStatements, ...enumCreateStatements, ...plan.transactional];
+
+      // Append ALTER TYPE ADD VALUE statements to concurrent (cannot run in transaction)
+      plan.concurrent = [...enumAddValueStatements, ...plan.concurrent];
+
+      // Update hasChanges flag after modifying plan
+      plan.hasChanges = plan.transactional.length > 0 || plan.concurrent.length > 0;
 
       // Generate statements for new features
       const sequenceStatements = this.generateSequenceStatements(desiredSequences, currentSequences);
@@ -319,21 +326,25 @@ export class SchemaService {
     }
   }
 
-  private generateEnumStatements(desiredEnums: EnumType[], currentEnums: EnumType[]): string[] {
-    const statements: string[] = [];
+  private generateEnumStatements(desiredEnums: EnumType[], currentEnums: EnumType[]): {
+    transactional: string[];
+    concurrent: string[];
+  } {
+    const transactional: string[] = [];
+    const concurrent: string[] = [];
     const currentEnumMap = new Map(currentEnums.map(e => [e.name, e]));
-    
+
     for (const desiredEnum of desiredEnums) {
       const currentEnum = currentEnumMap.get(desiredEnum.name);
-      
+
       if (!currentEnum) {
         // ENUM doesn't exist, create it
-        statements.push(this.generateCreateTypeStatement(desiredEnum));
+        transactional.push(this.generateCreateTypeStatement(desiredEnum));
       } else {
         // ENUM exists, check if values need to be modified
         const currentValues = currentEnum.values;
         const desiredValues = desiredEnum.values;
-        
+
         // Check if values are identical in order and content
         if (JSON.stringify(currentValues) === JSON.stringify(desiredValues)) {
           // Values match exactly, skip modification
@@ -341,14 +352,15 @@ export class SchemaService {
         } else {
           // Values differ, generate modification statements
           const modificationStatements = this.generateEnumModificationStatements(desiredEnum, currentEnum);
-          statements.push(...modificationStatements);
+          // ALTER TYPE ADD VALUE must run outside of transaction block
+          concurrent.push(...modificationStatements);
         }
       }
     }
-    
+
     // Note: ENUM removal is handled separately after table changes
-    
-    return statements;
+
+    return { transactional, concurrent };
   }
 
   private async generateEnumRemovalStatements(desiredEnums: EnumType[], currentEnums: EnumType[], client: Client, schemas: string[]): Promise<string[]> {
