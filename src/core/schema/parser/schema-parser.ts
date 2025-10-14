@@ -82,18 +82,20 @@ export class SchemaParser {
    */
   private autoQuoteReservedKeywords(sql: string): string {
     // List of commonly used PostgreSQL reserved keywords that users might use as column names
+    // Note: Excludes highly ambiguous keywords like 'table', 'column', 'index' that appear in DDL
     const keywords = [
       'user', 'year', 'month', 'day', 'hour', 'minute', 'second',
-      'order', 'group', 'limit', 'offset', 'table', 'column',
-      'index', 'key', 'value', 'check', 'comment', 'status'
+      'order', 'group', 'limit', 'offset',
+      'key', 'value', 'comment', 'status'
     ];
 
     // Pattern to match unquoted identifiers in column definitions
     // This handles: column_name TYPE constraints
+    // Only match after whitespace or comma to ensure it's in a column position
     for (const keyword of keywords) {
-      // Match keyword followed by a space and a type (INT, VARCHAR, etc.)
-      // Make sure it's not already quoted
-      const pattern = new RegExp(`\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
+      // Match keyword preceded by whitespace/comma and followed by a type
+      // Make sure it's not already quoted and not preceded by CREATE/ALTER
+      const pattern = new RegExp(`(?<![CREATE|ALTER]\\s{1,20})(?<=\\s|,)\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
       sql = sql.replace(pattern, `"${keyword}"`);
 
       // Also match in UNIQUE constraints: UNIQUE (column1, keyword, column3)
