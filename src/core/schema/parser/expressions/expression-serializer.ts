@@ -43,11 +43,6 @@ export function serializeExpression(expr: any): string {
       return expr;
     }
 
-    // Direct text property
-    if (expr.text) {
-      return expr.text;
-    }
-
     // Binary expressions (comparison, logical operators, etc.)
     if (expr.type === "binary_expr" || expr.type === "binary_op_expr") {
       return serializeBinaryExpr(expr, serializeExpression);
@@ -55,7 +50,18 @@ export function serializeExpression(expr: any): string {
 
     // Column references
     if (expr.type === "identifier" || expr.type === "column_ref") {
-      return expr.name || expr.text || expr.column || "unknown_column";
+      const name = expr.name || expr.text || expr.column || "unknown_column";
+      if (typeof name === 'string') {
+        // Remove surrounding double quotes if present (from reserved keyword preprocessing)
+        const cleaned = name.replace(/^"|"$/g, '');
+        // Check if this is a temporal keyword that should not have quotes
+        const temporalKeywords = ['CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'LOCALTIME', 'LOCALTIMESTAMP'];
+        if (temporalKeywords.includes(cleaned.toUpperCase())) {
+          return cleaned.toUpperCase();
+        }
+        return cleaned;
+      }
+      return name;
     }
 
     // Literals

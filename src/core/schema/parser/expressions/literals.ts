@@ -96,6 +96,21 @@ export function serializeDefaultValue(expr: any): string {
       if (expr.text) {
         return expr.text;
       }
+    } else if (expr.type === "identifier" || expr.type === "column_ref") {
+      // Handle identifiers (which might be temporal keywords parsed as identifiers)
+      // Strip double quotes if present (from reserved keyword preprocessing)
+      const name = expr.name || expr.text;
+      if (typeof name === 'string') {
+        // Remove surrounding double quotes if present
+        const cleaned = name.replace(/^"|"$/g, '');
+        // Check if this is a temporal keyword that should not have quotes
+        const temporalKeywords = ['CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'LOCALTIME', 'LOCALTIMESTAMP'];
+        if (temporalKeywords.includes(cleaned.toUpperCase())) {
+          return cleaned.toUpperCase();
+        }
+        return cleaned;
+      }
+      return name;
     } else if (expr.type === "prefix_op_expr") {
       // Handle negative numbers and other prefix operations
       const operator = expr.operator || "";
