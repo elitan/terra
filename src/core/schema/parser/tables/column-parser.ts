@@ -173,7 +173,9 @@ function extractGeneratedColumn(constraints: any[]): Column['generated'] | undef
       if (constraint.Constraint?.contype === "CONSTR_GENERATED") {
         const c = constraint.Constraint;
 
-        const always = c.generated_when === 1;
+        // generated_when can be 'a' (ALWAYS) or 's' (BY DEFAULT/ON STORAGE)
+        // In pgsql-parser, 'a' = ALWAYS, but we need to check the actual value
+        const always = c.generated_when === 'a' || c.generated_when === 97; // 97 is ASCII 'a'
 
         const stored = true;
 

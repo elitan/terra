@@ -35,7 +35,7 @@ describe("Generated Columns", () => {
       );
     `;
 
-    const tables = services.parser.parseCreateTableStatements(schema);
+    const tables = await services.parser.parseCreateTableStatements(schema);
     expect(tables).toHaveLength(1);
 
     const table = tables[0];
@@ -117,7 +117,7 @@ describe("Generated Columns", () => {
     `;
 
     const currentSchema = await services.inspector.getCurrentSchema(client);
-    const desiredTables = services.parser.parseCreateTableStatements(updatedSchema);
+    const desiredTables = await services.parser.parseCreateTableStatements(updatedSchema);
     const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
 
     expect(plan.hasChanges).toBe(true);
@@ -150,7 +150,7 @@ describe("Generated Columns", () => {
     `;
 
     const currentSchema = await services.inspector.getCurrentSchema(client);
-    const desiredTables = services.parser.parseCreateTableStatements(updatedSchema);
+    const desiredTables = await services.parser.parseCreateTableStatements(updatedSchema);
     const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
 
     expect(plan.hasChanges).toBe(true);

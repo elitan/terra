@@ -41,7 +41,7 @@ export async function executeColumnMigration(
   const { parser, differ, inspector, executor } = services;
 
   const initialSchema = await inspector.getCurrentSchema(client);
-  const desiredTables = parser.parseCreateTableStatements(desiredSQL);
+  const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
   const migrationStatements = differ.generateMigrationPlan(
     desiredTables,
     initialSchema
