@@ -11,7 +11,7 @@ import { Logger } from "../../../utils/logger";
 import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
 import { parseCreateType } from "./enum-parser";
-import { parseCreateView } from "./view-parser";
+import { parseCreateView, parseCreateMaterializedView } from "./view-parser";
 import { parseCreateFunction } from "./function-parser";
 import { parseCreateProcedure } from "./procedure-parser";
 import { parseCreateTrigger } from "./trigger-parser";
@@ -267,6 +267,11 @@ export class SchemaParser {
           }
         } else if (stmt.ViewStmt) {
           const view = parseCreateView(stmt.ViewStmt, sql);
+          if (view) {
+            views.push(view);
+          }
+        } else if (stmt.CreateTableAsStmt) {
+          const view = parseCreateMaterializedView(stmt.CreateTableAsStmt);
           if (view) {
             views.push(view);
           }
