@@ -173,4 +173,61 @@ describe("Parser Error Handling", () => {
       expect(result.tables[0].name).toBe("users");
     });
   });
+
+  describe("Reserved keywords handling", () => {
+    test("should automatically quote reserved keyword 'year' as column name", () => {
+      const sqlWithYear = `
+        CREATE TABLE company_yearly_data (
+          id SERIAL PRIMARY KEY,
+          company_id INTEGER NOT NULL,
+          year INT NOT NULL,
+          revenue INT,
+          UNIQUE (company_id, year)
+        );
+      `;
+
+      expect(() => {
+        parser.parseSchema(sqlWithYear);
+      }).not.toThrow();
+    });
+
+    test("should parse table with 'year' column successfully", () => {
+      const sqlWithYear = `
+        CREATE TABLE company_yearly_data (
+          id SERIAL PRIMARY KEY,
+          company_id INTEGER NOT NULL,
+          year INT NOT NULL,
+          revenue INT
+        );
+      `;
+
+      const result = parser.parseSchema(sqlWithYear);
+      expect(result.tables).toHaveLength(1);
+      expect(result.tables[0].name).toBe("company_yearly_data");
+      expect(result.tables[0].columns).toHaveLength(4);
+
+      const yearColumn = result.tables[0].columns.find(c => c.name === "year");
+      expect(yearColumn).toBeDefined();
+      expect(yearColumn?.type).toBe("INT");
+    });
+
+    test("should handle multiple reserved keywords", () => {
+      const sqlWithKeywords = `
+        CREATE TABLE events (
+          id SERIAL PRIMARY KEY,
+          user INTEGER NOT NULL,
+          day INT NOT NULL,
+          month INT NOT NULL,
+          year INT NOT NULL
+        );
+      `;
+
+      expect(() => {
+        parser.parseSchema(sqlWithKeywords);
+      }).not.toThrow();
+
+      const result = parser.parseSchema(sqlWithKeywords);
+      expect(result.tables[0].columns).toHaveLength(5);
+    });
+  });
 });

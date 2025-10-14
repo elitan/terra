@@ -177,6 +177,10 @@ function extractIndexColumnsAndExpressions(node: any): {
       }
 
       if (columnName) {
+        // Strip surrounding quotes from identifiers (e.g., "year" -> year)
+        if (columnName.startsWith('"') && columnName.endsWith('"')) {
+          columnName = columnName.slice(1, -1);
+        }
         columns.push(columnName);
       }
     }

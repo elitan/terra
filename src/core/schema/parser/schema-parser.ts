@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { parse as parseCST } from "sql-parser-cst";
+import { parse as parseCST, postgresqlKeywords } from "sql-parser-cst";
 import { Logger } from "../../../utils/logger";
 import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
@@ -158,6 +158,10 @@ export class SchemaParser {
     // Preprocess PostGIS types to work around sql-parser-cst limitations
     // Convert geography(point, 4326) -> geography('POINT', 4326)
     cleanedSql = this.preprocessPostGISTypes(cleanedSql);
+
+    // Preprocess reserved keywords to work around sql-parser-cst limitations
+    // Convert year int -> "year" int
+    cleanedSql = this.preprocessReservedKeywords(cleanedSql);
 
     try {
       const cst = parseCST(cleanedSql, {
@@ -348,6 +352,78 @@ export class SchemaParser {
         });
       }
     }
+
+    return result;
+  }
+
+  /**
+   * Preprocess reserved keywords to work around sql-parser-cst limitations
+   * Automatically quotes unquoted reserved keywords when used as identifiers
+   * e.g., year int -> "year" int
+   */
+  private preprocessReservedKeywords(sql: string): string {
+    let result = sql;
+
+    // List of SQL keywords that should NOT be quoted (structural keywords)
+    const structuralKeywords = new Set([
+      'CREATE', 'TABLE', 'INDEX', 'VIEW', 'TYPE', 'ENUM', 'FUNCTION', 'PROCEDURE',
+      'TRIGGER', 'SEQUENCE', 'SCHEMA', 'EXTENSION', 'ALTER', 'DROP', 'CONSTRAINT',
+      'PRIMARY', 'FOREIGN', 'KEY', 'REFERENCES', 'UNIQUE', 'CHECK', 'NOT', 'NULL',
+      'DEFAULT', 'ON', 'DELETE', 'UPDATE', 'CASCADE', 'RESTRICT', 'SET', 'NO',
+      'ACTION', 'DEFERRABLE', 'INITIALLY', 'DEFERRED', 'IMMEDIATE', 'MATCH',
+      'FULL', 'PARTIAL', 'SIMPLE', 'IF', 'EXISTS', 'OR', 'REPLACE', 'TEMP',
+      'TEMPORARY', 'UNLOGGED', 'MATERIALIZED', 'RECURSIVE', 'WITH', 'WITHOUT',
+      'CONCURRENTLY', 'ONLY', 'ASC', 'DESC', 'NULLS', 'FIRST', 'LAST', 'USING',
+      'WHERE', 'AND', 'INCLUDE', 'TABLESPACE', 'FILLFACTOR', 'INHERITS',
+      'PARTITION', 'BY', 'RANGE', 'LIST', 'HASH', 'FOR', 'VALUES', 'FROM', 'TO',
+      'IN', 'COLLATE', 'AS', 'RETURNS', 'LANGUAGE', 'IMMUTABLE', 'STABLE',
+      'VOLATILE', 'CALLED', 'SECURITY', 'DEFINER', 'INVOKER', 'PARALLEL',
+      'SAFE', 'UNSAFE', 'RESTRICTED', 'COST', 'ROWS', 'SUPPORT', 'WINDOW',
+      'BEFORE', 'AFTER', 'INSTEAD', 'OF', 'EACH', 'ROW', 'STATEMENT', 'WHEN',
+      'EXECUTE', 'INCREMENT', 'MINVALUE', 'MAXVALUE', 'START', 'CACHE', 'CYCLE',
+      'OWNED', 'NONE', 'AUTHORIZATION', 'GRANT', 'REVOKE', 'TO', 'PUBLIC',
+      'USAGE', 'SELECT', 'INSERT', 'DELETE', 'TRUNCATE', 'COMMENT', 'IS'
+    ]);
+
+    // Pattern to match column definitions: word followed by a data type
+    // This matches: "identifier TYPE" where TYPE could be INT, VARCHAR, etc.
+    const columnPattern = /\b([a-z_][a-z0-9_]*)\s+(INT|INTEGER|BIGINT|SMALLINT|SERIAL|BIGSERIAL|SMALLSERIAL|DECIMAL|NUMERIC|REAL|DOUBLE|FLOAT|BOOLEAN|BOOL|CHAR|VARCHAR|TEXT|DATE|TIME|TIMESTAMP|TIMESTAMPTZ|INTERVAL|JSON|JSONB|UUID|BYTEA|ARRAY|POINT|LINE|LSEG|BOX|PATH|POLYGON|CIRCLE|CIDR|INET|MACADDR|BIT|VARBIT|MONEY|XML|TSVECTOR|TSQUERY|GEOMETRY|GEOGRAPHY)\b/gi;
+
+    result = result.replace(columnPattern, (match, identifier, type) => {
+      const upperIdent = identifier.toUpperCase();
+
+      // Check if this identifier is a reserved keyword but NOT a structural keyword
+      if (upperIdent in postgresqlKeywords && !structuralKeywords.has(upperIdent)) {
+        return `"${identifier}" ${type}`;
+      }
+
+      return match;
+    });
+
+    // Pattern to match identifiers in constraint/index column lists: (col1, col2, ...)
+    // This handles UNIQUE (company_id, year) or PRIMARY KEY (id, year)
+    const constraintPattern = /\(([^)]+)\)/g;
+
+    result = result.replace(constraintPattern, (match, contents) => {
+      const columns = contents.split(',').map((col: string) => {
+        const trimmed = col.trim();
+        const identMatch = trimmed.match(/^([a-z_][a-z0-9_]*)/i);
+
+        if (identMatch) {
+          const identifier = identMatch[1];
+          const upperIdent = identifier.toUpperCase();
+
+          // Check if this identifier is a reserved keyword but NOT a structural keyword
+          if (upperIdent in postgresqlKeywords && !structuralKeywords.has(upperIdent)) {
+            return trimmed.replace(identifier, `"${identifier}"`);
+          }
+        }
+
+        return trimmed;
+      });
+
+      return `(${columns.join(', ')})`;
+    });
 
     return result;
   }

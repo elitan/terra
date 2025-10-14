@@ -271,6 +271,10 @@ export function parseForeignKey(node: any): ForeignKeyConstraint | null {
         }
 
         if (colName) {
+          // Strip surrounding quotes from identifiers (e.g., "year" -> year)
+          if (colName.startsWith('"') && colName.endsWith('"')) {
+            colName = colName.slice(1, -1);
+          }
           columns.push(colName);
         }
       }
@@ -403,6 +407,10 @@ export function parseUniqueConstraint(node: any): UniqueConstraint | null {
         }
 
         if (colName) {
+          // Strip surrounding quotes from identifiers (e.g., "year" -> year)
+          if (colName.startsWith('"') && colName.endsWith('"')) {
+            colName = colName.slice(1, -1);
+          }
           columns.push(colName);
         }
       }

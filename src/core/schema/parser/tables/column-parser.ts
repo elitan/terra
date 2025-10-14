@@ -41,8 +41,13 @@ export function extractColumns(node: any): Column[] {
 export function parseColumn(node: any): Column | null {
   try {
     // Extract column name from the node
-    const name = node.name?.text || node.name?.name;
+    let name = node.name?.text || node.name?.name;
     if (!name) return null;
+
+    // Strip surrounding quotes from identifiers (e.g., "year" -> year)
+    if (name.startsWith('"') && name.endsWith('"')) {
+      name = name.slice(1, -1);
+    }
 
     // Extract data type
     const type = extractDataType(node);
