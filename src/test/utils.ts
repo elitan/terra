@@ -40,45 +40,49 @@ export function createTestDatabaseService(): DatabaseService {
   return new DatabaseService(config);
 }
 
-export async function cleanDatabase(client: Client): Promise<void> {
-  // Batch all cleanup operations in a single query for better performance
-  // This reduces round trips from ~20+ queries to just 1
-  await client.query(`
-    DO $$
-    DECLARE
-      r RECORD;
-    BEGIN
-      -- Drop all tables in the public schema
-      FOR r IN (
-        SELECT quote_ident(tablename) as quoted_tablename
-        FROM pg_tables
-        WHERE schemaname = 'public'
-      ) LOOP
-        EXECUTE 'DROP TABLE IF EXISTS ' || r.quoted_tablename || ' CASCADE';
-      END LOOP;
+export async function cleanDatabase(client: Client, schemas: string[] = ['public']): Promise<void> {
+  for (const schema of schemas) {
+    if (schema !== 'public') {
+      await client.query(`DROP SCHEMA IF EXISTS ${client.escapeIdentifier(schema)} CASCADE`);
+    } else {
+      await client.query(`
+        DO $$
+        DECLARE
+          r RECORD;
+        BEGIN
+          -- Drop all tables in the public schema
+          FOR r IN (
+            SELECT quote_ident(tablename) as quoted_tablename
+            FROM pg_tables
+            WHERE schemaname = 'public'
+          ) LOOP
+            EXECUTE 'DROP TABLE IF EXISTS ' || r.quoted_tablename || ' CASCADE';
+          END LOOP;
 
-      -- Drop all custom types (including ENUMs)
-      FOR r IN (
-        SELECT quote_ident(typname) as quoted_typename
-        FROM pg_type
-        WHERE typtype = 'e'
-          AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
-      ) LOOP
-        EXECUTE 'DROP TYPE IF EXISTS ' || r.quoted_typename || ' CASCADE';
-      END LOOP;
+          -- Drop all custom types (including ENUMs)
+          FOR r IN (
+            SELECT quote_ident(typname) as quoted_typename
+            FROM pg_type
+            WHERE typtype = 'e'
+              AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+          ) LOOP
+            EXECUTE 'DROP TYPE IF EXISTS ' || r.quoted_typename || ' CASCADE';
+          END LOOP;
 
-      -- Drop all extensions in the public schema (except built-in ones like plpgsql)
-      FOR r IN (
-        SELECT e.extname
-        FROM pg_extension e
-        JOIN pg_namespace n ON e.extnamespace = n.oid
-        WHERE n.nspname = 'public'
-          AND e.extname != 'plpgsql'
-      ) LOOP
-        EXECUTE 'DROP EXTENSION IF EXISTS ' || quote_ident(r.extname) || ' CASCADE';
-      END LOOP;
-    END $$;
-  `);
+          -- Drop all extensions in the public schema (except built-in ones like plpgsql)
+          FOR r IN (
+            SELECT e.extname
+            FROM pg_extension e
+            JOIN pg_namespace n ON e.extnamespace = n.oid
+            WHERE n.nspname = 'public'
+              AND e.extname != 'plpgsql'
+          ) LOOP
+            EXECUTE 'DROP EXTENSION IF EXISTS ' || quote_ident(r.extname) || ' CASCADE';
+          END LOOP;
+        END $$;
+      `);
+    }
+  }
 }
 
 export async function getTableNames(client: Client): Promise<string[]> {

@@ -10,7 +10,7 @@ describe("ENUM Types", () => {
 
   beforeEach(async () => {
     client = await createTestClient();
-    await cleanDatabase(client);
+    await cleanDatabase(client, ['public', 'myapp', 'app']);
     const databaseService = new DatabaseService(getTestDbConfig());
     schemaService = new SchemaService(databaseService);
   });
