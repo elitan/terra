@@ -50,7 +50,7 @@ export class SchemaParser {
     // Find the first occurrence of the problem text in the SQL
     const lines = sql.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      const lineText = lines[i];
+      const lineText = lines[i] || '';
       const col = lineText.indexOf(problemText);
 
       if (col !== -1) {

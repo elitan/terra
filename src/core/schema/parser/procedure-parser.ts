@@ -39,12 +39,13 @@ export function parseCreateProcedure(node: any): Procedure | null {
       name,
       schema,
       parameters,
-      language,
-      body,
+      language: language as string,
+      body: body as string,
       securityDefiner,
     };
   } catch (error) {
     Logger.warning(
+      // @ts-expect-error - error is unknown but String() handles it
       `Failed to parse CREATE PROCEDURE from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;

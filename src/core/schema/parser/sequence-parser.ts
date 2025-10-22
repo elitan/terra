@@ -42,6 +42,7 @@ export function parseCreateSequence(node: any): Sequence | null {
     };
   } catch (error) {
     Logger.warning(
+      // @ts-expect-error - error is unknown but String() handles it
       `Failed to parse CREATE SEQUENCE from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
