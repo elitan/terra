@@ -34,14 +34,17 @@ describe("Unique Constraints", () => {
 
       // Verify unique constraint exists
       const result = await client.query(`
-        SELECT 
+        SELECT
           tc.constraint_name,
           tc.constraint_type,
           kcu.column_name
         FROM information_schema.table_constraints tc
-        JOIN information_schema.key_column_usage kcu 
+        JOIN information_schema.key_column_usage kcu
           ON tc.constraint_name = kcu.constraint_name
-        WHERE tc.table_name = 'users' 
+          AND tc.table_schema = kcu.table_schema
+          AND tc.table_name = kcu.table_name
+        WHERE tc.table_name = 'users'
+          AND tc.table_schema = 'public'
           AND tc.constraint_type = 'UNIQUE'
         ORDER BY tc.constraint_name
       `);
@@ -188,7 +191,8 @@ describe("Unique Constraints", () => {
       const result = await client.query(`
         SELECT COUNT(*) as constraint_count
         FROM information_schema.table_constraints
-        WHERE table_name = 'users' 
+        WHERE table_name = 'users'
+          AND table_schema = 'public'
           AND constraint_type = 'UNIQUE'
       `);
 
