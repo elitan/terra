@@ -193,7 +193,7 @@ describe("Partial Index Support", () => {
       // Should drop old index and create new partial index
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "DROP INDEX CONCURRENTLY idx_users_email;"
+        'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
         "CREATE INDEX idx_users_email ON users (email) WHERE active = true;"
@@ -247,7 +247,7 @@ describe("Partial Index Support", () => {
       // Should recreate index with new condition
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "DROP INDEX CONCURRENTLY idx_orders_status;"
+        'DROP INDEX CONCURRENTLY "idx_orders_status";'
       );
       expect(allStatements).toContain(
         "CREATE INDEX CONCURRENTLY idx_orders_status ON orders (status) WHERE status IN ('active', 'pending');"

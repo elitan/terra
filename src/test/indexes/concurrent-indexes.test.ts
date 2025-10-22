@@ -153,7 +153,7 @@ describe("Concurrent Index Operations", () => {
 
       // Even regular indexes should be dropped concurrently for safety
       expect(plan.concurrent).toContain(
-        "DROP INDEX CONCURRENTLY idx_users_email;"
+        'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
     });
 
@@ -211,7 +211,7 @@ describe("Concurrent Index Operations", () => {
 
       // Drop should be concurrent
       expect(plan.concurrent).toContain(
-        "DROP INDEX CONCURRENTLY idx_old_email;"
+        'DROP INDEX CONCURRENTLY "idx_old_email";'
       );
 
       // Regular create should be transactional
@@ -293,7 +293,7 @@ describe("Concurrent Index Operations", () => {
 
       // Drop index concurrently
       await client.query(`
-        DROP INDEX CONCURRENTLY idx_drop_test_email;
+        DROP INDEX CONCURRENTLY "idx_drop_test_email";
       `);
 
       // Verify index is gone

@@ -301,7 +301,7 @@ describe("Index Storage Options", () => {
       // Should recreate index with new storage parameters
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "DROP INDEX CONCURRENTLY idx_users_email;"
+        'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
         "CREATE INDEX CONCURRENTLY idx_users_email ON users (email) WITH (fillfactor=90);"
@@ -355,7 +355,7 @@ describe("Index Storage Options", () => {
       // Should recreate index in new tablespace
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "DROP INDEX CONCURRENTLY idx_users_email;"
+        'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
         "CREATE INDEX CONCURRENTLY idx_users_email ON users (email) TABLESPACE new_tablespace;"

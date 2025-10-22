@@ -17,7 +17,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toBe("CREATE VIEW active_users AS SELECT id, email FROM users WHERE active = true;");
+      expect(sql).toBe('CREATE VIEW "active_users" AS SELECT id, email FROM users WHERE active = true;');
     });
 
     test("should generate CREATE MATERIALIZED VIEW statement", () => {
@@ -28,7 +28,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toBe("CREATE MATERIALIZED VIEW user_stats AS SELECT COUNT(*) as total FROM users;");
+      expect(sql).toBe('CREATE MATERIALIZED VIEW "user_stats" AS SELECT COUNT(*) as total FROM users;');
     });
 
     test("should include WITH CHECK OPTION for regular views", () => {
@@ -40,7 +40,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toBe("CREATE VIEW active_users AS SELECT id, email FROM users WHERE active = true WITH CASCADED CHECK OPTION;");
+      expect(sql).toBe('CREATE VIEW "active_users" AS SELECT id, email FROM users WHERE active = true WITH CASCADED CHECK OPTION;');
     });
 
     test("should include WITH LOCAL CHECK OPTION", () => {
@@ -52,7 +52,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toBe("CREATE VIEW local_view AS SELECT * FROM base_view WITH LOCAL CHECK OPTION;");
+      expect(sql).toBe('CREATE VIEW "local_view" AS SELECT * FROM base_view WITH LOCAL CHECK OPTION;');
     });
 
     test("should NOT include CHECK OPTION for materialized views", () => {
@@ -64,19 +64,19 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toBe("CREATE MATERIALIZED VIEW mat_view AS SELECT * FROM users;");
+      expect(sql).toBe('CREATE MATERIALIZED VIEW "mat_view" AS SELECT * FROM users;');
     });
   });
 
   describe("DROP VIEW SQL", () => {
     test("should generate DROP VIEW statement", () => {
       const sql = generateDropViewSQL("test_view");
-      expect(sql).toBe("DROP VIEW IF EXISTS test_view;");
+      expect(sql).toBe('DROP VIEW IF EXISTS "test_view";');
     });
 
     test("should generate DROP MATERIALIZED VIEW statement", () => {
       const sql = generateDropViewSQL("test_mat_view", true);
-      expect(sql).toBe("DROP MATERIALIZED VIEW IF EXISTS test_mat_view;");
+      expect(sql).toBe('DROP MATERIALIZED VIEW IF EXISTS "test_mat_view";');
     });
   });
 
@@ -89,7 +89,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateOrReplaceViewSQL(view);
-      expect(sql).toBe("CREATE OR REPLACE VIEW replaceable_view AS SELECT id, name FROM users;");
+      expect(sql).toBe('CREATE OR REPLACE VIEW "replaceable_view" AS SELECT id, name FROM users;');
     });
 
     test("should generate CREATE OR REPLACE with CHECK OPTION", () => {
@@ -101,7 +101,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateOrReplaceViewSQL(view);
-      expect(sql).toBe("CREATE OR REPLACE VIEW replaceable_view AS SELECT id, name FROM users WHERE active = true WITH CASCADED CHECK OPTION;");
+      expect(sql).toBe('CREATE OR REPLACE VIEW "replaceable_view" AS SELECT id, name FROM users WHERE active = true WITH CASCADED CHECK OPTION;');
     });
 
     test("should generate DROP + CREATE for materialized views", () => {
@@ -112,20 +112,20 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateOrReplaceViewSQL(view);
-      expect(sql).toContain("DROP MATERIALIZED VIEW IF EXISTS mat_view;");
-      expect(sql).toContain("CREATE MATERIALIZED VIEW mat_view AS SELECT COUNT(*) FROM users;");
+      expect(sql).toContain('DROP MATERIALIZED VIEW IF EXISTS "mat_view";');
+      expect(sql).toContain('CREATE MATERIALIZED VIEW "mat_view" AS SELECT COUNT(*) FROM users;');
     });
   });
 
   describe("REFRESH MATERIALIZED VIEW SQL", () => {
     test("should generate REFRESH MATERIALIZED VIEW statement", () => {
       const sql = generateRefreshMaterializedViewSQL("test_mat_view");
-      expect(sql).toBe("REFRESH MATERIALIZED VIEW test_mat_view;");
+      expect(sql).toBe('REFRESH MATERIALIZED VIEW "test_mat_view";');
     });
 
     test("should generate REFRESH MATERIALIZED VIEW CONCURRENTLY", () => {
       const sql = generateRefreshMaterializedViewSQL("test_mat_view", true);
-      expect(sql).toBe("REFRESH MATERIALIZED VIEW CONCURRENTLY test_mat_view;");
+      expect(sql).toBe('REFRESH MATERIALIZED VIEW CONCURRENTLY "test_mat_view";');
     });
   });
 
@@ -148,7 +148,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toContain("CREATE VIEW complex_view AS");
+      expect(sql).toContain('CREATE VIEW "complex_view" AS');
       expect(sql).toContain("LEFT JOIN posts p");
       expect(sql).toContain("GROUP BY u.id, u.name");
       expect(sql).toContain("HAVING COUNT(p.id) > 0");
@@ -171,7 +171,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toContain("CREATE MATERIALIZED VIEW cte_view AS");
+      expect(sql).toContain('CREATE MATERIALIZED VIEW "cte_view" AS');
       expect(sql).toContain("WITH RECURSIVE category_tree");
       expect(sql).toContain("UNION ALL");
     });
@@ -191,7 +191,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toContain("CREATE VIEW window_func_view AS");
+      expect(sql).toContain('CREATE VIEW "window_func_view" AS');
       expect(sql).toContain("ROW_NUMBER() OVER");
       expect(sql).toContain("PERCENT_RANK() OVER");
       expect(sql).toContain("LAG(salary) OVER");
@@ -201,7 +201,7 @@ describe("View SQL Generation", () => {
   describe("Edge Cases", () => {
     test("should handle view names with special characters", () => {
       const view: View = {
-        name: '"user-summary"',
+        name: 'user-summary',
         definition: 'SELECT id, email FROM "user_profiles"',
         materialized: false
       };
@@ -218,7 +218,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toBe("CREATE VIEW minimal_view AS SELECT 1;");
+      expect(sql).toBe('CREATE VIEW "minimal_view" AS SELECT 1;');
     });
 
     test("should handle very long view definitions", () => {
@@ -233,7 +233,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toContain("CREATE MATERIALIZED VIEW wide_view AS");
+      expect(sql).toContain('CREATE MATERIALIZED VIEW "wide_view" AS');
       expect(sql).toContain("column0, column1");
       expect(sql).toContain("column99");
     });
@@ -250,7 +250,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateViewSQL(view);
-      expect(sql).toContain("CREATE VIEW special_chars_view AS");
+      expect(sql).toContain('CREATE VIEW "special_chars_view" AS');
       expect(sql).toContain("'It''s a string with quotes'");
       expect(sql).toContain("$tag$Dollar quoted string$tag$");
     });

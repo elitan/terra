@@ -318,7 +318,7 @@ describe("Type Aliases with Defaults - Combination Testing", () => {
 
       expect(plan.hasChanges).toBe(true);
       // Should have type change operation (but not default operations since default value is same)
-      expect(plan.transactional.some(s => s.includes("ALTER COLUMN val TYPE INT8"))).toBe(true);
+      expect(plan.transactional.some(s => s.includes('ALTER COLUMN "val" TYPE INT8'))).toBe(true);
       expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
       expect(plan.transactional.some(s => s.includes("SET DEFAULT"))).toBe(false);
     });
@@ -345,7 +345,7 @@ describe("Type Aliases with Defaults - Combination Testing", () => {
 
       expect(plan.hasChanges).toBe(true);
       expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(true);
-      expect(plan.transactional.some(s => s.includes("ALTER COLUMN val TYPE INT8"))).toBe(true);
+      expect(plan.transactional.some(s => s.includes('ALTER COLUMN "val" TYPE INT8'))).toBe(true);
       expect(plan.transactional.some(s => s.includes("SET DEFAULT"))).toBe(false);
     });
   });

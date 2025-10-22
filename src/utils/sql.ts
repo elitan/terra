@@ -1,4 +1,5 @@
-import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence } from "../types/schema";
+import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType } from "../types/schema";
+import { SQLBuilder } from "./sql-builder";
 
 /**
  * Get qualified table name with schema prefix if present
@@ -150,13 +151,17 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
 
 export function generateCreateTableStatement(table: Table): string {
   const columnDefs = table.columns.map((col) => {
-    let def = `${col.name} ${col.type}`;
-    if (!col.nullable) def += " NOT NULL";
-    if (col.default) def += ` DEFAULT ${col.default}`;
+    const builder = new SQLBuilder();
+    builder.ident(col.name).p(col.type);
+
     if (col.generated) {
-      def += ` GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+      builder.p(`GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`);
+    } else {
+      if (!col.nullable) builder.p("NOT NULL");
+      if (col.default) builder.p(`DEFAULT ${col.default}`);
     }
-    return def;
+
+    return builder.build();
   });
 
   // Add primary key constraint if it exists
@@ -188,10 +193,14 @@ export function generateCreateTableStatement(table: Table): string {
 export function generatePrimaryKeyClause(
   primaryKey: PrimaryKeyConstraint
 ): string {
-  const columns = primaryKey.columns.join(", ");
+  const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
 
   if (primaryKey.name) {
-    return `CONSTRAINT ${primaryKey.name} PRIMARY KEY (${columns})`;
+    const builder = new SQLBuilder()
+      .p("CONSTRAINT")
+      .ident(primaryKey.name)
+      .p(`PRIMARY KEY (${columns})`);
+    return builder.build();
   } else {
     return `PRIMARY KEY (${columns})`;
   }
@@ -202,15 +211,28 @@ export function generateAddPrimaryKeySQL(
   primaryKey: PrimaryKeyConstraint
 ): string {
   const constraintName = primaryKey.name || `pk_${tableName}`;
-  const columns = primaryKey.columns.join(", ");
-  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} PRIMARY KEY (${columns});`;
+  const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`PRIMARY KEY (${columns});`)
+    .build();
 }
 
 export function generateDropPrimaryKeySQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 // Foreign Key SQL generation
@@ -219,50 +241,42 @@ export function generateAddForeignKeySQL(
   foreignKey: ForeignKeyConstraint
 ): string {
   const constraintName = foreignKey.name || `fk_${tableName}_${foreignKey.referencedTable}`;
-  const columns = foreignKey.columns.join(", ");
-  const referencedColumns = foreignKey.referencedColumns.join(", ");
-  
-  let sql = `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${columns}) REFERENCES ${foreignKey.referencedTable}(${referencedColumns})`;
-  
+  const columns = foreignKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const referencedColumns = foreignKey.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+
+  const builder = new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`FOREIGN KEY (${columns}) REFERENCES`)
+    .table(foreignKey.referencedTable)
+    .p(`(${referencedColumns})`);
+
   if (foreignKey.onDelete) {
-    sql += ` ON DELETE ${foreignKey.onDelete}`;
+    builder.p(`ON DELETE ${foreignKey.onDelete}`);
   }
-  
+
   if (foreignKey.onUpdate) {
-    sql += ` ON UPDATE ${foreignKey.onUpdate}`;
+    builder.p(`ON UPDATE ${foreignKey.onUpdate}`);
   }
-  
-  return sql + ";";
+
+  return builder.p(";").build();
 }
 
 export function generateDropForeignKeySQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
-export function generateForeignKeyClause(foreignKey: ForeignKeyConstraint): string {
-  const columns = foreignKey.columns.join(", ");
-  const referencedColumns = foreignKey.referencedColumns.join(", ");
-  
-  let clause = "";
-  if (foreignKey.name) {
-    clause += `CONSTRAINT ${foreignKey.name} `;
-  }
-  
-  clause += `FOREIGN KEY (${columns}) REFERENCES ${foreignKey.referencedTable}(${referencedColumns})`;
-  
-  if (foreignKey.onDelete) {
-    clause += ` ON DELETE ${foreignKey.onDelete}`;
-  }
-  
-  if (foreignKey.onUpdate) {
-    clause += ` ON UPDATE ${foreignKey.onUpdate}`;
-  }
-  
-  return clause;
-}
 
 // Check Constraint SQL generation
 export function generateAddCheckConstraintSQL(
@@ -270,25 +284,38 @@ export function generateAddCheckConstraintSQL(
   checkConstraint: CheckConstraint
 ): string {
   const constraintName = checkConstraint.name || `check_${tableName}_${Date.now()}`;
-  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} CHECK (${checkConstraint.expression});`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`CHECK (${checkConstraint.expression});`)
+    .build();
 }
 
 export function generateDropCheckConstraintSQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 export function generateCheckConstraintClause(checkConstraint: CheckConstraint): string {
-  let clause = "";
+  const builder = new SQLBuilder();
+
   if (checkConstraint.name) {
-    clause += `CONSTRAINT ${checkConstraint.name} `;
+    builder.p("CONSTRAINT").ident(checkConstraint.name);
   }
-  
-  clause += `CHECK (${checkConstraint.expression})`;
-  
-  return clause;
+
+  builder.p(`CHECK (${checkConstraint.expression})`);
+
+  return builder.build();
 }
 
 // Unique Constraint SQL generation
@@ -297,58 +324,73 @@ export function generateAddUniqueConstraintSQL(
   uniqueConstraint: UniqueConstraint
 ): string {
   const constraintName = uniqueConstraint.name || `unique_${tableName}_${uniqueConstraint.columns.join('_')}`;
-  const columns = uniqueConstraint.columns.join(", ");
-  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} UNIQUE (${columns});`;
+  const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`UNIQUE (${columns});`)
+    .build();
 }
 
 export function generateDropUniqueConstraintSQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 export function generateUniqueConstraintClause(uniqueConstraint: UniqueConstraint): string {
-  const columns = uniqueConstraint.columns.join(", ");
-  
-  let clause = "";
+  const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+
+  const builder = new SQLBuilder();
+
   if (uniqueConstraint.name) {
-    clause += `CONSTRAINT ${uniqueConstraint.name} `;
+    builder.p("CONSTRAINT").ident(uniqueConstraint.name);
   }
-  
-  clause += `UNIQUE (${columns})`;
-  
-  return clause;
+
+  builder.p(`UNIQUE (${columns})`);
+
+  return builder.build();
 }
 
 // VIEW SQL generation functions
 export function generateCreateViewSQL(view: View): string {
-  let sql = "CREATE ";
-  
+  const builder = new SQLBuilder();
+
   if (view.materialized) {
-    sql += "MATERIALIZED ";
+    builder.p("CREATE MATERIALIZED VIEW");
+  } else {
+    builder.p("CREATE VIEW");
   }
-  
-  sql += `VIEW ${view.name} AS ${view.definition}`;
-  
+
+  builder.ident(view.name).p(`AS ${view.definition}`);
+
   // Add WITH CHECK OPTION if specified (not for materialized views)
   if (view.checkOption && !view.materialized) {
-    sql += ` WITH ${view.checkOption} CHECK OPTION`;
+    builder.p(`WITH ${view.checkOption} CHECK OPTION`);
   }
-  
-  return sql + ";";
+
+  return builder.p(";").build();
 }
 
 export function generateDropViewSQL(viewName: string, materialized?: boolean): string {
-  let sql = "DROP ";
-  
+  const builder = new SQLBuilder();
+
   if (materialized) {
-    sql += "MATERIALIZED ";
+    builder.p("DROP MATERIALIZED VIEW IF EXISTS");
+  } else {
+    builder.p("DROP VIEW IF EXISTS");
   }
-  
-  sql += `VIEW IF EXISTS ${viewName}`;
-  
-  return sql + ";";
+
+  return builder.ident(viewName).p(";").build();
 }
 
 export function generateCreateOrReplaceViewSQL(view: View): string {
@@ -357,183 +399,241 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
     // We need to drop and recreate
     return generateDropViewSQL(view.name, true) + "\n" + generateCreateViewSQL(view);
   }
-  
-  let sql = "CREATE OR REPLACE VIEW ";
-  sql += `${view.name} AS ${view.definition}`;
-  
+
+  const builder = new SQLBuilder()
+    .p("CREATE OR REPLACE VIEW")
+    .ident(view.name)
+    .p(`AS ${view.definition}`);
+
   // Add WITH CHECK OPTION if specified
   if (view.checkOption) {
-    sql += ` WITH ${view.checkOption} CHECK OPTION`;
+    builder.p(`WITH ${view.checkOption} CHECK OPTION`);
   }
-  
-  return sql + ";";
+
+  return builder.p(";").build();
 }
 
 export function generateRefreshMaterializedViewSQL(viewName: string, concurrently: boolean = false): string {
-  let sql = "REFRESH MATERIALIZED VIEW ";
+  const builder = new SQLBuilder();
 
   if (concurrently) {
-    sql += "CONCURRENTLY ";
+    builder.p("REFRESH MATERIALIZED VIEW CONCURRENTLY");
+  } else {
+    builder.p("REFRESH MATERIALIZED VIEW");
   }
 
-  sql += viewName;
-
-  return sql + ";";
+  return builder.ident(viewName).p(";").build();
 }
 
 // FUNCTION SQL generation functions
 export function generateCreateFunctionSQL(func: Function): string {
-  let sql = `CREATE FUNCTION ${func.name}(`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE FUNCTION').ident(func.name);
+  builder.rewriteLastChar('(');
 
   // Add parameters
   if (func.parameters.length > 0) {
     const params = func.parameters.map(p => {
-      let param = "";
-      if (p.mode) param += `${p.mode} `;
-      if (p.name) param += `${p.name} `;
-      param += p.type;
-      if (p.default) param += ` DEFAULT ${p.default}`;
-      return param;
+      const parts: string[] = [];
+      if (p.mode) parts.push(p.mode);
+      if (p.name) parts.push(`"${p.name.replace(/"/g, '""')}"`);
+      parts.push(p.type);
+      if (p.default) parts.push(`DEFAULT ${p.default}`);
+      return parts.join(' ');
     });
-    sql += params.join(", ");
+    builder.p(params.join(', '));
   }
 
-  sql += `) RETURNS ${func.returnType}`;
-  sql += ` AS $$ ${func.body} $$`;
-  sql += ` LANGUAGE ${func.language}`;
+  builder.p(')');
+  builder.p(`RETURNS ${func.returnType}`);
+  builder.p(`AS $$ ${func.body} $$`);
+  builder.p(`LANGUAGE ${func.language}`);
 
   if (func.volatility) {
-    sql += ` ${func.volatility}`;
+    builder.p(func.volatility);
   }
 
   if (func.parallel) {
-    sql += ` PARALLEL ${func.parallel}`;
+    builder.p(`PARALLEL ${func.parallel}`);
   }
 
   if (func.securityDefiner) {
-    sql += " SECURITY DEFINER";
+    builder.p('SECURITY DEFINER');
   }
 
   if (func.strict) {
-    sql += " STRICT";
+    builder.p('STRICT');
   }
 
   if (func.cost !== undefined) {
-    sql += ` COST ${func.cost}`;
+    builder.p(`COST ${func.cost}`);
   }
 
   if (func.rows !== undefined) {
-    sql += ` ROWS ${func.rows}`;
+    builder.p(`ROWS ${func.rows}`);
   }
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropFunctionSQL(func: Function): string {
   const paramTypes = func.parameters.map(p => p.type).join(", ");
   // Use CASCADE to automatically drop dependent triggers
-  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes}) CASCADE;`;
+  const builder = new SQLBuilder();
+  builder.p('DROP FUNCTION IF EXISTS').ident(func.name);
+  builder.rewriteLastChar('(');
+  builder.p(`${paramTypes}) CASCADE;`);
+  return builder.build();
 }
 
 // PROCEDURE SQL generation functions
 export function generateCreateProcedureSQL(proc: Procedure): string {
-  let sql = `CREATE PROCEDURE ${proc.name}(`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE PROCEDURE').ident(proc.name);
+  builder.rewriteLastChar('(');
 
   // Add parameters
   if (proc.parameters.length > 0) {
     const params = proc.parameters.map(p => {
-      let param = "";
-      if (p.mode) param += `${p.mode} `;
-      if (p.name) param += `${p.name} `;
-      param += p.type;
-      if (p.default) param += ` DEFAULT ${p.default}`;
-      return param;
+      const parts: string[] = [];
+      if (p.mode) parts.push(p.mode);
+      if (p.name) parts.push(`"${p.name.replace(/"/g, '""')}"`);
+      parts.push(p.type);
+      if (p.default) parts.push(`DEFAULT ${p.default}`);
+      return parts.join(' ');
     });
-    sql += params.join(", ");
+    builder.p(params.join(', '));
   }
 
-  sql += `) LANGUAGE ${proc.language}`;
-  sql += ` AS $$ ${proc.body} $$`;
+  builder.p(')');
+  builder.p(`LANGUAGE ${proc.language}`);
+  builder.p(`AS $$ ${proc.body} $$`);
 
   if (proc.securityDefiner) {
-    sql += " SECURITY DEFINER";
+    builder.p('SECURITY DEFINER');
   }
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropProcedureSQL(proc: Procedure): string {
   const paramTypes = proc.parameters.map(p => p.type).join(", ");
-  return `DROP PROCEDURE IF EXISTS ${proc.name}(${paramTypes});`;
+  const builder = new SQLBuilder();
+  builder.p('DROP PROCEDURE IF EXISTS').ident(proc.name);
+  builder.rewriteLastChar('(');
+  builder.p(`${paramTypes});`);
+  return builder.build();
 }
 
 // TRIGGER SQL generation functions
 export function generateCreateTriggerSQL(trigger: Trigger): string {
-  let sql = `CREATE TRIGGER ${trigger.name}`;
-  sql += ` ${trigger.timing}`;
-  sql += ` ${trigger.events.join(" OR ")}`;
-  sql += ` ON ${trigger.tableName}`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE TRIGGER').ident(trigger.name);
+  builder.p(trigger.timing);
+  builder.p(trigger.events.join(" OR "));
+  builder.p('ON').ident(trigger.tableName);
 
   if (trigger.forEach) {
-    sql += ` FOR EACH ${trigger.forEach}`;
+    builder.p(`FOR EACH ${trigger.forEach}`);
   }
 
   if (trigger.when) {
-    sql += ` WHEN (${trigger.when})`;
+    builder.p(`WHEN (${trigger.when})`);
   }
 
-  sql += ` EXECUTE FUNCTION ${trigger.functionName}(`;
+  builder.p('EXECUTE FUNCTION').ident(trigger.functionName);
+  builder.rewriteLastChar('(');
   if (trigger.functionArgs && trigger.functionArgs.length > 0) {
-    sql += trigger.functionArgs.join(", ");
+    builder.p(trigger.functionArgs.join(", "));
   }
-  sql += ")";
+  builder.p(')');
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropTriggerSQL(trigger: Trigger): string {
-  return `DROP TRIGGER IF EXISTS ${trigger.name} ON ${trigger.tableName};`;
+  const builder = new SQLBuilder();
+  builder.p('DROP TRIGGER IF EXISTS').ident(trigger.name);
+  builder.p('ON').ident(trigger.tableName);
+  return builder.p(';').build();
 }
 
 // SEQUENCE SQL generation functions
 export function generateCreateSequenceSQL(seq: Sequence): string {
-  let sql = `CREATE SEQUENCE ${seq.name}`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE SEQUENCE').ident(seq.name);
 
   if (seq.dataType) {
-    sql += ` AS ${seq.dataType}`;
+    builder.p(`AS ${seq.dataType}`);
   }
 
   if (seq.increment !== undefined) {
-    sql += ` INCREMENT ${seq.increment}`;
+    builder.p(`INCREMENT ${seq.increment}`);
   }
 
   if (seq.minValue !== undefined) {
-    sql += ` MINVALUE ${seq.minValue}`;
+    builder.p(`MINVALUE ${seq.minValue}`);
   }
 
   if (seq.maxValue !== undefined) {
-    sql += ` MAXVALUE ${seq.maxValue}`;
+    builder.p(`MAXVALUE ${seq.maxValue}`);
   }
 
   if (seq.start !== undefined) {
-    sql += ` START ${seq.start}`;
+    builder.p(`START ${seq.start}`);
   }
 
   if (seq.cache !== undefined) {
-    sql += ` CACHE ${seq.cache}`;
+    builder.p(`CACHE ${seq.cache}`);
   }
 
   if (seq.cycle !== undefined) {
-    sql += seq.cycle ? " CYCLE" : " NO CYCLE";
+    builder.p(seq.cycle ? 'CYCLE' : 'NO CYCLE');
   }
 
   if (seq.ownedBy) {
-    sql += ` OWNED BY ${seq.ownedBy}`;
+    builder.p(`OWNED BY ${seq.ownedBy}`);
   }
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropSequenceSQL(sequenceName: string): string {
-  return `DROP SEQUENCE IF EXISTS ${sequenceName};`;
+  const builder = new SQLBuilder();
+  builder.p('DROP SEQUENCE IF EXISTS').ident(sequenceName);
+  return builder.p(';').build();
+}
+
+// ENUM TYPE SQL generation functions
+export function generateCreateTypeSQL(enumType: EnumType): string {
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE TYPE');
+  if (enumType.schema) {
+    builder.ident(enumType.schema);
+    builder.rewriteLastChar('.');
+  }
+  builder.ident(enumType.name);
+
+  const values = enumType.values.map(value => `'${value}'`).join(', ');
+  builder.p(`AS ENUM (${values});`);
+
+  return builder.build();
+}
+
+export function generateDropTypeSQL(typeName: string, schema?: string): string {
+  const builder = new SQLBuilder();
+
+  builder.p('DROP TYPE');
+  if (schema) {
+    builder.ident(schema);
+    builder.rewriteLastChar('.');
+  }
+  builder.ident(typeName);
+
+  return builder.p(';').build();
 }

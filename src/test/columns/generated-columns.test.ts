@@ -121,10 +121,10 @@ describe("Generated Columns", () => {
     const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
 
     expect(plan.hasChanges).toBe(true);
-    expect(plan.transactional.some((s) => s.includes("DROP COLUMN tax"))).toBe(
+    expect(plan.transactional.some((s) => s.includes('DROP COLUMN "tax"'))).toBe(
       true
     );
-    expect(plan.transactional.some((s) => s.includes("ADD COLUMN tax"))).toBe(
+    expect(plan.transactional.some((s) => s.includes('ADD COLUMN "tax"'))).toBe(
       true
     );
   });
@@ -155,7 +155,7 @@ describe("Generated Columns", () => {
 
     expect(plan.hasChanges).toBe(true);
     expect(
-      plan.transactional.some((s) => s.includes("ADD COLUMN full_name"))
+      plan.transactional.some((s) => s.includes('ADD COLUMN "full_name"'))
     ).toBe(true);
     expect(plan.transactional.some((s) => s.includes("GENERATED"))).toBe(true);
 

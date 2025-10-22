@@ -314,7 +314,7 @@ describe("PostgreSQL Basic Index Support", () => {
 
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "DROP INDEX CONCURRENTLY idx_users_email;"
+        'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
     });
 
@@ -369,7 +369,7 @@ describe("PostgreSQL Basic Index Support", () => {
       // Should drop old index and create new one
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "DROP INDEX CONCURRENTLY idx_users_email;"
+        'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
         "CREATE INDEX idx_users_email ON users (email, name);"

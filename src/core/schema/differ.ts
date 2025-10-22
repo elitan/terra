@@ -24,6 +24,7 @@ import {
   generateDropUniqueConstraintSQL,
   getQualifiedTableName,
 } from "../../utils/sql";
+import { SQLBuilder } from "../../utils/sql-builder";
 
 export class SchemaDiffer {
   private options: MigrationOptions;
@@ -125,8 +126,12 @@ export class SchemaDiffer {
     // Handle dropped tables - constraint changes are handled above, just drop tables
     const tablesToDrop = currentSchema.filter(table => !desiredTables.has(table.name));
     for (const table of tablesToDrop) {
-      const qualifiedName = table.schema ? `${table.schema}.${table.name}` : table.name;
-      statements.push(`DROP TABLE ${qualifiedName} CASCADE;`);
+      const sql = new SQLBuilder()
+        .p("DROP TABLE")
+        .table(table.name, table.schema)
+        .p("CASCADE;")
+        .build();
+      statements.push(sql);
     }
 
     // Separate statements into transactional and concurrent
@@ -166,14 +171,21 @@ export class SchemaDiffer {
     // Add new columns
     for (const column of desiredTable.columns) {
       if (!currentColumns.has(column.name)) {
-        let statement = `ALTER TABLE ${qualifiedTableName} ADD COLUMN ${column.name} ${column.type}`;
+        const builder = new SQLBuilder()
+          .p("ALTER TABLE")
+          .table(desiredTable.name, desiredTable.schema)
+          .p("ADD COLUMN")
+          .ident(column.name)
+          .p(column.type);
+
         if (column.generated) {
-          statement += ` GENERATED ${column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${column.generated.expression}) ${column.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+          builder.p(`GENERATED ${column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${column.generated.expression}) ${column.generated.stored ? 'STORED' : 'VIRTUAL'}`);
         } else {
-          if (!column.nullable) statement += " NOT NULL";
-          if (column.default) statement += ` DEFAULT ${column.default}`;
+          if (!column.nullable) builder.p("NOT NULL");
+          if (column.default) builder.p(`DEFAULT ${column.default}`);
         }
-        statements.push(statement + ";");
+
+        statements.push(builder.p(";").build());
       } else {
         // Check for column modifications
         const currentColumn = currentColumns.get(column.name)!;
@@ -193,9 +205,14 @@ export class SchemaDiffer {
     // Drop removed columns
     for (const column of currentTable.columns) {
       if (!desiredColumns.has(column.name)) {
-        statements.push(
-          `ALTER TABLE ${qualifiedTableName} DROP COLUMN ${column.name};`
-        );
+        const sql = new SQLBuilder()
+          .p("ALTER TABLE")
+          .table(desiredTable.name, desiredTable.schema)
+          .p("DROP COLUMN")
+          .ident(column.name)
+          .p(";")
+          .build();
+        statements.push(sql);
       }
     }
 
@@ -218,16 +235,31 @@ export class SchemaDiffer {
 
     if (generatedChanging) {
       // Drop the column and recreate it
-      statements.push(`ALTER TABLE ${tableName} DROP COLUMN ${desiredColumn.name};`);
+      // Note: tableName is already a qualified name (e.g., "schema.table")
+      const dropSql = new SQLBuilder()
+        .p("ALTER TABLE")
+        .p(tableName)
+        .p("DROP COLUMN")
+        .ident(desiredColumn.name)
+        .p(";")
+        .build();
+      statements.push(dropSql);
 
-      let addStatement = `ALTER TABLE ${tableName} ADD COLUMN ${desiredColumn.name} ${desiredColumn.type}`;
+      const addBuilder = new SQLBuilder()
+        .p("ALTER TABLE")
+        .p(tableName)
+        .p("ADD COLUMN")
+        .ident(desiredColumn.name)
+        .p(desiredColumn.type);
+
       if (desiredColumn.generated) {
-        addStatement += ` GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+        addBuilder.p(`GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`);
       } else {
-        if (!desiredColumn.nullable) addStatement += " NOT NULL";
-        if (desiredColumn.default) addStatement += ` DEFAULT ${desiredColumn.default}`;
+        if (!desiredColumn.nullable) addBuilder.p("NOT NULL");
+        if (desiredColumn.default) addBuilder.p(`DEFAULT ${desiredColumn.default}`);
       }
-      statements.push(addStatement + ";");
+
+      statements.push(addBuilder.p(";").build());
 
       return statements;
     }
@@ -243,9 +275,14 @@ export class SchemaDiffer {
 
     // Step 1: If type is changing and there's a current default that might conflict, drop it first
     if (typeIsChanging && currentColumn.default && defaultIsChanging) {
-      statements.push(
-        `ALTER TABLE ${tableName} ALTER COLUMN ${desiredColumn.name} DROP DEFAULT;`
-      );
+      const sql = new SQLBuilder()
+        .p("ALTER TABLE")
+        .p(tableName) // tableName is already qualified
+        .p("ALTER COLUMN")
+        .ident(desiredColumn.name)
+        .p("DROP DEFAULT;")
+        .build();
+      statements.push(sql);
     }
 
     // Step 2: Change the type if needed
@@ -262,27 +299,47 @@ export class SchemaDiffer {
     // Step 3: Set the new default if needed (after type change)
     if (defaultIsChanging) {
       if (desiredColumn.default) {
-        statements.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${desiredColumn.name} SET DEFAULT ${desiredColumn.default};`
-        );
+        const sql = new SQLBuilder()
+          .p("ALTER TABLE")
+          .p(tableName) // tableName is already qualified
+          .p("ALTER COLUMN")
+          .ident(desiredColumn.name)
+          .p(`SET DEFAULT ${desiredColumn.default};`)
+          .build();
+        statements.push(sql);
       } else if (!typeIsChanging || !currentColumn.default) {
         // Only drop default if we didn't already drop it in step 1
-        statements.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${desiredColumn.name} DROP DEFAULT;`
-        );
+        const sql = new SQLBuilder()
+          .p("ALTER TABLE")
+          .p(tableName) // tableName is already qualified
+          .p("ALTER COLUMN")
+          .ident(desiredColumn.name)
+          .p("DROP DEFAULT;")
+          .build();
+        statements.push(sql);
       }
     }
 
     // Step 4: Handle nullable constraint changes last
     if (desiredColumn.nullable !== currentColumn.nullable) {
       if (!desiredColumn.nullable) {
-        statements.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${desiredColumn.name} SET NOT NULL;`
-        );
+        const sql = new SQLBuilder()
+          .p("ALTER TABLE")
+          .p(tableName) // tableName is already qualified
+          .p("ALTER COLUMN")
+          .ident(desiredColumn.name)
+          .p("SET NOT NULL;")
+          .build();
+        statements.push(sql);
       } else {
-        statements.push(
-          `ALTER TABLE ${tableName} ALTER COLUMN ${desiredColumn.name} DROP NOT NULL;`
-        );
+        const sql = new SQLBuilder()
+          .p("ALTER TABLE")
+          .p(tableName) // tableName is already qualified
+          .p("ALTER COLUMN")
+          .ident(desiredColumn.name)
+          .p("DROP NOT NULL;")
+          .build();
+        statements.push(sql);
       }
     }
 
@@ -301,20 +358,34 @@ export class SchemaDiffer {
       // and handle sequence creation separately if needed
       const needsUsing = this.requiresUsingClause(currentType, "INTEGER");
 
+      const builder = new SQLBuilder()
+        .p("ALTER TABLE")
+        .p(tableName) // tableName is already qualified
+        .p("ALTER COLUMN")
+        .ident(columnName)
+        .p("TYPE INTEGER");
+
       if (needsUsing) {
         const usingExpression = this.generateUsingExpression(
           columnName,
           currentType,
           "INTEGER"
         );
-        return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE INTEGER USING ${usingExpression};`;
-      } else {
-        return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE INTEGER;`;
+        builder.p(`USING ${usingExpression}`);
       }
+
+      return builder.p(";").build();
     }
 
     // Check if we need a USING clause for type conversion
     const needsUsing = this.requiresUsingClause(currentType, desiredType);
+
+    const builder = new SQLBuilder()
+      .p("ALTER TABLE")
+      .p(tableName) // tableName is already qualified
+      .p("ALTER COLUMN")
+      .ident(columnName)
+      .p(`TYPE ${desiredType}`);
 
     if (needsUsing) {
       const usingExpression = this.generateUsingExpression(
@@ -322,10 +393,10 @@ export class SchemaDiffer {
         currentType,
         desiredType
       );
-      return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE ${desiredType} USING ${usingExpression};`;
-    } else {
-      return `ALTER TABLE ${tableName} ALTER COLUMN ${columnName} TYPE ${desiredType};`;
+      builder.p(`USING ${usingExpression}`);
     }
+
+    return builder.p(";").build();
   }
 
   private requiresUsingClause(
@@ -656,8 +727,15 @@ export class SchemaDiffer {
 
   private generateIndexDropStatements(indexes: Index[]): string[] {
     const concurrent = this.options.useConcurrentDrops ?? true;
-    const dropClause = concurrent ? "DROP INDEX CONCURRENTLY" : "DROP INDEX";
-    return indexes.map((index) => `${dropClause} ${index.name};`);
+    return indexes.map((index) => {
+      const builder = new SQLBuilder();
+      if (concurrent) {
+        builder.p("DROP INDEX CONCURRENTLY");
+      } else {
+        builder.p("DROP INDEX");
+      }
+      return builder.ident(index.name).p(";").build();
+    });
   }
 
   private generateCreateIndexSQL(
