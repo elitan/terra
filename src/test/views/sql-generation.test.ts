@@ -71,12 +71,12 @@ describe("View SQL Generation", () => {
   describe("DROP VIEW SQL", () => {
     test("should generate DROP VIEW statement", () => {
       const sql = generateDropViewSQL("test_view");
-      expect(sql).toBe("DROP VIEW IF EXISTS test_view;");
+      expect(sql).toBe('DROP VIEW IF EXISTS "test_view" ;');
     });
 
     test("should generate DROP MATERIALIZED VIEW statement", () => {
       const sql = generateDropViewSQL("test_mat_view", true);
-      expect(sql).toBe("DROP MATERIALIZED VIEW IF EXISTS test_mat_view;");
+      expect(sql).toBe('DROP MATERIALIZED VIEW IF EXISTS "test_mat_view" ;');
     });
   });
 
@@ -112,7 +112,7 @@ describe("View SQL Generation", () => {
       };
 
       const sql = generateCreateOrReplaceViewSQL(view);
-      expect(sql).toContain("DROP MATERIALIZED VIEW IF EXISTS mat_view;");
+      expect(sql).toContain('DROP MATERIALIZED VIEW IF EXISTS "mat_view" ;');
       expect(sql).toContain("CREATE MATERIALIZED VIEW mat_view AS SELECT COUNT(*) FROM users;");
     });
   });
