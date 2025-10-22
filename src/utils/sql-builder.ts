@@ -183,6 +183,32 @@ export class SQLBuilder {
 
     return this;
   }
+
+  /**
+   * MapComma iterates over an array and calls the builder function for each item,
+   * automatically inserting commas and newlines between items.
+   * Useful for building comma-separated lists like ALTER TABLE clauses.
+   *
+   * @example
+   * ```typescript
+   * builder.p('ALTER TABLE users')
+   *   .mapComma(['name', 'email'], (item, b) => {
+   *     b.p('ADD COLUMN').ident(item).p('VARCHAR(255)');
+   *   });
+   * // Result: ALTER TABLE users
+   * //   ADD COLUMN "name" VARCHAR(255),
+   * //   ADD COLUMN "email" VARCHAR(255)
+   * ```
+   */
+  mapComma<T>(items: T[], fn: (item: T, builder: this, index: number) => void): this {
+    for (let i = 0; i < items.length; i++) {
+      if (i > 0) {
+        this.comma().nl();
+      }
+      fn(items[i], this, i);
+    }
+    return this;
+  }
 }
 
 /**
