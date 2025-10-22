@@ -553,10 +553,10 @@ describe("Advanced Index Options Support", () => {
 
   test("should parse partial indexes with storage parameters and tablespace", async () => {
     const sql = `
-      CREATE INDEX idx_active_users_email_advanced ON users (email) 
-      WHERE active = true 
-      WITH (fillfactor = 85) 
-      TABLESPACE index_space;
+      CREATE INDEX idx_active_users_email_advanced ON users (email)
+      WITH (fillfactor = 85)
+      TABLESPACE index_space
+      WHERE active = true;
     `;
 
     const indexes = await parser.parseCreateIndexStatements(sql);

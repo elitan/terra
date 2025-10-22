@@ -74,7 +74,7 @@ describe("Index Storage Options", () => {
 
     test("should parse expression indexes with storage parameters", async () => {
       const sql = `
-        CREATE INDEX idx_users_lower_email_params ON users (LOWER(email)) 
+        CREATE INDEX idx_users_lower_email_params ON users (LOWER(email))
         WITH (fillfactor = 70, deduplicate_items = on);
       `;
 
@@ -83,7 +83,7 @@ describe("Index Storage Options", () => {
 
       const index = indexes[0]!;
       expect(index.name).toBe("idx_users_lower_email_params");
-      expect(index.expression).toBe("LOWER(email)");
+      expect(index.expression).toBe("lower(email)");
       expect(index.columns).toEqual([]);
       expect(index.storageParameters).toEqual({
         fillfactor: "70",
@@ -93,10 +93,10 @@ describe("Index Storage Options", () => {
 
     test("should parse partial indexes with storage parameters and tablespace", async () => {
       const sql = `
-        CREATE INDEX idx_active_users_email_advanced ON users (email) 
-        WHERE active = true 
-        WITH (fillfactor = 85) 
-        TABLESPACE index_space;
+        CREATE INDEX idx_active_users_email_advanced ON users (email)
+        WITH (fillfactor = 85)
+        TABLESPACE index_space
+        WHERE active = true;
       `;
 
       const indexes = await parser.parseCreateIndexStatements(sql);
