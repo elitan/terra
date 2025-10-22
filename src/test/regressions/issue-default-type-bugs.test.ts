@@ -80,7 +80,7 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
 
       // CRITICAL: Should only have 1 statement (ALTER TYPE), not 3
       expect(plan.transactional.length).toBe(1);
-      expect(plan.transactional[0]).toContain("ALTER COLUMN name TYPE VARCHAR(255)");
+      expect(plan.transactional[0]).toContain('ALTER COLUMN "name" TYPE VARCHAR(255)');
 
       // Should NOT have DROP DEFAULT or SET DEFAULT
       expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
@@ -122,7 +122,7 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
 
       // Should only change type, not default
       expect(plan.transactional.length).toBe(1);
-      expect(plan.transactional[0]).toContain("ALTER COLUMN status TYPE VARCHAR(100)");
+      expect(plan.transactional[0]).toContain('ALTER COLUMN "status" TYPE VARCHAR(100)');
       expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
       expect(plan.transactional.some(s => s.includes("SET DEFAULT"))).toBe(false);
     });
@@ -277,7 +277,7 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
       // int -> INTEGER should be no-op
       expect(plan.hasChanges).toBe(true);
       expect(plan.transactional.length).toBe(1);
-      expect(plan.transactional[0]).toContain("ALTER COLUMN name TYPE VARCHAR(255)");
+      expect(plan.transactional[0]).toContain('ALTER COLUMN "name" TYPE VARCHAR(255)');
 
       // Should NOT drop/set defaults for either column
       expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
