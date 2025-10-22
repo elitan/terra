@@ -356,9 +356,9 @@ export class DatabaseInspector {
     return foreignKeys;
   }
 
-  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | undefined {
+  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION' | undefined {
     if (!rule) return undefined;
-    
+
     switch (rule.toUpperCase()) {
       case 'CASCADE':
         return 'CASCADE';
@@ -368,6 +368,8 @@ export class DatabaseInspector {
         return 'SET NULL';
       case 'SET DEFAULT':
         return 'SET DEFAULT';
+      case 'NO ACTION':
+        return 'NO ACTION';
       default:
         return undefined;
     }

@@ -85,7 +85,26 @@ export function parseCreateIndex(stmt: any): Index | null {
       }
     }
 
-    const tablespace = stmt.tableSpace || undefined;
+    let tablespace: string | undefined;
+    if (stmt.tableSpace) {
+      if (typeof stmt.tableSpace === 'string') {
+        const tsName = stmt.tableSpace;
+        if (tsName.includes('-') || tsName.includes(' ') || /[A-Z]/.test(tsName)) {
+          tablespace = '"' + tsName + '"';
+        } else {
+          tablespace = tsName;
+        }
+      } else if (stmt.tableSpace.String?.sval) {
+        const sval = stmt.tableSpace.String.sval;
+        if (sval.includes('-') || sval.includes(' ') || /[A-Z]/.test(sval)) {
+          tablespace = '"' + sval + '"';
+        } else {
+          tablespace = sval;
+        }
+      } else {
+        tablespace = deparseSync([stmt.tableSpace]).trim();
+      }
+    }
 
     return {
       name: indexName,

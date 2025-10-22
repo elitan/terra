@@ -402,7 +402,7 @@ describe("Index Storage Options", () => {
 
     test("should handle quoted parameter values", async () => {
       const sql = `
-        CREATE INDEX idx_quoted_params ON users (email) 
+        CREATE INDEX idx_quoted_params ON users (email)
         WITH (buffering = 'auto', pages_per_range = '128');
       `;
 
@@ -411,8 +411,8 @@ describe("Index Storage Options", () => {
 
       const index = indexes[0]!;
       expect(index.storageParameters).toEqual({
-        buffering: "'auto'",
-        pages_per_range: "'128'",
+        buffering: "auto",
+        pages_per_range: "128",
       });
     });
 

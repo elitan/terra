@@ -383,7 +383,7 @@ export class SchemaDiffer {
         return `TRUNC(${columnName}::DECIMAL)::integer`;
       }
       if (desiredNormalized.includes("bool")) {
-        return `CASE WHEN LOWER(regexp_replace(${columnName}, '\\s', '', 'g')) IN ('true', 't', 'yes', 'y', 'on', '1') THEN true WHEN LOWER(regexp_replace(${columnName}, '\\s', '', 'g')) IN ('false', 'f', 'no', 'n', 'off', '0') THEN false ELSE NULL END`;
+        return `TRIM(${columnName})::boolean`;
       }
     }
 
