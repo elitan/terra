@@ -32,7 +32,7 @@ describe("Primary Key Support", () => {
   });
 
   describe("Schema Parser - Primary Key Extraction", () => {
-    test("should parse column-level PRIMARY KEY", () => {
+    test("should parse column-level PRIMARY KEY", async () => {
       const sql = `
         CREATE TABLE users (
           id SERIAL PRIMARY KEY,
@@ -51,7 +51,7 @@ describe("Primary Key Support", () => {
       expect(table!.primaryKey!.name).toBeUndefined(); // No explicit name
     });
 
-    test("should parse table-level PRIMARY KEY", () => {
+    test("should parse table-level PRIMARY KEY", async () => {
       const sql = `
         CREATE TABLE orders (
           order_id INTEGER,
@@ -69,7 +69,7 @@ describe("Primary Key Support", () => {
       expect(table!.primaryKey!.columns).toEqual(["order_id"]);
     });
 
-    test("should parse composite PRIMARY KEY", () => {
+    test("should parse composite PRIMARY KEY", async () => {
       const sql = `
         CREATE TABLE user_roles (
           user_id INTEGER,
@@ -87,7 +87,7 @@ describe("Primary Key Support", () => {
       expect(table!.primaryKey!.columns).toEqual(["user_id", "role_id"]);
     });
 
-    test("should parse named PRIMARY KEY constraint", () => {
+    test("should parse named PRIMARY KEY constraint", async () => {
       const sql = `
         CREATE TABLE sessions (
           session_id VARCHAR(255),
@@ -106,7 +106,7 @@ describe("Primary Key Support", () => {
       expect(table!.primaryKey!.columns).toEqual(["session_id", "user_id"]);
     });
 
-    test("should handle table without PRIMARY KEY", () => {
+    test("should handle table without PRIMARY KEY", async () => {
       const sql = `
         CREATE TABLE logs (
           id INTEGER,
@@ -517,7 +517,7 @@ describe("Primary Key Support", () => {
       expect(parseInt(result.rows[0].count)).toBe(3);
     });
 
-    test("should handle malformed primary key SQL gracefully", () => {
+    test("should handle malformed primary key SQL gracefully", async () => {
       const malformedSQL = `
         CREATE TABLE users (
           id INTEGER,
@@ -529,7 +529,7 @@ describe("Primary Key Support", () => {
       expect(() => parser.parseCreateTableStatements(malformedSQL)).toThrow();
     });
 
-    test("should handle duplicate primary key definitions", () => {
+    test("should handle duplicate primary key definitions", async () => {
       const duplicateSQL = `
         CREATE TABLE users (
           id INTEGER PRIMARY KEY,

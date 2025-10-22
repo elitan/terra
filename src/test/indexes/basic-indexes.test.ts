@@ -82,7 +82,7 @@ describe("PostgreSQL Basic Index Support", () => {
         { type: "BRIN", expected: "brin" },
       ];
 
-      indexTypes.forEach(({ type, expected }) => {
+      for (const { type, expected } of indexTypes) {
         const sql = `CREATE INDEX idx_test_${type.toLowerCase()} ON test_table USING ${type} (test_column);`;
 
         const indexes = await parser.parseCreateIndexStatements(sql);
@@ -91,7 +91,7 @@ describe("PostgreSQL Basic Index Support", () => {
         if (indexes.length > 0) {
           expect(indexes[0].type).toBe(expected);
         }
-      });
+      }
     });
 
     test("should parse CONCURRENT index", async () => {
