@@ -57,10 +57,23 @@ export function parseCreateIndex(stmt: any): Index | null {
         if (opt.DefElem) {
           const key = opt.DefElem.defname;
           let value: string | undefined;
+
           if (opt.DefElem.arg?.Integer) {
             value = String(opt.DefElem.arg.Integer.ival);
           } else if (opt.DefElem.arg?.String) {
             value = opt.DefElem.arg.String.sval;
+          } else if (opt.DefElem.arg?.TypeName) {
+            const names = opt.DefElem.arg.TypeName.names || [];
+            if (names.length > 0 && names[0].String) {
+              value = names[0].String.sval;
+            }
+          } else if (opt.DefElem.arg?.A_Const) {
+            const aConst = opt.DefElem.arg.A_Const;
+            if (aConst.String) {
+              value = aConst.String.sval;
+            } else if (aConst.Integer) {
+              value = String(aConst.Integer.ival);
+            }
           }
           if (key && value) {
             storageParameters[key] = value;
@@ -72,7 +85,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       }
     }
 
-    const tablespace = stmt.tableSpaceName || undefined;
+    const tablespace = stmt.tableSpace || undefined;
 
     return {
       name: indexName,

@@ -18,13 +18,21 @@ export function normalizeType(type: string): string {
     boolean: "BOOLEAN",
     bool: "BOOLEAN",
     "timestamp without time zone": "TIMESTAMP",
-    // PostgreSQL treats INT and INTEGER as the same type
-    int: "INTEGER",
-    int2: "SMALLINT",
-    int4: "INTEGER",
-    int8: "BIGINT",
-    smallint: "SMALLINT",
-    bigint: "BIGINT",
+    // PostgreSQL integer type aliases
+    int: "INT4",
+    int2: "INT2",
+    int4: "INT4",
+    int8: "INT8",
+    smallint: "INT2",
+    integer: "INT4",
+    bigint: "INT8",
+    // Normalize to internal names to distinguish between sizes
+    "INT2": "INT2",
+    "INT4": "INT4",
+    "INT8": "INT8",
+    "SMALLINT": "INT2",
+    "INTEGER": "INT4",
+    "BIGINT": "INT8",
     // PostgreSQL treats DECIMAL and NUMERIC as the same type
     decimal: "NUMERIC",
   };

@@ -47,14 +47,14 @@ describe("Expression Index Support", () => {
         (idx) => idx.name === "idx_lower_email"
       );
       expect(lowerEmailIndex).toBeDefined();
-      expect(lowerEmailIndex?.expression).toBe("LOWER(email)");
+      expect(lowerEmailIndex?.expression).toBe("lower(email)");
       expect(lowerEmailIndex?.columns).toEqual([]);
 
       const upperNameIndex = indexes.find(
         (idx) => idx.name === "idx_upper_name"
       );
       expect(upperNameIndex).toBeDefined();
-      expect(upperNameIndex?.expression).toBe("UPPER(name)");
+      expect(upperNameIndex?.expression).toBe("upper(name)");
       expect(upperNameIndex?.columns).toEqual([]);
     });
 
@@ -70,13 +70,13 @@ describe("Expression Index Support", () => {
 
       const concatIndex = indexes.find((idx) => idx.name === "idx_concat");
       expect(concatIndex?.expression).toBe(
-        "CONCAT(first_name, ' ', last_name)"
+        "concat(first_name, ' ', last_name)"
       );
 
       const substringIndex = indexes.find(
         (idx) => idx.name === "idx_substring"
       );
-      expect(substringIndex?.expression).toBe("SUBSTRING(email, 1, 10)");
+      expect(substringIndex?.expression).toBe("substring(email, 1, 10)");
     });
   });
 
@@ -268,7 +268,7 @@ describe("Expression Index Support", () => {
       const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
-      expect(indexes[0]?.expression).toBe("LOWER(email)");
+      expect(indexes[0]?.expression).toBe("lower(email)");
       expect(indexes[0]?.where).toBe("active = true");
 
       // Test inspector

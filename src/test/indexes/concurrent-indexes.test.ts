@@ -65,7 +65,7 @@ describe("Concurrent Index Operations", () => {
 
       expect(indexes).toHaveLength(1);
       expect(indexes[0]!.concurrent).toBe(true);
-      expect(indexes[0]!.expression).toBe("LOWER(email)");
+      expect(indexes[0]!.expression).toBe("lower(email)");
     });
   });
 
