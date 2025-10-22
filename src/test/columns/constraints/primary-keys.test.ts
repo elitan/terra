@@ -132,7 +132,7 @@ describe("Primary Key Support", () => {
       const sql = generateAddPrimaryKeySQL("users", primaryKey);
 
       expect(sql).toBe(
-        "ALTER TABLE users ADD CONSTRAINT pk_users PRIMARY KEY (id);"
+        'ALTER TABLE "users" ADD CONSTRAINT "pk_users" PRIMARY KEY ("id");'
       );
     });
 
@@ -144,7 +144,7 @@ describe("Primary Key Support", () => {
       const sql = generateAddPrimaryKeySQL("user_roles", primaryKey);
 
       expect(sql).toBe(
-        "ALTER TABLE user_roles ADD CONSTRAINT pk_user_roles PRIMARY KEY (user_id, role_id);"
+        'ALTER TABLE "user_roles" ADD CONSTRAINT "pk_user_roles" PRIMARY KEY ("user_id", "role_id");'
       );
     });
 
@@ -157,14 +157,14 @@ describe("Primary Key Support", () => {
       const sql = generateAddPrimaryKeySQL("sessions", primaryKey);
 
       expect(sql).toBe(
-        "ALTER TABLE sessions ADD CONSTRAINT pk_custom_sessions PRIMARY KEY (session_id, user_id);"
+        'ALTER TABLE "sessions" ADD CONSTRAINT "pk_custom_sessions" PRIMARY KEY ("session_id", "user_id");'
       );
     });
 
     test("should generate DROP CONSTRAINT", () => {
       const sql = generateDropPrimaryKeySQL("users", "pk_users");
 
-      expect(sql).toBe("ALTER TABLE users DROP CONSTRAINT pk_users;");
+      expect(sql).toBe('ALTER TABLE "users" DROP CONSTRAINT "pk_users";');
     });
   });
 
