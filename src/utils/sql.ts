@@ -1,25 +1,55 @@
 import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence } from "../types/schema";
 import { SQLBuilder } from "./sql-builder";
 
+/**
+ * Get qualified table name with schema prefix if present
+ */
+export function getQualifiedTableName(table: Table | string, schema?: string): string {
+  if (typeof table === 'string') {
+    return schema ? `${schema}.${table}` : table;
+  }
+  return table.schema ? `${table.schema}.${table.name}` : table.name;
+}
+
 export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
   const typeMap: Record<string, string> = {
     "character varying": "VARCHAR",
     text: "TEXT",
     boolean: "BOOLEAN",
+    bool: "BOOLEAN",
     "timestamp without time zone": "TIMESTAMP",
-    // PostgreSQL treats INT and INTEGER as the same type
-    int: "INTEGER",
-    int2: "SMALLINT",
-    int4: "INTEGER",
-    int8: "BIGINT",
-    smallint: "SMALLINT",
-    bigint: "BIGINT",
+    // PostgreSQL integer type aliases
+    int: "INT4",
+    int2: "INT2",
+    int4: "INT4",
+    int8: "INT8",
+    smallint: "INT2",
+    integer: "INT4",
+    bigint: "INT8",
+    // Normalize to internal names to distinguish between sizes
+    "INT2": "INT2",
+    "INT4": "INT4",
+    "INT8": "INT8",
+    "SMALLINT": "INT2",
+    "INTEGER": "INT4",
+    "BIGINT": "INT8",
+    // PostgreSQL treats DECIMAL and NUMERIC as the same type
+    decimal: "NUMERIC",
   };
 
   // Handle VARCHAR with length
   if (type.startsWith("character varying")) {
     return type.replace("character varying", "VARCHAR");
+  }
+
+  // Handle NUMERIC/DECIMAL with precision and scale
+  if (type.toLowerCase().startsWith("numeric(") || type.toLowerCase().startsWith("decimal(")) {
+    // Extract precision and scale: numeric(10,2) -> NUMERIC(10,2)
+    const match = type.match(/^(numeric|decimal)\((\d+),(\d+)\)$/i);
+    if (match) {
+      return `NUMERIC(${match[2]},${match[3]})`;
+    }
   }
 
   // Normalize to lowercase first for case-insensitive matching
@@ -99,6 +129,23 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
     return true;
   }
 
+  // Check if generated column info is different
+  if (desired.generated || current.generated) {
+    // If one has generated and the other doesn't, they're different
+    if (!desired.generated || !current.generated) {
+      return true;
+    }
+
+    // Compare generated properties
+    if (
+      desired.generated.always !== current.generated.always ||
+      desired.generated.stored !== current.generated.stored ||
+      desired.generated.expression !== current.generated.expression
+    ) {
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -107,6 +154,9 @@ export function generateCreateTableStatement(table: Table): string {
     let def = `${col.name} ${col.type}`;
     if (!col.nullable) def += " NOT NULL";
     if (col.default) def += ` DEFAULT ${col.default}`;
+    if (col.generated) {
+      def += ` GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+    }
     return def;
   });
 
@@ -132,7 +182,8 @@ export function generateCreateTableStatement(table: Table): string {
     }
   }
 
-  return `CREATE TABLE ${table.name} (\n  ${columnDefs.join(",\n  ")}\n);`;
+  const qualifiedName = getQualifiedTableName(table);
+  return `CREATE TABLE ${qualifiedName} (\n  ${columnDefs.join(",\n  ")}\n);`;
 }
 
 export function generatePrimaryKeyClause(
@@ -431,7 +482,8 @@ export function generateCreateFunctionSQL(func: Function): string {
 
 export function generateDropFunctionSQL(func: Function): string {
   const paramTypes = func.parameters.map(p => p.type).join(", ");
-  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes});`;
+  // Use CASCADE to automatically drop dependent triggers
+  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes}) CASCADE;`;
 }
 
 // PROCEDURE SQL generation functions

@@ -1,26 +1,23 @@
 /**
  * Column Parser
  *
- * Handles parsing of table columns from CST.
+ * Handles parsing of table columns from pgsql-parser AST.
  */
 
 import { Logger } from "../../../../utils/logger";
-import { serializeDefaultValue } from "../expressions";
+import { deparseSync } from "pgsql-parser";
 import type { Column } from "../../../../types/schema";
 
 /**
- * Extract all columns from a CREATE TABLE CST node
+ * Extract all columns from CREATE TABLE tableElts array
  */
-export function extractColumns(node: any): Column[] {
+export function extractColumns(tableElts: any[]): Column[] {
   const columns: Column[] = [];
 
   try {
-    // Based on CST structure: node.columns.expr.items contains column_definition objects
-    const columnItems = node.columns?.expr?.items || [];
-
-    for (const columnNode of columnItems) {
-      if (columnNode.type === "column_definition") {
-        const column = parseColumn(columnNode);
+    for (const elt of tableElts) {
+      if (elt.ColumnDef) {
+        const column = parseColumn(elt.ColumnDef);
         if (column) {
           columns.push(column);
         }
@@ -36,70 +33,91 @@ export function extractColumns(node: any): Column[] {
 }
 
 /**
- * Parse a single column definition from CST
+ * Parse a single column definition from pgsql-parser AST
  */
-export function parseColumn(node: any): Column | null {
+export function parseColumn(columnDef: any): Column | null {
   try {
-    // Extract column name from the node
-    const name = node.name?.text || node.name?.name;
+    const name = columnDef.colname;
     if (!name) return null;
 
-    // Extract data type
-    const type = extractDataType(node);
+    const type = extractDataType(columnDef.typeName);
 
-    // Extract basic constraints (just for column properties)
-    const constraints = extractBasicConstraints(node);
+    const constraints = extractBasicConstraints(columnDef.constraints || []);
 
-    // Extract default value
-    const defaultValue = extractDefaultValue(node);
+    const defaultValue = extractDefaultValue(columnDef.constraints || []);
+
+    const generated = extractGeneratedColumn(columnDef.constraints || []);
 
     return {
       name,
       type,
       nullable: !constraints.notNull && !constraints.primary,
       default: defaultValue,
+      generated,
     };
   } catch (error) {
     Logger.warning(
-      `Failed to parse column from CST: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to parse column: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
 }
 
 /**
- * Extract data type from column CST node
+ * Extract data type from typeName node
  */
-function extractDataType(node: any): string {
+function extractDataType(typeName: any): string {
   try {
-    // Extract data type from dataType property
-    const dataType = node.dataType;
-    if (!dataType) return "UNKNOWN";
+    if (!typeName || !typeName.names) return "UNKNOWN";
 
-    // Get the type name
-    let type = dataType.name?.text || dataType.name?.name || "UNKNOWN";
-    type = type.toUpperCase();
+    const names = typeName.names.map((n: any) => n.String?.sval || '');
 
-    // Handle type parameters (e.g., VARCHAR(255), DECIMAL(10,2))
-    if (dataType.params?.expr?.items) {
-      const params = dataType.params.expr.items
-        .map((item: any) => item.text || item.value)
-        .join(",");
-      type += `(${params})`;
+    let type: string;
+    if (names.length > 1 && names[0] === 'pg_catalog') {
+      type = names[names.length - 1].toUpperCase();
+    } else if (names.length > 1) {
+      type = names.join('.');
+    } else {
+      type = names[0].toUpperCase();
+    }
+
+    if (typeName.typmods && typeName.typmods.length > 0) {
+      const params = typeName.typmods.map((mod: any) => {
+        if (mod.A_Const?.ival !== undefined) {
+          return mod.A_Const.ival.ival;
+        }
+        if (mod.A_Const?.sval !== undefined) {
+          return mod.A_Const.sval.sval;
+        }
+        if (mod.ColumnRef) {
+          const fields = mod.ColumnRef.fields || [];
+          return fields.map((f: any) => f.String?.sval || '').join('.');
+        }
+        try {
+          return deparseSync([mod]).trim();
+        } catch {
+          return '';
+        }
+      }).filter(Boolean);
+
+      if (params.length > 0) {
+        type += `(${params.join(',')})`;
+      }
     }
 
     return type;
   } catch (error) {
+    Logger.warning(
+      `Failed to extract data type: ${error instanceof Error ? error.message : String(error)}`
+    );
     return "UNKNOWN";
   }
 }
 
 /**
  * Extract basic column-level constraints (NOT NULL, PRIMARY KEY)
- * Note: This only extracts constraints that affect column properties,
- * not constraints that need to be stored separately
  */
-function extractBasicConstraints(node: any): {
+function extractBasicConstraints(constraints: any[]): {
   notNull: boolean;
   primary: boolean;
 } {
@@ -107,11 +125,12 @@ function extractBasicConstraints(node: any): {
   let primary = false;
 
   try {
-    if (node.constraints && Array.isArray(node.constraints)) {
-      for (const constraint of node.constraints) {
-        if (constraint.type === "constraint_not_null") {
+    for (const constraint of constraints) {
+      if (constraint.Constraint) {
+        const contype = constraint.Constraint.contype;
+        if (contype === "CONSTR_NOTNULL") {
           notNull = true;
-        } else if (constraint.type === "constraint_primary_key") {
+        } else if (contype === "CONSTR_PRIMARY") {
           primary = true;
         }
       }
@@ -124,19 +143,55 @@ function extractBasicConstraints(node: any): {
 }
 
 /**
- * Extract default value from column CST node
+ * Extract default value from constraints
  */
-function extractDefaultValue(node: any): string | undefined {
+function extractDefaultValue(constraints: any[]): string | undefined {
   try {
-    if (node.constraints && Array.isArray(node.constraints)) {
-      for (const constraint of node.constraints) {
-        if (constraint.type === "constraint_default" && constraint.expr) {
-          return serializeDefaultValue(constraint.expr);
+    for (const constraint of constraints) {
+      if (constraint.Constraint?.contype === "CONSTR_DEFAULT") {
+        const rawExpr = constraint.Constraint.raw_expr;
+        if (rawExpr) {
+          return deparseSync([rawExpr]).trim();
         }
       }
     }
   } catch (error) {
-    // Ignore extraction errors
+    Logger.warning(
+      `Failed to extract default value: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Extract generated column info from constraints
+ */
+function extractGeneratedColumn(constraints: any[]): Column['generated'] | undefined {
+  try {
+    for (const constraint of constraints) {
+      if (constraint.Constraint?.contype === "CONSTR_GENERATED") {
+        const c = constraint.Constraint;
+
+        // generated_when can be 'a' (ALWAYS) or 's' (BY DEFAULT/ON STORAGE)
+        // In pgsql-parser, 'a' = ALWAYS, but we need to check the actual value
+        const always = c.generated_when === 'a' || c.generated_when === 97; // 97 is ASCII 'a'
+
+        const stored = true;
+
+        const expression = c.raw_expr ? deparseSync([c.raw_expr]).trim() : "";
+
+        return {
+          always,
+          expression,
+          stored,
+        };
+      }
+    }
+  } catch (error) {
+    Logger.warning(
+      `Failed to extract generated column info: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 
   return undefined;

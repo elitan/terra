@@ -22,13 +22,13 @@ describe("Index Storage Options", () => {
   });
 
   describe("Storage Parameters Parsing", () => {
-    test("should parse storage parameters in index definitions", () => {
+    test("should parse storage parameters in index definitions", async () => {
       const sql = `
         CREATE INDEX idx_users_email_with_params ON users (email) 
         WITH (fillfactor = 90, deduplicate_items = off);
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
@@ -39,13 +39,13 @@ describe("Index Storage Options", () => {
       });
     });
 
-    test("should parse tablespace specifications in index definitions", () => {
+    test("should parse tablespace specifications in index definitions", async () => {
       const sql = `
         CREATE INDEX idx_users_email_tablespace ON users (email) 
         TABLESPACE pg_default;
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
@@ -53,14 +53,14 @@ describe("Index Storage Options", () => {
       expect(index.tablespace).toBe("pg_default");
     });
 
-    test("should parse indexes with both storage parameters and tablespace", () => {
+    test("should parse indexes with both storage parameters and tablespace", async () => {
       const sql = `
         CREATE UNIQUE INDEX idx_users_email_full_options ON users (email) 
         WITH (fillfactor = 80) 
         TABLESPACE fast_ssd;
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
@@ -72,18 +72,18 @@ describe("Index Storage Options", () => {
       expect(index.tablespace).toBe("fast_ssd");
     });
 
-    test("should parse expression indexes with storage parameters", () => {
+    test("should parse expression indexes with storage parameters", async () => {
       const sql = `
-        CREATE INDEX idx_users_lower_email_params ON users (LOWER(email)) 
+        CREATE INDEX idx_users_lower_email_params ON users (LOWER(email))
         WITH (fillfactor = 70, deduplicate_items = on);
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
       expect(index.name).toBe("idx_users_lower_email_params");
-      expect(index.expression).toBe("LOWER(email)");
+      expect(index.expression).toBe("lower(email)");
       expect(index.columns).toEqual([]);
       expect(index.storageParameters).toEqual({
         fillfactor: "70",
@@ -91,15 +91,15 @@ describe("Index Storage Options", () => {
       });
     });
 
-    test("should parse partial indexes with storage parameters and tablespace", () => {
+    test("should parse partial indexes with storage parameters and tablespace", async () => {
       const sql = `
-        CREATE INDEX idx_active_users_email_advanced ON users (email) 
-        WHERE active = true 
-        WITH (fillfactor = 85) 
-        TABLESPACE index_space;
+        CREATE INDEX idx_active_users_email_advanced ON users (email)
+        WITH (fillfactor = 85)
+        TABLESPACE index_space
+        WHERE active = true;
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
@@ -112,12 +112,12 @@ describe("Index Storage Options", () => {
       expect(index.tablespace).toBe("index_space");
     });
 
-    test("should handle indexes without storage parameters or tablespace", () => {
+    test("should handle indexes without storage parameters or tablespace", async () => {
       const sql = `
         CREATE INDEX idx_users_simple ON users (email);
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
@@ -126,7 +126,7 @@ describe("Index Storage Options", () => {
       expect(index.tablespace).toBeUndefined();
     });
 
-    test("should parse multiple storage parameters", () => {
+    test("should parse multiple storage parameters", async () => {
       const sql = `
         CREATE INDEX idx_complex_storage ON users (email) 
         WITH (
@@ -136,7 +136,7 @@ describe("Index Storage Options", () => {
         );
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
@@ -254,7 +254,7 @@ describe("Index Storage Options", () => {
   });
 
   describe("Schema Differ Support", () => {
-    test("should detect storage parameter changes", () => {
+    test("should detect storage parameter changes", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -308,7 +308,7 @@ describe("Index Storage Options", () => {
       );
     });
 
-    test("should detect tablespace changes", () => {
+    test("should detect tablespace changes", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -362,7 +362,7 @@ describe("Index Storage Options", () => {
       );
     });
 
-    test("should generate correct SQL with both storage parameters and tablespace", () => {
+    test("should generate correct SQL with both storage parameters and tablespace", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -388,41 +388,41 @@ describe("Index Storage Options", () => {
   });
 
   describe("Edge Cases and Validation", () => {
-    test("should handle indexes without WITH clause", () => {
+    test("should handle indexes without WITH clause", async () => {
       const sql = `
         CREATE INDEX idx_no_params ON users (email);
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
       expect(index.storageParameters).toBeUndefined();
     });
 
-    test("should handle quoted parameter values", () => {
+    test("should handle quoted parameter values", async () => {
       const sql = `
-        CREATE INDEX idx_quoted_params ON users (email) 
+        CREATE INDEX idx_quoted_params ON users (email)
         WITH (buffering = 'auto', pages_per_range = '128');
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;
       expect(index.storageParameters).toEqual({
-        buffering: "'auto'",
-        pages_per_range: "'128'",
+        buffering: "auto",
+        pages_per_range: "128",
       });
     });
 
-    test("should handle complex tablespace names", () => {
+    test("should handle complex tablespace names", async () => {
       const sql = `
         CREATE INDEX idx_complex_tablespace ON users (email) 
         TABLESPACE "my-special-tablespace";
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
       expect(indexes).toHaveLength(1);
 
       const index = indexes[0]!;

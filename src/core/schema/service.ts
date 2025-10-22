@@ -1,6 +1,6 @@
 import { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
-import type { EnumType, View, Function, Procedure, Trigger, Sequence, Extension } from "../../types/schema";
+import type { EnumType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../types/schema";
 import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
 import { SchemaDiffer } from "./differ";
@@ -40,7 +40,7 @@ export class SchemaService {
     const client = await this.databaseService.createClient();
 
     try {
-      const parsedSchema = this.parseSchemaInput(schemaFile);
+      const parsedSchema = await this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const currentSchema = await this.inspector.getCurrentSchema(client);
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
@@ -87,7 +87,7 @@ export class SchemaService {
       if (lockOptions && !dryRun) {
         await this.databaseService.acquireAdvisoryLock(client, lockOptions);
       }
-      const parsedSchema = this.parseSchemaInput(schemaFile);
+      const parsedSchema = await this.parseSchemaInput(schemaFile);
       const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
       const desiredEnums = Array.isArray(parsedSchema) ? [] : parsedSchema.enums;
       const desiredViews = Array.isArray(parsedSchema) ? [] : parsedSchema.views;
@@ -96,6 +96,8 @@ export class SchemaService {
       const desiredTriggers = Array.isArray(parsedSchema) ? [] : parsedSchema.triggers;
       const desiredSequences = Array.isArray(parsedSchema) ? [] : parsedSchema.sequences;
       const desiredExtensions = Array.isArray(parsedSchema) ? [] : parsedSchema.extensions;
+      const desiredSchemas = Array.isArray(parsedSchema) ? [] : parsedSchema.schemas || [];
+      const desiredComments = Array.isArray(parsedSchema) ? [] : parsedSchema.comments || [];
 
       // Validate that all schema references are in the managed schemas list
       this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
@@ -109,18 +111,30 @@ export class SchemaService {
       const currentTriggers = await this.inspector.getCurrentTriggers(client, schemas);
       const currentSequences = await this.inspector.getCurrentSequences(client, schemas);
       const currentExtensions = await this.inspector.getCurrentExtensions(client, schemas);
+      const currentSchemas = await this.inspector.getCurrentSchemas(client, schemas);
+      const currentComments = await this.inspector.getCurrentComments(client, schemas);
+
+      // Generate schema statements (CREATE first)
+      const schemaStatements = this.generateSchemaStatements(desiredSchemas, currentSchemas);
 
       // Generate extension statements (CREATE first, DROP last)
       const { create: extensionCreateStatements, drop: extensionDropStatements } =
         this.generateExtensionStatements(desiredExtensions, currentExtensions);
 
       // Generate ENUM statements with collision detection
-      const enumStatements = this.generateEnumStatements(desiredEnums, currentEnums);
+      const { transactional: enumCreateStatements, concurrent: enumAddValueStatements } =
+        this.generateEnumStatements(desiredEnums, currentEnums);
 
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Prepend extension CREATE and ENUM creation statements
-      plan.transactional = [...extensionCreateStatements, ...enumStatements, ...plan.transactional];
+      // Prepend schema CREATE, extension CREATE, and ENUM creation statements
+      plan.transactional = [...schemaStatements, ...extensionCreateStatements, ...enumCreateStatements, ...plan.transactional];
+
+      // Append ALTER TYPE ADD VALUE statements to concurrent (cannot run in transaction)
+      plan.concurrent = [...enumAddValueStatements, ...plan.concurrent];
+
+      // Update hasChanges flag after modifying plan
+      plan.hasChanges = plan.transactional.length > 0 || plan.concurrent.length > 0;
 
       // Generate statements for new features
       const sequenceStatements = this.generateSequenceStatements(desiredSequences, currentSequences);
@@ -128,12 +142,13 @@ export class SchemaService {
       const procedureStatements = this.generateProcedureStatements(desiredProcedures, currentProcedures);
       const viewStatements = this.generateViewStatements(desiredViews, currentViews);
       const triggerStatements = this.generateTriggerStatements(desiredTriggers, currentTriggers);
+      const commentStatements = this.generateCommentStatements(desiredComments, currentComments);
 
       // Calculate total changes
       const totalChanges = plan.transactional.length + plan.concurrent.length +
                           sequenceStatements.length + functionStatements.length +
                           procedureStatements.length + viewStatements.length +
-                          triggerStatements.length + extensionDropStatements.length;
+                          triggerStatements.length + commentStatements.length + extensionDropStatements.length;
 
       // Show plan
       if (totalChanges === 0) {
@@ -145,7 +160,7 @@ export class SchemaService {
 
       Logger.print(OutputFormatter.summary(`${totalChanges} changes`));
 
-      // Combine all transactional statements
+      // Combine all transactional statements (comments executed separately after all objects created)
       const allTransactional = [
         ...plan.transactional,
         ...sequenceStatements,
@@ -246,7 +261,17 @@ export class SchemaService {
         await this.executor.executePlan(client, triggerPlan, autoApprove);
       }
 
-      // 6. Drop extensions (must come LAST, after all dependent objects are dropped)
+      // 6. Comments (must come after all objects are created)
+      if (commentStatements.length > 0) {
+        const commentPlan = {
+          transactional: commentStatements,
+          concurrent: [],
+          hasChanges: true
+        };
+        await this.executor.executePlan(client, commentPlan, autoApprove);
+      }
+
+      // 7. Drop extensions (must come LAST, after all dependent objects are dropped)
       if (extensionDropStatements.length > 0) {
         const extensionDropPlan = {
           transactional: extensionDropStatements,
@@ -280,10 +305,10 @@ export class SchemaService {
     });
   }
 
-  private parseSchemaInput(input: string) {
+  private async parseSchemaInput(input: string) {
     // Handle empty string as empty SQL content (not a filename)
     if (input === "") {
-      return this.parser.parseSchema(input);
+      return await this.parser.parseSchema(input);
     }
 
     // Simple heuristic: if the input contains SQL keywords and is longer than a typical file path,
@@ -294,28 +319,32 @@ export class SchemaService {
       input.includes('\n') ||
       input.length > 500
     ) {
-      return this.parser.parseSchema(input);
+      return await this.parser.parseSchema(input);
     } else {
       // Treat as file path
-      return this.parser.parseSchemaFile(input);
+      return await this.parser.parseSchemaFile(input);
     }
   }
 
-  private generateEnumStatements(desiredEnums: EnumType[], currentEnums: EnumType[]): string[] {
-    const statements: string[] = [];
+  private generateEnumStatements(desiredEnums: EnumType[], currentEnums: EnumType[]): {
+    transactional: string[];
+    concurrent: string[];
+  } {
+    const transactional: string[] = [];
+    const concurrent: string[] = [];
     const currentEnumMap = new Map(currentEnums.map(e => [e.name, e]));
-    
+
     for (const desiredEnum of desiredEnums) {
       const currentEnum = currentEnumMap.get(desiredEnum.name);
-      
+
       if (!currentEnum) {
         // ENUM doesn't exist, create it
-        statements.push(this.generateCreateTypeStatement(desiredEnum));
+        transactional.push(this.generateCreateTypeStatement(desiredEnum));
       } else {
         // ENUM exists, check if values need to be modified
         const currentValues = currentEnum.values;
         const desiredValues = desiredEnum.values;
-        
+
         // Check if values are identical in order and content
         if (JSON.stringify(currentValues) === JSON.stringify(desiredValues)) {
           // Values match exactly, skip modification
@@ -323,14 +352,15 @@ export class SchemaService {
         } else {
           // Values differ, generate modification statements
           const modificationStatements = this.generateEnumModificationStatements(desiredEnum, currentEnum);
-          statements.push(...modificationStatements);
+          // ALTER TYPE ADD VALUE must run outside of transaction block
+          concurrent.push(...modificationStatements);
         }
       }
     }
-    
+
     // Note: ENUM removal is handled separately after table changes
-    
-    return statements;
+
+    return { transactional, concurrent };
   }
 
   private async generateEnumRemovalStatements(desiredEnums: EnumType[], currentEnums: EnumType[], client: Client, schemas: string[]): Promise<string[]> {
@@ -343,7 +373,8 @@ export class SchemaService {
         const isUsed = await this.isEnumTypeUsed(currentEnum.name, client, schemas);
         
         if (!isUsed) {
-          statements.push(`DROP TYPE ${currentEnum.name};`);
+          const fullName = currentEnum.schema ? `${currentEnum.schema}.${currentEnum.name}` : currentEnum.name;
+          statements.push(`DROP TYPE ${fullName};`);
           Logger.info(`Dropping unused ENUM type '${currentEnum.name}'`);
         } else {
           Logger.warning(
@@ -429,8 +460,9 @@ export class SchemaService {
       Logger.info(`ENUM type '${desiredEnum.name}' values already match, no changes needed`);
     } else if (isOnlyAppending) {
       // Only adding values at the end - safe operation using ALTER TYPE ADD VALUE
+      const fullName = desiredEnum.schema ? `${desiredEnum.schema}.${desiredEnum.name}` : desiredEnum.name;
       for (const value of valuesToAdd) {
-        statements.push(`ALTER TYPE ${desiredEnum.name} ADD VALUE '${value}';`);
+        statements.push(`ALTER TYPE ${fullName} ADD VALUE '${value}';`);
         Logger.info(`Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
       }
     } else {
@@ -459,7 +491,8 @@ export class SchemaService {
 
   private generateCreateTypeStatement(enumType: EnumType): string {
     const values = enumType.values.map(value => `'${value}'`).join(', ');
-    return `CREATE TYPE ${enumType.name} AS ENUM (${values});`;
+    const fullName = enumType.schema ? `${enumType.schema}.${enumType.name}` : enumType.name;
+    return `CREATE TYPE ${fullName} AS ENUM (${values});`;
   }
 
   private generateViewStatements(desiredViews: View[], currentViews: View[]): string[] {
@@ -757,5 +790,72 @@ export class SchemaService {
            desired.forEach !== current.forEach ||
            desired.functionName !== current.functionName ||
            JSON.stringify(desired.events) !== JSON.stringify(current.events);
+  }
+
+  private generateSchemaStatements(desiredSchemas: SchemaDefinition[], currentSchemas: SchemaDefinition[]): string[] {
+    const statements: string[] = [];
+    const currentSchemaNames = new Set(currentSchemas.map(s => s.name));
+
+    for (const desiredSchema of desiredSchemas) {
+      if (!currentSchemaNames.has(desiredSchema.name)) {
+        const ifNotExists = desiredSchema.ifNotExists ? 'IF NOT EXISTS ' : '';
+        let sql = `CREATE SCHEMA ${ifNotExists}${desiredSchema.name}`;
+
+        if (desiredSchema.owner) {
+          sql += ` AUTHORIZATION ${desiredSchema.owner}`;
+        }
+
+        sql += ';';
+        statements.push(sql);
+        Logger.info(`Creating schema '${desiredSchema.name}'`);
+      } else {
+        Logger.info(`Schema '${desiredSchema.name}' already exists, skipping`);
+      }
+    }
+
+    return statements;
+  }
+
+  private generateCommentStatements(desiredComments: Comment[], currentComments: Comment[]): string[] {
+    const statements: string[] = [];
+    const currentCommentMap = new Map(
+      currentComments.map(c => [this.getCommentKey(c), c])
+    );
+
+    for (const desiredComment of desiredComments) {
+      const key = this.getCommentKey(desiredComment);
+      const currentComment = currentCommentMap.get(key);
+
+      if (!currentComment || currentComment.comment !== desiredComment.comment) {
+        const sql = this.generateCommentSQL(desiredComment);
+        statements.push(sql);
+        Logger.info(`${currentComment ? 'Updating' : 'Creating'} comment on ${desiredComment.objectType} '${desiredComment.objectName}'`);
+      } else {
+        Logger.info(`Comment on ${desiredComment.objectType} '${desiredComment.objectName}' is up to date, skipping`);
+      }
+    }
+
+    return statements;
+  }
+
+  private getCommentKey(comment: Comment): string {
+    if (comment.objectType === 'COLUMN') {
+      return `${comment.objectType}:${comment.objectName}`;
+    }
+    return `${comment.objectType}:${comment.schemaName || 'public'}.${comment.objectName}`;
+  }
+
+  private generateCommentSQL(comment: Comment): string {
+    const escapedComment = comment.comment.replace(/'/g, "''");
+
+    if (comment.objectType === 'SCHEMA') {
+      return `COMMENT ON SCHEMA ${comment.objectName} IS '${escapedComment}';`;
+    }
+
+    const objectName = comment.schemaName
+      ? `${comment.schemaName}.${comment.objectName}`
+      : comment.objectName;
+
+    return `COMMENT ON ${comment.objectType} ${objectName} IS '${escapedComment}';`;
   }
 }

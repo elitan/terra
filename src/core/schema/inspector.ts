@@ -15,6 +15,8 @@ import type {
   Trigger,
   Sequence,
   Extension,
+  SchemaDefinition,
+  Comment,
 } from "../../types/schema";
 
 export class DatabaseInspector {
@@ -36,34 +38,59 @@ export class DatabaseInspector {
       const columnsResult = await client.query(
         `
         SELECT
-          column_name,
-          data_type,
-          character_maximum_length,
-          is_nullable,
-          column_default
-        FROM information_schema.columns
-        WHERE table_name = $1 AND table_schema = $2
-        ORDER BY ordinal_position
+          a.attname as column_name,
+          format_type(a.atttypid, a.atttypmod) as data_type,
+          format_type(a.atttypid, a.atttypmod) as pg_type,
+          CASE
+            WHEN a.atttypmod > 0 AND format_type(a.atttypid, a.atttypmod) LIKE '%(%'
+            THEN substring(format_type(a.atttypid, a.atttypmod) FROM '\\((\\d+)')::int
+            ELSE NULL
+          END as character_maximum_length,
+          NOT a.attnotnull as is_nullable,
+          pg_get_expr(ad.adbin, ad.adrelid) as column_default,
+          a.attgenerated,
+          CASE
+            WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
+            ELSE NULL
+          END as generation_expression
+        FROM pg_attribute a
+        LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+        JOIN pg_class cls ON cls.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = cls.relnamespace
+        WHERE cls.relname = $1 AND n.nspname = $2 AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum
       `,
         [tableName, tableSchema]
       );
 
       const columns: Column[] = columnsResult.rows.map((col: any) => {
-        let type = col.data_type;
+        let type = col.pg_type;
 
-        // Handle character varying with length
-        if (
-          col.data_type === "character varying" &&
-          col.character_maximum_length
-        ) {
-          type = `character varying(${col.character_maximum_length})`;
+        // Parse generated column info
+        let generated: Column['generated'] | undefined = undefined;
+        let defaultValue = col.column_default;
+
+        if (col.attgenerated && col.attgenerated !== '') {
+          const always = col.attgenerated === 's' || col.attgenerated === 'a';
+          const stored = col.attgenerated === 's';
+          const expression = col.generation_expression || '';
+
+          generated = {
+            always,
+            expression,
+            stored,
+          };
+
+          // Generated columns don't have defaults in the traditional sense
+          defaultValue = undefined;
         }
 
         return {
           name: col.column_name,
           type: type,
-          nullable: col.is_nullable === "YES",
-          default: col.column_default,
+          nullable: col.is_nullable,
+          default: defaultValue,
+          generated,
         };
       });
 
@@ -111,6 +138,8 @@ export class DatabaseInspector {
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       WHERE tc.table_name = $1
         AND tc.table_schema = $2
         AND tc.constraint_type = 'PRIMARY KEY'
@@ -181,16 +210,11 @@ export class DatabaseInspector {
           ELSE NULL
         END as where_clause
       FROM pg_indexes i
-      JOIN pg_class c ON c.relname = i.tablename
-      JOIN pg_index ix ON ix.indexrelid = (
-        SELECT oid FROM pg_class WHERE relname = i.indexname
-      )
-      JOIN pg_am am ON am.oid = (
-        SELECT pg_class.relam FROM pg_class WHERE relname = i.indexname
-      )
-      -- Join with pg_class again to get the index relation for storage options
-      JOIN pg_class ic ON ic.oid = ix.indexrelid
-      -- Left join with pg_tablespace to get tablespace name
+      JOIN pg_namespace n ON n.nspname = i.schemaname
+      JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = n.oid
+      JOIN pg_class ic ON ic.relname = i.indexname AND ic.relnamespace = n.oid
+      JOIN pg_index ix ON ix.indexrelid = ic.oid
+      JOIN pg_am am ON am.oid = ic.relam
       LEFT JOIN pg_tablespace ts ON ts.oid = ic.reltablespace
       WHERE i.tablename = $1
         AND i.schemaname = $2
@@ -270,14 +294,19 @@ export class DatabaseInspector {
         ccu.table_name AS referenced_table,
         ccu.column_name AS referenced_column,
         rc.delete_rule,
-        rc.update_rule
+        rc.update_rule,
+        kcu.ordinal_position
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       JOIN information_schema.constraint_column_usage ccu
         ON ccu.constraint_name = tc.constraint_name
+        AND ccu.table_schema = tc.table_schema
       JOIN information_schema.referential_constraints rc
         ON rc.constraint_name = tc.constraint_name
+        AND rc.constraint_schema = tc.table_schema
       WHERE tc.table_name = $1
         AND tc.table_schema = $2
         AND tc.constraint_type = 'FOREIGN KEY'
@@ -327,9 +356,9 @@ export class DatabaseInspector {
     return foreignKeys;
   }
 
-  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | undefined {
+  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION' | undefined {
     if (!rule) return undefined;
-    
+
     switch (rule.toUpperCase()) {
       case 'CASCADE':
         return 'CASCADE';
@@ -339,6 +368,8 @@ export class DatabaseInspector {
         return 'SET NULL';
       case 'SET DEFAULT':
         return 'SET DEFAULT';
+      case 'NO ACTION':
+        return 'NO ACTION';
       default:
         return undefined;
     }
@@ -352,8 +383,9 @@ export class DatabaseInspector {
         pg_get_constraintdef(c.oid) as constraint_def
       FROM pg_constraint c
       JOIN pg_class t ON c.conrelid = t.oid
+      JOIN pg_namespace n ON t.relnamespace = n.oid
       WHERE t.relname = $1
-        AND t.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $2)
+        AND n.nspname = $2
         AND c.contype = 'c'
       ORDER BY c.conname
       `,
@@ -396,6 +428,8 @@ export class DatabaseInspector {
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       WHERE tc.table_name = $1
         AND tc.table_schema = $2
         AND tc.constraint_type = 'UNIQUE'
@@ -559,7 +593,7 @@ export class DatabaseInspector {
 
   // Get complete schema including all database objects
   async getCompleteSchema(client: Client, schemas: string[] = ['public']): Promise<Schema> {
-    const [tables, views, enumTypes, functions, procedures, triggers, sequences, extensions] = await Promise.all([
+    const [tables, views, enumTypes, functions, procedures, triggers, sequences, extensions, schemaDefinitions, comments] = await Promise.all([
       this.getCurrentSchema(client, schemas),
       this.getCurrentViews(client, schemas),
       this.getCurrentEnums(client, schemas),
@@ -568,6 +602,8 @@ export class DatabaseInspector {
       this.getCurrentTriggers(client, schemas),
       this.getCurrentSequences(client, schemas),
       this.getCurrentExtensions(client, schemas),
+      this.getCurrentSchemas(client, schemas),
+      this.getCurrentComments(client, schemas),
     ]);
 
     return {
@@ -579,6 +615,8 @@ export class DatabaseInspector {
       triggers,
       sequences,
       extensions,
+      schemas: schemaDefinitions,
+      comments,
     };
   }
 
@@ -812,6 +850,69 @@ export class DatabaseInspector {
       name: row.extension_name,
       schema: row.schema_name,
       version: row.version || undefined,
+    }));
+  }
+
+  // Get all user-created schemas from the database
+  async getCurrentSchemas(client: Client, schemas: string[] = ['public']): Promise<SchemaDefinition[]> {
+    const result = await client.query(`
+      SELECT
+        n.nspname as schema_name,
+        pg_get_userbyid(n.nspowner) as owner
+      FROM pg_namespace n
+      WHERE n.nspname = ANY($1::text[])
+        AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND n.nspname NOT LIKE 'pg_%'
+      ORDER BY n.nspname
+    `, [schemas]);
+
+    return result.rows.map((row: any) => ({
+      name: row.schema_name,
+      owner: row.owner || undefined,
+      ifNotExists: false,
+    }));
+  }
+
+  // Get all comments from the database
+  async getCurrentComments(client: Client, schemas: string[] = ['public']): Promise<Comment[]> {
+    const comments: Comment[] = [];
+
+    const result = await client.query(`
+      SELECT
+        CASE c.relkind
+          WHEN 'r' THEN 'TABLE'
+          WHEN 'v' THEN 'VIEW'
+          WHEN 'm' THEN 'VIEW'
+          WHEN 'i' THEN 'INDEX'
+        END as object_type,
+        c.relname as object_name,
+        n.nspname as schema_name,
+        d.description as comment
+      FROM pg_class c
+      JOIN pg_namespace n ON c.relnamespace = n.oid
+      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+      WHERE n.nspname = ANY($1::text[])
+        AND c.relkind IN ('r', 'v', 'm', 'i')
+
+      UNION ALL
+
+      SELECT
+        'SCHEMA' as object_type,
+        n.nspname as object_name,
+        NULL as schema_name,
+        d.description as comment
+      FROM pg_namespace n
+      JOIN pg_description d ON d.objoid = n.oid
+      WHERE n.nspname = ANY($1::text[])
+
+      ORDER BY object_type, object_name
+    `, [schemas]);
+
+    return result.rows.map((row: any) => ({
+      objectType: row.object_type as Comment['objectType'],
+      objectName: row.object_name,
+      schemaName: row.schema_name || undefined,
+      comment: row.comment,
     }));
   }
 

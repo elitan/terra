@@ -6,25 +6,114 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { parse as parseCST } from "sql-parser-cst";
+import { parse, loadModule } from "pgsql-parser";
 import { Logger } from "../../../utils/logger";
 import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
 import { parseCreateType } from "./enum-parser";
-import { parseCreateView } from "./view-parser";
+import { parseCreateView, parseCreateMaterializedView } from "./view-parser";
 import { parseCreateFunction } from "./function-parser";
 import { parseCreateProcedure } from "./procedure-parser";
 import { parseCreateTrigger } from "./trigger-parser";
 import { parseCreateSequence } from "./sequence-parser";
 import { parseCreateExtension } from "./extension-parser";
-import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence, Extension } from "../../../types/schema";
+import { parseCreateSchema } from "./schema-definition-parser";
+import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
+let wasmInitialized = false;
+
 export class SchemaParser {
+  private async ensureWasmLoaded() {
+    if (!wasmInitialized) {
+      await loadModule();
+      wasmInitialized = true;
+    }
+  }
+
+  /**
+   * Extract error context from pgsql-parser error message
+   */
+  private extractErrorContext(errorMessage: string, sql: string): { line?: number; column?: number; snippet?: string } {
+    // pgsql-parser errors sometimes contain position info like:
+    // "syntax error at or near "something" at line X"
+    // or just "syntax error at or near "something""
+
+    // Try to extract quoted text that caused the error
+    const nearMatch = errorMessage.match(/at or near "([^"]+)"/);
+    const problemText = nearMatch ? nearMatch[1] : null;
+
+    if (!problemText) {
+      return {};
+    }
+
+    // Find the first occurrence of the problem text in the SQL
+    const lines = sql.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const lineText = lines[i] || '';
+      const col = lineText.indexOf(problemText);
+
+      if (col !== -1) {
+        // Found it! Extract context
+        const line = i + 1;
+        const column = col + 1;
+
+        // Get snippet: current line + 2 lines before and after
+        const start = Math.max(0, i - 2);
+        const end = Math.min(lines.length, i + 3);
+        const contextLines = lines.slice(start, end);
+
+        // Add line numbers and highlight the problem line
+        const snippet = contextLines.map((l, idx) => {
+          const lineNum = start + idx + 1;
+          const marker = lineNum === line ? '→' : ' ';
+          return `${marker} ${lineNum.toString().padStart(4)} | ${l}`;
+        }).join('\n');
+
+        return { line, column, snippet };
+      }
+    }
+
+    return {};
+  }
+
+  /**
+   * Auto-quote common reserved keywords when used as identifiers
+   */
+  private autoQuoteReservedKeywords(sql: string): string {
+    // List of commonly used PostgreSQL reserved keywords that users might use as column names
+    // Note: Excludes highly ambiguous keywords like 'table', 'column', 'index' that appear in DDL
+    const keywords = [
+      'user', 'year', 'month', 'day', 'hour', 'minute', 'second',
+      'order', 'group', 'limit', 'offset',
+      'key', 'value', 'comment', 'status'
+    ];
+
+    // Pattern to match unquoted identifiers in column definitions
+    // This handles: column_name TYPE constraints
+    // Only match after whitespace or comma to ensure it's in a column position
+    for (const keyword of keywords) {
+      // Match keyword preceded by whitespace/comma and followed by a type
+      // Make sure it's not already quoted and not preceded by CREATE/ALTER
+      const pattern = new RegExp(`(?<![CREATE|ALTER]\\s{1,20})(?<=\\s|,)\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
+      sql = sql.replace(pattern, `"${keyword}"`);
+
+      // Also match in UNIQUE constraints: UNIQUE (column1, keyword, column3)
+      const uniquePattern = new RegExp(`(UNIQUE\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      sql = sql.replace(uniquePattern, `$1"${keyword}"`);
+
+      // Also match in PRIMARY KEY and FOREIGN KEY constraints
+      const keyPattern = new RegExp(`((?:PRIMARY|FOREIGN)\\s+KEY\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      sql = sql.replace(keyPattern, `$1"${keyword}"`);
+    }
+
+    return sql;
+  }
+
   /**
    * Parse schema from a file path
    */
-  parseSchemaFile(filePath: string): {
+  async parseSchemaFile(filePath: string): Promise<{
     tables: Table[];
     enums: EnumType[];
     views: View[];
@@ -33,7 +122,9 @@ export class SchemaParser {
     triggers: Trigger[];
     sequences: Sequence[];
     extensions: Extension[];
-  } {
+    schemas: SchemaDefinition[];
+    comments: Comment[];
+  }> {
     if (!existsSync(filePath)) {
       throw new ParserError(
         `Schema file not found: ${filePath}`,
@@ -48,10 +139,10 @@ export class SchemaParser {
   /**
    * Parse schema from SQL string
    */
-  parseSchema(
+  async parseSchema(
     sql: string,
     filePath?: string
-  ): {
+  ): Promise<{
     tables: Table[];
     enums: EnumType[];
     views: View[];
@@ -60,8 +151,12 @@ export class SchemaParser {
     triggers: Trigger[];
     sequences: Sequence[];
     extensions: Extension[];
-  } {
-    const { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions } = this.parseWithCST(sql, filePath);
+    schemas: SchemaDefinition[];
+    comments: Comment[];
+  }> {
+    await this.ensureWasmLoaded();
+
+    const { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments } = await this.parseWithPgsql(sql, filePath);
 
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map((t) => [t.name, t]));
@@ -76,40 +171,43 @@ export class SchemaParser {
       }
     }
 
-    return { tables, enums, views, functions, procedures, triggers, sequences, extensions };
+    return { tables, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
   }
 
   /**
    * Parse CREATE TABLE statements
    */
-  parseCreateTableStatements(sql: string): Table[] {
-    const { tables } = this.parseWithCST(sql);
+  async parseCreateTableStatements(sql: string): Promise<Table[]> {
+    await this.ensureWasmLoaded();
+    const { tables } = await this.parseWithPgsql(sql);
     return tables;
   }
 
   /**
    * Parse CREATE INDEX statements
    */
-  parseCreateIndexStatements(sql: string): Index[] {
-    const { indexes } = this.parseWithCST(sql);
+  async parseCreateIndexStatements(sql: string): Promise<Index[]> {
+    await this.ensureWasmLoaded();
+    const { indexes } = await this.parseWithPgsql(sql);
     return indexes;
   }
 
   /**
    * Parse CREATE VIEW statements
    */
-  parseCreateViewStatements(sql: string): View[] {
-    const { views } = this.parseWithCST(sql);
+  async parseCreateViewStatements(sql: string): Promise<View[]> {
+    await this.ensureWasmLoaded();
+    const { views } = await this.parseWithPgsql(sql);
     return views;
   }
 
   /**
-   * Parse SQL using sql-parser-cst and extract all schema objects
+   * Parse SQL using pgsql-parser and extract all schema objects
    */
-  private parseWithCST(
+  private async parseWithPgsql(
     sql: string,
     filePath?: string
-  ): {
+  ): Promise<{
     tables: Table[];
     indexes: Index[];
     enums: EnumType[];
@@ -119,7 +217,9 @@ export class SchemaParser {
     triggers: Trigger[];
     sequences: Sequence[];
     extensions: Extension[];
-  } {
+    schemas: SchemaDefinition[];
+    comments: Comment[];
+  }> {
     const tables: Table[] = [];
     const indexes: Index[] = [];
     const enums: EnumType[] = [];
@@ -129,143 +229,188 @@ export class SchemaParser {
     const triggers: Trigger[] = [];
     const sequences: Sequence[] = [];
     const extensions: Extension[] = [];
+    const schemas: SchemaDefinition[] = [];
+    const comments: Comment[] = [];
 
-    // First, extract CREATE EXTENSION statements manually (sql-parser-cst doesn't support them yet)
-    const extensionMatches = this.extractExtensionStatements(sql);
-    extensions.push(...extensionMatches);
+    // Auto-quote reserved keywords that are commonly used as column names
+    sql = this.autoQuoteReservedKeywords(sql);
 
-    // Remove CREATE EXTENSION statements from SQL before parsing with CST
-    let sqlWithoutExtensions = sql;
-    const extensionRegex = /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)(?:\s+WITH\s+)?(?:\s+SCHEMA\s+(\w+))?(?:\s+VERSION\s+'([^']+)')?(?:\s+CASCADE)?[^;]*;/gi;
-    sqlWithoutExtensions = sqlWithoutExtensions.replace(extensionRegex, '');
+    // Handle empty SQL (after keyword quoting to preserve empty checks correctly)
+    if (!sql || sql.trim() === '') {
+      return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+    }
 
     try {
-      const cst = parseCST(sqlWithoutExtensions, {
-        dialect: "postgresql",
-        includeSpaces: true,
-        includeNewlines: true,
-        includeComments: true,
-        includeRange: true,
-      });
+      const ast = await parse(sql);
 
-      // Extract statements from the CST
-      if (cst.statements) {
-        for (const statement of cst.statements) {
-          if (statement.type === "create_table_stmt") {
-            const table = parseCreateTable(statement);
-            if (table) {
-              tables.push(table);
-            }
-          } else if (statement.type === "create_index_stmt") {
-            const index = parseCreateIndex(statement);
-            if (index) {
-              indexes.push(index);
-            }
-          } else if (statement.type === "create_type_stmt") {
-            const enumType = parseCreateType(statement);
-            if (enumType) {
-              enums.push(enumType);
-            }
-          } else if (statement.type === "create_view_stmt") {
-            const view = parseCreateView(statement, sql);
-            if (view) {
-              views.push(view);
-            }
-          } else if (statement.type === "create_function_stmt") {
-            const func = parseCreateFunction(statement);
-            if (func) {
-              functions.push(func);
-            }
-          } else if (statement.type === "create_procedure_stmt") {
-            const proc = parseCreateProcedure(statement);
-            if (proc) {
-              procedures.push(proc);
-            }
-          } else if (statement.type === "create_trigger_stmt") {
-            const trigger = parseCreateTrigger(statement);
-            if (trigger) {
-              triggers.push(trigger);
-            }
-          } else if (statement.type === "create_sequence_stmt") {
-            const sequence = parseCreateSequence(statement);
-            if (sequence) {
-              sequences.push(sequence);
-            }
-          } else if (statement.type === "alter_table_stmt") {
-            throw new ParserError(
-              "ALTER TABLE statements are not supported in schema definitions. " +
-                "Terra is a declarative schema tool - please define your complete desired schema " +
-                "using CREATE TABLE statements with inline constraints. " +
-                "For circular foreign keys, use inline CONSTRAINT syntax.",
-              filePath
-            );
-          } else if (
-            statement.type === "drop_table_stmt" ||
-            statement.type === "drop_index_stmt"
-          ) {
-            throw new ParserError(
-              "DROP statements are not supported in schema definitions. " +
-                "Terra is a declarative schema tool - only include the tables and indexes " +
-                "you want to exist. Terra will automatically determine what needs to be dropped.",
-              filePath
-            );
+      if (!ast.stmts) {
+        return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+      }
+
+      for (const stmtWrapper of ast.stmts) {
+        const stmt = stmtWrapper.stmt;
+
+        if (stmt.CreateStmt) {
+          const table = parseCreateTable(stmt.CreateStmt);
+          if (table) {
+            tables.push(table);
           }
+        } else if (stmt.IndexStmt) {
+          const index = parseCreateIndex(stmt.IndexStmt);
+          if (index) {
+            indexes.push(index);
+          }
+        } else if (stmt.CreateEnumStmt) {
+          const enumType = parseCreateType(stmt.CreateEnumStmt);
+          if (enumType) {
+            enums.push(enumType);
+          }
+        } else if (stmt.ViewStmt) {
+          const view = parseCreateView(stmt.ViewStmt, sql);
+          if (view) {
+            views.push(view);
+          }
+        } else if (stmt.CreateTableAsStmt) {
+          const view = parseCreateMaterializedView(stmt.CreateTableAsStmt);
+          if (view) {
+            views.push(view);
+          }
+        } else if (stmt.CreateFunctionStmt) {
+          const func = parseCreateFunction(stmt.CreateFunctionStmt);
+          if (func) {
+            functions.push(func);
+          }
+        } else if (stmt.CreateProcedureStmt) {
+          const proc = parseCreateProcedure(stmt.CreateProcedureStmt);
+          if (proc) {
+            procedures.push(proc);
+          }
+        } else if (stmt.CreateTrigStmt) {
+          const trigger = parseCreateTrigger(stmt.CreateTrigStmt);
+          if (trigger) {
+            triggers.push(trigger);
+          }
+        } else if (stmt.CreateSeqStmt) {
+          const sequence = parseCreateSequence(stmt.CreateSeqStmt);
+          if (sequence) {
+            sequences.push(sequence);
+          }
+        } else if (stmt.CreateExtensionStmt) {
+          const extension = parseCreateExtension(stmt.CreateExtensionStmt);
+          if (extension) {
+            extensions.push(extension);
+          }
+        } else if (stmt.CreateSchemaStmt) {
+          const schema = parseCreateSchema(stmt.CreateSchemaStmt);
+          if (schema) {
+            schemas.push(schema);
+          }
+        } else if (stmt.CommentStmt) {
+          const comment = this.parseCommentStmt(stmt.CommentStmt);
+          if (comment) {
+            comments.push(comment);
+          }
+        } else if (stmt.AlterTableStmt) {
+          throw new ParserError(
+            "ALTER TABLE statements are not supported in schema definitions. " +
+              "Terra is a declarative schema tool - please define your complete desired schema " +
+              "using CREATE TABLE statements with inline constraints. " +
+              "For circular foreign keys, use inline CONSTRAINT syntax.",
+            filePath
+          );
+        } else if (stmt.DropStmt) {
+          throw new ParserError(
+            "DROP statements are not supported in schema definitions. " +
+              "Terra is a declarative schema tool - only include the tables and indexes " +
+              "you want to exist. Terra will automatically determine what needs to be dropped.",
+            filePath
+          );
         }
       }
     } catch (error) {
-      // If it's already a ParserError, re-throw it
       if (error instanceof ParserError) {
         throw error;
       }
 
-      // Handle CST parser errors (FormattedSyntaxError)
       if (error instanceof Error) {
-        // Extract line and column from error message if available
-        // CST errors have format like: "--> undefined:12:48" or "--> filename:12:48"
-        const lineColMatch = error.message.match(/-->\s+(?:.*?):(\d+):(\d+)/);
-        const line = lineColMatch?.[1] ? parseInt(lineColMatch[1]) : undefined;
-        const column = lineColMatch?.[2] ? parseInt(lineColMatch[2]) : undefined;
+        // Try to extract line/column info from pgsql-parser error message
+        const { line, column, snippet } = this.extractErrorContext(error.message, sql);
 
         throw new ParserError(
           error.message,
           filePath,
           line,
-          column
+          column,
+          snippet
         );
       }
 
-      // Unknown error type
       throw new ParserError(
         `Unexpected parser error: ${String(error)}`,
         filePath
       );
     }
 
-    return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions };
+    return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
   }
 
   /**
-   * Extract CREATE EXTENSION statements manually using regex
-   * This is a workaround until sql-parser-cst supports CREATE EXTENSION
+   * Parse COMMENT ON statement
    */
-  private extractExtensionStatements(sql: string): Extension[] {
-    const extensions: Extension[] = [];
-    const extensionRegex = /CREATE\s+EXTENSION\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)(?:\s+WITH\s+)?(?:\s+SCHEMA\s+(\w+))?(?:\s+VERSION\s+'([^']+)')?(\s+CASCADE)?[^;]*;/gi;
-
-    let match;
-    while ((match = extensionRegex.exec(sql)) !== null) {
-      // Skip if extension name is not captured (shouldn't happen with our regex, but be safe)
-      if (!match[1]) continue;
-
-      const extension: Extension = {
-        name: match[1],
-        schema: match[2] || undefined,
-        version: match[3] || undefined,
-        cascade: !!match[4],
-      };
-      extensions.push(extension);
+  private parseCommentStmt(stmt: any): Comment | null {
+    if (!stmt.objtype || !stmt.comment) {
+      return null;
     }
 
-    return extensions;
+    const objectTypeMap: Record<string, Comment['objectType']> = {
+      'OBJECT_TABLE': 'TABLE',
+      'OBJECT_COLUMN': 'COLUMN',
+      'OBJECT_VIEW': 'VIEW',
+      'OBJECT_INDEX': 'INDEX',
+      'OBJECT_SCHEMA': 'SCHEMA',
+      'OBJECT_TYPE': 'TYPE',
+      'OBJECT_FUNCTION': 'FUNCTION',
+    };
+
+    const objectType = objectTypeMap[stmt.objtype];
+    if (!objectType) {
+      return null;
+    }
+
+    let objectName = '';
+    if (stmt.object) {
+      objectName = this.extractObjectName(stmt.object);
+    }
+
+    return {
+      objectType,
+      objectName,
+      comment: stmt.comment
+    };
+  }
+
+  /**
+   * Extract object name from AST node
+   */
+  private extractObjectName(obj: any): string {
+    if (obj.String?.sval) {
+      return obj.String.sval;
+    }
+
+    if (obj.List?.items) {
+      return obj.List.items.map((item: any) => {
+        if (item.String?.sval) return item.String.sval;
+        return String(item);
+      }).join('.');
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.map(item => {
+        if (item.String?.sval) return item.String.sval;
+        return String(item);
+      }).join('.');
+    }
+
+    return String(obj);
   }
 }

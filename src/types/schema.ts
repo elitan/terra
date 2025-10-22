@@ -3,6 +3,11 @@ export interface Column {
   type: string;
   nullable: boolean;
   default?: string;
+  generated?: {
+    always: boolean;
+    expression: string;
+    stored: boolean;
+  };
 }
 
 export interface PrimaryKeyConstraint {
@@ -15,8 +20,8 @@ export interface ForeignKeyConstraint {
   columns: string[];
   referencedTable: string;
   referencedColumns: string[];
-  onDelete?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT';
-  onUpdate?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT';
+  onDelete?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION';
+  onUpdate?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION';
   deferrable?: boolean;
   initiallyDeferred?: boolean;
 }
@@ -128,6 +133,22 @@ export interface Extension {
   cascade?: boolean; // If true, install dependencies
 }
 
+export interface SchemaDefinition {
+  name: string;
+  owner?: string;
+  ifNotExists?: boolean;
+}
+
+export type CommentObjectType = 'SCHEMA' | 'TABLE' | 'COLUMN' | 'VIEW' | 'FUNCTION' | 'INDEX' | 'TYPE';
+
+export interface Comment {
+  objectType: CommentObjectType;
+  objectName: string;
+  schemaName?: string;
+  columnName?: string;
+  comment: string;
+}
+
 export interface Table {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
@@ -148,4 +169,6 @@ export interface Schema {
   triggers?: Trigger[];
   sequences?: Sequence[];
   extensions?: Extension[];
+  schemas?: SchemaDefinition[];
+  comments?: Comment[];
 }

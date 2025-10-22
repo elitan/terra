@@ -23,7 +23,7 @@ describe("PostgreSQL Basic Index Support", () => {
   });
 
   describe("Phase 1.1 & 1.2: Parser - CREATE INDEX Support", () => {
-    test("should parse basic CREATE INDEX statement", () => {
+    test("should parse basic CREATE INDEX statement", async () => {
       const sql = `
         CREATE TABLE users (
           id SERIAL PRIMARY KEY,
@@ -33,7 +33,7 @@ describe("PostgreSQL Basic Index Support", () => {
         CREATE INDEX idx_users_email ON users (email);
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
 
@@ -47,10 +47,10 @@ describe("PostgreSQL Basic Index Support", () => {
       }
     });
 
-    test("should parse UNIQUE INDEX statement", () => {
+    test("should parse UNIQUE INDEX statement", async () => {
       const sql = `CREATE UNIQUE INDEX idx_users_username ON users (username);`;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       if (indexes.length > 0) {
@@ -61,10 +61,10 @@ describe("PostgreSQL Basic Index Support", () => {
       }
     });
 
-    test("should parse multi-column index", () => {
+    test("should parse multi-column index", async () => {
       const sql = `CREATE INDEX idx_users_name ON users (first_name, last_name);`;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       if (indexes.length > 0) {
@@ -72,7 +72,7 @@ describe("PostgreSQL Basic Index Support", () => {
       }
     });
 
-    test("should parse all PostgreSQL index types", () => {
+    test("should parse all PostgreSQL index types", async () => {
       const indexTypes = [
         { type: "BTREE", expected: "btree" },
         { type: "HASH", expected: "hash" },
@@ -82,22 +82,22 @@ describe("PostgreSQL Basic Index Support", () => {
         { type: "BRIN", expected: "brin" },
       ];
 
-      indexTypes.forEach(({ type, expected }) => {
+      for (const { type, expected } of indexTypes) {
         const sql = `CREATE INDEX idx_test_${type.toLowerCase()} ON test_table USING ${type} (test_column);`;
 
-        const indexes = parser.parseCreateIndexStatements(sql);
+        const indexes = await parser.parseCreateIndexStatements(sql);
 
         expect(indexes).toHaveLength(1);
         if (indexes.length > 0) {
           expect(indexes[0].type).toBe(expected);
         }
-      });
+      }
     });
 
-    test("should parse CONCURRENT index", () => {
+    test("should parse CONCURRENT index", async () => {
       const sql = `CREATE INDEX CONCURRENTLY idx_users_created_at ON users (created_at);`;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       if (indexes.length > 0) {
@@ -105,7 +105,7 @@ describe("PostgreSQL Basic Index Support", () => {
       }
     });
 
-    test("should handle mixed CREATE TABLE and CREATE INDEX statements", () => {
+    test("should handle mixed CREATE TABLE and CREATE INDEX statements", async () => {
       const sql = `
         CREATE TABLE users (
           id SERIAL PRIMARY KEY,
@@ -122,8 +122,8 @@ describe("PostgreSQL Basic Index Support", () => {
         CREATE INDEX idx_products_name ON products (name);
       `;
 
-      const tables = parser.parseCreateTableStatements(sql);
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const tables = await parser.parseCreateTableStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(tables).toHaveLength(2);
       expect(indexes).toHaveLength(2);
@@ -232,7 +232,7 @@ describe("PostgreSQL Basic Index Support", () => {
   });
 
   describe("Phase 1.4: Schema Differ - Index Comparison", () => {
-    test("should identify new indexes to create", () => {
+    test("should identify new indexes to create", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -275,7 +275,7 @@ describe("PostgreSQL Basic Index Support", () => {
       );
     });
 
-    test("should identify indexes to drop", () => {
+    test("should identify indexes to drop", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -318,7 +318,7 @@ describe("PostgreSQL Basic Index Support", () => {
       );
     });
 
-    test("should treat modified indexes as drop + create", () => {
+    test("should treat modified indexes as drop + create", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
