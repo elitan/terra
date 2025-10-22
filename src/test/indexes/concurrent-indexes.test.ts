@@ -23,13 +23,13 @@ describe("Concurrent Index Operations", () => {
   });
 
   describe("Parser Support", () => {
-    test("should parse CREATE INDEX CONCURRENTLY statements", () => {
+    test("should parse CREATE INDEX CONCURRENTLY statements", async () => {
       const sql = `
         CREATE INDEX CONCURRENTLY idx_users_email ON users (email);
         CREATE UNIQUE INDEX CONCURRENTLY idx_users_username ON users (username);
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(2);
 
@@ -42,35 +42,35 @@ describe("Concurrent Index Operations", () => {
       expect(indexes[1]!.unique).toBe(true);
     });
 
-    test("should parse concurrent partial indexes", () => {
+    test("should parse concurrent partial indexes", async () => {
       const sql = `
         CREATE INDEX CONCURRENTLY idx_active_users 
         ON users (email) WHERE active = true;
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       expect(indexes[0]!.concurrent).toBe(true);
       expect(indexes[0]!.where).toBe("active = true");
     });
 
-    test("should parse concurrent expression indexes", () => {
+    test("should parse concurrent expression indexes", async () => {
       const sql = `
         CREATE INDEX CONCURRENTLY idx_lower_email 
         ON users (LOWER(email));
       `;
 
-      const indexes = parser.parseCreateIndexStatements(sql);
+      const indexes = await parser.parseCreateIndexStatements(sql);
 
       expect(indexes).toHaveLength(1);
       expect(indexes[0]!.concurrent).toBe(true);
-      expect(indexes[0]!.expression).toBe("LOWER(email)");
+      expect(indexes[0]!.expression).toBe("lower(email)");
     });
   });
 
   describe("Migration Plan Structure", () => {
-    test("should separate concurrent and transactional operations", () => {
+    test("should separate concurrent and transactional operations", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -115,7 +115,7 @@ describe("Concurrent Index Operations", () => {
       );
     });
 
-    test("should use CONCURRENTLY for index drops by default", () => {
+    test("should use CONCURRENTLY for index drops by default", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 
@@ -157,7 +157,7 @@ describe("Concurrent Index Operations", () => {
       );
     });
 
-    test("should handle mixed operations correctly", () => {
+    test("should handle mixed operations correctly", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
 

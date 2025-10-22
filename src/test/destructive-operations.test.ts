@@ -428,9 +428,10 @@ describe("Destructive Operation Safety", () => {
 
       // Verify only one index remains
       const indexes = await client.query(`
-        SELECT indexname 
-        FROM pg_indexes 
-        WHERE tablename = 'users' 
+        SELECT indexname
+        FROM pg_indexes
+        WHERE tablename = 'users'
+          AND schemaname = 'public'
           AND indexname NOT LIKE '%pkey%'
         ORDER BY indexname
       `);

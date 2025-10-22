@@ -46,8 +46,8 @@ describe("Index Integration Tests", () => {
       `;
 
       // 3. Parse the schema
-      const tables = parser.parseCreateTableStatements(schemaSQL);
-      const indexes = parser.parseCreateIndexStatements(schemaSQL);
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
 
       // Add indexes to tables
       if (tables.length > 0) {
@@ -147,8 +147,8 @@ describe("Index Integration Tests", () => {
         CREATE INDEX idx_products_name ON products (name, category);
       `;
 
-      const tables = parser.parseCreateTableStatements(schemaSQL);
-      const indexes = parser.parseCreateIndexStatements(schemaSQL);
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
 
       if (tables.length > 0) {
         tables[0]!.indexes = indexes;
@@ -397,8 +397,8 @@ describe("Index Integration Tests", () => {
         CREATE INDEX idx_complex_active_created ON complex_test (created_at) WHERE status = 'active';
       `;
 
-      const tables = parser.parseCreateTableStatements(schemaSQL);
-      const indexes = parser.parseCreateIndexStatements(schemaSQL);
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
 
       if (tables.length > 0) {
         tables[0]!.indexes = indexes;

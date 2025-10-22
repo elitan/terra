@@ -73,7 +73,7 @@
     "diff": "^5.1.0",
     "ora": "^9.0.0",
     "pg": "^8.11.3",
-    "sql-parser-cst": "^0.33.1"
+    "pgsql-parser": "^17.8.2"
   },
   "devDependencies": {
     "@types/bun": "latest",

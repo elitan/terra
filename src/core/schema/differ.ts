@@ -167,10 +167,11 @@ export class SchemaDiffer {
     for (const column of desiredTable.columns) {
       if (!currentColumns.has(column.name)) {
         let statement = `ALTER TABLE ${qualifiedTableName} ADD COLUMN ${column.name} ${column.type}`;
-        if (!column.nullable) statement += " NOT NULL";
-        if (column.default) statement += ` DEFAULT ${column.default}`;
         if (column.generated) {
           statement += ` GENERATED ${column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${column.generated.expression}) ${column.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+        } else {
+          if (!column.nullable) statement += " NOT NULL";
+          if (column.default) statement += ` DEFAULT ${column.default}`;
         }
         statements.push(statement + ";");
       } else {
@@ -220,10 +221,11 @@ export class SchemaDiffer {
       statements.push(`ALTER TABLE ${tableName} DROP COLUMN ${desiredColumn.name};`);
 
       let addStatement = `ALTER TABLE ${tableName} ADD COLUMN ${desiredColumn.name} ${desiredColumn.type}`;
-      if (!desiredColumn.nullable) addStatement += " NOT NULL";
-      if (desiredColumn.default) addStatement += ` DEFAULT ${desiredColumn.default}`;
       if (desiredColumn.generated) {
         addStatement += ` GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+      } else {
+        if (!desiredColumn.nullable) addStatement += " NOT NULL";
+        if (desiredColumn.default) addStatement += ` DEFAULT ${desiredColumn.default}`;
       }
       statements.push(addStatement + ";");
 
@@ -344,7 +346,7 @@ export class SchemaDiffer {
         desiredNormalized.includes("numeric") ||
         desiredNormalized.includes("integer") ||
         desiredNormalized.includes("int") ||
-        desiredNormalized.includes("boolean")
+        desiredNormalized.includes("bool")
       ) {
         return true;
       }
@@ -380,8 +382,8 @@ export class SchemaDiffer {
         // For string to integer conversion, first convert to numeric to handle decimal strings, then truncate
         return `TRUNC(${columnName}::DECIMAL)::integer`;
       }
-      if (desiredNormalized.includes("boolean")) {
-        return `${columnName}::boolean`;
+      if (desiredNormalized.includes("bool")) {
+        return `TRIM(${columnName})::boolean`;
       }
     }
 

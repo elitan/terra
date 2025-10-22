@@ -138,6 +138,8 @@ export class DatabaseInspector {
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       WHERE tc.table_name = $1
         AND tc.table_schema = $2
         AND tc.constraint_type = 'PRIMARY KEY'
@@ -208,16 +210,11 @@ export class DatabaseInspector {
           ELSE NULL
         END as where_clause
       FROM pg_indexes i
-      JOIN pg_class c ON c.relname = i.tablename
-      JOIN pg_index ix ON ix.indexrelid = (
-        SELECT oid FROM pg_class WHERE relname = i.indexname
-      )
-      JOIN pg_am am ON am.oid = (
-        SELECT pg_class.relam FROM pg_class WHERE relname = i.indexname
-      )
-      -- Join with pg_class again to get the index relation for storage options
-      JOIN pg_class ic ON ic.oid = ix.indexrelid
-      -- Left join with pg_tablespace to get tablespace name
+      JOIN pg_namespace n ON n.nspname = i.schemaname
+      JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = n.oid
+      JOIN pg_class ic ON ic.relname = i.indexname AND ic.relnamespace = n.oid
+      JOIN pg_index ix ON ix.indexrelid = ic.oid
+      JOIN pg_am am ON am.oid = ic.relam
       LEFT JOIN pg_tablespace ts ON ts.oid = ic.reltablespace
       WHERE i.tablename = $1
         AND i.schemaname = $2
@@ -297,14 +294,19 @@ export class DatabaseInspector {
         ccu.table_name AS referenced_table,
         ccu.column_name AS referenced_column,
         rc.delete_rule,
-        rc.update_rule
+        rc.update_rule,
+        kcu.ordinal_position
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       JOIN information_schema.constraint_column_usage ccu
         ON ccu.constraint_name = tc.constraint_name
+        AND ccu.table_schema = tc.table_schema
       JOIN information_schema.referential_constraints rc
         ON rc.constraint_name = tc.constraint_name
+        AND rc.constraint_schema = tc.table_schema
       WHERE tc.table_name = $1
         AND tc.table_schema = $2
         AND tc.constraint_type = 'FOREIGN KEY'
@@ -354,9 +356,9 @@ export class DatabaseInspector {
     return foreignKeys;
   }
 
-  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | undefined {
+  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION' | undefined {
     if (!rule) return undefined;
-    
+
     switch (rule.toUpperCase()) {
       case 'CASCADE':
         return 'CASCADE';
@@ -366,6 +368,8 @@ export class DatabaseInspector {
         return 'SET NULL';
       case 'SET DEFAULT':
         return 'SET DEFAULT';
+      case 'NO ACTION':
+        return 'NO ACTION';
       default:
         return undefined;
     }
@@ -379,8 +383,9 @@ export class DatabaseInspector {
         pg_get_constraintdef(c.oid) as constraint_def
       FROM pg_constraint c
       JOIN pg_class t ON c.conrelid = t.oid
+      JOIN pg_namespace n ON t.relnamespace = n.oid
       WHERE t.relname = $1
-        AND t.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = $2)
+        AND n.nspname = $2
         AND c.contype = 'c'
       ORDER BY c.conname
       `,
@@ -423,6 +428,8 @@ export class DatabaseInspector {
       FROM information_schema.table_constraints tc
       JOIN information_schema.key_column_usage kcu
         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+        AND tc.table_name = kcu.table_name
       WHERE tc.table_name = $1
         AND tc.table_schema = $2
         AND tc.constraint_type = 'UNIQUE'

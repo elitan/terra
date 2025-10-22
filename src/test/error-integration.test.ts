@@ -6,14 +6,14 @@ import { writeFileSync, unlinkSync } from "fs";
 
 describe("Error Integration Tests", () => {
   describe("Parser Error Formatting", () => {
-    test("should format parser error with file location", () => {
+    test("should format parser error with file location", async () => {
       const testFile = "/tmp/test-error-formatting.sql";
       const invalidSQL = "CREATE TABLE users (id SERIAL PRIMARY KEY, name";
       writeFileSync(testFile, invalidSQL);
 
       try {
         const parser = new SchemaParser();
-        parser.parseSchemaFile(testFile);
+        await parser.parseSchemaFile(testFile);
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
         expect(error).toBeInstanceOf(ParserError);
@@ -23,13 +23,13 @@ describe("Error Integration Tests", () => {
         // Check formatted output
         expect(formatted).toContain("Parser Error");
         expect(formatted).toContain(testFile);
-        expect(formatted).toContain("Unexpected end of input");
+        expect(formatted).toContain("syntax error");
       } finally {
         unlinkSync(testFile);
       }
     });
 
-    test("should format ALTER TABLE error with suggestion", () => {
+    test("should format ALTER TABLE error with suggestion", async () => {
       const parser = new SchemaParser();
       const sqlWithAlter = `
         CREATE TABLE users (id SERIAL PRIMARY KEY);
@@ -37,7 +37,7 @@ describe("Error Integration Tests", () => {
       `;
 
       try {
-        parser.parseSchema(sqlWithAlter);
+        await parser.parseSchema(sqlWithAlter);
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
         expect(error).toBeInstanceOf(ParserError);
@@ -52,7 +52,7 @@ describe("Error Integration Tests", () => {
       }
     });
 
-    test("should format DROP statement error with suggestion", () => {
+    test("should format DROP statement error with suggestion", async () => {
       const parser = new SchemaParser();
       const sqlWithDrop = `
         CREATE TABLE users (id SERIAL PRIMARY KEY);
@@ -60,7 +60,7 @@ describe("Error Integration Tests", () => {
       `;
 
       try {
-        parser.parseSchema(sqlWithDrop);
+        await parser.parseSchema(sqlWithDrop);
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
         expect(error).toBeInstanceOf(ParserError);
