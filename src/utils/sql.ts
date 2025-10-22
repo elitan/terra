@@ -269,27 +269,6 @@ export function generateDropForeignKeySQL(
     .build();
 }
 
-export function generateForeignKeyClause(foreignKey: ForeignKeyConstraint): string {
-  const columns = foreignKey.columns.join(", ");
-  const referencedColumns = foreignKey.referencedColumns.join(", ");
-  
-  let clause = "";
-  if (foreignKey.name) {
-    clause += `CONSTRAINT ${foreignKey.name} `;
-  }
-  
-  clause += `FOREIGN KEY (${columns}) REFERENCES ${foreignKey.referencedTable}(${referencedColumns})`;
-  
-  if (foreignKey.onDelete) {
-    clause += ` ON DELETE ${foreignKey.onDelete}`;
-  }
-  
-  if (foreignKey.onUpdate) {
-    clause += ` ON UPDATE ${foreignKey.onUpdate}`;
-  }
-  
-  return clause;
-}
 
 // Check Constraint SQL generation
 export function generateAddCheckConstraintSQL(

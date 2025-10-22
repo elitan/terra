@@ -235,6 +235,7 @@ export class SchemaDiffer {
 
     if (generatedChanging) {
       // Drop the column and recreate it
+      // Note: tableName is already a qualified name (e.g., "schema.table")
       statements.push(`ALTER TABLE ${tableName} DROP COLUMN ${desiredColumn.name};`);
 
       let addStatement = `ALTER TABLE ${tableName} ADD COLUMN ${desiredColumn.name} ${desiredColumn.type}`;
@@ -262,7 +263,7 @@ export class SchemaDiffer {
     if (typeIsChanging && currentColumn.default && defaultIsChanging) {
       const sql = new SQLBuilder()
         .p("ALTER TABLE")
-        .table(tableName)
+        .p(tableName) // tableName is already qualified
         .p("ALTER COLUMN")
         .ident(desiredColumn.name)
         .p("DROP DEFAULT;")
@@ -286,7 +287,7 @@ export class SchemaDiffer {
       if (desiredColumn.default) {
         const sql = new SQLBuilder()
           .p("ALTER TABLE")
-          .table(tableName)
+          .p(tableName) // tableName is already qualified
           .p("ALTER COLUMN")
           .ident(desiredColumn.name)
           .p(`SET DEFAULT ${desiredColumn.default};`)
@@ -296,7 +297,7 @@ export class SchemaDiffer {
         // Only drop default if we didn't already drop it in step 1
         const sql = new SQLBuilder()
           .p("ALTER TABLE")
-          .table(tableName)
+          .p(tableName) // tableName is already qualified
           .p("ALTER COLUMN")
           .ident(desiredColumn.name)
           .p("DROP DEFAULT;")
@@ -310,7 +311,7 @@ export class SchemaDiffer {
       if (!desiredColumn.nullable) {
         const sql = new SQLBuilder()
           .p("ALTER TABLE")
-          .table(tableName)
+          .p(tableName) // tableName is already qualified
           .p("ALTER COLUMN")
           .ident(desiredColumn.name)
           .p("SET NOT NULL;")
@@ -319,7 +320,7 @@ export class SchemaDiffer {
       } else {
         const sql = new SQLBuilder()
           .p("ALTER TABLE")
-          .table(tableName)
+          .p(tableName) // tableName is already qualified
           .p("ALTER COLUMN")
           .ident(desiredColumn.name)
           .p("DROP NOT NULL;")
@@ -345,7 +346,7 @@ export class SchemaDiffer {
 
       const builder = new SQLBuilder()
         .p("ALTER TABLE")
-        .table(tableName)
+        .p(tableName) // tableName is already qualified
         .p("ALTER COLUMN")
         .ident(columnName)
         .p("TYPE INTEGER");
@@ -367,7 +368,7 @@ export class SchemaDiffer {
 
     const builder = new SQLBuilder()
       .p("ALTER TABLE")
-      .table(tableName)
+      .p(tableName) // tableName is already qualified
       .p("ALTER COLUMN")
       .ident(columnName)
       .p(`TYPE ${desiredType}`);
