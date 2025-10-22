@@ -236,16 +236,30 @@ export class SchemaDiffer {
     if (generatedChanging) {
       // Drop the column and recreate it
       // Note: tableName is already a qualified name (e.g., "schema.table")
-      statements.push(`ALTER TABLE ${tableName} DROP COLUMN ${desiredColumn.name};`);
+      const dropSql = new SQLBuilder()
+        .p("ALTER TABLE")
+        .p(tableName)
+        .p("DROP COLUMN")
+        .ident(desiredColumn.name)
+        .p(";")
+        .build();
+      statements.push(dropSql);
 
-      let addStatement = `ALTER TABLE ${tableName} ADD COLUMN ${desiredColumn.name} ${desiredColumn.type}`;
+      const addBuilder = new SQLBuilder()
+        .p("ALTER TABLE")
+        .p(tableName)
+        .p("ADD COLUMN")
+        .ident(desiredColumn.name)
+        .p(desiredColumn.type);
+
       if (desiredColumn.generated) {
-        addStatement += ` GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+        addBuilder.p(`GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`);
       } else {
-        if (!desiredColumn.nullable) addStatement += " NOT NULL";
-        if (desiredColumn.default) addStatement += ` DEFAULT ${desiredColumn.default}`;
+        if (!desiredColumn.nullable) addBuilder.p("NOT NULL");
+        if (desiredColumn.default) addBuilder.p(`DEFAULT ${desiredColumn.default}`);
       }
-      statements.push(addStatement + ";");
+
+      statements.push(addBuilder.p(";").build());
 
       return statements;
     }
