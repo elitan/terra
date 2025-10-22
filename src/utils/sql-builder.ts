@@ -167,7 +167,8 @@ export class SQLBuilder {
   private lastChar(): string {
     if (this.buffer.length === 0) return '';
     const last = this.buffer[this.buffer.length - 1];
-    return last[last.length - 1];
+    if (!last) return '';
+    return last[last.length - 1] || '';
   }
 
   /**
@@ -177,6 +178,7 @@ export class SQLBuilder {
     if (this.buffer.length === 0) return this;
 
     const last = this.buffer[this.buffer.length - 1];
+    if (!last) return this;
     this.buffer[this.buffer.length - 1] = last.slice(0, -1) + char;
 
     return this;
