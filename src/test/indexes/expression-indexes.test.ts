@@ -543,7 +543,7 @@ describe("Advanced Index Options Support", () => {
 
     const index = indexes[0]!;
     expect(index.name).toBe("idx_users_lower_email_params");
-    expect(index.expression).toBe("LOWER(email)");
+    expect(index.expression).toBe("lower(email)");
     expect(index.columns).toEqual([]);
     expect(index.storageParameters).toEqual({
       fillfactor: "70",
