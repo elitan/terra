@@ -148,7 +148,10 @@ export class SQLBuilder {
    * Build returns the final SQL string with trailing whitespace trimmed.
    */
   build(): string {
-    return this.buffer.join('').trim();
+    let result = this.buffer.join('').trim();
+    // Clean up space before semicolon
+    result = result.replace(/\s+;/g, ';');
+    return result;
   }
 
   /**
