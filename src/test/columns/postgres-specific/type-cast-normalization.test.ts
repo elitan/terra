@@ -303,7 +303,7 @@ describe("PostgreSQL Type Cast Normalization", () => {
 
       // Should only change type, not default
       expect(plan.hasChanges).toBe(true);
-      expect(plan.transactional.some(s => s.includes("ALTER COLUMN content TYPE VARCHAR(255)"))).toBe(true);
+      expect(plan.transactional.some(s => s.includes('ALTER COLUMN "content" TYPE VARCHAR(255)'))).toBe(true);
       expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
       expect(plan.transactional.some(s => s.includes("SET DEFAULT"))).toBe(false);
 

@@ -151,13 +151,17 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
 
 export function generateCreateTableStatement(table: Table): string {
   const columnDefs = table.columns.map((col) => {
-    let def = `${col.name} ${col.type}`;
-    if (!col.nullable) def += " NOT NULL";
-    if (col.default) def += ` DEFAULT ${col.default}`;
+    const builder = new SQLBuilder();
+    builder.ident(col.name).p(col.type);
+
     if (col.generated) {
-      def += ` GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`;
+      builder.p(`GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`);
+    } else {
+      if (!col.nullable) builder.p("NOT NULL");
+      if (col.default) builder.p(`DEFAULT ${col.default}`);
     }
-    return def;
+
+    return builder.build();
   });
 
   // Add primary key constraint if it exists
@@ -189,10 +193,14 @@ export function generateCreateTableStatement(table: Table): string {
 export function generatePrimaryKeyClause(
   primaryKey: PrimaryKeyConstraint
 ): string {
-  const columns = primaryKey.columns.join(", ");
+  const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
 
   if (primaryKey.name) {
-    return `CONSTRAINT ${primaryKey.name} PRIMARY KEY (${columns})`;
+    const builder = new SQLBuilder()
+      .p("CONSTRAINT")
+      .ident(primaryKey.name)
+      .p(`PRIMARY KEY (${columns})`);
+    return builder.build();
   } else {
     return `PRIMARY KEY (${columns})`;
   }
@@ -299,14 +307,15 @@ export function generateDropCheckConstraintSQL(
 }
 
 export function generateCheckConstraintClause(checkConstraint: CheckConstraint): string {
-  let clause = "";
+  const builder = new SQLBuilder();
+
   if (checkConstraint.name) {
-    clause += `CONSTRAINT ${checkConstraint.name} `;
+    builder.p("CONSTRAINT").ident(checkConstraint.name);
   }
-  
-  clause += `CHECK (${checkConstraint.expression})`;
-  
-  return clause;
+
+  builder.p(`CHECK (${checkConstraint.expression})`);
+
+  return builder.build();
 }
 
 // Unique Constraint SQL generation
@@ -339,34 +348,37 @@ export function generateDropUniqueConstraintSQL(
 }
 
 export function generateUniqueConstraintClause(uniqueConstraint: UniqueConstraint): string {
-  const columns = uniqueConstraint.columns.join(", ");
-  
-  let clause = "";
+  const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+
+  const builder = new SQLBuilder();
+
   if (uniqueConstraint.name) {
-    clause += `CONSTRAINT ${uniqueConstraint.name} `;
+    builder.p("CONSTRAINT").ident(uniqueConstraint.name);
   }
-  
-  clause += `UNIQUE (${columns})`;
-  
-  return clause;
+
+  builder.p(`UNIQUE (${columns})`);
+
+  return builder.build();
 }
 
 // VIEW SQL generation functions
 export function generateCreateViewSQL(view: View): string {
-  let sql = "CREATE ";
-  
+  const builder = new SQLBuilder();
+
   if (view.materialized) {
-    sql += "MATERIALIZED ";
+    builder.p("CREATE MATERIALIZED VIEW");
+  } else {
+    builder.p("CREATE VIEW");
   }
-  
-  sql += `VIEW ${view.name} AS ${view.definition}`;
-  
+
+  builder.ident(view.name).p(`AS ${view.definition}`);
+
   // Add WITH CHECK OPTION if specified (not for materialized views)
   if (view.checkOption && !view.materialized) {
-    sql += ` WITH ${view.checkOption} CHECK OPTION`;
+    builder.p(`WITH ${view.checkOption} CHECK OPTION`);
   }
-  
-  return sql + ";";
+
+  return builder.p(";").build();
 }
 
 export function generateDropViewSQL(viewName: string, materialized?: boolean): string {
@@ -387,28 +399,30 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
     // We need to drop and recreate
     return generateDropViewSQL(view.name, true) + "\n" + generateCreateViewSQL(view);
   }
-  
-  let sql = "CREATE OR REPLACE VIEW ";
-  sql += `${view.name} AS ${view.definition}`;
-  
+
+  const builder = new SQLBuilder()
+    .p("CREATE OR REPLACE VIEW")
+    .ident(view.name)
+    .p(`AS ${view.definition}`);
+
   // Add WITH CHECK OPTION if specified
   if (view.checkOption) {
-    sql += ` WITH ${view.checkOption} CHECK OPTION`;
+    builder.p(`WITH ${view.checkOption} CHECK OPTION`);
   }
-  
-  return sql + ";";
+
+  return builder.p(";").build();
 }
 
 export function generateRefreshMaterializedViewSQL(viewName: string, concurrently: boolean = false): string {
-  let sql = "REFRESH MATERIALIZED VIEW ";
+  const builder = new SQLBuilder();
 
   if (concurrently) {
-    sql += "CONCURRENTLY ";
+    builder.p("REFRESH MATERIALIZED VIEW CONCURRENTLY");
+  } else {
+    builder.p("REFRESH MATERIALIZED VIEW");
   }
 
-  sql += viewName;
-
-  return sql + ";";
+  return builder.ident(viewName).p(";").build();
 }
 
 // FUNCTION SQL generation functions

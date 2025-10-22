@@ -56,7 +56,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
       // Check that it includes adding email column
       const hasEmailColumn = plan.transactional.some(stmt =>
-        stmt.includes("ADD COLUMN email")
+        stmt.includes('ADD COLUMN "email"')
       );
       expect(hasEmailColumn).toBe(true);
 
@@ -302,13 +302,13 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
       // Check for expected changes
       const hasBioRemoval = plan.transactional.some(stmt =>
-        stmt.includes("DROP COLUMN bio")
+        stmt.includes('DROP COLUMN "bio"')
       );
       const hasEmailAddition = plan.transactional.some(stmt =>
-        stmt.includes("ADD COLUMN email")
+        stmt.includes('ADD COLUMN "email"')
       );
       const hasIsbnAddition = plan.transactional.some(stmt =>
-        stmt.includes("ADD COLUMN isbn")
+        stmt.includes('ADD COLUMN "isbn"')
       );
 
       expect(hasBioRemoval).toBe(true);

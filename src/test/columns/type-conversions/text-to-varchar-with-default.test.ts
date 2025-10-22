@@ -57,7 +57,7 @@ describe("TEXT to VARCHAR conversion with default values", () => {
 
     // Should have exactly 1 statement: ALTER COLUMN TYPE
     expect(plan.transactional.length).toBe(1);
-    expect(plan.transactional[0]).toContain("ALTER COLUMN name TYPE VARCHAR(255)");
+    expect(plan.transactional[0]).toContain('ALTER COLUMN "name" TYPE VARCHAR(255)');
 
     // Should NOT have DROP DEFAULT or SET DEFAULT statements
     expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
@@ -102,7 +102,7 @@ describe("TEXT to VARCHAR conversion with default values", () => {
     // Should only have type change
     expect(plan.hasChanges).toBe(true);
     expect(plan.transactional.length).toBe(1);
-    expect(plan.transactional[0]).toContain("ALTER COLUMN status TYPE VARCHAR(255)");
+    expect(plan.transactional[0]).toContain('ALTER COLUMN "status" TYPE VARCHAR(255)');
 
     // Should NOT have DROP DEFAULT or SET DEFAULT
     expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
@@ -132,7 +132,7 @@ describe("TEXT to VARCHAR conversion with default values", () => {
 
     // Should have type change AND default change
     expect(plan.hasChanges).toBe(true);
-    expect(plan.transactional.some(s => s.includes("ALTER COLUMN name TYPE VARCHAR(255)"))).toBe(true);
+    expect(plan.transactional.some(s => s.includes('ALTER COLUMN "name" TYPE VARCHAR(255)'))).toBe(true);
     expect(plan.transactional.some(s => s.includes("SET DEFAULT 'new_value'"))).toBe(true);
 
     // Should drop old default before type change
@@ -162,7 +162,7 @@ describe("TEXT to VARCHAR conversion with default values", () => {
 
     // Should have both type change and DROP DEFAULT
     expect(plan.hasChanges).toBe(true);
-    expect(plan.transactional.some(s => s.includes("ALTER COLUMN name TYPE VARCHAR(255)"))).toBe(true);
+    expect(plan.transactional.some(s => s.includes('ALTER COLUMN "name" TYPE VARCHAR(255)'))).toBe(true);
     expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(true);
     expect(plan.transactional.some(s => s.includes("SET DEFAULT"))).toBe(false);
   });
@@ -190,7 +190,7 @@ describe("TEXT to VARCHAR conversion with default values", () => {
 
     // Should have both type change and SET DEFAULT
     expect(plan.hasChanges).toBe(true);
-    expect(plan.transactional.some(s => s.includes("ALTER COLUMN name TYPE VARCHAR(255)"))).toBe(true);
+    expect(plan.transactional.some(s => s.includes('ALTER COLUMN "name" TYPE VARCHAR(255)'))).toBe(true);
     expect(plan.transactional.some(s => s.includes("SET DEFAULT 'hejsan'"))).toBe(true);
     expect(plan.transactional.some(s => s.includes("DROP DEFAULT"))).toBe(false);
   });
