@@ -1,4 +1,5 @@
 import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence } from "../types/schema";
+import { SQLBuilder } from "./sql-builder";
 
 export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
@@ -151,15 +152,28 @@ export function generateAddPrimaryKeySQL(
   primaryKey: PrimaryKeyConstraint
 ): string {
   const constraintName = primaryKey.name || `pk_${tableName}`;
-  const columns = primaryKey.columns.join(", ");
-  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} PRIMARY KEY (${columns});`;
+  const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`PRIMARY KEY (${columns});`)
+    .build();
 }
 
 export function generateDropPrimaryKeySQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 // Foreign Key SQL generation
@@ -168,27 +182,40 @@ export function generateAddForeignKeySQL(
   foreignKey: ForeignKeyConstraint
 ): string {
   const constraintName = foreignKey.name || `fk_${tableName}_${foreignKey.referencedTable}`;
-  const columns = foreignKey.columns.join(", ");
-  const referencedColumns = foreignKey.referencedColumns.join(", ");
-  
-  let sql = `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${columns}) REFERENCES ${foreignKey.referencedTable}(${referencedColumns})`;
-  
+  const columns = foreignKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const referencedColumns = foreignKey.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+
+  const builder = new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`FOREIGN KEY (${columns}) REFERENCES`)
+    .table(foreignKey.referencedTable)
+    .p(`(${referencedColumns})`);
+
   if (foreignKey.onDelete) {
-    sql += ` ON DELETE ${foreignKey.onDelete}`;
+    builder.p(`ON DELETE ${foreignKey.onDelete}`);
   }
-  
+
   if (foreignKey.onUpdate) {
-    sql += ` ON UPDATE ${foreignKey.onUpdate}`;
+    builder.p(`ON UPDATE ${foreignKey.onUpdate}`);
   }
-  
-  return sql + ";";
+
+  return builder.p(";").build();
 }
 
 export function generateDropForeignKeySQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 export function generateForeignKeyClause(foreignKey: ForeignKeyConstraint): string {
@@ -219,14 +246,26 @@ export function generateAddCheckConstraintSQL(
   checkConstraint: CheckConstraint
 ): string {
   const constraintName = checkConstraint.name || `check_${tableName}_${Date.now()}`;
-  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} CHECK (${checkConstraint.expression});`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`CHECK (${checkConstraint.expression});`)
+    .build();
 }
 
 export function generateDropCheckConstraintSQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 export function generateCheckConstraintClause(checkConstraint: CheckConstraint): string {
@@ -246,15 +285,27 @@ export function generateAddUniqueConstraintSQL(
   uniqueConstraint: UniqueConstraint
 ): string {
   const constraintName = uniqueConstraint.name || `unique_${tableName}_${uniqueConstraint.columns.join('_')}`;
-  const columns = uniqueConstraint.columns.join(", ");
-  return `ALTER TABLE ${tableName} ADD CONSTRAINT ${constraintName} UNIQUE (${columns});`;
+  const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("ADD CONSTRAINT")
+    .ident(constraintName)
+    .p(`UNIQUE (${columns});`)
+    .build();
 }
 
 export function generateDropUniqueConstraintSQL(
   tableName: string,
   constraintName: string
 ): string {
-  return `ALTER TABLE ${tableName} DROP CONSTRAINT ${constraintName};`;
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(tableName)
+    .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
 }
 
 export function generateUniqueConstraintClause(uniqueConstraint: UniqueConstraint): string {
@@ -289,15 +340,15 @@ export function generateCreateViewSQL(view: View): string {
 }
 
 export function generateDropViewSQL(viewName: string, materialized?: boolean): string {
-  let sql = "DROP ";
-  
+  const builder = new SQLBuilder();
+
   if (materialized) {
-    sql += "MATERIALIZED ";
+    builder.p("DROP MATERIALIZED VIEW IF EXISTS");
+  } else {
+    builder.p("DROP VIEW IF EXISTS");
   }
-  
-  sql += `VIEW IF EXISTS ${viewName}`;
-  
-  return sql + ";";
+
+  return builder.ident(viewName).p(";").build();
 }
 
 export function generateCreateOrReplaceViewSQL(view: View): string {
