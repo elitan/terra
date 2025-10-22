@@ -1,4 +1,4 @@
-import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence } from "../types/schema";
+import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType } from "../types/schema";
 import { SQLBuilder } from "./sql-builder";
 
 /**
@@ -427,157 +427,213 @@ export function generateRefreshMaterializedViewSQL(viewName: string, concurrentl
 
 // FUNCTION SQL generation functions
 export function generateCreateFunctionSQL(func: Function): string {
-  let sql = `CREATE FUNCTION ${func.name}(`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE FUNCTION').ident(func.name);
+  builder.rewriteLastChar('(');
 
   // Add parameters
   if (func.parameters.length > 0) {
     const params = func.parameters.map(p => {
-      let param = "";
-      if (p.mode) param += `${p.mode} `;
-      if (p.name) param += `${p.name} `;
-      param += p.type;
-      if (p.default) param += ` DEFAULT ${p.default}`;
-      return param;
+      const parts: string[] = [];
+      if (p.mode) parts.push(p.mode);
+      if (p.name) parts.push(`"${p.name.replace(/"/g, '""')}"`);
+      parts.push(p.type);
+      if (p.default) parts.push(`DEFAULT ${p.default}`);
+      return parts.join(' ');
     });
-    sql += params.join(", ");
+    builder.p(params.join(', '));
   }
 
-  sql += `) RETURNS ${func.returnType}`;
-  sql += ` AS $$ ${func.body} $$`;
-  sql += ` LANGUAGE ${func.language}`;
+  builder.p(')');
+  builder.p(`RETURNS ${func.returnType}`);
+  builder.p(`AS $$ ${func.body} $$`);
+  builder.p(`LANGUAGE ${func.language}`);
 
   if (func.volatility) {
-    sql += ` ${func.volatility}`;
+    builder.p(func.volatility);
   }
 
   if (func.parallel) {
-    sql += ` PARALLEL ${func.parallel}`;
+    builder.p(`PARALLEL ${func.parallel}`);
   }
 
   if (func.securityDefiner) {
-    sql += " SECURITY DEFINER";
+    builder.p('SECURITY DEFINER');
   }
 
   if (func.strict) {
-    sql += " STRICT";
+    builder.p('STRICT');
   }
 
   if (func.cost !== undefined) {
-    sql += ` COST ${func.cost}`;
+    builder.p(`COST ${func.cost}`);
   }
 
   if (func.rows !== undefined) {
-    sql += ` ROWS ${func.rows}`;
+    builder.p(`ROWS ${func.rows}`);
   }
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropFunctionSQL(func: Function): string {
   const paramTypes = func.parameters.map(p => p.type).join(", ");
   // Use CASCADE to automatically drop dependent triggers
-  return `DROP FUNCTION IF EXISTS ${func.name}(${paramTypes}) CASCADE;`;
+  const builder = new SQLBuilder();
+  builder.p('DROP FUNCTION IF EXISTS').ident(func.name);
+  builder.rewriteLastChar('(');
+  builder.p(`${paramTypes}) CASCADE;`);
+  return builder.build();
 }
 
 // PROCEDURE SQL generation functions
 export function generateCreateProcedureSQL(proc: Procedure): string {
-  let sql = `CREATE PROCEDURE ${proc.name}(`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE PROCEDURE').ident(proc.name);
+  builder.rewriteLastChar('(');
 
   // Add parameters
   if (proc.parameters.length > 0) {
     const params = proc.parameters.map(p => {
-      let param = "";
-      if (p.mode) param += `${p.mode} `;
-      if (p.name) param += `${p.name} `;
-      param += p.type;
-      if (p.default) param += ` DEFAULT ${p.default}`;
-      return param;
+      const parts: string[] = [];
+      if (p.mode) parts.push(p.mode);
+      if (p.name) parts.push(`"${p.name.replace(/"/g, '""')}"`);
+      parts.push(p.type);
+      if (p.default) parts.push(`DEFAULT ${p.default}`);
+      return parts.join(' ');
     });
-    sql += params.join(", ");
+    builder.p(params.join(', '));
   }
 
-  sql += `) LANGUAGE ${proc.language}`;
-  sql += ` AS $$ ${proc.body} $$`;
+  builder.p(')');
+  builder.p(`LANGUAGE ${proc.language}`);
+  builder.p(`AS $$ ${proc.body} $$`);
 
   if (proc.securityDefiner) {
-    sql += " SECURITY DEFINER";
+    builder.p('SECURITY DEFINER');
   }
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropProcedureSQL(proc: Procedure): string {
   const paramTypes = proc.parameters.map(p => p.type).join(", ");
-  return `DROP PROCEDURE IF EXISTS ${proc.name}(${paramTypes});`;
+  const builder = new SQLBuilder();
+  builder.p('DROP PROCEDURE IF EXISTS').ident(proc.name);
+  builder.rewriteLastChar('(');
+  builder.p(`${paramTypes});`);
+  return builder.build();
 }
 
 // TRIGGER SQL generation functions
 export function generateCreateTriggerSQL(trigger: Trigger): string {
-  let sql = `CREATE TRIGGER ${trigger.name}`;
-  sql += ` ${trigger.timing}`;
-  sql += ` ${trigger.events.join(" OR ")}`;
-  sql += ` ON ${trigger.tableName}`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE TRIGGER').ident(trigger.name);
+  builder.p(trigger.timing);
+  builder.p(trigger.events.join(" OR "));
+  builder.p('ON').ident(trigger.tableName);
 
   if (trigger.forEach) {
-    sql += ` FOR EACH ${trigger.forEach}`;
+    builder.p(`FOR EACH ${trigger.forEach}`);
   }
 
   if (trigger.when) {
-    sql += ` WHEN (${trigger.when})`;
+    builder.p(`WHEN (${trigger.when})`);
   }
 
-  sql += ` EXECUTE FUNCTION ${trigger.functionName}(`;
+  builder.p('EXECUTE FUNCTION').ident(trigger.functionName);
+  builder.rewriteLastChar('(');
   if (trigger.functionArgs && trigger.functionArgs.length > 0) {
-    sql += trigger.functionArgs.join(", ");
+    builder.p(trigger.functionArgs.join(", "));
   }
-  sql += ")";
+  builder.p(')');
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropTriggerSQL(trigger: Trigger): string {
-  return `DROP TRIGGER IF EXISTS ${trigger.name} ON ${trigger.tableName};`;
+  const builder = new SQLBuilder();
+  builder.p('DROP TRIGGER IF EXISTS').ident(trigger.name);
+  builder.p('ON').ident(trigger.tableName);
+  return builder.p(';').build();
 }
 
 // SEQUENCE SQL generation functions
 export function generateCreateSequenceSQL(seq: Sequence): string {
-  let sql = `CREATE SEQUENCE ${seq.name}`;
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE SEQUENCE').ident(seq.name);
 
   if (seq.dataType) {
-    sql += ` AS ${seq.dataType}`;
+    builder.p(`AS ${seq.dataType}`);
   }
 
   if (seq.increment !== undefined) {
-    sql += ` INCREMENT ${seq.increment}`;
+    builder.p(`INCREMENT ${seq.increment}`);
   }
 
   if (seq.minValue !== undefined) {
-    sql += ` MINVALUE ${seq.minValue}`;
+    builder.p(`MINVALUE ${seq.minValue}`);
   }
 
   if (seq.maxValue !== undefined) {
-    sql += ` MAXVALUE ${seq.maxValue}`;
+    builder.p(`MAXVALUE ${seq.maxValue}`);
   }
 
   if (seq.start !== undefined) {
-    sql += ` START ${seq.start}`;
+    builder.p(`START ${seq.start}`);
   }
 
   if (seq.cache !== undefined) {
-    sql += ` CACHE ${seq.cache}`;
+    builder.p(`CACHE ${seq.cache}`);
   }
 
   if (seq.cycle !== undefined) {
-    sql += seq.cycle ? " CYCLE" : " NO CYCLE";
+    builder.p(seq.cycle ? 'CYCLE' : 'NO CYCLE');
   }
 
   if (seq.ownedBy) {
-    sql += ` OWNED BY ${seq.ownedBy}`;
+    builder.p(`OWNED BY ${seq.ownedBy}`);
   }
 
-  return sql + ";";
+  return builder.build() + ';';
 }
 
 export function generateDropSequenceSQL(sequenceName: string): string {
-  return `DROP SEQUENCE IF EXISTS ${sequenceName};`;
+  const builder = new SQLBuilder();
+  builder.p('DROP SEQUENCE IF EXISTS').ident(sequenceName);
+  return builder.p(';').build();
+}
+
+// ENUM TYPE SQL generation functions
+export function generateCreateTypeSQL(enumType: EnumType): string {
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE TYPE');
+  if (enumType.schema) {
+    builder.ident(enumType.schema);
+    builder.rewriteLastChar('.');
+  }
+  builder.ident(enumType.name);
+
+  const values = enumType.values.map(value => `'${value}'`).join(', ');
+  builder.p(`AS ENUM (${values});`);
+
+  return builder.build();
+}
+
+export function generateDropTypeSQL(typeName: string, schema?: string): string {
+  const builder = new SQLBuilder();
+
+  builder.p('DROP TYPE');
+  if (schema) {
+    builder.ident(schema);
+    builder.rewriteLastChar('.');
+  }
+  builder.ident(typeName);
+
+  return builder.p(';').build();
 }

@@ -19,6 +19,8 @@ import {
   generateDropTriggerSQL,
   generateCreateSequenceSQL,
   generateDropSequenceSQL,
+  generateCreateTypeSQL,
+  generateDropTypeSQL,
 } from "../../utils/sql";
 
 export class SchemaService {
@@ -339,7 +341,7 @@ export class SchemaService {
 
       if (!currentEnum) {
         // ENUM doesn't exist, create it
-        transactional.push(this.generateCreateTypeStatement(desiredEnum));
+        transactional.push(generateCreateTypeSQL(desiredEnum));
       } else {
         // ENUM exists, check if values need to be modified
         const currentValues = currentEnum.values;
@@ -373,8 +375,7 @@ export class SchemaService {
         const isUsed = await this.isEnumTypeUsed(currentEnum.name, client, schemas);
         
         if (!isUsed) {
-          const fullName = currentEnum.schema ? `${currentEnum.schema}.${currentEnum.name}` : currentEnum.name;
-          statements.push(`DROP TYPE ${fullName};`);
+          statements.push(generateDropTypeSQL(currentEnum.name, currentEnum.schema));
           Logger.info(`Dropping unused ENUM type '${currentEnum.name}'`);
         } else {
           Logger.warning(
@@ -487,12 +488,6 @@ export class SchemaService {
     }
     
     return statements;
-  }
-
-  private generateCreateTypeStatement(enumType: EnumType): string {
-    const values = enumType.values.map(value => `'${value}'`).join(', ');
-    const fullName = enumType.schema ? `${enumType.schema}.${enumType.name}` : enumType.name;
-    return `CREATE TYPE ${fullName} AS ENUM (${values});`;
   }
 
   private generateViewStatements(desiredViews: View[], currentViews: View[]): string[] {

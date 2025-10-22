@@ -174,7 +174,7 @@ export class SQLBuilder {
   /**
    * Helper to rewrite the last character in the buffer.
    */
-  private rewriteLastChar(char: string): this {
+  rewriteLastChar(char: string): this {
     if (this.buffer.length === 0) return this;
 
     const last = this.buffer[this.buffer.length - 1];
