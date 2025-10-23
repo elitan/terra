@@ -219,7 +219,10 @@ export class DatabaseInspector {
       WHERE i.tablename = $1
         AND i.schemaname = $2
         AND NOT ix.indisprimary  -- Exclude primary key indexes
-        AND NOT EXISTS (  -- Exclude unique constraint indexes
+        -- Exclude unique constraint indexes - these are handled via uniqueConstraints
+        -- This ensures proper distinction: constraints use ALTER TABLE ADD CONSTRAINT,
+        -- while indexes use CREATE INDEX CONCURRENTLY for production safety
+        AND NOT EXISTS (
           SELECT 1 FROM pg_constraint con
           WHERE con.conindid = ix.indexrelid
           AND con.contype = 'u'

@@ -53,6 +53,15 @@ export class SchemaDiffer {
     this.options = { ...DEFAULT_MIGRATION_OPTIONS, ...options };
   }
 
+  /**
+   * Helper to check if an index is backed by a constraint.
+   * Constraint-backed indexes should be managed via ALTER TABLE ADD/DROP CONSTRAINT
+   * rather than CREATE/DROP INDEX for proper batching and PostgreSQL semantics.
+   */
+  private isConstraintBackedIndex(index: Index): boolean {
+    return index.constraint !== undefined;
+  }
+
   generateMigrationPlan(
     desiredSchema: Table[],
     currentSchema: Table[]
@@ -605,7 +614,18 @@ export class SchemaDiffer {
     return statements;
   }
 
-  // Index-related methods
+  /**
+   * Generates index-related statements (CREATE/DROP INDEX).
+   *
+   * IMPORTANT: This handles standalone indexes only, NOT constraint-backed indexes.
+   * - Standalone indexes use CREATE INDEX [CONCURRENTLY] for production safety
+   * - Constraint-backed indexes are handled via ALTER TABLE in uniqueConstraints
+   *
+   * This distinction enables:
+   * - Concurrent index creation/deletion without blocking writes
+   * - Batching constraints with other ALTER TABLE operations
+   * - Proper PostgreSQL semantics (constraints vs performance indexes)
+   */
   private generateIndexStatements(
     desiredTable: Table,
     currentTable: Table
@@ -966,6 +986,18 @@ export class SchemaDiffer {
     return false;
   }
 
+  /**
+   * Generates UNIQUE constraint statements using ALTER TABLE ADD/DROP CONSTRAINT.
+   *
+   * IMPORTANT: These are true constraints, not standalone unique indexes.
+   * - Uses ALTER TABLE ADD CONSTRAINT for proper semantics
+   * - Can be batched with other table alterations (see batchAlterTableChanges)
+   * - Distinct from unique indexes which use CREATE UNIQUE INDEX CONCURRENTLY
+   *
+   * The distinction is crucial:
+   * - Constraints: data integrity, batched with ALTER TABLE
+   * - Indexes: performance optimization, created CONCURRENTLY for production safety
+   */
   private generateUniqueConstraintStatements(
     tableName: string,
     desiredConstraints: UniqueConstraint[],
