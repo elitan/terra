@@ -533,4 +533,5 @@ describe("Dependency Resolution", () => {
       await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
     });
   });
+
 });
