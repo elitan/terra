@@ -887,6 +887,7 @@ export class DatabaseInspector {
         END as object_type,
         c.relname as object_name,
         n.nspname as schema_name,
+        NULL as column_name,
         d.description as comment
       FROM pg_class c
       JOIN pg_namespace n ON c.relnamespace = n.oid
@@ -900,10 +901,28 @@ export class DatabaseInspector {
         'SCHEMA' as object_type,
         n.nspname as object_name,
         NULL as schema_name,
+        NULL as column_name,
         d.description as comment
       FROM pg_namespace n
       JOIN pg_description d ON d.objoid = n.oid
       WHERE n.nspname = ANY($1::text[])
+
+      UNION ALL
+
+      SELECT
+        'COLUMN' as object_type,
+        c.relname as object_name,
+        n.nspname as schema_name,
+        a.attname as column_name,
+        d.description as comment
+      FROM pg_class c
+      JOIN pg_namespace n ON c.relnamespace = n.oid
+      JOIN pg_attribute a ON a.attrelid = c.oid
+      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+      WHERE n.nspname = ANY($1::text[])
+        AND c.relkind = 'r'
+        AND a.attnum > 0
+        AND NOT a.attisdropped
 
       ORDER BY object_type, object_name
     `, [schemas]);
@@ -912,6 +931,7 @@ export class DatabaseInspector {
       objectType: row.object_type as Comment['objectType'],
       objectName: row.object_name,
       schemaName: row.schema_name || undefined,
+      columnName: row.column_name || undefined,
       comment: row.comment,
     }));
   }

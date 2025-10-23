@@ -835,7 +835,9 @@ export class SchemaService {
 
   private getCommentKey(comment: Comment): string {
     if (comment.objectType === 'COLUMN') {
-      return `${comment.objectType}:${comment.objectName}`;
+      // For columns, include table name and column name in the key
+      const schemaPrefix = comment.schemaName || 'public';
+      return `${comment.objectType}:${schemaPrefix}.${comment.objectName}.${comment.columnName}`;
     }
     return `${comment.objectType}:${comment.schemaName || 'public'}.${comment.objectName}`;
   }
@@ -845,6 +847,14 @@ export class SchemaService {
 
     if (comment.objectType === 'SCHEMA') {
       return `COMMENT ON SCHEMA ${comment.objectName} IS '${escapedComment}';`;
+    }
+
+    if (comment.objectType === 'COLUMN') {
+      // For columns, use table.column or schema.table.column format
+      const tableName = comment.schemaName
+        ? `${comment.schemaName}.${comment.objectName}`
+        : comment.objectName;
+      return `COMMENT ON COLUMN ${tableName}.${comment.columnName} IS '${escapedComment}';`;
     }
 
     const objectName = comment.schemaName
