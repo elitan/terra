@@ -106,8 +106,17 @@ export class DependencyResolver {
 
     // Check for cycles
     if (result.length !== this.nodes.size) {
+      const cycles = this.getCircularDependencies();
+      if (cycles.length > 0) {
+        const cycleDescriptions = cycles.map(cycle => cycle.join(' → ')).join('\n  ');
+        throw new Error(
+          `Circular dependency detected. Cannot resolve table creation order.\n` +
+          `Detected cycles:\n  ${cycleDescriptions}\n` +
+          `Tables involved in cycles cannot be created because they reference each other.`
+        );
+      }
       throw new Error(
-        `Circular dependency detected. Cannot resolve table creation order. ` +
+        `Cannot resolve table creation order. ` +
         `Processed ${result.length} out of ${this.nodes.size} tables.`
       );
     }
@@ -163,8 +172,17 @@ export class DependencyResolver {
 
     // Check for cycles
     if (result.length !== this.nodes.size) {
+      const cycles = this.getCircularDependencies();
+      if (cycles.length > 0) {
+        const cycleDescriptions = cycles.map(cycle => cycle.join(' → ')).join('\n  ');
+        throw new Error(
+          `Circular dependency detected. Cannot resolve table deletion order.\n` +
+          `Detected cycles:\n  ${cycleDescriptions}\n` +
+          `Tables involved in cycles cannot be deleted in a valid order.`
+        );
+      }
       throw new Error(
-        `Circular dependency detected. Cannot resolve table deletion order. ` +
+        `Cannot resolve table deletion order. ` +
         `Processed ${result.length} out of ${this.nodes.size} tables.`
       );
     }
