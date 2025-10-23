@@ -377,40 +377,76 @@ export class SchemaParser {
       return null;
     }
 
+    // For COLUMN comments, we need to extract table name, column name, and optionally schema
+    if (objectType === 'COLUMN' && stmt.object) {
+      const parts = this.extractObjectParts(stmt.object);
+
+      if (parts.length === 2) {
+        // Format: table.column
+        return {
+          objectType,
+          objectName: parts[0], // table name
+          columnName: parts[1], // column name
+          comment: stmt.comment
+        };
+      } else if (parts.length === 3) {
+        // Format: schema.table.column
+        return {
+          objectType,
+          objectName: parts[1], // table name
+          schemaName: parts[0], // schema name
+          columnName: parts[2], // column name
+          comment: stmt.comment
+        };
+      }
+    }
+
+    // For other object types, extract name normally
     let objectName = '';
+    let schemaName: string | undefined;
+
     if (stmt.object) {
-      objectName = this.extractObjectName(stmt.object);
+      const parts = this.extractObjectParts(stmt.object);
+      if (parts.length === 2 && objectType !== 'SCHEMA') {
+        // Format: schema.object
+        schemaName = parts[0];
+        objectName = parts[1];
+      } else {
+        objectName = parts[parts.length - 1] || '';
+      }
     }
 
     return {
       objectType,
       objectName,
+      schemaName,
       comment: stmt.comment
     };
   }
 
   /**
-   * Extract object name from AST node
+   * Extract object parts from AST node (returns array of parts)
    */
-  private extractObjectName(obj: any): string {
+  private extractObjectParts(obj: any): string[] {
     if (obj.String?.sval) {
-      return obj.String.sval;
+      return [obj.String.sval];
     }
 
     if (obj.List?.items) {
       return obj.List.items.map((item: any) => {
         if (item.String?.sval) return item.String.sval;
         return String(item);
-      }).join('.');
+      });
     }
 
     if (Array.isArray(obj)) {
       return obj.map(item => {
         if (item.String?.sval) return item.String.sval;
         return String(item);
-      }).join('.');
+      });
     }
 
-    return String(obj);
+    return [String(obj)];
   }
+
 }
