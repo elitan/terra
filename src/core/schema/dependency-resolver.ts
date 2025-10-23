@@ -6,10 +6,20 @@ export interface DependencyNode {
   dependents: Set<string>;   // Tables that depend on this table
 }
 
+export interface DetachmentResult {
+  order: string[]; // Table creation/deletion order
+  foreignKeysToDefer: Array<{ tableName: string; foreignKey: ForeignKeyConstraint }>; // FKs to add after all tables exist
+}
+
 export class DependencyResolver {
   private nodes: Map<string, DependencyNode> = new Map();
+  private tables: Map<string, Table> = new Map();
 
   constructor(tables: Table[]) {
+    // Store tables for FK access
+    for (const table of tables) {
+      this.tables.set(table.name, table);
+    }
     this.buildDependencyGraph(tables);
   }
 
@@ -253,5 +263,222 @@ export class DependencyResolver {
     }
 
     return cycles;
+  }
+
+  /**
+   * Get creation order with FK detachment for circular dependencies.
+   * Instead of throwing on cycles, identifies FKs to defer and returns valid creation order.
+   */
+  getCreationOrderWithDetachment(): DetachmentResult {
+    // Check if there are cycles
+    if (!this.hasCircularDependencies()) {
+      // No cycles, return normal creation order with no deferred FKs
+      return {
+        order: this.getCreationOrder(),
+        foreignKeysToDefer: [],
+      };
+    }
+
+    // There are cycles - identify FKs involved in cycles
+    const cycles = this.getCircularDependencies();
+    const tablesInCycles = new Set<string>();
+
+    for (const cycle of cycles) {
+      for (const tableName of cycle) {
+        tablesInCycles.add(tableName);
+      }
+    }
+
+    // Identify FKs to defer (those pointing from one cycle table to another)
+    const foreignKeysToDefer: Array<{ tableName: string; foreignKey: ForeignKeyConstraint }> = [];
+
+    for (const tableName of tablesInCycles) {
+      const table = this.tables.get(tableName);
+      if (!table || !table.foreignKeys) continue;
+
+      for (const fk of table.foreignKeys) {
+        // Defer FK if it points to another table in a cycle (but not self-references)
+        if (tablesInCycles.has(fk.referencedTable) && fk.referencedTable !== tableName) {
+          foreignKeysToDefer.push({ tableName, foreignKey: fk });
+        }
+      }
+    }
+
+    // Build a new dependency graph without the deferred FKs
+    const modifiedNodes = new Map<string, DependencyNode>();
+
+    // Initialize nodes
+    for (const tableName of this.nodes.keys()) {
+      modifiedNodes.set(tableName, {
+        tableName,
+        dependencies: new Set(),
+        dependents: new Set(),
+      });
+    }
+
+    // Build dependencies, skipping deferred FKs
+    const deferredSet = new Set(
+      foreignKeysToDefer.map(item => `${item.tableName}->${item.foreignKey.referencedTable}`)
+    );
+
+    for (const [tableName, node] of this.nodes) {
+      for (const dep of node.dependencies) {
+        const key = `${tableName}->${dep}`;
+        if (!deferredSet.has(key)) {
+          modifiedNodes.get(tableName)!.dependencies.add(dep);
+          modifiedNodes.get(dep)!.dependents.add(tableName);
+        }
+      }
+    }
+
+    // Perform topological sort on modified graph
+    const order = this.topologicalSortWithNodes(modifiedNodes, false);
+
+    return {
+      order,
+      foreignKeysToDefer,
+    };
+  }
+
+  /**
+   * Get deletion order with FK detachment for circular dependencies.
+   * Identifies FKs that must be dropped before dropping tables in cycles.
+   */
+  getDeletionOrderWithDetachment(): DetachmentResult {
+    // Check if there are cycles
+    if (!this.hasCircularDependencies()) {
+      // No cycles, return normal deletion order with no FKs to drop
+      return {
+        order: this.getDeletionOrder(),
+        foreignKeysToDefer: [], // For deletion, this represents FKs to drop first
+      };
+    }
+
+    // There are cycles - identify FKs involved in cycles
+    const cycles = this.getCircularDependencies();
+    const tablesInCycles = new Set<string>();
+
+    for (const cycle of cycles) {
+      for (const tableName of cycle) {
+        tablesInCycles.add(tableName);
+      }
+    }
+
+    // Identify FKs to drop first (those pointing from one cycle table to another)
+    const foreignKeysToDrop: Array<{ tableName: string; foreignKey: ForeignKeyConstraint }> = [];
+
+    for (const tableName of tablesInCycles) {
+      const table = this.tables.get(tableName);
+      if (!table || !table.foreignKeys) continue;
+
+      for (const fk of table.foreignKeys) {
+        // Drop FK if it points to another table in a cycle (but not self-references)
+        if (tablesInCycles.has(fk.referencedTable) && fk.referencedTable !== tableName) {
+          foreignKeysToDrop.push({ tableName, foreignKey: fk });
+        }
+      }
+    }
+
+    // Build a new dependency graph without the cycle-forming FKs
+    const modifiedNodes = new Map<string, DependencyNode>();
+
+    // Initialize nodes
+    for (const tableName of this.nodes.keys()) {
+      modifiedNodes.set(tableName, {
+        tableName,
+        dependencies: new Set(),
+        dependents: new Set(),
+      });
+    }
+
+    // Build dependencies, skipping cycle-forming FKs
+    const dropSet = new Set(
+      foreignKeysToDrop.map(item => `${item.tableName}->${item.foreignKey.referencedTable}`)
+    );
+
+    for (const [tableName, node] of this.nodes) {
+      for (const dep of node.dependencies) {
+        const key = `${tableName}->${dep}`;
+        if (!dropSet.has(key)) {
+          modifiedNodes.get(tableName)!.dependencies.add(dep);
+          modifiedNodes.get(dep)!.dependents.add(tableName);
+        }
+      }
+    }
+
+    // Perform topological sort on modified graph (reverse order for deletion)
+    const order = this.topologicalSortWithNodes(modifiedNodes, true);
+
+    return {
+      order,
+      foreignKeysToDefer: foreignKeysToDrop, // These are FKs to drop first
+    };
+  }
+
+  /**
+   * Topological sort using a custom node map (used for cycle breaking)
+   */
+  private topologicalSortWithNodes(nodes: Map<string, DependencyNode>, reverse: boolean): string[] {
+    const inDegree = new Map<string, number>();
+
+    // Initialize in-degree count
+    for (const tableName of nodes.keys()) {
+      inDegree.set(tableName, 0);
+    }
+
+    // Count dependencies or dependents based on direction
+    if (!reverse) {
+      // For creation: count dependencies (incoming edges)
+      for (const [tableName, node] of nodes) {
+        for (const dependency of node.dependencies) {
+          inDegree.set(tableName, (inDegree.get(tableName) || 0) + 1);
+        }
+      }
+    } else {
+      // For deletion: count dependents (outgoing edges become incoming)
+      for (const [tableName, node] of nodes) {
+        for (const dependent of node.dependents) {
+          inDegree.set(tableName, (inDegree.get(tableName) || 0) + 1);
+        }
+      }
+    }
+
+    const result: string[] = [];
+    const queue: string[] = [];
+
+    // Find tables with no dependencies/dependents
+    for (const [tableName, degree] of inDegree) {
+      if (degree === 0) {
+        queue.push(tableName);
+      }
+    }
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+
+      const currentNode = nodes.get(current);
+      if (currentNode) {
+        const neighbors = reverse ? currentNode.dependencies : currentNode.dependents;
+        for (const neighbor of neighbors) {
+          const newDegree = (inDegree.get(neighbor) || 0) - 1;
+          inDegree.set(neighbor, newDegree);
+
+          if (newDegree === 0) {
+            queue.push(neighbor);
+          }
+        }
+      }
+    }
+
+    // Should not have cycles in modified graph
+    if (result.length !== nodes.size) {
+      throw new Error(
+        `Internal error: topological sort failed even after removing cycle-forming edges. ` +
+        `Processed ${result.length} out of ${nodes.size} tables.`
+      );
+    }
+
+    return result;
   }
 }
