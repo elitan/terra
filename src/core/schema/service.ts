@@ -217,6 +217,7 @@ export class SchemaService {
         const sequencePlan = {
           transactional: sequenceStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, sequencePlan, autoApprove);
@@ -231,6 +232,7 @@ export class SchemaService {
         const removalPlan = {
           transactional: enumRemovalStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, removalPlan, autoApprove);
@@ -241,6 +243,7 @@ export class SchemaService {
         const functionPlan = {
           transactional: functionStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, functionPlan, autoApprove);
@@ -250,6 +253,7 @@ export class SchemaService {
         const procedurePlan = {
           transactional: procedureStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, procedurePlan, autoApprove);
@@ -260,6 +264,7 @@ export class SchemaService {
         const viewPlan = {
           transactional: viewStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, viewPlan, autoApprove);
@@ -270,6 +275,7 @@ export class SchemaService {
         const triggerPlan = {
           transactional: triggerStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, triggerPlan, autoApprove);
@@ -280,6 +286,7 @@ export class SchemaService {
         const commentPlan = {
           transactional: commentStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, commentPlan, autoApprove);
@@ -290,6 +297,7 @@ export class SchemaService {
         const extensionDropPlan = {
           transactional: extensionDropStatements,
           concurrent: [],
+          deferred: [],
           hasChanges: true
         };
         await this.executor.executePlan(client, extensionDropPlan, autoApprove);
