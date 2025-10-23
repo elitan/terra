@@ -40,7 +40,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
   describe("Constraint Creation and Handling", () => {
     test("should create UNIQUE constraint (not index) from table definition", async () => {
       const schema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           email VARCHAR(255) NOT NULL,
           username VARCHAR(50) NOT NULL,
@@ -54,7 +54,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const constraints = await client.query(`
         SELECT constraint_name, constraint_type
         FROM information_schema.table_constraints
-        WHERE table_name = 'users'
+        WHERE table_name = 'uc_users'
           AND table_schema = 'public'
           AND constraint_type = 'UNIQUE'
       `);
@@ -67,7 +67,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const indexes = await client.query(`
         SELECT indexname
         FROM pg_indexes
-        WHERE tablename = 'users'
+        WHERE tablename = 'uc_users'
           AND schemaname = 'public'
           AND indexname = 'unique_email'
       `);
@@ -77,13 +77,13 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
     test("should create standalone UNIQUE index from CREATE INDEX statement", async () => {
       const schema = `
-        CREATE TABLE products (
+        CREATE TABLE uc_products (
           id SERIAL PRIMARY KEY,
           sku VARCHAR(50) NOT NULL,
           name VARCHAR(100) NOT NULL
         );
 
-        CREATE UNIQUE INDEX unique_sku_idx ON products (sku);
+        CREATE UNIQUE INDEX unique_sku_idx ON uc_products (sku);
       `;
 
       await schemaService.apply(schema, ['public'], true);
@@ -92,7 +92,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const constraints = await client.query(`
         SELECT COUNT(*) as count
         FROM information_schema.table_constraints
-        WHERE table_name = 'products'
+        WHERE table_name = 'uc_products'
           AND table_schema = 'public'
           AND constraint_type = 'UNIQUE'
       `);
@@ -103,7 +103,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const indexes = await client.query(`
         SELECT indexname, indexdef
         FROM pg_indexes
-        WHERE tablename = 'products'
+        WHERE tablename = 'uc_products'
           AND schemaname = 'public'
           AND indexname = 'unique_sku_idx'
       `);
@@ -114,7 +114,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
     test("should handle both constraints and indexes in same table", async () => {
       const schema = `
-        CREATE TABLE orders (
+        CREATE TABLE uc_orders (
           id SERIAL PRIMARY KEY,
           order_number VARCHAR(50) NOT NULL,
           customer_email VARCHAR(255) NOT NULL,
@@ -123,7 +123,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
         );
 
         -- Partial unique index for non-null tracking codes
-        CREATE UNIQUE INDEX unique_tracking_code ON orders (tracking_code) WHERE tracking_code IS NOT NULL;
+        CREATE UNIQUE INDEX unique_tracking_code ON uc_orders (tracking_code) WHERE tracking_code IS NOT NULL;
       `;
 
       await schemaService.apply(schema, ['public'], true);
@@ -132,7 +132,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const constraints = await client.query(`
         SELECT constraint_name
         FROM information_schema.table_constraints
-        WHERE table_name = 'orders'
+        WHERE table_name = 'uc_orders'
           AND constraint_type = 'UNIQUE'
       `);
 
@@ -143,7 +143,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const indexes = await client.query(`
         SELECT indexname, indexdef
         FROM pg_indexes
-        WHERE tablename = 'orders'
+        WHERE tablename = 'uc_orders'
           AND indexname = 'unique_tracking_code'
       `);
 
@@ -155,7 +155,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
   describe("Migration and Batching", () => {
     test("should batch UNIQUE constraint with other ALTER TABLE operations", async () => {
       const initialSchema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL
         );
@@ -165,7 +165,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
       // Add multiple things including a unique constraint
       const updatedSchema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
           email VARCHAR(255) NOT NULL,
@@ -188,7 +188,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const result = await client.query(`
         SELECT constraint_name
         FROM information_schema.table_constraints
-        WHERE table_name = 'users'
+        WHERE table_name = 'uc_users'
           AND constraint_type = 'UNIQUE'
           AND constraint_name = 'unique_email'
       `);
@@ -199,7 +199,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
     test("should handle indexes separately from constraints (non-batched)", async () => {
       const initialSchema = `
-        CREATE TABLE products (
+        CREATE TABLE uc_products (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
           sku VARCHAR(50) NOT NULL
@@ -210,13 +210,13 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
       // Add an index (should be separate statement, not batched)
       const updatedSchema = `
-        CREATE TABLE products (
+        CREATE TABLE uc_products (
           id SERIAL PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
           sku VARCHAR(50) NOT NULL
         );
 
-        CREATE INDEX idx_product_name ON products (name);
+        CREATE INDEX idx_product_name ON uc_products (name);
       `;
 
       const plan = await schemaService.plan(updatedSchema, ['public']);
@@ -234,7 +234,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const result = await client.query(`
         SELECT COUNT(*) as count
         FROM pg_indexes
-        WHERE tablename = 'products'
+        WHERE tablename = 'uc_products'
           AND indexname = 'idx_product_name'
       `);
 
@@ -245,7 +245,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
   describe("Constraint and Index Modifications", () => {
     test("should drop UNIQUE constraint using ALTER TABLE", async () => {
       const initialSchema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           email VARCHAR(255) NOT NULL,
           CONSTRAINT unique_email UNIQUE (email)
@@ -258,7 +258,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const beforeResult = await client.query(`
         SELECT constraint_name
         FROM information_schema.table_constraints
-        WHERE table_name = 'users'
+        WHERE table_name = 'uc_users'
           AND constraint_type = 'UNIQUE'
           AND constraint_name = 'unique_email'
       `);
@@ -267,7 +267,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
       // Remove the constraint
       const updatedSchema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           email VARCHAR(255) NOT NULL
         );
@@ -288,7 +288,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const result = await client.query(`
         SELECT COUNT(*) as count
         FROM information_schema.table_constraints
-        WHERE table_name = 'users'
+        WHERE table_name = 'uc_users'
           AND constraint_type = 'UNIQUE'
           AND constraint_name = 'unique_email'
       `);
@@ -298,19 +298,19 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
     test("should drop standalone UNIQUE index using DROP INDEX", async () => {
       const initialSchema = `
-        CREATE TABLE products (
+        CREATE TABLE uc_products (
           id SERIAL PRIMARY KEY,
           sku VARCHAR(50) NOT NULL
         );
 
-        CREATE UNIQUE INDEX unique_sku_idx ON products (sku);
+        CREATE UNIQUE INDEX unique_sku_idx ON uc_products (sku);
       `;
 
       await schemaService.apply(initialSchema, ['public'], true);
 
       // Remove the index
       const updatedSchema = `
-        CREATE TABLE products (
+        CREATE TABLE uc_products (
           id SERIAL PRIMARY KEY,
           sku VARCHAR(50) NOT NULL
         );
@@ -333,7 +333,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const result = await client.query(`
         SELECT COUNT(*) as count
         FROM pg_indexes
-        WHERE tablename = 'products'
+        WHERE tablename = 'uc_products'
           AND indexname = 'unique_sku_idx'
       `);
 
@@ -345,7 +345,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
     test("UNIQUE constraint: for enforcing data integrity", async () => {
       // Use UNIQUE constraint when the uniqueness is a business rule
       const schema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           email VARCHAR(255) NOT NULL,
           username VARCHAR(50) NOT NULL,
@@ -357,14 +357,14 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       await schemaService.apply(schema, ['public'], true);
 
       // These constraints ensure data integrity at the database level
-      await client.query("INSERT INTO users (email, username) VALUES ('test@example.com', 'testuser')");
+      await client.query("INSERT INTO uc_users (email, username) VALUES ('test@example.com', 'testuser')");
 
       await expect(
-        client.query("INSERT INTO users (email, username) VALUES ('test@example.com', 'otheruser')")
+        client.query("INSERT INTO uc_users (email, username) VALUES ('test@example.com', 'otheruser')")
       ).rejects.toThrow(/unique_email/);
 
       await expect(
-        client.query("INSERT INTO users (email, username) VALUES ('other@example.com', 'testuser')")
+        client.query("INSERT INTO uc_users (email, username) VALUES ('other@example.com', 'testuser')")
       ).rejects.toThrow(/unique_username/);
     });
 
@@ -374,7 +374,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       // - Expression-based uniqueness
       // - Performance optimization that happens to be unique
       const schema = `
-        CREATE TABLE documents (
+        CREATE TABLE uc_documents (
           id SERIAL PRIMARY KEY,
           title VARCHAR(255) NOT NULL,
           status VARCHAR(20) NOT NULL,
@@ -384,25 +384,25 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
 
         -- Partial unique: title must be unique only for published, non-deleted documents
         CREATE UNIQUE INDEX unique_published_title
-          ON documents (LOWER(title))
+          ON uc_documents (LOWER(title))
           WHERE status = 'published' AND deleted_at IS NULL;
       `;
 
       await schemaService.apply(schema, ['public'], true);
 
       // Can have duplicate titles for drafts
-      await client.query("INSERT INTO documents (title, status) VALUES ('My Document', 'draft')");
-      await client.query("INSERT INTO documents (title, status) VALUES ('My Document', 'draft')");
+      await client.query("INSERT INTO uc_documents (title, status) VALUES ('My Document', 'draft')");
+      await client.query("INSERT INTO uc_documents (title, status) VALUES ('My Document', 'draft')");
 
       // Can have duplicate titles for deleted documents
-      await client.query("INSERT INTO documents (title, status, published_at, deleted_at) VALUES ('Deleted Doc', 'published', NOW(), NOW())");
-      await client.query("INSERT INTO documents (title, status, published_at, deleted_at) VALUES ('Deleted Doc', 'published', NOW(), NOW())");
+      await client.query("INSERT INTO uc_documents (title, status, published_at, deleted_at) VALUES ('Deleted Doc', 'published', NOW(), NOW())");
+      await client.query("INSERT INTO uc_documents (title, status, published_at, deleted_at) VALUES ('Deleted Doc', 'published', NOW(), NOW())");
 
       // But published, non-deleted titles must be unique (case-insensitive)
-      await client.query("INSERT INTO documents (title, status, published_at) VALUES ('Unique Title', 'published', NOW())");
+      await client.query("INSERT INTO uc_documents (title, status, published_at) VALUES ('Unique Title', 'published', NOW())");
 
       await expect(
-        client.query("INSERT INTO documents (title, status, published_at) VALUES ('unique title', 'published', NOW())")
+        client.query("INSERT INTO uc_documents (title, status, published_at) VALUES ('unique title', 'published', NOW())")
       ).rejects.toThrow(/unique_published_title/);
     });
   });
@@ -410,12 +410,12 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
   describe("Concurrent Index Creation", () => {
     test("should support CONCURRENTLY for standalone indexes", async () => {
       const schema = `
-        CREATE TABLE large_table (
+        CREATE TABLE uc_large_table (
           id SERIAL PRIMARY KEY,
           data VARCHAR(255)
         );
 
-        CREATE INDEX CONCURRENTLY idx_data ON large_table (data);
+        CREATE INDEX CONCURRENTLY idx_data ON uc_large_table (data);
       `;
 
       // This should work without issues - concurrent indexes don't block writes
@@ -424,7 +424,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const result = await client.query(`
         SELECT indexname
         FROM pg_indexes
-        WHERE tablename = 'large_table'
+        WHERE tablename = 'uc_large_table'
           AND indexname = 'idx_data'
       `);
 
@@ -435,7 +435,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       // UNIQUE constraints are added via ALTER TABLE ADD CONSTRAINT
       // which cannot use CONCURRENTLY, but can be batched with other operations
       const schema = `
-        CREATE TABLE users (
+        CREATE TABLE uc_users (
           id SERIAL PRIMARY KEY,
           email VARCHAR(255) NOT NULL,
           CONSTRAINT unique_email UNIQUE (email)
@@ -448,7 +448,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
       const result = await client.query(`
         SELECT constraint_name
         FROM information_schema.table_constraints
-        WHERE table_name = 'users'
+        WHERE table_name = 'uc_users'
           AND constraint_type = 'UNIQUE'
           AND constraint_name = 'unique_email'
       `);
