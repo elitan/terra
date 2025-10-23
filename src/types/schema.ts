@@ -50,6 +50,13 @@ export interface Index {
   expression?: string; // For expression indexes
   storageParameters?: Record<string, string>;
   tablespace?: string;
+  // Marks if this index is backed by a constraint (e.g., UNIQUE constraint).
+  // When present, this index should be managed via ALTER TABLE ADD/DROP CONSTRAINT
+  // rather than CREATE/DROP INDEX. This enables proper batching with other table alterations.
+  constraint?: {
+    type: 'u' | 'p' | 'x'; // u = unique, p = primary key, x = exclude
+    name?: string; // constraint name (may differ from index name)
+  };
 }
 
 export interface EnumType {

@@ -381,7 +381,7 @@ export class SchemaParser {
     if (objectType === 'COLUMN' && stmt.object) {
       const parts = this.extractObjectParts(stmt.object);
 
-      if (parts.length === 2) {
+      if (parts.length === 2 && parts[0] && parts[1]) {
         // Format: table.column
         return {
           objectType,
@@ -389,7 +389,7 @@ export class SchemaParser {
           columnName: parts[1], // column name
           comment: stmt.comment
         };
-      } else if (parts.length === 3) {
+      } else if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
         // Format: schema.table.column
         return {
           objectType,
@@ -407,7 +407,7 @@ export class SchemaParser {
 
     if (stmt.object) {
       const parts = this.extractObjectParts(stmt.object);
-      if (parts.length === 2 && objectType !== 'SCHEMA') {
+      if (parts.length === 2 && objectType !== 'SCHEMA' && parts[0] && parts[1]) {
         // Format: schema.object
         schemaName = parts[0];
         objectName = parts[1];
