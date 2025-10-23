@@ -50,13 +50,20 @@ export class SchemaService {
       if (!plan.hasChanges) {
         Logger.success("No changes needed - database is up to date");
       } else {
-        const totalChanges = plan.transactional.length + plan.concurrent.length;
+        const totalChanges = plan.transactional.length + plan.concurrent.length + plan.deferred.length;
         Logger.warning(`Found ${totalChanges} change(s) to apply:`);
         console.log();
 
         if (plan.transactional.length > 0) {
           Logger.info("Transactional changes:");
           plan.transactional.forEach((stmt, i) => {
+            Logger.cyan(`  ${i + 1}. ${stmt}`);
+          });
+        }
+
+        if (plan.deferred.length > 0) {
+          Logger.info("Deferred changes (circular FK dependencies):");
+          plan.deferred.forEach((stmt, i) => {
             Logger.cyan(`  ${i + 1}. ${stmt}`);
           });
         }
@@ -147,7 +154,7 @@ export class SchemaService {
       const commentStatements = this.generateCommentStatements(desiredComments, currentComments);
 
       // Calculate total changes
-      const totalChanges = plan.transactional.length + plan.concurrent.length +
+      const totalChanges = plan.transactional.length + plan.concurrent.length + plan.deferred.length +
                           sequenceStatements.length + functionStatements.length +
                           procedureStatements.length + viewStatements.length +
                           triggerStatements.length + commentStatements.length + extensionDropStatements.length;
@@ -175,6 +182,11 @@ export class SchemaService {
       if (allTransactional.length > 0) {
         Logger.print(OutputFormatter.section("Transactional"));
         Logger.print(OutputFormatter.box(allTransactional));
+      }
+
+      if (plan.deferred.length > 0) {
+        Logger.print(OutputFormatter.section("Deferred (circular FK dependencies)"));
+        Logger.print(OutputFormatter.box(plan.deferred));
       }
 
       if (plan.concurrent.length > 0) {

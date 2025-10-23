@@ -25,6 +25,7 @@ import {
   getQualifiedTableName,
 } from "../../utils/sql";
 import { SQLBuilder } from "../../utils/sql-builder";
+import { DependencyResolver } from "./dependency-resolver";
 
 /**
  * Represents a single alteration that can be part of a batched ALTER TABLE statement
@@ -67,15 +68,41 @@ export class SchemaDiffer {
     currentSchema: Table[]
   ): MigrationPlan {
     const statements: string[] = [];
+    const deferred: string[] = [];
 
     // Create a map of current tables for easy lookup
     const currentTables = new Map(currentSchema.map((t) => [t.name, t]));
     const desiredTables = new Map(desiredSchema.map((t) => [t.name, t]));
 
+    // Identify new tables and tables to drop
+    const newTables = desiredSchema.filter(t => !currentTables.has(t.name));
+    const tablesToDrop = currentSchema.filter(t => !desiredTables.has(t.name));
+
+    // Use DependencyResolver to handle circular dependencies for new tables
+    let foreignKeysToDefer: Array<{ tableName: string; foreignKey: ForeignKeyConstraint }> = [];
+    if (newTables.length > 0) {
+      const resolver = new DependencyResolver(newTables);
+      const result = resolver.getCreationOrderWithDetachment();
+      foreignKeysToDefer = result.foreignKeysToDefer;
+    }
+
+    // Create a set of deferred FK keys for quick lookup
+    const deferredFKSet = new Set(
+      foreignKeysToDefer.map(item => `${item.tableName}:${item.foreignKey.name || item.foreignKey.columns.join(',')}`)
+    );
+
     // Handle new tables
     for (const table of desiredSchema) {
       if (!currentTables.has(table.name)) {
-        statements.push(generateCreateTableStatement(table));
+        // Filter out deferred FKs from the table definition
+        const filteredTable = {
+          ...table,
+          foreignKeys: table.foreignKeys?.filter(fk => {
+            const key = `${table.name}:${fk.name || fk.columns.join(',')}`;
+            return !deferredFKSet.has(key);
+          })
+        };
+        statements.push(generateCreateTableStatement(filteredTable));
       } else {
         // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(table.name)!;
@@ -116,13 +143,23 @@ export class SchemaDiffer {
     }
 
     // Handle constraints for new tables (created after table creation)
+    // Regular FKs go in statements, deferred FKs go in deferred array
     for (const table of desiredSchema) {
       if (!currentTables.has(table.name)) {
         const qualifiedName = getQualifiedTableName(table);
-        // Generate foreign key constraints
+
         if (table.foreignKeys && table.foreignKeys.length > 0) {
           for (const fk of table.foreignKeys) {
-            statements.push(generateAddForeignKeySQL(qualifiedName, fk));
+            const key = `${table.name}:${fk.name || fk.columns.join(',')}`;
+            const fkStatement = generateAddForeignKeySQL(qualifiedName, fk);
+
+            if (deferredFKSet.has(key)) {
+              // This FK is involved in a cycle, defer it
+              deferred.push(fkStatement);
+            } else {
+              // Regular FK, add immediately after table creation
+              statements.push(fkStatement);
+            }
           }
         }
 
@@ -131,15 +168,39 @@ export class SchemaDiffer {
       }
     }
 
-    // Handle dropped tables - constraint changes are handled above, just drop tables
-    const tablesToDrop = currentSchema.filter(table => !desiredTables.has(table.name));
-    for (const table of tablesToDrop) {
-      const sql = new SQLBuilder()
-        .p("DROP TABLE")
-        .table(table.name, table.schema)
-        .p("CASCADE;")
-        .build();
-      statements.push(sql);
+    // Handle dropped tables with circular dependency support
+    if (tablesToDrop.length > 0) {
+      const dropResolver = new DependencyResolver(tablesToDrop);
+      const dropResult = dropResolver.getDeletionOrderWithDetachment();
+
+      // Drop cycle-forming FKs first
+      for (const { tableName, foreignKey } of dropResult.foreignKeysToDefer) {
+        const table = tablesToDrop.find(t => t.name === tableName);
+        if (table && foreignKey.name) {
+          // generateDropForeignKeySQL expects unqualified table name
+          const dropSQL = new SQLBuilder()
+            .p("ALTER TABLE")
+            .table(table.name, table.schema)
+            .p("DROP CONSTRAINT")
+            .ident(foreignKey.name)
+            .p(";")
+            .build();
+          statements.push(dropSQL);
+        }
+      }
+
+      // Then drop tables in the correct order
+      for (const tableName of dropResult.order) {
+        const table = tablesToDrop.find(t => t.name === tableName);
+        if (table) {
+          const sql = new SQLBuilder()
+            .p("DROP TABLE")
+            .table(table.name, table.schema)
+            .p("CASCADE;")
+            .build();
+          statements.push(sql);
+        }
+      }
     }
 
     // Separate statements into transactional and concurrent
@@ -157,7 +218,8 @@ export class SchemaDiffer {
     return {
       transactional,
       concurrent,
-      hasChanges: transactional.length > 0 || concurrent.length > 0,
+      deferred,
+      hasChanges: transactional.length > 0 || concurrent.length > 0 || deferred.length > 0,
     };
   }
 
