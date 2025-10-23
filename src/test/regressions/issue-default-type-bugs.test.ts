@@ -367,25 +367,25 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
 
       expect(plan.hasChanges).toBe(true);
 
-      // col1: TEXT -> VARCHAR, same default -> only type change, no default ops
-      const col1Ops = plan.transactional.filter(s => s.includes("col1"));
-      expect(col1Ops.some(s => s.includes("TYPE VARCHAR(255)"))).toBe(true);
-      expect(col1Ops.some(s => s.includes("DROP DEFAULT"))).toBe(false);
-      expect(col1Ops.some(s => s.includes("SET DEFAULT"))).toBe(false);
+      // With batching, all operations are in a single ALTER TABLE statement
+      expect(plan.transactional.length).toBe(1);
+      const statement = plan.transactional[0];
 
-      // col2: int -> INTEGER, same default -> no operations at all
-      const col2Ops = plan.transactional.filter(s => s.includes("col2"));
-      expect(col2Ops.length).toBe(0);
+      // col1: TEXT -> VARCHAR, same default -> only type change, no default ops for col1
+      expect(statement).toContain('ALTER COLUMN "col1" TYPE VARCHAR(255)');
+      expect(statement).not.toMatch(/col1.*DROP DEFAULT/);
+      expect(statement).not.toMatch(/col1.*SET DEFAULT/);
+
+      // col2: int -> INTEGER, same default -> no operations at all for col2
+      expect(statement).not.toContain('"col2"');
 
       // col3: VARCHAR -> TEXT, different default -> type change + default change
-      const col3Ops = plan.transactional.filter(s => s.includes("col3"));
-      expect(col3Ops.some(s => s.includes("TYPE TEXT"))).toBe(true);
-      expect(col3Ops.some(s => s.includes("SET DEFAULT 'changed'"))).toBe(true);
+      expect(statement).toContain('ALTER COLUMN "col3" TYPE TEXT');
+      expect(statement).toContain('ALTER COLUMN "col3" SET DEFAULT \'changed\'');
 
-      // col4: INTEGER -> int (equiv), add default -> only add default
-      const col4Ops = plan.transactional.filter(s => s.includes("col4"));
-      expect(col4Ops.some(s => s.includes("SET DEFAULT 50"))).toBe(true);
-      expect(col4Ops.some(s => s.includes("TYPE"))).toBe(false);
+      // col4: INTEGER -> int (equiv), add default -> only add default, no type change for col4
+      expect(statement).toContain('ALTER COLUMN "col4" SET DEFAULT 50');
+      expect(statement).not.toMatch(/col4.*TYPE/);
     });
 
     test("should remain idempotent through multiple alternating applies", async () => {

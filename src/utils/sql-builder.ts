@@ -205,7 +205,10 @@ export class SQLBuilder {
       if (i > 0) {
         this.comma().nl();
       }
-      fn(items[i], this, i);
+      const item = items[i];
+      if (item !== undefined) {
+        fn(item, this, i);
+      }
     }
     return this;
   }
