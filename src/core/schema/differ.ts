@@ -26,6 +26,26 @@ import {
 } from "../../utils/sql";
 import { SQLBuilder } from "../../utils/sql-builder";
 
+/**
+ * Represents a single alteration that can be part of a batched ALTER TABLE statement
+ */
+type TableAlteration =
+  | { type: "add_column"; column: Column }
+  | { type: "drop_column"; columnName: string }
+  | { type: "alter_column_type"; columnName: string; newType: string; usingClause?: string }
+  | { type: "alter_column_set_default"; columnName: string; default: string }
+  | { type: "alter_column_drop_default"; columnName: string }
+  | { type: "alter_column_set_not_null"; columnName: string }
+  | { type: "alter_column_drop_not_null"; columnName: string }
+  | { type: "add_primary_key"; constraint: PrimaryKeyConstraint }
+  | { type: "drop_primary_key"; constraintName: string }
+  | { type: "add_check"; constraint: CheckConstraint }
+  | { type: "drop_check"; constraintName: string }
+  | { type: "add_foreign_key"; constraint: ForeignKeyConstraint }
+  | { type: "drop_foreign_key"; constraintName: string }
+  | { type: "add_unique"; constraint: UniqueConstraint }
+  | { type: "drop_unique"; constraintName: string };
+
 export class SchemaDiffer {
   private options: MigrationOptions;
 
@@ -48,48 +68,27 @@ export class SchemaDiffer {
       if (!currentTables.has(table.name)) {
         statements.push(generateCreateTableStatement(table));
       } else {
-        // Handle existing tables - ORDER MATTERS!
+        // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(table.name)!;
         const qualifiedName = getQualifiedTableName(table);
 
-        // 1. First handle primary key changes that involve dropping constraints
-        const primaryKeyDropStatements = this.generatePrimaryKeyDropStatements(
-          table,
-          currentTable,
-          qualifiedName
-        );
-        statements.push(...primaryKeyDropStatements);
+        // Collect all table alterations (columns, constraints, etc.)
+        const alterations = this.collectTableAlterations(table, currentTable);
 
-        // 2. Then handle column changes (now that blocking constraints are removed)
-        const columnStatements = this.generateColumnStatements(
-          table,
-          currentTable
-        );
-        statements.push(...columnStatements);
+        // Generate a single batched ALTER TABLE statement for all compatible operations
+        if (alterations.length > 0) {
+          const batchedStatement = this.batchAlterTableChanges(qualifiedName, alterations);
+          if (batchedStatement) {
+            statements.push(batchedStatement);
+          }
+        }
 
-        // 3. Finally handle primary key additions/modifications
-        const primaryKeyAddStatements = this.generatePrimaryKeyAddStatements(
-          table,
-          currentTable,
-          qualifiedName
-        );
-        statements.push(...primaryKeyAddStatements);
-
-        // 4. Handle index changes for existing tables
+        // Handle index changes separately (they use CONCURRENTLY which can't be batched)
         const indexStatements = this.generateIndexStatements(
           table,
           currentTable
         );
         statements.push(...indexStatements);
-
-        // 5. Handle constraint changes (check, foreign key, unique)
-        // Note: Skip explicit FK constraint drops if they'll be auto-dropped by column changes
-        const constraintStatements = this.generateConstraintStatementsWithColumnContext(
-          table,
-          currentTable,
-          qualifiedName
-        );
-        statements.push(...constraintStatements);
       }
     }
 
@@ -1005,5 +1004,475 @@ export class SchemaDiffer {
     }
 
     return statements;
+  }
+
+  /**
+   * Collects all alterations for a table (columns, constraints, etc.)
+   * This includes everything that can be batched in a single ALTER TABLE statement.
+   */
+  private collectTableAlterations(
+    desiredTable: Table,
+    currentTable: Table
+  ): TableAlteration[] {
+    const alterations: TableAlteration[] = [];
+
+    // Collect column alterations
+    const currentColumns = new Map(currentTable.columns.map((c) => [c.name, c]));
+    const desiredColumns = new Map(desiredTable.columns.map((c) => [c.name, c]));
+
+    // Add new columns
+    for (const column of desiredTable.columns) {
+      if (!currentColumns.has(column.name)) {
+        alterations.push({ type: "add_column", column });
+      } else {
+        // Check for column modifications
+        const currentColumn = currentColumns.get(column.name)!;
+        if (columnsAreDifferent(column, currentColumn)) {
+          this.collectColumnModificationAlterations(column, currentColumn, alterations);
+        }
+      }
+    }
+
+    // Drop removed columns
+    for (const column of currentTable.columns) {
+      if (!desiredColumns.has(column.name)) {
+        alterations.push({ type: "drop_column", columnName: column.name });
+      }
+    }
+
+    // Collect primary key alterations
+    const primaryKeyChange = this.comparePrimaryKeys(
+      desiredTable.primaryKey,
+      currentTable.primaryKey
+    );
+
+    if (primaryKeyChange.type === "drop" || primaryKeyChange.type === "modify") {
+      alterations.push({
+        type: "drop_primary_key",
+        constraintName: primaryKeyChange.currentPK!.name!,
+      });
+    }
+
+    if (primaryKeyChange.type === "add" || primaryKeyChange.type === "modify") {
+      alterations.push({
+        type: "add_primary_key",
+        constraint: primaryKeyChange.desiredPK!,
+      });
+    }
+
+    // Collect check constraint alterations
+    this.collectCheckConstraintAlterations(
+      desiredTable.checkConstraints || [],
+      currentTable.checkConstraints || [],
+      alterations
+    );
+
+    // Collect foreign key constraint alterations
+    const currentColumns2 = new Set(currentTable.columns.map(c => c.name));
+    const desiredColumns2 = new Set(desiredTable.columns.map(c => c.name));
+    const droppedColumns = new Set([...currentColumns2].filter(col => !desiredColumns2.has(col)));
+
+    this.collectForeignKeyAlterations(
+      desiredTable.foreignKeys || [],
+      currentTable.foreignKeys || [],
+      droppedColumns,
+      alterations
+    );
+
+    // Collect unique constraint alterations
+    this.collectUniqueConstraintAlterations(
+      desiredTable.uniqueConstraints || [],
+      currentTable.uniqueConstraints || [],
+      alterations
+    );
+
+    return alterations;
+  }
+
+  /**
+   * Collects alterations for column modifications (type, default, nullable changes)
+   */
+  private collectColumnModificationAlterations(
+    desiredColumn: Column,
+    currentColumn: Column,
+    alterations: TableAlteration[]
+  ): void {
+    // Special handling for generated columns - they need drop and recreate
+    // We'll still do this as separate statements for now (not batched)
+    const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
+      (!desiredColumn.generated || !currentColumn.generated ||
+       desiredColumn.generated.expression !== currentColumn.generated.expression ||
+       desiredColumn.generated.always !== currentColumn.generated.always ||
+       desiredColumn.generated.stored !== currentColumn.generated.stored);
+
+    if (generatedChanging) {
+      // Drop and recreate - these can't be batched with other operations
+      alterations.push({ type: "drop_column", columnName: desiredColumn.name });
+      alterations.push({ type: "add_column", column: desiredColumn });
+      return;
+    }
+
+    const normalizedDesiredType = normalizeType(desiredColumn.type);
+    const normalizedCurrentType = normalizeType(currentColumn.type);
+    const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
+
+    const normalizedCurrentDefault = normalizeDefault(currentColumn.default);
+    const normalizedDesiredDefault = normalizeDefault(desiredColumn.default);
+    const defaultIsChanging = normalizedDesiredDefault !== normalizedCurrentDefault;
+
+    // If type is changing and there's a current default that might conflict, drop it first
+    if (typeIsChanging && currentColumn.default && defaultIsChanging) {
+      alterations.push({
+        type: "alter_column_drop_default",
+        columnName: desiredColumn.name,
+      });
+    }
+
+    // Change the type if needed
+    if (typeIsChanging) {
+      const needsUsing = this.requiresUsingClause(currentColumn.type, desiredColumn.type);
+      const usingClause = needsUsing
+        ? this.generateUsingExpression(desiredColumn.name, currentColumn.type, desiredColumn.type)
+        : undefined;
+
+      // Handle SERIAL specially
+      const actualType = desiredColumn.type === "SERIAL" ? "INTEGER" : desiredColumn.type;
+
+      alterations.push({
+        type: "alter_column_type",
+        columnName: desiredColumn.name,
+        newType: actualType,
+        usingClause,
+      });
+    }
+
+    // Set the new default if needed
+    if (defaultIsChanging) {
+      if (desiredColumn.default) {
+        alterations.push({
+          type: "alter_column_set_default",
+          columnName: desiredColumn.name,
+          default: desiredColumn.default,
+        });
+      } else if (!typeIsChanging || !currentColumn.default) {
+        // Only drop default if we didn't already drop it
+        alterations.push({
+          type: "alter_column_drop_default",
+          columnName: desiredColumn.name,
+        });
+      }
+    }
+
+    // Handle nullable constraint changes
+    if (desiredColumn.nullable !== currentColumn.nullable) {
+      if (!desiredColumn.nullable) {
+        alterations.push({
+          type: "alter_column_set_not_null",
+          columnName: desiredColumn.name,
+        });
+      } else {
+        alterations.push({
+          type: "alter_column_drop_not_null",
+          columnName: desiredColumn.name,
+        });
+      }
+    }
+  }
+
+  /**
+   * Collects check constraint alterations
+   */
+  private collectCheckConstraintAlterations(
+    desiredConstraints: CheckConstraint[],
+    currentConstraints: CheckConstraint[],
+    alterations: TableAlteration[]
+  ): void {
+    const currentMap = new Map(
+      currentConstraints.map(c => [c.name || c.expression, c])
+    );
+    const desiredMap = new Map(
+      desiredConstraints.map(c => [c.name || c.expression, c])
+    );
+
+    // Drop removed constraints
+    for (const [key, constraint] of currentMap) {
+      if (!desiredMap.has(key) && constraint.name) {
+        alterations.push({
+          type: "drop_check",
+          constraintName: constraint.name,
+        });
+      }
+    }
+
+    // Add new constraints
+    for (const [key, constraint] of desiredMap) {
+      if (!currentMap.has(key)) {
+        alterations.push({
+          type: "add_check",
+          constraint,
+        });
+      } else {
+        // Check if expression changed
+        const currentConstraint = currentMap.get(key)!;
+        if (constraint.expression !== currentConstraint.expression && currentConstraint.name) {
+          // Drop and recreate
+          alterations.push({
+            type: "drop_check",
+            constraintName: currentConstraint.name,
+          });
+          alterations.push({
+            type: "add_check",
+            constraint,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Collects foreign key constraint alterations
+   */
+  private collectForeignKeyAlterations(
+    desiredConstraints: ForeignKeyConstraint[],
+    currentConstraints: ForeignKeyConstraint[],
+    droppedColumns: Set<string>,
+    alterations: TableAlteration[]
+  ): void {
+    const currentMap = new Map(
+      currentConstraints.map(c => [
+        c.name || `fk_${c.columns.join('_')}_${c.referencedTable}`,
+        c
+      ])
+    );
+    const desiredMap = new Map(
+      desiredConstraints.map(c => [
+        c.name || `fk_${c.columns.join('_')}_${c.referencedTable}`,
+        c
+      ])
+    );
+
+    // Drop removed constraints (skip those auto-dropped by column removal)
+    for (const [key, constraint] of currentMap) {
+      if (!desiredMap.has(key)) {
+        const dependsOnDroppedColumn = constraint.columns.some(col => droppedColumns.has(col));
+        if (!dependsOnDroppedColumn && constraint.name) {
+          alterations.push({
+            type: "drop_foreign_key",
+            constraintName: constraint.name,
+          });
+        }
+      }
+    }
+
+    // Add new constraints or modify existing ones
+    for (const [key, constraint] of desiredMap) {
+      if (!currentMap.has(key)) {
+        alterations.push({
+          type: "add_foreign_key",
+          constraint,
+        });
+      } else {
+        const currentConstraint = currentMap.get(key)!;
+        if (this.foreignKeysDiffer(constraint, currentConstraint) && currentConstraint.name) {
+          // Drop and recreate
+          alterations.push({
+            type: "drop_foreign_key",
+            constraintName: currentConstraint.name,
+          });
+          alterations.push({
+            type: "add_foreign_key",
+            constraint,
+          });
+        }
+      }
+    }
+  }
+
+  /**
+   * Collects unique constraint alterations
+   */
+  private collectUniqueConstraintAlterations(
+    desiredConstraints: UniqueConstraint[],
+    currentConstraints: UniqueConstraint[],
+    alterations: TableAlteration[]
+  ): void {
+    const currentMap = new Map(
+      currentConstraints.map(c => [
+        c.name || `unique_${c.columns.join('_')}`,
+        c
+      ])
+    );
+    const desiredMap = new Map(
+      desiredConstraints.map(c => [
+        c.name || `unique_${c.columns.join('_')}`,
+        c
+      ])
+    );
+
+    // Drop removed constraints
+    for (const [key, constraint] of currentMap) {
+      if (!desiredMap.has(key) && constraint.name) {
+        alterations.push({
+          type: "drop_unique",
+          constraintName: constraint.name,
+        });
+      }
+    }
+
+    // Add new constraints
+    for (const [key, constraint] of desiredMap) {
+      if (!currentMap.has(key)) {
+        alterations.push({
+          type: "add_unique",
+          constraint,
+        });
+      }
+    }
+  }
+
+  /**
+   * Batches multiple ALTER TABLE alterations into a single statement.
+   * This improves performance by reducing database round trips.
+   *
+   * @param tableName - Qualified table name
+   * @param alterations - List of alterations to batch
+   * @returns SQL statement with batched alterations, or empty string if no alterations
+   */
+  private batchAlterTableChanges(tableName: string, alterations: TableAlteration[]): string {
+    if (alterations.length === 0) {
+      return "";
+    }
+
+    // Sort alterations: drops first, then other operations
+    // This prevents dependency issues (e.g., dropping a constraint before dropping a column)
+    const sorted = [...alterations].sort((a, b) => {
+      const isADrop = a.type.startsWith("drop_");
+      const isBDrop = b.type.startsWith("drop_");
+      if (isADrop && !isBDrop) return -1;
+      if (!isADrop && isBDrop) return 1;
+      return 0;
+    });
+
+    const builder = new SQLBuilder()
+      .p("ALTER TABLE")
+      .p(tableName);
+
+    builder.indentIn();
+    builder.mapComma(sorted, (alt, b) => {
+      b.nl();
+      switch (alt.type) {
+        case "add_column":
+          b.p("ADD COLUMN")
+            .ident(alt.column.name)
+            .p(alt.column.type);
+          if (alt.column.generated) {
+            b.p(`GENERATED ${alt.column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${alt.column.generated.expression}) ${alt.column.generated.stored ? 'STORED' : 'VIRTUAL'}`);
+          } else {
+            if (!alt.column.nullable) b.p("NOT NULL");
+            if (alt.column.default) b.p(`DEFAULT ${alt.column.default}`);
+          }
+          break;
+
+        case "drop_column":
+          b.p("DROP COLUMN").ident(alt.columnName);
+          break;
+
+        case "alter_column_type":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`TYPE ${alt.newType}`);
+          if (alt.usingClause) {
+            b.p(`USING ${alt.usingClause}`);
+          }
+          break;
+
+        case "alter_column_set_default":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`SET DEFAULT ${alt.default}`);
+          break;
+
+        case "alter_column_drop_default":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p("DROP DEFAULT");
+          break;
+
+        case "alter_column_set_not_null":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p("SET NOT NULL");
+          break;
+
+        case "alter_column_drop_not_null":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p("DROP NOT NULL");
+          break;
+
+        case "add_primary_key": {
+          const constraintName = alt.constraint.name || `pk_${tableName}`;
+          const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+          b.p("ADD CONSTRAINT")
+            .ident(constraintName)
+            .p(`PRIMARY KEY (${columns})`);
+          break;
+        }
+
+        case "drop_primary_key":
+          b.p("DROP CONSTRAINT").ident(alt.constraintName);
+          break;
+
+        case "add_check": {
+          const constraintName = alt.constraint.name || `check_${tableName}_${Date.now()}`;
+          b.p("ADD CONSTRAINT")
+            .ident(constraintName)
+            .p(`CHECK (${alt.constraint.expression})`);
+          break;
+        }
+
+        case "drop_check":
+          b.p("DROP CONSTRAINT").ident(alt.constraintName);
+          break;
+
+        case "add_foreign_key": {
+          const constraintName = alt.constraint.name || `fk_${tableName}_${alt.constraint.referencedTable}`;
+          const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+          const referencedColumns = alt.constraint.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+          b.p("ADD CONSTRAINT")
+            .ident(constraintName)
+            .p(`FOREIGN KEY (${columns}) REFERENCES`)
+            .table(alt.constraint.referencedTable)
+            .p(`(${referencedColumns})`);
+          if (alt.constraint.onDelete) {
+            b.p(`ON DELETE ${alt.constraint.onDelete}`);
+          }
+          if (alt.constraint.onUpdate) {
+            b.p(`ON UPDATE ${alt.constraint.onUpdate}`);
+          }
+          break;
+        }
+
+        case "drop_foreign_key":
+          b.p("DROP CONSTRAINT").ident(alt.constraintName);
+          break;
+
+        case "add_unique": {
+          const constraintName = alt.constraint.name || `unique_${tableName}_${alt.constraint.columns.join('_')}`;
+          const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+          b.p("ADD CONSTRAINT")
+            .ident(constraintName)
+            .p(`UNIQUE (${columns})`);
+          break;
+        }
+
+        case "drop_unique":
+          b.p("DROP CONSTRAINT").ident(alt.constraintName);
+          break;
+      }
+    });
+    builder.indentOut();
+
+    return builder.p(";").build();
   }
 }
