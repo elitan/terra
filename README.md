@@ -39,13 +39,13 @@ CREATE TABLE users (
 **2. Preview changes:**
 
 ```bash
-terra plan
+pgterra plan
 ```
 
 **3. Apply:**
 
 ```bash
-terra apply
+pgterra apply
 ```
 
 **4. Update schema.sql:**
@@ -71,13 +71,13 @@ CREATE INDEX idx_user_email ON users (LOWER(email));  -- added
 **5. Terra generates the ALTER statements:**
 
 ```bash
-$ terra plan
+$ pgterra plan
 ALTER TABLE users ADD COLUMN name VARCHAR(100) NOT NULL
 ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT true
 CREATE TABLE posts (...)
 CREATE INDEX idx_user_email ON users (LOWER(email))
 
-$ terra apply
+$ pgterra apply
 ```
 
 ## Configuration
@@ -211,10 +211,10 @@ CACHE 20;
 ## Commands
 
 ```bash
-terra plan                    # Preview changes
-terra plan -f custom.sql      # Use custom schema file
-terra apply                   # Apply changes
-terra apply -f custom.sql     # Apply from custom file
+pgterra plan                    # Preview changes
+pgterra plan -f custom.sql      # Use custom schema file
+pgterra apply                   # Apply changes
+pgterra apply -f custom.sql     # Apply from custom file
 ```
 
 ## Development
