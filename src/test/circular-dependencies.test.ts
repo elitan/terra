@@ -326,6 +326,43 @@ describe("Circular Dependencies", () => {
     });
   });
 
+  describe("Forward References (non-circular)", () => {
+    test("should handle FK to table defined later in schema", async () => {
+      const schema = `
+        CREATE TABLE posts (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          author_id INTEGER NOT NULL,
+          CONSTRAINT fk_author FOREIGN KEY (author_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const constraints = await client.query(`
+        SELECT tc.constraint_name, tc.table_name, ccu.table_name as referenced_table
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+      `);
+
+      expect(constraints.rows).toHaveLength(1);
+      expect(constraints.rows[0].table_name).toBe('posts');
+      expect(constraints.rows[0].referenced_table).toBe('users');
+
+      await client.query("INSERT INTO users (name) VALUES ('Alice')");
+      await client.query("INSERT INTO posts (title, author_id) VALUES ('Hello World', 1)");
+
+      const post = await client.query("SELECT author_id FROM posts WHERE id = 1");
+      expect(post.rows[0].author_id).toBe(1);
+    });
+  });
+
   describe("Self-referential with External Cycles", () => {
     test("should handle self-referential FK and circular FK together", async () => {
       const schema = `
