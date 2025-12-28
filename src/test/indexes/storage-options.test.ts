@@ -304,7 +304,7 @@ describe("Index Storage Options", () => {
         'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
-        "CREATE INDEX CONCURRENTLY idx_users_email ON users (email) WITH (fillfactor=90);"
+        'CREATE INDEX CONCURRENTLY "idx_users_email" ON "users" ("email") WITH (fillfactor=90);'
       );
     });
 
@@ -358,7 +358,7 @@ describe("Index Storage Options", () => {
         'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
-        "CREATE INDEX CONCURRENTLY idx_users_email ON users (email) TABLESPACE new_tablespace;"
+        'CREATE INDEX CONCURRENTLY "idx_users_email" ON "users" ("email") TABLESPACE new_tablespace;'
       );
     });
 
@@ -382,7 +382,7 @@ describe("Index Storage Options", () => {
       const sql = (differ as any).generateCreateIndexSQL(index);
 
       expect(sql).toBe(
-        "CREATE UNIQUE INDEX CONCURRENTLY idx_complex ON users (email) WITH (fillfactor=85, deduplicate_items=on) TABLESPACE fast_ssd;"
+        'CREATE UNIQUE INDEX CONCURRENTLY "idx_complex" ON "users" ("email") WITH (fillfactor=85, deduplicate_items=on) TABLESPACE fast_ssd;'
       );
     });
   });

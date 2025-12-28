@@ -196,7 +196,7 @@ describe("Partial Index Support", () => {
         'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
-        "CREATE INDEX idx_users_email ON users (email) WHERE active = true;"
+        'CREATE INDEX "idx_users_email" ON "users" ("email") WHERE active = true;'
       );
     });
 
@@ -250,7 +250,7 @@ describe("Partial Index Support", () => {
         'DROP INDEX CONCURRENTLY "idx_orders_status";'
       );
       expect(allStatements).toContain(
-        "CREATE INDEX CONCURRENTLY idx_orders_status ON orders (status) WHERE status IN ('active', 'pending');"
+        'CREATE INDEX CONCURRENTLY "idx_orders_status" ON "orders" ("status") WHERE status IN (\'active\', \'pending\');'
       );
     });
   });

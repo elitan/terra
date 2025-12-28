@@ -106,12 +106,12 @@ describe("Concurrent Index Operations", () => {
 
       // Regular index should be in transactional statements
       expect(plan.transactional).toContain(
-        "CREATE INDEX idx_users_email_regular ON users (email);"
+        'CREATE INDEX "idx_users_email_regular" ON "users" ("email");'
       );
 
       // Concurrent index should be in concurrent statements
       expect(plan.concurrent).toContain(
-        "CREATE INDEX CONCURRENTLY idx_users_email_concurrent ON users (email);"
+        'CREATE INDEX CONCURRENTLY "idx_users_email_concurrent" ON "users" ("email");'
       );
     });
 
@@ -216,12 +216,12 @@ describe("Concurrent Index Operations", () => {
 
       // Regular create should be transactional
       expect(plan.transactional).toContain(
-        "CREATE INDEX idx_new_name ON users (name);"
+        'CREATE INDEX "idx_new_name" ON "users" ("name");'
       );
 
       // Concurrent create should be concurrent
       expect(plan.concurrent).toContain(
-        "CREATE INDEX CONCURRENTLY idx_new_email_concurrent ON users (email);"
+        'CREATE INDEX CONCURRENTLY "idx_new_email_concurrent" ON "users" ("email");'
       );
     });
   });

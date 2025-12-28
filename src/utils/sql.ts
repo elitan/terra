@@ -186,8 +186,11 @@ export function generateCreateTableStatement(table: Table): string {
     }
   }
 
-  const qualifiedName = getQualifiedTableName(table);
-  return `CREATE TABLE ${qualifiedName} (\n  ${columnDefs.join(",\n  ")}\n);`;
+  const builder = new SQLBuilder()
+    .p("CREATE TABLE")
+    .table(table.name, table.schema)
+    .p("(\n  " + columnDefs.join(",\n  ") + "\n)");
+  return builder.build() + ";";
 }
 
 export function generatePrimaryKeyClause(
