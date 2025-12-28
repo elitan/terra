@@ -271,7 +271,7 @@ describe("PostgreSQL Basic Index Support", () => {
 
       const allStatements = [...plan.transactional, ...plan.concurrent];
       expect(allStatements).toContain(
-        "CREATE INDEX idx_users_email ON users (email);"
+        'CREATE INDEX "idx_users_email" ON "users" ("email");'
       );
     });
 
@@ -372,7 +372,7 @@ describe("PostgreSQL Basic Index Support", () => {
         'DROP INDEX CONCURRENTLY "idx_users_email";'
       );
       expect(allStatements).toContain(
-        "CREATE INDEX idx_users_email ON users (email, name);"
+        'CREATE INDEX "idx_users_email" ON "users" ("email", "name");'
       );
     });
   });

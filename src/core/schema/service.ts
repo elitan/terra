@@ -22,6 +22,7 @@ import {
   generateCreateTypeSQL,
   generateDropTypeSQL,
 } from "../../utils/sql";
+import { SQLBuilder } from "../../utils/sql-builder";
 
 export class SchemaService {
   private parser: SchemaParser;
@@ -481,9 +482,14 @@ export class SchemaService {
       Logger.info(`ENUM type '${desiredEnum.name}' values already match, no changes needed`);
     } else if (isOnlyAppending) {
       // Only adding values at the end - safe operation using ALTER TYPE ADD VALUE
-      const fullName = desiredEnum.schema ? `${desiredEnum.schema}.${desiredEnum.name}` : desiredEnum.name;
       for (const value of valuesToAdd) {
-        statements.push(`ALTER TYPE ${fullName} ADD VALUE '${value}';`);
+        const builder = new SQLBuilder().p("ALTER TYPE");
+        if (desiredEnum.schema) {
+          builder.ident(desiredEnum.schema).rewriteLastChar('.');
+        }
+        builder.ident(desiredEnum.name);
+        builder.p(`ADD VALUE '${value}';`);
+        statements.push(builder.build());
         Logger.info(`Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
       }
     } else {
@@ -616,22 +622,21 @@ export class SchemaService {
   }
 
   private generateCreateExtensionSQL(extension: Extension): string {
-    let sql = `CREATE EXTENSION IF NOT EXISTS ${extension.name}`;
+    const builder = new SQLBuilder().p("CREATE EXTENSION IF NOT EXISTS").ident(extension.name);
 
     if (extension.schema) {
-      sql += ` SCHEMA ${extension.schema}`;
+      builder.p("SCHEMA").ident(extension.schema);
     }
 
     if (extension.version) {
-      sql += ` VERSION '${extension.version}'`;
+      builder.p(`VERSION '${extension.version}'`);
     }
 
     if (extension.cascade) {
-      sql += ` CASCADE`;
+      builder.p("CASCADE");
     }
 
-    sql += ';';
-    return sql;
+    return builder.build() + ';';
   }
 
   private generateSequenceStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {
@@ -813,15 +818,17 @@ export class SchemaService {
 
     for (const desiredSchema of desiredSchemas) {
       if (!currentSchemaNames.has(desiredSchema.name)) {
-        const ifNotExists = desiredSchema.ifNotExists ? 'IF NOT EXISTS ' : '';
-        let sql = `CREATE SCHEMA ${ifNotExists}${desiredSchema.name}`;
+        const builder = new SQLBuilder().p("CREATE SCHEMA");
+        if (desiredSchema.ifNotExists) {
+          builder.p("IF NOT EXISTS");
+        }
+        builder.ident(desiredSchema.name);
 
         if (desiredSchema.owner) {
-          sql += ` AUTHORIZATION ${desiredSchema.owner}`;
+          builder.p("AUTHORIZATION").ident(desiredSchema.owner);
         }
 
-        sql += ';';
-        statements.push(sql);
+        statements.push(builder.build() + ';');
         Logger.info(`Creating schema '${desiredSchema.name}'`);
       } else {
         Logger.info(`Schema '${desiredSchema.name}' already exists, skipping`);
@@ -864,23 +871,19 @@ export class SchemaService {
 
   private generateCommentSQL(comment: Comment): string {
     const escapedComment = comment.comment.replace(/'/g, "''");
+    const builder = new SQLBuilder().p("COMMENT ON");
 
     if (comment.objectType === 'SCHEMA') {
-      return `COMMENT ON SCHEMA ${comment.objectName} IS '${escapedComment}';`;
+      builder.p("SCHEMA").ident(comment.objectName);
+    } else if (comment.objectType === 'COLUMN') {
+      builder.p("COLUMN").table(comment.objectName, comment.schemaName);
+      builder.rewriteLastChar('.');
+      builder.ident(comment.columnName!);
+    } else {
+      builder.p(comment.objectType).table(comment.objectName, comment.schemaName);
     }
 
-    if (comment.objectType === 'COLUMN') {
-      // For columns, use table.column or schema.table.column format
-      const tableName = comment.schemaName
-        ? `${comment.schemaName}.${comment.objectName}`
-        : comment.objectName;
-      return `COMMENT ON COLUMN ${tableName}.${comment.columnName} IS '${escapedComment}';`;
-    }
-
-    const objectName = comment.schemaName
-      ? `${comment.schemaName}.${comment.objectName}`
-      : comment.objectName;
-
-    return `COMMENT ON ${comment.objectType} ${objectName} IS '${escapedComment}';`;
+    builder.p(`IS '${escapedComment}'`);
+    return builder.build() + ';';
   }
 }

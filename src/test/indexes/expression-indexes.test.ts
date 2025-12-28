@@ -435,7 +435,7 @@ describe("Schema Differ Support", () => {
       ...migrationPlan.concurrent,
     ];
     expect(allStatements).toContain(
-      "CREATE INDEX CONCURRENTLY idx_email_lower ON users (LOWER(email));"
+      'CREATE INDEX CONCURRENTLY "idx_email_lower" ON "users" (LOWER(email));'
     );
   });
 
@@ -452,7 +452,7 @@ describe("Schema Differ Support", () => {
     const sql = (differ as any).generateCreateIndexSQL(expressionIndex);
 
     expect(sql).toBe(
-      "CREATE INDEX CONCURRENTLY idx_email_lower ON users (LOWER(email));"
+      'CREATE INDEX CONCURRENTLY "idx_email_lower" ON "users" (LOWER(email));'
     );
   });
 
@@ -470,7 +470,7 @@ describe("Schema Differ Support", () => {
     const sql = (differ as any).generateCreateIndexSQL(uniqueExpressionIndex);
 
     expect(sql).toBe(
-      "CREATE UNIQUE INDEX CONCURRENTLY idx_email_lower_unique ON users (LOWER(email));"
+      'CREATE UNIQUE INDEX CONCURRENTLY "idx_email_lower_unique" ON "users" (LOWER(email));'
     );
   });
 });

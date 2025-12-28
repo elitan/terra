@@ -60,9 +60,9 @@ describe("SchemaService - MigrationPlanner Removal", () => {
       );
       expect(hasEmailColumn).toBe(true);
 
-      // Check that it includes creating posts table
+      // Check that it includes creating posts table (quoted)
       const hasPostsTable = plan.transactional.some(stmt =>
-        stmt.includes("CREATE TABLE posts")
+        stmt.includes('CREATE TABLE "posts"')
       );
       expect(hasPostsTable).toBe(true);
     });

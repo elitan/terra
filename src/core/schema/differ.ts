@@ -106,14 +106,13 @@ export class SchemaDiffer {
       } else {
         // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(table.name)!;
-        const qualifiedName = getQualifiedTableName(table);
 
         // Collect all table alterations (columns, constraints, etc.)
         const alterations = this.collectTableAlterations(table, currentTable);
 
         // Generate a single batched ALTER TABLE statement for all compatible operations
         if (alterations.length > 0) {
-          const batchedStatement = this.batchAlterTableChanges(qualifiedName, alterations);
+          const batchedStatement = this.batchAlterTableChanges(table, alterations);
           if (batchedStatement) {
             statements.push(batchedStatement);
           }
@@ -823,43 +822,39 @@ export class SchemaDiffer {
     index: Index,
     useConcurrent: boolean = true
   ): string {
-    let sql = "CREATE";
+    const builder = new SQLBuilder();
 
-    // Add UNIQUE if specified
+    builder.p("CREATE");
+
     if (index.unique) {
-      sql += " UNIQUE";
+      builder.p("UNIQUE");
     }
 
-    sql += " INDEX";
+    builder.p("INDEX");
 
-    // Add CONCURRENTLY for production safety (default: true)
-    // Can be overridden by explicit index.concurrent setting or global useConcurrent parameter
     const shouldUseConcurrent =
       index.concurrent !== undefined ? index.concurrent : useConcurrent;
     if (shouldUseConcurrent) {
-      sql += " CONCURRENTLY";
+      builder.p("CONCURRENTLY");
     }
 
-    sql += ` ${index.name} ON ${index.tableName}`;
+    builder.ident(index.name).p("ON").table(index.tableName, index.schema);
 
-    // Add USING clause if not default btree
     if (index.type && index.type !== "btree") {
-      sql += ` USING ${index.type.toUpperCase()}`;
+      builder.p(`USING ${index.type.toUpperCase()}`);
     }
 
-    // Add columns or expression
     if (index.expression) {
-      sql += ` (${index.expression})`;
+      builder.p(`(${index.expression})`);
     } else {
-      sql += ` (${index.columns.join(", ")})`;
+      const quotedColumns = index.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+      builder.p(`(${quotedColumns})`);
     }
 
-    // Add WHERE clause for partial indexes
     if (index.where) {
-      sql += ` WHERE ${index.where}`;
+      builder.p(`WHERE ${index.where}`);
     }
 
-    // Add storage parameters
     if (
       index.storageParameters &&
       Object.keys(index.storageParameters).length > 0
@@ -867,15 +862,14 @@ export class SchemaDiffer {
       const params = Object.entries(index.storageParameters)
         .map(([key, value]) => `${key}=${value}`)
         .join(", ");
-      sql += ` WITH (${params})`;
+      builder.p(`WITH (${params})`);
     }
 
-    // Add tablespace
     if (index.tablespace) {
-      sql += ` TABLESPACE ${index.tablespace}`;
+      builder.p(`TABLESPACE ${index.tablespace}`);
     }
 
-    return sql + ";";
+    return builder.build() + ";";
   }
 
   private generateConstraintStatementsWithColumnContext(
@@ -1432,7 +1426,7 @@ export class SchemaDiffer {
    * @param alterations - List of alterations to batch
    * @returns SQL statement with batched alterations, or empty string if no alterations
    */
-  private batchAlterTableChanges(tableName: string, alterations: TableAlteration[]): string {
+  private batchAlterTableChanges(table: Table, alterations: TableAlteration[]): string {
     if (alterations.length === 0) {
       return "";
     }
@@ -1449,7 +1443,7 @@ export class SchemaDiffer {
 
     const builder = new SQLBuilder()
       .p("ALTER TABLE")
-      .p(tableName);
+      .table(table.name, table.schema);
 
     builder.indentIn();
     builder.mapComma(sorted, (alt, b) => {
@@ -1505,7 +1499,7 @@ export class SchemaDiffer {
           break;
 
         case "add_primary_key": {
-          const constraintName = alt.constraint.name || `pk_${tableName}`;
+          const constraintName = alt.constraint.name || `pk_${table.name}`;
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
@@ -1518,7 +1512,7 @@ export class SchemaDiffer {
           break;
 
         case "add_check": {
-          const constraintName = alt.constraint.name || `check_${tableName}_${Date.now()}`;
+          const constraintName = alt.constraint.name || `check_${table.name}_${Date.now()}`;
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
             .p(`CHECK (${alt.constraint.expression})`);
@@ -1530,7 +1524,7 @@ export class SchemaDiffer {
           break;
 
         case "add_foreign_key": {
-          const constraintName = alt.constraint.name || `fk_${tableName}_${alt.constraint.referencedTable}`;
+          const constraintName = alt.constraint.name || `fk_${table.name}_${alt.constraint.referencedTable}`;
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           const referencedColumns = alt.constraint.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")
@@ -1552,7 +1546,7 @@ export class SchemaDiffer {
           break;
 
         case "add_unique": {
-          const constraintName = alt.constraint.name || `unique_${tableName}_${alt.constraint.columns.join('_')}`;
+          const constraintName = alt.constraint.name || `unique_${table.name}_${alt.constraint.columns.join('_')}`;
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")
             .ident(constraintName)

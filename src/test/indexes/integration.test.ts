@@ -169,7 +169,7 @@ describe("Index Integration Tests", () => {
       );
       const hasCreateStatement = allStatements.some((stmt) =>
         stmt.includes(
-          "CREATE INDEX idx_products_name ON products (name, category)"
+          'CREATE INDEX "idx_products_name" ON "products" ("name", "category")'
         )
       );
 
