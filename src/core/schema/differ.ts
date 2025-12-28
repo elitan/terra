@@ -503,6 +503,7 @@ export class SchemaDiffer {
   ): string {
     const currentNormalized = normalizeType(currentType).toLowerCase();
     const desiredNormalized = normalizeType(desiredType).toLowerCase();
+    const quotedCol = `"${columnName.replace(/"/g, '""')}"`;
 
     // For VARCHAR/TEXT to numeric, try to cast the string to the target type
     if (
@@ -513,22 +514,22 @@ export class SchemaDiffer {
         desiredNormalized.includes("decimal") ||
         desiredNormalized.includes("numeric")
       ) {
-        return `${columnName}::${desiredType}`;
+        return `${quotedCol}::${desiredType}`;
       }
       if (
         desiredNormalized.includes("integer") ||
         desiredNormalized.includes("int")
       ) {
         // For string to integer conversion, first convert to numeric to handle decimal strings, then truncate
-        return `TRUNC(${columnName}::DECIMAL)::integer`;
+        return `TRUNC(${quotedCol}::DECIMAL)::integer`;
       }
       if (desiredNormalized.includes("bool")) {
-        return `TRIM(${columnName})::boolean`;
+        return `TRIM(${quotedCol})::boolean`;
       }
     }
 
     // Default: just cast to the desired type
-    return `${columnName}::${desiredType}`;
+    return `${quotedCol}::${desiredType}`;
   }
 
   private generatePrimaryKeyStatements(

@@ -596,7 +596,8 @@ export class SchemaService {
     for (const currentExt of currentExtensions) {
       if (!desiredExtensionNames.has(currentExt.name)) {
         // Use CASCADE to drop all dependent objects (types, functions, etc.)
-        dropStatements.push(`DROP EXTENSION IF EXISTS ${currentExt.name} CASCADE;`);
+        const dropBuilder = new SQLBuilder().p("DROP EXTENSION IF EXISTS").ident(currentExt.name).p("CASCADE");
+        dropStatements.push(dropBuilder.build() + ';');
         Logger.info(`Dropping extension '${currentExt.name}' (CASCADE will drop dependent objects)`);
       }
     }
