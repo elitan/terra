@@ -374,6 +374,41 @@ describe("Type Alias Idempotency", () => {
     });
   });
 
+  describe("TIMESTAMPTZ Alias Equivalence", () => {
+    test("should treat 'timestamptz' and 'timestamp with time zone' as identical", async () => {
+      const schema1 = `
+        CREATE TABLE events (
+          id SERIAL PRIMARY KEY,
+          created_at timestamptz
+        );
+      `;
+
+      await service.apply(schema1, ['public'], true);
+
+      const plan = await service.plan(schema1);
+
+      expect(plan.hasChanges).toBe(false);
+      expect(plan.transactional.length).toBe(0);
+    });
+
+    test("should be idempotent with 'timestamptz DEFAULT now()'", async () => {
+      const schema1 = `
+        CREATE TABLE events (
+          id SERIAL PRIMARY KEY,
+          created_at timestamptz DEFAULT now(),
+          updated_at timestamptz DEFAULT now()
+        );
+      `;
+
+      await service.apply(schema1, ['public'], true);
+
+      const plan = await service.plan(schema1);
+
+      expect(plan.hasChanges).toBe(false);
+      expect(plan.transactional.length).toBe(0);
+    });
+  });
+
   describe("Data Preservation Across Aliases", () => {
     test("should preserve data when switching between int aliases", async () => {
       const schema1 = `
