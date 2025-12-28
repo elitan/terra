@@ -12,13 +12,13 @@
     "cli",
     "sql"
   ],
-  "homepage": "https://github.com/elitan/terra#readme",
+  "homepage": "https://github.com/elitan/pgterra#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/elitan/terra.git"
+    "url": "https://github.com/elitan/pgterra.git"
   },
   "bugs": {
-    "url": "https://github.com/elitan/terra/issues"
+    "url": "https://github.com/elitan/pgterra/issues"
   },
   "author": {
     "name": "Johan Eliasson",
