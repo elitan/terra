@@ -965,18 +965,16 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    // Create maps for easier comparison
+    // Generate a structural key for FK matching (independent of constraint name)
+    const getFkStructuralKey = (c: ForeignKeyConstraint) =>
+      `${c.columns.join(',')}->${c.referencedTable}.${c.referencedColumns.join(',')}`;
+
+    // Create maps for easier comparison using structural keys
     const currentMap = new Map(
-      currentConstraints.map(c => [
-        c.name || `fk_${c.columns.join('_')}_${c.referencedTable}`,
-        c
-      ])
+      currentConstraints.map(c => [getFkStructuralKey(c), c])
     );
     const desiredMap = new Map(
-      desiredConstraints.map(c => [
-        c.name || `fk_${c.columns.join('_')}_${c.referencedTable}`,
-        c
-      ])
+      desiredConstraints.map(c => [getFkStructuralKey(c), c])
     );
 
     // Drop removed constraints (but skip those that will be auto-dropped by column removal)
@@ -1327,17 +1325,15 @@ export class SchemaDiffer {
     droppedColumns: Set<string>,
     alterations: TableAlteration[]
   ): void {
+    // Generate a structural key for FK matching (independent of constraint name)
+    const getFkStructuralKey = (c: ForeignKeyConstraint) =>
+      `${c.columns.join(',')}->${c.referencedTable}.${c.referencedColumns.join(',')}`;
+
     const currentMap = new Map(
-      currentConstraints.map(c => [
-        c.name || `fk_${c.columns.join('_')}_${c.referencedTable}`,
-        c
-      ])
+      currentConstraints.map(c => [getFkStructuralKey(c), c])
     );
     const desiredMap = new Map(
-      desiredConstraints.map(c => [
-        c.name || `fk_${c.columns.join('_')}_${c.referencedTable}`,
-        c
-      ])
+      desiredConstraints.map(c => [getFkStructuralKey(c), c])
     );
 
     // Drop removed constraints (skip those auto-dropped by column removal)
