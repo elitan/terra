@@ -1,6 +1,6 @@
 {
   "name": "pgterra",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Declarative schema management for Postgres",
   "keywords": [
     "postgres",
