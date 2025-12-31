@@ -14,6 +14,7 @@ import {
   columnsAreDifferent,
   normalizeType,
   normalizeDefault,
+  normalizeExpression,
   generateAddPrimaryKeySQL,
   generateDropPrimaryKeySQL,
   generateAddCheckConstraintSQL,
@@ -300,7 +301,7 @@ export class SchemaDiffer {
     // Special handling for generated columns - they need drop and recreate
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
       (!desiredColumn.generated || !currentColumn.generated ||
-       desiredColumn.generated.expression !== currentColumn.generated.expression ||
+       normalizeExpression(desiredColumn.generated.expression) !== normalizeExpression(currentColumn.generated.expression) ||
        desiredColumn.generated.always !== currentColumn.generated.always ||
        desiredColumn.generated.stored !== currentColumn.generated.stored);
 
@@ -769,23 +770,28 @@ export class SchemaDiffer {
   }
 
   private indexesAreEqual(index1: Index, index2: Index): boolean {
-    // Compare all relevant properties
     if (index1.tableName !== index2.tableName) return false;
     if (index1.type !== index2.type) return false;
     if (index1.unique !== index2.unique) return false;
 
-    // Compare columns (order matters)
     if (index1.columns.length !== index2.columns.length) return false;
     for (let i = 0; i < index1.columns.length; i++) {
       if (index1.columns[i] !== index2.columns[i]) return false;
     }
 
-    // Compare optional properties
     if (index1.where !== index2.where) return false;
     if (index1.expression !== index2.expression) return false;
     if (index1.tablespace !== index2.tablespace) return false;
 
-    // Compare storage parameters
+    const opclasses1 = index1.opclasses || {};
+    const opclasses2 = index2.opclasses || {};
+    const opKeys1 = Object.keys(opclasses1);
+    const opKeys2 = Object.keys(opclasses2);
+    if (opKeys1.length !== opKeys2.length) return false;
+    for (const key of opKeys1) {
+      if (opclasses1[key] !== opclasses2[key]) return false;
+    }
+
     const params1 = index1.storageParameters || {};
     const params2 = index2.storageParameters || {};
     const keys1 = Object.keys(params1);
@@ -850,7 +856,11 @@ export class SchemaDiffer {
     if (index.expression) {
       builder.p(`(${index.expression})`);
     } else {
-      const quotedColumns = index.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+      const quotedColumns = index.columns.map(col => {
+        const quoted = `"${col.replace(/"/g, '""')}"`;
+        const opclass = index.opclasses?.[col];
+        return opclass ? `${quoted} ${opclass}` : quoted;
+      }).join(", ");
       builder.p(`(${quotedColumns})`);
     }
 
@@ -1174,7 +1184,7 @@ export class SchemaDiffer {
     // We'll still do this as separate statements for now (not batched)
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
       (!desiredColumn.generated || !currentColumn.generated ||
-       desiredColumn.generated.expression !== currentColumn.generated.expression ||
+       normalizeExpression(desiredColumn.generated.expression) !== normalizeExpression(currentColumn.generated.expression) ||
        desiredColumn.generated.always !== currentColumn.generated.always ||
        desiredColumn.generated.stored !== currentColumn.generated.stored);
 

@@ -217,4 +217,44 @@ describe("Generated Columns", () => {
     expect(displayColumn?.generated?.expression.toUpperCase()).toContain("CASE");
     expect(displayColumn?.generated?.expression.toUpperCase()).toContain("WHEN");
   });
+
+  test("should be idempotent - no changes after applying generated column", async () => {
+    const schema = `
+      CREATE TABLE products (
+        id SERIAL PRIMARY KEY,
+        price DECIMAL(10, 2),
+        quantity INTEGER,
+        total DECIMAL(10, 2) GENERATED ALWAYS AS (price * quantity) STORED
+      );
+    `;
+
+    await executeColumnMigration(client, schema, services);
+
+    const currentSchema = await services.inspector.getCurrentSchema(client);
+    const desiredTables = await services.parser.parseCreateTableStatements(schema);
+    const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
+
+    expect(plan.hasChanges).toBe(false);
+  });
+
+  test("should be idempotent with complex generated expressions", async () => {
+    const schema = `
+      CREATE TABLE users (
+        id SERIAL PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        search_vector TEXT GENERATED ALWAYS AS (
+          LOWER(first_name) || ' ' || LOWER(last_name)
+        ) STORED
+      );
+    `;
+
+    await executeColumnMigration(client, schema, services);
+
+    const currentSchema = await services.inspector.getCurrentSchema(client);
+    const desiredTables = await services.parser.parseCreateTableStatements(schema);
+    const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
+
+    expect(plan.hasChanges).toBe(false);
+  });
 });

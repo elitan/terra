@@ -201,6 +201,22 @@ export class DatabaseInspector {
             -- Expression index - no simple column names
             ARRAY[]::text[]
         END as column_names,
+        -- Get operator class names for each column (non-default only)
+        CASE
+          WHEN ix.indexprs IS NULL THEN
+            ARRAY(
+              SELECT
+                CASE
+                  WHEN opc.opcdefault THEN NULL
+                  ELSE opc.opcname
+                END
+              FROM unnest(ix.indclass) WITH ORDINALITY AS u(opcoid, ord)
+              JOIN pg_opclass opc ON opc.oid = u.opcoid
+              ORDER BY u.ord
+            )
+          ELSE
+            ARRAY[]::text[]
+        END as opclass_names,
         CASE
           WHEN ix.indpred IS NOT NULL THEN
             regexp_replace(
@@ -232,19 +248,31 @@ export class DatabaseInspector {
       [tableName, tableSchema]
     );
 
-    return result.rows.map((row: any) => ({
-      name: row.index_name,
-      tableName: row.table_name,
-      schema: row.table_schema,
-      columns: row.column_names || [],
-      type: this.mapPostgreSQLIndexType(row.access_method),
-      unique: row.is_unique,
-      concurrent: false, // Cannot detect from system catalogs
-      where: row.where_clause || undefined,
-      expression: row.has_expressions ? row.expression_def : undefined,
-      storageParameters: this.parseStorageOptions(row.storage_options),
-      tablespace: row.tablespace_name || undefined,
-    }));
+    return result.rows.map((row: any) => {
+      const columns = row.column_names || [];
+      const opclassNames = row.opclass_names || [];
+      let opclasses: Record<string, string> | undefined;
+      for (let i = 0; i < columns.length; i++) {
+        if (opclassNames[i]) {
+          if (!opclasses) opclasses = {};
+          opclasses[columns[i]] = opclassNames[i];
+        }
+      }
+      return {
+        name: row.index_name,
+        tableName: row.table_name,
+        schema: row.table_schema,
+        columns,
+        opclasses,
+        type: this.mapPostgreSQLIndexType(row.access_method),
+        unique: row.is_unique,
+        concurrent: false,
+        where: row.where_clause || undefined,
+        expression: row.has_expressions ? row.expression_def : undefined,
+        storageParameters: this.parseStorageOptions(row.storage_options),
+        tablespace: row.tablespace_name || undefined,
+      };
+    });
   }
 
   private parseStorageOptions(

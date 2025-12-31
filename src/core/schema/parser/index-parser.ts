@@ -24,6 +24,7 @@ export function parseCreateIndex(stmt: any): Index | null {
     const indexParams = stmt.indexParams || [];
 
     const columns: string[] = [];
+    let opclasses: Record<string, string> | undefined;
     let expression: string | undefined;
 
     if (indexParams.length === 1 && indexParams[0].IndexElem?.expr) {
@@ -34,6 +35,16 @@ export function parseCreateIndex(stmt: any): Index | null {
           const colName = param.IndexElem.name;
           if (colName) {
             columns.push(colName);
+            if (param.IndexElem.opclass && param.IndexElem.opclass.length > 0) {
+              const opclassName = param.IndexElem.opclass
+                .map((node: any) => node.String?.sval)
+                .filter(Boolean)
+                .join('.');
+              if (opclassName) {
+                if (!opclasses) opclasses = {};
+                opclasses[colName] = opclassName;
+              }
+            }
           } else if (param.IndexElem.expr) {
             expression = deparseSync([param.IndexElem.expr]).trim();
             break;
@@ -111,6 +122,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       tableName,
       schema,
       columns,
+      opclasses,
       type,
       unique,
       concurrent,
