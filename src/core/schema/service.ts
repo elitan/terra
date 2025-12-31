@@ -229,14 +229,18 @@ export class SchemaService {
 
       // After table changes, safely remove unused ENUMs
       const enumRemovalStatements = await this.generateEnumRemovalStatements(desiredEnums, currentEnums, client, schemas);
-      if (enumRemovalStatements.length > 0) {
-        const removalPlan = {
-          transactional: enumRemovalStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, removalPlan, autoApprove);
+      for (const statement of enumRemovalStatements) {
+        try {
+          await client.query(statement);
+        } catch (error: any) {
+          if (error.code === '2BP01') {
+            const match = statement.match(/DROP TYPE\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i);
+            const typeName = match ? (match[1] ? `${match[1]}.${match[2]}` : match[2]) : 'unknown';
+            Logger.warning(`Could not drop ENUM '${typeName}': now in use (concurrent change). Will retry next migration.`);
+          } else {
+            throw error;
+          }
+        }
       }
 
       // 3. Functions and procedures (triggers depend on functions)
