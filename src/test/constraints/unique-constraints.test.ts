@@ -58,7 +58,7 @@ describe("Unique Constraints", () => {
 
       // Test uniqueness enforcement
       await client.query("INSERT INTO users (email, username) VALUES ('test@example.com', 'user1')");
-      
+
       await expect(
         client.query("INSERT INTO users (email, username) VALUES ('test@example.com', 'user2')")
       ).rejects.toThrow(/unique_email/);

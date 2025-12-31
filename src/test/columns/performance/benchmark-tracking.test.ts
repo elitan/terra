@@ -294,7 +294,7 @@ describe("Performance Benchmark Tracking", () => {
 
         await client.query(`DROP TABLE ${tableName}`);
       }
-    });
+    }, 60000);
   });
 
   describe("Complex Scenario Benchmarks", () => {

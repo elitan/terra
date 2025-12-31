@@ -132,7 +132,7 @@ describe("Primary Key Support", () => {
       const sql = generateAddPrimaryKeySQL("users", primaryKey);
 
       expect(sql).toBe(
-        'ALTER TABLE "users" ADD CONSTRAINT "pk_users" PRIMARY KEY ("id");'
+        'ALTER TABLE "users" ADD CONSTRAINT "users_pkey" PRIMARY KEY ("id");'
       );
     });
 
@@ -144,7 +144,7 @@ describe("Primary Key Support", () => {
       const sql = generateAddPrimaryKeySQL("user_roles", primaryKey);
 
       expect(sql).toBe(
-        'ALTER TABLE "user_roles" ADD CONSTRAINT "pk_user_roles" PRIMARY KEY ("user_id", "role_id");'
+        'ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_pkey" PRIMARY KEY ("user_id", "role_id");'
       );
     });
 
@@ -269,7 +269,7 @@ describe("Primary Key Support", () => {
       expect(usersTable).toBeDefined();
       expect(usersTable!.primaryKey).toBeDefined();
       expect(usersTable!.primaryKey!.columns).toEqual(["id"]);
-      expect(usersTable!.primaryKey!.name).toBe("pk_users");
+      expect(usersTable!.primaryKey!.name).toBe("users_pkey");
 
       // Verify data is preserved
       const result = await client.query("SELECT COUNT(*) FROM users");
@@ -360,7 +360,7 @@ describe("Primary Key Support", () => {
         "user_id",
         "session_token",
       ]);
-      expect(sessionsTable!.primaryKey!.name).toBe("pk_user_sessions");
+      expect(sessionsTable!.primaryKey!.name).toBe("user_sessions_pkey");
 
       // Verify data is preserved and id column is no longer primary key
       const result = await client.query("SELECT COUNT(*) FROM user_sessions");

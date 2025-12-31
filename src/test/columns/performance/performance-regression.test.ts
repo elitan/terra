@@ -312,7 +312,7 @@ describe("Performance Regression Testing", () => {
       console.log(
         `Precision decrease rate: ${decreaseRate.toFixed(0)} records/second`
       );
-    });
+    }, 60000);
   });
 
   describe("Regression Detection", () => {

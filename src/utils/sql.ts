@@ -9,6 +9,11 @@ export function splitSchemaTable(qualifiedName: string): [string, string | undef
   return [qualifiedName, undefined];
 }
 
+export function getBareTableName(tableName: string): string {
+  const parts = tableName.split('.');
+  return parts[parts.length - 1];
+}
+
 /**
  * Get qualified table name with schema prefix if present
  */
@@ -176,14 +181,14 @@ export function generateCreateTableStatement(table: Table): string {
 
   // Add primary key constraint if it exists
   if (table.primaryKey) {
-    const primaryKeyClause = generatePrimaryKeyClause(table.primaryKey);
+    const primaryKeyClause = generatePrimaryKeyClause(table.primaryKey, table.name);
     columnDefs.push(primaryKeyClause);
   }
 
   // Add check constraints if they exist
   if (table.checkConstraints) {
     for (const checkConstraint of table.checkConstraints) {
-      const checkClause = generateCheckConstraintClause(checkConstraint);
+      const checkClause = generateCheckConstraintClause(checkConstraint, table.name);
       columnDefs.push(checkClause);
     }
   }
@@ -191,7 +196,7 @@ export function generateCreateTableStatement(table: Table): string {
   // Add unique constraints if they exist
   if (table.uniqueConstraints) {
     for (const uniqueConstraint of table.uniqueConstraints) {
-      const uniqueClause = generateUniqueConstraintClause(uniqueConstraint);
+      const uniqueClause = generateUniqueConstraintClause(uniqueConstraint, table.name);
       columnDefs.push(uniqueClause);
     }
   }
@@ -204,14 +209,19 @@ export function generateCreateTableStatement(table: Table): string {
 }
 
 export function generatePrimaryKeyClause(
-  primaryKey: PrimaryKeyConstraint
+  primaryKey: PrimaryKeyConstraint,
+  tableName?: string
 ): string {
   const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const bareTable = tableName ? getBareTableName(tableName) : undefined;
+  const constraintName = primaryKey.name
+    ? primaryKey.name
+    : (bareTable ? `${bareTable}_pkey` : undefined);
 
-  if (primaryKey.name) {
+  if (constraintName) {
     const builder = new SQLBuilder()
       .p("CONSTRAINT")
-      .ident(primaryKey.name)
+      .ident(constraintName)
       .p(`PRIMARY KEY (${columns})`);
     return builder.build();
   } else {
@@ -223,7 +233,8 @@ export function generateAddPrimaryKeySQL(
   tableName: string,
   primaryKey: PrimaryKeyConstraint
 ): string {
-  const constraintName = primaryKey.name || `pk_${tableName}`;
+  const bareTable = getBareTableName(tableName);
+  const constraintName = primaryKey.name || `${bareTable}_pkey`;
   const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
 
   return new SQLBuilder()
@@ -296,7 +307,8 @@ export function generateAddCheckConstraintSQL(
   tableName: string,
   checkConstraint: CheckConstraint
 ): string {
-  const constraintName = checkConstraint.name || `check_${tableName}_${Date.now()}`;
+  const bareTable = getBareTableName(tableName);
+  const constraintName = checkConstraint.name || `${bareTable}_check`;
   return new SQLBuilder()
     .p("ALTER TABLE")
     .table(tableName)
@@ -319,7 +331,10 @@ export function generateDropCheckConstraintSQL(
     .build();
 }
 
-export function generateCheckConstraintClause(checkConstraint: CheckConstraint): string {
+export function generateCheckConstraintClause(
+  checkConstraint: CheckConstraint,
+  tableName?: string
+): string {
   const builder = new SQLBuilder();
 
   if (checkConstraint.name) {
@@ -336,7 +351,8 @@ export function generateAddUniqueConstraintSQL(
   tableName: string,
   uniqueConstraint: UniqueConstraint
 ): string {
-  const constraintName = uniqueConstraint.name || `unique_${tableName}_${uniqueConstraint.columns.join('_')}`;
+  const bareTable = getBareTableName(tableName);
+  const constraintName = uniqueConstraint.name || `${bareTable}_${uniqueConstraint.columns.join('_')}_unique`;
   const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
   return new SQLBuilder()
     .p("ALTER TABLE")
@@ -360,13 +376,20 @@ export function generateDropUniqueConstraintSQL(
     .build();
 }
 
-export function generateUniqueConstraintClause(uniqueConstraint: UniqueConstraint): string {
+export function generateUniqueConstraintClause(
+  uniqueConstraint: UniqueConstraint,
+  tableName?: string
+): string {
   const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const bareTable = tableName ? getBareTableName(tableName) : undefined;
+  const constraintName = uniqueConstraint.name
+    ? uniqueConstraint.name
+    : (bareTable ? `${bareTable}_${uniqueConstraint.columns.join('_')}_unique` : undefined);
 
   const builder = new SQLBuilder();
 
-  if (uniqueConstraint.name) {
-    builder.p("CONSTRAINT").ident(uniqueConstraint.name);
+  if (constraintName) {
+    builder.p("CONSTRAINT").ident(constraintName);
   }
 
   builder.p(`UNIQUE (${columns})`);

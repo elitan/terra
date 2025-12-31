@@ -24,6 +24,7 @@ import {
   generateDropUniqueConstraintSQL,
   getQualifiedTableName,
   splitSchemaTable,
+  getBareTableName,
 } from "../../utils/sql";
 import { SQLBuilder } from "../../utils/sql-builder";
 import { DependencyResolver } from "./dependency-resolver";
@@ -921,15 +922,16 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    // Create maps for easier comparison
+    const normalizeExpression = (expr: string) =>
+      expr.replace(/\s+/g, ' ').trim();
+
     const currentMap = new Map(
-      currentConstraints.map(c => [c.name || c.expression, c])
+      currentConstraints.map(c => [normalizeExpression(c.expression), c])
     );
     const desiredMap = new Map(
-      desiredConstraints.map(c => [c.name || c.expression, c])
+      desiredConstraints.map(c => [normalizeExpression(c.expression), c])
     );
 
-    // Drop removed constraints
     for (const [key, constraint] of currentMap) {
       if (!desiredMap.has(key)) {
         if (constraint.name) {
@@ -938,20 +940,9 @@ export class SchemaDiffer {
       }
     }
 
-    // Add new constraints
     for (const [key, constraint] of desiredMap) {
       if (!currentMap.has(key)) {
         statements.push(generateAddCheckConstraintSQL(tableName, constraint));
-      } else {
-        // Check if the constraint has changed (expression is different)
-        const currentConstraint = currentMap.get(key)!;
-        if (constraint.expression !== currentConstraint.expression) {
-          // Drop and recreate
-          if (currentConstraint.name) {
-            statements.push(generateDropCheckConstraintSQL(tableName, currentConstraint.name));
-          }
-          statements.push(generateAddCheckConstraintSQL(tableName, constraint));
-        }
       }
     }
 
@@ -1061,21 +1052,16 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    // Create maps for easier comparison
+    const getStructuralKey = (c: UniqueConstraint) =>
+      [...c.columns].sort().join(',');
+
     const currentMap = new Map(
-      currentConstraints.map(c => [
-        c.name || `unique_${c.columns.join('_')}`,
-        c
-      ])
+      currentConstraints.map(c => [getStructuralKey(c), c])
     );
     const desiredMap = new Map(
-      desiredConstraints.map(c => [
-        c.name || `unique_${c.columns.join('_')}`,
-        c
-      ])
+      desiredConstraints.map(c => [getStructuralKey(c), c])
     );
 
-    // Drop removed constraints
     for (const [key, constraint] of currentMap) {
       if (!desiredMap.has(key)) {
         if (constraint.name) {
@@ -1084,7 +1070,6 @@ export class SchemaDiffer {
       }
     }
 
-    // Add new constraints
     for (const [key, constraint] of desiredMap) {
       if (!currentMap.has(key)) {
         statements.push(generateAddUniqueConstraintSQL(tableName, constraint));
@@ -1275,14 +1260,16 @@ export class SchemaDiffer {
     currentConstraints: CheckConstraint[],
     alterations: TableAlteration[]
   ): void {
+    const normalizeExpression = (expr: string) =>
+      expr.replace(/\s+/g, ' ').trim();
+
     const currentMap = new Map(
-      currentConstraints.map(c => [c.name || c.expression, c])
+      currentConstraints.map(c => [normalizeExpression(c.expression), c])
     );
     const desiredMap = new Map(
-      desiredConstraints.map(c => [c.name || c.expression, c])
+      desiredConstraints.map(c => [normalizeExpression(c.expression), c])
     );
 
-    // Drop removed constraints
     for (const [key, constraint] of currentMap) {
       if (!desiredMap.has(key) && constraint.name) {
         alterations.push({
@@ -1292,27 +1279,12 @@ export class SchemaDiffer {
       }
     }
 
-    // Add new constraints
     for (const [key, constraint] of desiredMap) {
       if (!currentMap.has(key)) {
         alterations.push({
           type: "add_check",
           constraint,
         });
-      } else {
-        // Check if expression changed
-        const currentConstraint = currentMap.get(key)!;
-        if (constraint.expression !== currentConstraint.expression && currentConstraint.name) {
-          // Drop and recreate
-          alterations.push({
-            type: "drop_check",
-            constraintName: currentConstraint.name,
-          });
-          alterations.push({
-            type: "add_check",
-            constraint,
-          });
-        }
       }
     }
   }
@@ -1382,20 +1354,16 @@ export class SchemaDiffer {
     currentConstraints: UniqueConstraint[],
     alterations: TableAlteration[]
   ): void {
+    const getStructuralKey = (c: UniqueConstraint) =>
+      [...c.columns].sort().join(',');
+
     const currentMap = new Map(
-      currentConstraints.map(c => [
-        c.name || `unique_${c.columns.join('_')}`,
-        c
-      ])
+      currentConstraints.map(c => [getStructuralKey(c), c])
     );
     const desiredMap = new Map(
-      desiredConstraints.map(c => [
-        c.name || `unique_${c.columns.join('_')}`,
-        c
-      ])
+      desiredConstraints.map(c => [getStructuralKey(c), c])
     );
 
-    // Drop removed constraints
     for (const [key, constraint] of currentMap) {
       if (!desiredMap.has(key) && constraint.name) {
         alterations.push({
@@ -1405,7 +1373,6 @@ export class SchemaDiffer {
       }
     }
 
-    // Add new constraints
     for (const [key, constraint] of desiredMap) {
       if (!currentMap.has(key)) {
         alterations.push({
@@ -1497,7 +1464,8 @@ export class SchemaDiffer {
           break;
 
         case "add_primary_key": {
-          const constraintName = alt.constraint.name || `pk_${table.name}`;
+          const bareTable = getBareTableName(table.name);
+          const constraintName = alt.constraint.name || `${bareTable}_pkey`;
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
@@ -1510,7 +1478,8 @@ export class SchemaDiffer {
           break;
 
         case "add_check": {
-          const constraintName = alt.constraint.name || `check_${table.name}_${Date.now()}`;
+          const bareTable = getBareTableName(table.name);
+          const constraintName = alt.constraint.name || `${bareTable}_check`;
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
             .p(`CHECK (${alt.constraint.expression})`);
@@ -1544,7 +1513,8 @@ export class SchemaDiffer {
           break;
 
         case "add_unique": {
-          const constraintName = alt.constraint.name || `unique_${table.name}_${alt.constraint.columns.join('_')}`;
+          const bareTable = getBareTableName(table.name);
+          const constraintName = alt.constraint.name || `${bareTable}_${alt.constraint.columns.join('_')}_unique`;
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
