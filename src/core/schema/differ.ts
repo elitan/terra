@@ -1417,10 +1417,6 @@ export class SchemaDiffer {
     };
 
     const sorted = [...alterations].sort((a, b) => {
-      const isADrop = a.type.startsWith("drop_");
-      const isBDrop = b.type.startsWith("drop_");
-      if (isADrop && !isBDrop) return -1;
-      if (!isADrop && isBDrop) return 1;
       return (operationPriority[a.type] ?? 99) - (operationPriority[b.type] ?? 99);
     });
 
