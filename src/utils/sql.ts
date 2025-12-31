@@ -3,15 +3,16 @@ import { SQLBuilder } from "./sql-builder";
 
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
-  if (parts.length === 2) {
-    return [parts[1], parts[0]];
+  const [schema, table] = parts;
+  if (parts.length === 2 && schema && table) {
+    return [table, schema];
   }
   return [qualifiedName, undefined];
 }
 
 export function getBareTableName(tableName: string): string {
   const parts = tableName.split('.');
-  return parts[parts.length - 1];
+  return parts[parts.length - 1] ?? tableName;
 }
 
 /**
