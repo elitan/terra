@@ -2,6 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { MigrationError } from "../types/errors";
 import { DatabaseService } from "../core/database/client";
+import { MigrationExecutor } from "../core/migration/executor";
+import type { MigrationPlan } from "../types/migration";
 import { createTestClient, cleanDatabase } from "./utils";
 
 describe("Executor Error Handling", () => {
@@ -151,6 +153,74 @@ describe("Executor Error Handling", () => {
       // Verify data was inserted
       const result = await client.query("SELECT * FROM test_table");
       expect(result.rows).toHaveLength(1);
+    });
+  });
+
+  describe("MigrationExecutor error handling", () => {
+    let executor: MigrationExecutor;
+
+    beforeEach(() => {
+      executor = new MigrationExecutor(databaseService);
+    });
+
+    test("should preserve statement from transactional errors", async () => {
+      await client.query(`
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) UNIQUE
+        );
+        INSERT INTO users (email) VALUES ('test@example.com');
+      `);
+
+      const plan: MigrationPlan = {
+        hasChanges: true,
+        transactional: [
+          "INSERT INTO users (email) VALUES ('duplicate@example.com');",
+          "INSERT INTO users (email) VALUES ('test@example.com');",
+        ],
+        concurrent: [],
+        deferred: [],
+      };
+
+      try {
+        await executor.executePlan(client, plan, true);
+        expect(true).toBe(false);
+      } catch (error) {
+        expect(error).toBeInstanceOf(MigrationError);
+        const migrationError = error as MigrationError;
+        expect(migrationError.statement).toContain("INSERT INTO users");
+        expect(migrationError.statement).toContain("test@example.com");
+        expect(migrationError.pgError?.code).toBe("23505");
+      }
+    });
+
+    test("should include statement in concurrent errors", async () => {
+      await client.query(`
+        CREATE TABLE items (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(255)
+        );
+      `);
+
+      const plan: MigrationPlan = {
+        hasChanges: true,
+        transactional: [],
+        concurrent: [
+          "CREATE INDEX CONCURRENTLY idx_items_name ON items (name);",
+          "CREATE INDEX CONCURRENTLY idx_items_name ON items (name);",
+        ],
+        deferred: [],
+      };
+
+      try {
+        await executor.executePlan(client, plan, true);
+        expect(true).toBe(false);
+      } catch (error) {
+        expect(error).toBeInstanceOf(MigrationError);
+        const migrationError = error as MigrationError;
+        expect(migrationError.statement).toContain("CREATE INDEX CONCURRENTLY");
+        expect(migrationError.statement).toContain("idx_items_name");
+      }
     });
   });
 });

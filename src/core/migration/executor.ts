@@ -79,25 +79,37 @@ export class MigrationExecutor {
             spinner.stopAndPersist({ symbol: "✔", text: `Applied concurrent change (${elapsed}s)` });
           } catch (error) {
             spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply concurrent change" });
-            throw error;
+
+            if (error && typeof error === 'object' && 'code' in error) {
+              const pgError = error as any;
+              throw new MigrationError(
+                pgError.message || "Concurrent statement failed",
+                statement,
+                {
+                  code: pgError.code,
+                  detail: pgError.detail,
+                  hint: pgError.hint,
+                  position: pgError.position,
+                }
+              );
+            }
+            throw new MigrationError(
+              error instanceof Error ? error.message : String(error),
+              statement
+            );
           }
         }
       }
     } catch (error) {
-      // Check if this is a PostgreSQL error with additional context
+      if (error instanceof MigrationError) {
+        throw error;
+      }
+
       if (error && typeof error === 'object' && 'code' in error) {
         const pgError = error as any;
-
-        // Try to determine which statement failed
-        let failedStatement: string | undefined;
-        if (pgError.message) {
-          // If we're in the middle of executing statements, the current statement is in the error
-          failedStatement = undefined; // We'll let the caller determine this
-        }
-
         throw new MigrationError(
           pgError.message || "Database migration failed",
-          failedStatement,
+          undefined,
           {
             code: pgError.code,
             detail: pgError.detail,
@@ -107,12 +119,6 @@ export class MigrationExecutor {
         );
       }
 
-      // If it's already a MigrationError, re-throw it
-      if (error instanceof MigrationError) {
-        throw error;
-      }
-
-      // Generic error
       throw new MigrationError(
         error instanceof Error ? error.message : String(error)
       );
