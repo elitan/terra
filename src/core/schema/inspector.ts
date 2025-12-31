@@ -294,6 +294,7 @@ export class DatabaseInspector {
       SELECT
         tc.constraint_name,
         kcu.column_name,
+        ccu.table_schema AS referenced_schema,
         ccu.table_name AS referenced_table,
         ccu.column_name AS referenced_column,
         rc.delete_rule,
@@ -349,7 +350,9 @@ export class DatabaseInspector {
       foreignKeys.push({
         name: constraintName,
         columns,
-        referencedTable: firstRow.referenced_table,
+        referencedTable: firstRow.referenced_schema === 'public'
+          ? firstRow.referenced_table
+          : `${firstRow.referenced_schema}.${firstRow.referenced_table}`,
         referencedColumns,
         onDelete,
         onUpdate,

@@ -1,6 +1,14 @@
 import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType } from "../types/schema";
 import { SQLBuilder } from "./sql-builder";
 
+export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
+  const parts = qualifiedName.split('.');
+  if (parts.length === 2) {
+    return [parts[1], parts[0]];
+  }
+  return [qualifiedName, undefined];
+}
+
 /**
  * Get qualified table name with schema prefix if present
  */
@@ -255,7 +263,7 @@ export function generateAddForeignKeySQL(
     .p("ADD CONSTRAINT")
     .ident(constraintName)
     .p(`FOREIGN KEY (${columns}) REFERENCES`)
-    .table(foreignKey.referencedTable)
+    .table(...splitSchemaTable(foreignKey.referencedTable))
     .p(`(${referencedColumns})`);
 
   if (foreignKey.onDelete) {

@@ -496,6 +496,37 @@ describe("Foreign Key Constraints", () => {
       expect(result.rows[1].constraint_name).toBe('fk_sender');
     });
 
+    test("should handle cross-schema foreign keys without false diffs", async () => {
+      await client.query("CREATE SCHEMA IF NOT EXISTS other_schema");
+
+      const schema = `
+        CREATE TABLE other_schema.referenced_table (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL
+        );
+
+        CREATE TABLE referencing_table (
+          id SERIAL PRIMARY KEY,
+          ref_id INTEGER NOT NULL,
+          CONSTRAINT fk_cross_schema FOREIGN KEY (ref_id) REFERENCES other_schema.referenced_table(id)
+        );
+      `;
+
+      await schemaService.apply(schema, ['public', 'other_schema'], true);
+
+      const result = await client.query(`
+        SELECT ccu.table_schema, ccu.table_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.constraint_name = 'fk_cross_schema'
+      `);
+      expect(result.rows[0].table_schema).toBe('other_schema');
+      expect(result.rows[0].table_name).toBe('referenced_table');
+
+      await client.query("DROP SCHEMA other_schema CASCADE");
+    });
+
     test("should preserve foreign keys when modifying unrelated columns", async () => {
       const initialSchema = `
         CREATE TABLE departments (

@@ -23,6 +23,7 @@ import {
   generateAddUniqueConstraintSQL,
   generateDropUniqueConstraintSQL,
   getQualifiedTableName,
+  splitSchemaTable,
 } from "../../utils/sql";
 import { SQLBuilder } from "../../utils/sql-builder";
 import { DependencyResolver } from "./dependency-resolver";
@@ -1527,7 +1528,7 @@ export class SchemaDiffer {
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
             .p(`FOREIGN KEY (${columns}) REFERENCES`)
-            .table(alt.constraint.referencedTable)
+            .table(...splitSchemaTable(alt.constraint.referencedTable))
             .p(`(${referencedColumns})`);
           if (alt.constraint.onDelete) {
             b.p(`ON DELETE ${alt.constraint.onDelete}`);
