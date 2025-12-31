@@ -1,6 +1,5 @@
 import { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
-import type { EnumType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../types/schema";
 import { SchemaParser } from "./parser";
 import { DatabaseInspector } from "./inspector";
 import { SchemaDiffer } from "./differ";
@@ -8,21 +7,16 @@ import { MigrationExecutor } from "../migration/executor";
 import { DatabaseService, type AdvisoryLockOptions } from "../database/client";
 import { Logger } from "../../utils/logger";
 import {
-  generateCreateViewSQL,
-  generateDropViewSQL,
-  generateCreateOrReplaceViewSQL,
-  generateCreateFunctionSQL,
-  generateDropFunctionSQL,
-  generateCreateProcedureSQL,
-  generateDropProcedureSQL,
-  generateCreateTriggerSQL,
-  generateDropTriggerSQL,
-  generateCreateSequenceSQL,
-  generateDropSequenceSQL,
-  generateCreateTypeSQL,
-  generateDropTypeSQL,
-} from "../../utils/sql";
-import { SQLBuilder } from "../../utils/sql-builder";
+  CommentHandler,
+  EnumHandler,
+  ExtensionHandler,
+  FunctionHandler,
+  ProcedureHandler,
+  SchemaHandler,
+  SequenceHandler,
+  TriggerHandler,
+  ViewHandler,
+} from "./handlers";
 
 export class SchemaService {
   private parser: SchemaParser;
@@ -31,12 +25,32 @@ export class SchemaService {
   private executor: MigrationExecutor;
   private databaseService: DatabaseService;
 
+  private schemaHandler: SchemaHandler;
+  private commentHandler: CommentHandler;
+  private extensionHandler: ExtensionHandler;
+  private enumHandler: EnumHandler;
+  private sequenceHandler: SequenceHandler;
+  private functionHandler: FunctionHandler;
+  private procedureHandler: ProcedureHandler;
+  private viewHandler: ViewHandler;
+  private triggerHandler: TriggerHandler;
+
   constructor(databaseService: DatabaseService) {
     this.databaseService = databaseService;
     this.parser = new SchemaParser();
     this.inspector = new DatabaseInspector();
     this.differ = new SchemaDiffer();
     this.executor = new MigrationExecutor(databaseService);
+
+    this.schemaHandler = new SchemaHandler();
+    this.commentHandler = new CommentHandler();
+    this.extensionHandler = new ExtensionHandler();
+    this.enumHandler = new EnumHandler();
+    this.sequenceHandler = new SequenceHandler();
+    this.functionHandler = new FunctionHandler();
+    this.procedureHandler = new ProcedureHandler();
+    this.viewHandler = new ViewHandler();
+    this.triggerHandler = new TriggerHandler();
   }
 
   async plan(schemaFile: string): Promise<MigrationPlan> {
@@ -93,7 +107,6 @@ export class SchemaService {
     const client = await this.databaseService.createClient();
 
     try {
-      // Acquire advisory lock if options provided (skip in dry-run mode)
       if (lockOptions && !dryRun) {
         await this.databaseService.acquireAdvisoryLock(client, lockOptions);
       }
@@ -109,7 +122,6 @@ export class SchemaService {
       const desiredSchemas = Array.isArray(parsedSchema) ? [] : parsedSchema.schemas || [];
       const desiredComments = Array.isArray(parsedSchema) ? [] : parsedSchema.comments || [];
 
-      // Validate that all schema references are in the managed schemas list
       this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
         desiredFunctions, desiredProcedures, desiredTriggers, desiredSequences);
 
@@ -124,43 +136,30 @@ export class SchemaService {
       const currentSchemas = await this.inspector.getCurrentSchemas(client, schemas);
       const currentComments = await this.inspector.getCurrentComments(client, schemas);
 
-      // Generate schema statements (CREATE first)
-      const schemaStatements = this.generateSchemaStatements(desiredSchemas, currentSchemas);
-
-      // Generate extension statements (CREATE first, DROP last)
+      const schemaStatements = this.schemaHandler.generateStatements(desiredSchemas, currentSchemas);
       const { create: extensionCreateStatements, drop: extensionDropStatements } =
-        this.generateExtensionStatements(desiredExtensions, currentExtensions);
-
-      // Generate ENUM statements with collision detection
+        this.extensionHandler.generateStatements(desiredExtensions, currentExtensions);
       const { transactional: enumCreateStatements, concurrent: enumAddValueStatements } =
-        this.generateEnumStatements(desiredEnums, currentEnums);
+        this.enumHandler.generateStatements(desiredEnums, currentEnums);
 
       const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Prepend schema CREATE, extension CREATE, and ENUM creation statements
       plan.transactional = [...schemaStatements, ...extensionCreateStatements, ...enumCreateStatements, ...plan.transactional];
-
-      // Append ALTER TYPE ADD VALUE statements to concurrent (cannot run in transaction)
       plan.concurrent = [...enumAddValueStatements, ...plan.concurrent];
-
-      // Update hasChanges flag after modifying plan
       plan.hasChanges = plan.transactional.length > 0 || plan.concurrent.length > 0;
 
-      // Generate statements for new features
-      const sequenceStatements = this.generateSequenceStatements(desiredSequences, currentSequences);
-      const functionStatements = this.generateFunctionStatements(desiredFunctions, currentFunctions);
-      const procedureStatements = this.generateProcedureStatements(desiredProcedures, currentProcedures);
-      const viewStatements = this.generateViewStatements(desiredViews, currentViews);
-      const triggerStatements = this.generateTriggerStatements(desiredTriggers, currentTriggers);
-      const commentStatements = this.generateCommentStatements(desiredComments, currentComments);
+      const sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
+      const functionStatements = this.functionHandler.generateStatements(desiredFunctions, currentFunctions);
+      const procedureStatements = this.procedureHandler.generateStatements(desiredProcedures, currentProcedures);
+      const viewStatements = this.viewHandler.generateStatements(desiredViews, currentViews);
+      const triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
+      const commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
 
-      // Calculate total changes
       const totalChanges = plan.transactional.length + plan.concurrent.length + plan.deferred.length +
                           sequenceStatements.length + functionStatements.length +
                           procedureStatements.length + viewStatements.length +
                           triggerStatements.length + commentStatements.length + extensionDropStatements.length;
 
-      // Show plan
       if (totalChanges === 0) {
         Logger.success("No changes needed - database is up to date");
         return;
@@ -170,7 +169,6 @@ export class SchemaService {
 
       Logger.print(OutputFormatter.summary(`${totalChanges} changes`));
 
-      // Combine all transactional statements (comments executed separately after all objects created)
       const allTransactional = [
         ...plan.transactional,
         ...sequenceStatements,
@@ -197,13 +195,11 @@ export class SchemaService {
 
       console.log();
 
-      // Exit early if dry-run mode
       if (dryRun) {
         Logger.info("Dry run complete - no changes were made");
         return;
       }
 
-      // Prompt for confirmation unless auto-approve is enabled
       if (!autoApprove) {
         const confirmed = await this.promptForConfirmation();
         if (!confirmed) {
@@ -212,103 +208,16 @@ export class SchemaService {
         }
       }
 
-      // Execute in dependency order:
-      // 1. Sequences (may be referenced by table defaults)
-      if (sequenceStatements.length > 0) {
-        const sequencePlan = {
-          transactional: sequenceStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, sequencePlan, autoApprove);
-      }
-
-      // 2. Tables and enums
+      await this.executeStatements(client, sequenceStatements, autoApprove);
       await this.executor.executePlan(client, plan, autoApprove);
-
-      // After table changes, safely remove unused ENUMs
-      const enumRemovalStatements = await this.generateEnumRemovalStatements(desiredEnums, currentEnums, client, schemas);
-      for (const statement of enumRemovalStatements) {
-        try {
-          await client.query(statement);
-        } catch (error: any) {
-          if (error.code === '2BP01') {
-            const match = statement.match(/DROP TYPE\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i);
-            const typeName = match ? (match[1] ? `${match[1]}.${match[2]}` : match[2]) : 'unknown';
-            Logger.warning(`Could not drop ENUM '${typeName}': now in use (concurrent change). Will retry next migration.`);
-          } else {
-            throw error;
-          }
-        }
-      }
-
-      // 3. Functions and procedures (triggers depend on functions)
-      if (functionStatements.length > 0) {
-        const functionPlan = {
-          transactional: functionStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, functionPlan, autoApprove);
-      }
-
-      if (procedureStatements.length > 0) {
-        const procedurePlan = {
-          transactional: procedureStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, procedurePlan, autoApprove);
-      }
-
-      // 4. Views
-      if (viewStatements.length > 0) {
-        const viewPlan = {
-          transactional: viewStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, viewPlan, autoApprove);
-      }
-
-      // 5. Triggers (must come after tables, functions, and views)
-      if (triggerStatements.length > 0) {
-        const triggerPlan = {
-          transactional: triggerStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, triggerPlan, autoApprove);
-      }
-
-      // 6. Comments (must come after all objects are created)
-      if (commentStatements.length > 0) {
-        const commentPlan = {
-          transactional: commentStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, commentPlan, autoApprove);
-      }
-
-      // 7. Drop extensions (must come LAST, after all dependent objects are dropped)
-      if (extensionDropStatements.length > 0) {
-        const extensionDropPlan = {
-          transactional: extensionDropStatements,
-          concurrent: [],
-          deferred: [],
-          hasChanges: true
-        };
-        await this.executor.executePlan(client, extensionDropPlan, autoApprove);
-      }
+      await this.executeEnumRemovals(client, desiredEnums, currentEnums, schemas);
+      await this.executeStatements(client, functionStatements, autoApprove);
+      await this.executeStatements(client, procedureStatements, autoApprove);
+      await this.executeStatements(client, viewStatements, autoApprove);
+      await this.executeStatements(client, triggerStatements, autoApprove);
+      await this.executeStatements(client, commentStatements, autoApprove);
+      await this.executeStatements(client, extensionDropStatements, autoApprove)
     } finally {
-      // Release advisory lock if it was acquired (skip in dry-run mode)
       if (lockOptions && !dryRun) {
         await this.databaseService.releaseAdvisoryLock(client, lockOptions.lockName);
       }
@@ -333,13 +242,10 @@ export class SchemaService {
   }
 
   private async parseSchemaInput(input: string) {
-    // Handle empty string as empty SQL content (not a filename)
     if (input === "") {
       return await this.parser.parseSchema(input);
     }
 
-    // Simple heuristic: if the input contains SQL keywords and is longer than a typical file path,
-    // or contains newlines/semicolons, treat it as SQL content rather than a file path
     if (
       input.includes('CREATE') ||
       input.includes(';') ||
@@ -348,80 +254,35 @@ export class SchemaService {
     ) {
       return await this.parser.parseSchema(input);
     } else {
-      // Treat as file path
       return await this.parser.parseSchemaFile(input);
     }
   }
 
-  private generateEnumStatements(desiredEnums: EnumType[], currentEnums: EnumType[]): {
-    transactional: string[];
-    concurrent: string[];
-  } {
-    const transactional: string[] = [];
-    const concurrent: string[] = [];
-    const currentEnumMap = new Map(currentEnums.map(e => [e.name, e]));
+  private async executeStatements(client: Client, statements: string[], autoApprove: boolean): Promise<void> {
+    if (statements.length === 0) return;
+    await this.executor.executePlan(client, {
+      transactional: statements,
+      concurrent: [],
+      deferred: [],
+      hasChanges: true
+    }, autoApprove);
+  }
 
-    for (const desiredEnum of desiredEnums) {
-      const currentEnum = currentEnumMap.get(desiredEnum.name);
-
-      if (!currentEnum) {
-        // ENUM doesn't exist, create it
-        transactional.push(generateCreateTypeSQL(desiredEnum));
-      } else {
-        // ENUM exists, check if values need to be modified
-        const currentValues = currentEnum.values;
-        const desiredValues = desiredEnum.values;
-
-        // Check if values are identical in order and content
-        if (JSON.stringify(currentValues) === JSON.stringify(desiredValues)) {
-          // Values match exactly, skip modification
-          Logger.info(`ENUM type '${desiredEnum.name}' already exists with matching values, skipping creation`);
+  private async executeEnumRemovals(client: Client, desiredEnums: any[], currentEnums: any[], schemas: string[]): Promise<void> {
+    const statements = await this.enumHandler.generateRemovalStatements(desiredEnums, currentEnums, client, schemas);
+    for (const statement of statements) {
+      try {
+        await client.query(statement);
+      } catch (error: any) {
+        if (error.code === '2BP01') {
+          const match = statement.match(/DROP TYPE\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i);
+          const typeName = match ? (match[1] ? `${match[1]}.${match[2]}` : match[2]) : 'unknown';
+          Logger.warning(`Could not drop ENUM '${typeName}': now in use (concurrent change). Will retry next migration.`);
         } else {
-          // Values differ, generate modification statements
-          const modificationStatements = this.generateEnumModificationStatements(desiredEnum, currentEnum);
-          // ALTER TYPE ADD VALUE must run outside of transaction block
-          concurrent.push(...modificationStatements);
+          throw error;
         }
       }
     }
-
-    // Note: ENUM removal is handled separately after table changes
-
-    return { transactional, concurrent };
-  }
-
-  private async generateEnumRemovalStatements(desiredEnums: EnumType[], currentEnums: EnumType[], client: Client, schemas: string[]): Promise<string[]> {
-    const statements: string[] = [];
-    const desiredEnumNames = new Set(desiredEnums.map(e => e.name));
-
-    for (const currentEnum of currentEnums) {
-      if (!desiredEnumNames.has(currentEnum.name)) {
-        // ENUM is not in desired schema, check if it's safe to drop
-        const isUsed = await this.isEnumTypeUsed(currentEnum.name, client, schemas);
-        
-        if (!isUsed) {
-          statements.push(generateDropTypeSQL(currentEnum.name, currentEnum.schema));
-          Logger.info(`Dropping unused ENUM type '${currentEnum.name}'`);
-        } else {
-          Logger.warning(
-            `ENUM type '${currentEnum.name}' is not in schema but is still referenced by table columns. ` +
-            `Cannot auto-drop. Remove column references first.`
-          );
-        }
-      }
-    }
-    
-    return statements;
-  }
-
-  private async isEnumTypeUsed(enumName: string, client: Client, schemas: string[]): Promise<boolean> {
-    const result = await client.query(`
-      SELECT COUNT(*) as usage_count
-      FROM information_schema.columns
-      WHERE udt_name = $1 AND table_schema = ANY($2::text[])
-    `, [enumName, schemas]);
-
-    return parseInt(result.rows[0].usage_count) > 0;
   }
 
   private validateSchemaReferences(
@@ -436,15 +297,13 @@ export class SchemaService {
   ): void {
     const errors: string[] = [];
 
-    // Helper to check schema reference
     const checkSchema = (objType: string, objName: string, objSchema: string | undefined) => {
-      const schema = objSchema || 'public'; // Default to 'public' if not specified
+      const schema = objSchema || 'public';
       if (!managedSchemas.includes(schema)) {
         errors.push(`${objType} '${objSchema ? objSchema + '.' : ''}${objName}' references schema '${schema}' which is not in the managed schema list: [${managedSchemas.join(', ')}]`);
       }
     };
 
-    // Check all object types
     tables.forEach(t => checkSchema('Table', t.name, t.schema));
     enums.forEach(e => checkSchema('ENUM type', e.name, e.schema));
     views.forEach(v => checkSchema('View', v.name, v.schema));
@@ -461,434 +320,5 @@ export class SchemaService {
         `2. Remove or modify the objects to use only managed schemas`
       );
     }
-  }
-
-  private generateEnumModificationStatements(desiredEnum: EnumType, currentEnum: EnumType): string[] {
-    const statements: string[] = [];
-    const currentValues = new Set(currentEnum.values);
-    const desiredValues = new Set(desiredEnum.values);
-    
-    // Find values to add
-    const valuesToAdd = desiredEnum.values.filter(value => !currentValues.has(value));
-    
-    // Find values to remove  
-    const valuesToRemove = currentEnum.values.filter(value => !desiredValues.has(value));
-    
-    // Check if values are identical in order and content
-    const valuesIdentical = JSON.stringify(currentEnum.values) === JSON.stringify(desiredEnum.values);
-    
-    // Check if only appending new values at the end (safe case)
-    const isOnlyAppending = valuesToRemove.length === 0 && valuesToAdd.length > 0 &&
-                           currentEnum.values.every((value, index) => desiredEnum.values[index] === value);
-    
-    if (valuesIdentical) {
-      // No changes needed
-      Logger.info(`ENUM type '${desiredEnum.name}' values already match, no changes needed`);
-    } else if (isOnlyAppending) {
-      // Only adding values at the end - safe operation using ALTER TYPE ADD VALUE
-      for (const value of valuesToAdd) {
-        const builder = new SQLBuilder().p("ALTER TYPE");
-        if (desiredEnum.schema) {
-          builder.ident(desiredEnum.schema).rewriteLastChar('.');
-        }
-        builder.ident(desiredEnum.name);
-        builder.p(`ADD VALUE '${value}';`);
-        statements.push(builder.build());
-        Logger.info(`Adding value '${value}' to ENUM type '${desiredEnum.name}'`);
-      }
-    } else {
-      // Values are removed or reordered - this requires manual intervention
-      const changeDescription = [];
-      if (valuesToRemove.length > 0) {
-        changeDescription.push(`removing values [${valuesToRemove.join(', ')}]`);
-      }
-      if (valuesToRemove.length === 0 && valuesToAdd.length === 0) {
-        // Same values but different order = reordering
-        changeDescription.push(`reordering values`);
-      }
-      
-      throw new Error(
-        `ENUM type '${desiredEnum.name}' modification requires manual intervention. ` +
-        `Cannot safely perform: ${changeDescription.join(' and ')}. ` +
-        `Current values: [${currentEnum.values.join(', ')}], ` +
-        `Desired values: [${desiredEnum.values.join(', ')}]. ` +
-        `Removing ENUM values or changing their order can cause data loss and is not supported by Terra. ` +
-        `Please handle this migration manually or create a new ENUM type with a different name.`
-      );
-    }
-    
-    return statements;
-  }
-
-  private generateViewStatements(desiredViews: View[], currentViews: View[]): string[] {
-    const statements: string[] = [];
-    const currentViewMap = new Map(currentViews.map(v => [v.name, v]));
-    const desiredViewNames = new Set(desiredViews.map(v => v.name));
-    
-    // Drop views that are no longer needed
-    for (const currentView of currentViews) {
-      if (!desiredViewNames.has(currentView.name)) {
-        statements.push(generateDropViewSQL(currentView.name, currentView.materialized));
-        Logger.info(`Dropping view '${currentView.name}'`);
-      }
-    }
-    
-    // Create or update views
-    for (const desiredView of desiredViews) {
-      const currentView = currentViewMap.get(desiredView.name);
-      
-      if (!currentView) {
-        // View doesn't exist, create it
-        statements.push(generateCreateViewSQL(desiredView));
-        Logger.info(`Creating view '${desiredView.name}'`);
-      } else {
-        // View exists, check if it needs to be updated
-        if (this.viewNeedsUpdate(desiredView, currentView)) {
-          statements.push(generateCreateOrReplaceViewSQL(desiredView));
-          Logger.info(`Updating view '${desiredView.name}'`);
-        } else {
-          Logger.info(`View '${desiredView.name}' is up to date, skipping`);
-        }
-      }
-    }
-    
-    return statements;
-  }
-
-  private viewNeedsUpdate(desired: View, current: View): boolean {
-    // Check if materialized flag differs
-    if (desired.materialized !== current.materialized) {
-      return true;
-    }
-
-    // Check if definition differs (normalize whitespace for comparison)
-    const normalizeDefinition = (def: string) => def.replace(/\s+/g, ' ').trim();
-    const normalizedDesired = normalizeDefinition(desired.definition);
-    const normalizedCurrent = normalizeDefinition(current.definition);
-
-    if (normalizedDesired !== normalizedCurrent) {
-      // Add some debugging for the test
-      Logger.info(`View '${desired.name}' needs update:`);
-      Logger.info(`  Desired: ${normalizedDesired.substring(0, 100)}...`);
-      Logger.info(`  Current: ${normalizedCurrent.substring(0, 100)}...`);
-      return true;
-    }
-
-    // Check if check options differ
-    if (desired.checkOption !== current.checkOption) {
-      return true;
-    }
-
-    // Check if security barrier differs
-    if (desired.securityBarrier !== current.securityBarrier) {
-      return true;
-    }
-
-    return false;
-  }
-
-  private generateExtensionStatements(desiredExtensions: Extension[], currentExtensions: Extension[]): {
-    create: string[];
-    drop: string[];
-  } {
-    const createStatements: string[] = [];
-    const dropStatements: string[] = [];
-    const currentExtensionMap = new Map(currentExtensions.map(e => [e.name, e]));
-    const desiredExtensionNames = new Set(desiredExtensions.map(e => e.name));
-
-    // Determine which extensions to drop (executed LAST, after all dependent objects are removed)
-    for (const currentExt of currentExtensions) {
-      if (!desiredExtensionNames.has(currentExt.name)) {
-        // Use CASCADE to drop all dependent objects (types, functions, etc.)
-        const dropBuilder = new SQLBuilder().p("DROP EXTENSION IF EXISTS").ident(currentExt.name).p("CASCADE");
-        dropStatements.push(dropBuilder.build() + ';');
-        Logger.info(`Dropping extension '${currentExt.name}' (CASCADE will drop dependent objects)`);
-      }
-    }
-
-    // Create extensions (these will be executed FIRST, before all dependent objects)
-    for (const desiredExt of desiredExtensions) {
-      const currentExt = currentExtensionMap.get(desiredExt.name);
-
-      if (!currentExt) {
-        createStatements.push(this.generateCreateExtensionSQL(desiredExt));
-        Logger.info(`Creating extension '${desiredExt.name}'`);
-      } else {
-        // Check if version differs
-        if (desiredExt.version && currentExt.version !== desiredExt.version) {
-          Logger.warning(`Extension '${desiredExt.name}' version differs (current: ${currentExt.version}, desired: ${desiredExt.version}). Manual update may be required.`);
-        } else {
-          Logger.info(`Extension '${desiredExt.name}' already exists, skipping`);
-        }
-      }
-    }
-
-    return { create: createStatements, drop: dropStatements };
-  }
-
-  private generateCreateExtensionSQL(extension: Extension): string {
-    const builder = new SQLBuilder().p("CREATE EXTENSION IF NOT EXISTS").ident(extension.name);
-
-    if (extension.schema) {
-      builder.p("SCHEMA").ident(extension.schema);
-    }
-
-    if (extension.version) {
-      builder.p(`VERSION '${extension.version}'`);
-    }
-
-    if (extension.cascade) {
-      builder.p("CASCADE");
-    }
-
-    return builder.build() + ';';
-  }
-
-  private generateSequenceStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {
-    const statements: string[] = [];
-    const currentSequenceMap = new Map(currentSequences.map(s => [s.name, s]));
-    const desiredSequenceNames = new Set(desiredSequences.map(s => s.name));
-
-    // Drop sequences that are no longer needed
-    // Skip sequences owned by table columns (created by SERIAL) as they're managed automatically
-    for (const currentSeq of currentSequences) {
-      if (!desiredSequenceNames.has(currentSeq.name) && !currentSeq.ownedBy) {
-        statements.push(generateDropSequenceSQL(currentSeq.name));
-        Logger.info(`Dropping sequence '${currentSeq.name}'`);
-      }
-    }
-
-    // Create or update sequences
-    // Skip sequences owned by table columns (created by SERIAL) as they're managed automatically
-    for (const desiredSeq of desiredSequences) {
-      const currentSeq = currentSequenceMap.get(desiredSeq.name);
-
-      if (!currentSeq) {
-        statements.push(generateCreateSequenceSQL(desiredSeq));
-        Logger.info(`Creating sequence '${desiredSeq.name}'`);
-      } else if (!currentSeq.ownedBy) {
-        // Only update sequences that are not owned by table columns
-        if (this.sequenceNeedsUpdate(desiredSeq, currentSeq)) {
-          statements.push(generateDropSequenceSQL(currentSeq.name));
-          statements.push(generateCreateSequenceSQL(desiredSeq));
-          Logger.info(`Updating sequence '${desiredSeq.name}'`);
-        } else {
-          Logger.info(`Sequence '${desiredSeq.name}' is up to date, skipping`);
-        }
-      } else {
-        Logger.info(`Sequence '${desiredSeq.name}' is owned by a table column, skipping`);
-      }
-    }
-
-    return statements;
-  }
-
-  private sequenceNeedsUpdate(desired: Sequence, current: Sequence): boolean {
-    return desired.increment !== current.increment ||
-           desired.minValue !== current.minValue ||
-           desired.maxValue !== current.maxValue ||
-           desired.start !== current.start ||
-           desired.cache !== current.cache ||
-           desired.cycle !== current.cycle;
-  }
-
-  private generateFunctionStatements(desiredFunctions: Function[], currentFunctions: Function[]): string[] {
-    const statements: string[] = [];
-    const currentFunctionMap = new Map(currentFunctions.map(f => [f.name, f]));
-    const desiredFunctionNames = new Set(desiredFunctions.map(f => f.name));
-
-    // Drop functions that are no longer needed
-    for (const currentFunc of currentFunctions) {
-      if (!desiredFunctionNames.has(currentFunc.name)) {
-        statements.push(generateDropFunctionSQL(currentFunc));
-        Logger.info(`Dropping function '${currentFunc.name}'`);
-      }
-    }
-
-    // Create or update functions
-    for (const desiredFunc of desiredFunctions) {
-      const currentFunc = currentFunctionMap.get(desiredFunc.name);
-
-      if (!currentFunc) {
-        statements.push(generateCreateFunctionSQL(desiredFunc));
-        Logger.info(`Creating function '${desiredFunc.name}'`);
-      } else {
-        if (this.functionNeedsUpdate(desiredFunc, currentFunc)) {
-          statements.push(generateDropFunctionSQL(currentFunc));
-          statements.push(generateCreateFunctionSQL(desiredFunc));
-          Logger.info(`Updating function '${desiredFunc.name}'`);
-        } else {
-          Logger.info(`Function '${desiredFunc.name}' is up to date, skipping`);
-        }
-      }
-    }
-
-    return statements;
-  }
-
-  private functionNeedsUpdate(desired: Function, current: Function): boolean {
-    const normalizeBody = (body: string) => body.replace(/\s+/g, ' ').trim();
-    return normalizeBody(desired.body) !== normalizeBody(current.body) ||
-           desired.returnType !== current.returnType ||
-           desired.language !== current.language ||
-           desired.volatility !== current.volatility;
-  }
-
-  private generateProcedureStatements(desiredProcedures: Procedure[], currentProcedures: Procedure[]): string[] {
-    const statements: string[] = [];
-    const currentProcedureMap = new Map(currentProcedures.map(p => [p.name, p]));
-    const desiredProcedureNames = new Set(desiredProcedures.map(p => p.name));
-
-    // Drop procedures that are no longer needed
-    for (const currentProc of currentProcedures) {
-      if (!desiredProcedureNames.has(currentProc.name)) {
-        statements.push(generateDropProcedureSQL(currentProc));
-        Logger.info(`Dropping procedure '${currentProc.name}'`);
-      }
-    }
-
-    // Create or update procedures
-    for (const desiredProc of desiredProcedures) {
-      const currentProc = currentProcedureMap.get(desiredProc.name);
-
-      if (!currentProc) {
-        statements.push(generateCreateProcedureSQL(desiredProc));
-        Logger.info(`Creating procedure '${desiredProc.name}'`);
-      } else {
-        if (this.procedureNeedsUpdate(desiredProc, currentProc)) {
-          statements.push(generateDropProcedureSQL(currentProc));
-          statements.push(generateCreateProcedureSQL(desiredProc));
-          Logger.info(`Updating procedure '${desiredProc.name}'`);
-        } else {
-          Logger.info(`Procedure '${desiredProc.name}' is up to date, skipping`);
-        }
-      }
-    }
-
-    return statements;
-  }
-
-  private procedureNeedsUpdate(desired: Procedure, current: Procedure): boolean {
-    const normalizeBody = (body: string) => body.replace(/\s+/g, ' ').trim();
-    return normalizeBody(desired.body) !== normalizeBody(current.body) ||
-           desired.language !== current.language;
-  }
-
-  private generateTriggerStatements(desiredTriggers: Trigger[], currentTriggers: Trigger[]): string[] {
-    const statements: string[] = [];
-    const currentTriggerMap = new Map(currentTriggers.map(t => [`${t.tableName}.${t.name}`, t]));
-    const desiredTriggerKeys = new Set(desiredTriggers.map(t => `${t.tableName}.${t.name}`));
-
-    // Drop triggers that are no longer needed
-    for (const currentTrig of currentTriggers) {
-      const key = `${currentTrig.tableName}.${currentTrig.name}`;
-      if (!desiredTriggerKeys.has(key)) {
-        statements.push(generateDropTriggerSQL(currentTrig));
-        Logger.info(`Dropping trigger '${currentTrig.name}' on '${currentTrig.tableName}'`);
-      }
-    }
-
-    // Create or update triggers
-    for (const desiredTrig of desiredTriggers) {
-      const key = `${desiredTrig.tableName}.${desiredTrig.name}`;
-      const currentTrig = currentTriggerMap.get(key);
-
-      if (!currentTrig) {
-        statements.push(generateCreateTriggerSQL(desiredTrig));
-        Logger.info(`Creating trigger '${desiredTrig.name}' on '${desiredTrig.tableName}'`);
-      } else {
-        if (this.triggerNeedsUpdate(desiredTrig, currentTrig)) {
-          statements.push(generateDropTriggerSQL(currentTrig));
-          statements.push(generateCreateTriggerSQL(desiredTrig));
-          Logger.info(`Updating trigger '${desiredTrig.name}' on '${desiredTrig.tableName}'`);
-        } else {
-          Logger.info(`Trigger '${desiredTrig.name}' is up to date, skipping`);
-        }
-      }
-    }
-
-    return statements;
-  }
-
-  private triggerNeedsUpdate(desired: Trigger, current: Trigger): boolean {
-    return desired.timing !== current.timing ||
-           desired.forEach !== current.forEach ||
-           desired.functionName !== current.functionName ||
-           JSON.stringify(desired.events) !== JSON.stringify(current.events);
-  }
-
-  private generateSchemaStatements(desiredSchemas: SchemaDefinition[], currentSchemas: SchemaDefinition[]): string[] {
-    const statements: string[] = [];
-    const currentSchemaNames = new Set(currentSchemas.map(s => s.name));
-
-    for (const desiredSchema of desiredSchemas) {
-      if (!currentSchemaNames.has(desiredSchema.name)) {
-        const builder = new SQLBuilder().p("CREATE SCHEMA");
-        if (desiredSchema.ifNotExists) {
-          builder.p("IF NOT EXISTS");
-        }
-        builder.ident(desiredSchema.name);
-
-        if (desiredSchema.owner) {
-          builder.p("AUTHORIZATION").ident(desiredSchema.owner);
-        }
-
-        statements.push(builder.build() + ';');
-        Logger.info(`Creating schema '${desiredSchema.name}'`);
-      } else {
-        Logger.info(`Schema '${desiredSchema.name}' already exists, skipping`);
-      }
-    }
-
-    return statements;
-  }
-
-  private generateCommentStatements(desiredComments: Comment[], currentComments: Comment[]): string[] {
-    const statements: string[] = [];
-    const currentCommentMap = new Map(
-      currentComments.map(c => [this.getCommentKey(c), c])
-    );
-
-    for (const desiredComment of desiredComments) {
-      const key = this.getCommentKey(desiredComment);
-      const currentComment = currentCommentMap.get(key);
-
-      if (!currentComment || currentComment.comment !== desiredComment.comment) {
-        const sql = this.generateCommentSQL(desiredComment);
-        statements.push(sql);
-        Logger.info(`${currentComment ? 'Updating' : 'Creating'} comment on ${desiredComment.objectType} '${desiredComment.objectName}'`);
-      } else {
-        Logger.info(`Comment on ${desiredComment.objectType} '${desiredComment.objectName}' is up to date, skipping`);
-      }
-    }
-
-    return statements;
-  }
-
-  private getCommentKey(comment: Comment): string {
-    if (comment.objectType === 'COLUMN') {
-      // For columns, include table name and column name in the key
-      const schemaPrefix = comment.schemaName || 'public';
-      return `${comment.objectType}:${schemaPrefix}.${comment.objectName}.${comment.columnName}`;
-    }
-    return `${comment.objectType}:${comment.schemaName || 'public'}.${comment.objectName}`;
-  }
-
-  private generateCommentSQL(comment: Comment): string {
-    const escapedComment = comment.comment.replace(/'/g, "''");
-    const builder = new SQLBuilder().p("COMMENT ON");
-
-    if (comment.objectType === 'SCHEMA') {
-      builder.p("SCHEMA").ident(comment.objectName);
-    } else if (comment.objectType === 'COLUMN') {
-      builder.p("COLUMN").table(comment.objectName, comment.schemaName);
-      builder.rewriteLastChar('.');
-      builder.ident(comment.columnName!);
-    } else {
-      builder.p(comment.objectType).table(comment.objectName, comment.schemaName);
-    }
-
-    builder.p(`IS '${escapedComment}'`);
-    return builder.build() + ';';
   }
 }
