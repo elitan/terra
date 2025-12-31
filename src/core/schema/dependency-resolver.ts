@@ -68,136 +68,12 @@ export class DependencyResolver {
     return this.topologicalSort(true);
   }
 
-  /**
-   * Topological sort using Kahn's algorithm for creation order
-   */
   private topologicalSortCreation(): string[] {
-    const inDegree = new Map<string, number>();
-    
-    // Initialize in-degree count for each table
-    for (const tableName of this.nodes.keys()) {
-      inDegree.set(tableName, 0);
-    }
-    
-    // Count dependencies (incoming edges)
-    for (const [tableName, node] of this.nodes) {
-      for (const dependency of node.dependencies) {
-        inDegree.set(tableName, (inDegree.get(tableName) || 0) + 1);
-      }
-    }
-
-    const result: string[] = [];
-    const queue: string[] = [];
-
-    // Find tables with no dependencies
-    for (const [tableName, degree] of inDegree) {
-      if (degree === 0) {
-        queue.push(tableName);
-      }
-    }
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      result.push(current);
-
-      // Remove this table's impact on its dependents
-      const currentNode = this.nodes.get(current);
-      if (currentNode) {
-        for (const dependent of currentNode.dependents) {
-          const newDegree = (inDegree.get(dependent) || 0) - 1;
-          inDegree.set(dependent, newDegree);
-          
-          if (newDegree === 0) {
-            queue.push(dependent);
-          }
-        }
-      }
-    }
-
-    // Check for cycles
-    if (result.length !== this.nodes.size) {
-      const cycles = this.getCircularDependencies();
-      if (cycles.length > 0) {
-        const cycleDescriptions = cycles.map(cycle => cycle.join(' → ')).join('\n  ');
-        throw new Error(
-          `Circular dependency detected. Cannot resolve table creation order.\n` +
-          `Detected cycles:\n  ${cycleDescriptions}\n` +
-          `Tables involved in cycles cannot be created because they reference each other.`
-        );
-      }
-      throw new Error(
-        `Cannot resolve table creation order. ` +
-        `Processed ${result.length} out of ${this.nodes.size} tables.`
-      );
-    }
-
-    return result;
+    return this.topologicalSortCore(this.nodes, false, 'creation');
   }
 
-  /**
-   * Topological sort for deletion order (reverse of creation order)
-   */
   private topologicalSortDeletion(): string[] {
-    const inDegree = new Map<string, number>();
-    
-    // Initialize in-degree count - for deletion, we count dependents
-    for (const tableName of this.nodes.keys()) {
-      inDegree.set(tableName, 0);
-    }
-    
-    // Count dependents (outgoing edges become incoming for deletion)
-    for (const [tableName, node] of this.nodes) {
-      for (const dependent of node.dependents) {
-        inDegree.set(tableName, (inDegree.get(tableName) || 0) + 1);
-      }
-    }
-
-    const result: string[] = [];
-    const queue: string[] = [];
-
-    // Find tables with no dependents (can be deleted first)
-    for (const [tableName, degree] of inDegree) {
-      if (degree === 0) {
-        queue.push(tableName);
-      }
-    }
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      result.push(current);
-
-      // Remove this table's impact on its dependencies
-      const currentNode = this.nodes.get(current);
-      if (currentNode) {
-        for (const dependency of currentNode.dependencies) {
-          const newDegree = (inDegree.get(dependency) || 0) - 1;
-          inDegree.set(dependency, newDegree);
-          
-          if (newDegree === 0) {
-            queue.push(dependency);
-          }
-        }
-      }
-    }
-
-    // Check for cycles
-    if (result.length !== this.nodes.size) {
-      const cycles = this.getCircularDependencies();
-      if (cycles.length > 0) {
-        const cycleDescriptions = cycles.map(cycle => cycle.join(' → ')).join('\n  ');
-        throw new Error(
-          `Circular dependency detected. Cannot resolve table deletion order.\n` +
-          `Detected cycles:\n  ${cycleDescriptions}\n` +
-          `Tables involved in cycles cannot be deleted in a valid order.`
-        );
-      }
-      throw new Error(
-        `Cannot resolve table deletion order. ` +
-        `Processed ${result.length} out of ${this.nodes.size} tables.`
-      );
-    }
-
-    return result;
+    return this.topologicalSortCore(this.nodes, true, 'deletion');
   }
 
   /**
@@ -331,8 +207,7 @@ export class DependencyResolver {
       }
     }
 
-    // Perform topological sort on modified graph
-    const order = this.topologicalSortWithNodes(modifiedNodes, false);
+    const order = this.topologicalSortCore(modifiedNodes, false);
 
     return {
       order,
@@ -406,8 +281,7 @@ export class DependencyResolver {
       }
     }
 
-    // Perform topological sort on modified graph (reverse order for deletion)
-    const order = this.topologicalSortWithNodes(modifiedNodes, true);
+    const order = this.topologicalSortCore(modifiedNodes, true);
 
     return {
       order,
@@ -416,26 +290,29 @@ export class DependencyResolver {
   }
 
   /**
-   * Topological sort using a custom node map (used for cycle breaking)
+   * Core topological sort implementation using Kahn's algorithm.
+   * @param nodes - Dependency graph nodes
+   * @param reverse - false for creation order, true for deletion order
+   * @param mode - 'creation'/'deletion' for detailed cycle errors, 'internal' for simple errors
    */
-  private topologicalSortWithNodes(nodes: Map<string, DependencyNode>, reverse: boolean): string[] {
+  private topologicalSortCore(
+    nodes: Map<string, DependencyNode>,
+    reverse: boolean,
+    mode: 'creation' | 'deletion' | 'internal' = 'internal'
+  ): string[] {
     const inDegree = new Map<string, number>();
 
-    // Initialize in-degree count
     for (const tableName of nodes.keys()) {
       inDegree.set(tableName, 0);
     }
 
-    // Count dependencies or dependents based on direction
     if (!reverse) {
-      // For creation: count dependencies (incoming edges)
       for (const [tableName, node] of nodes) {
         for (const dependency of node.dependencies) {
           inDegree.set(tableName, (inDegree.get(tableName) || 0) + 1);
         }
       }
     } else {
-      // For deletion: count dependents (outgoing edges become incoming)
       for (const [tableName, node] of nodes) {
         for (const dependent of node.dependents) {
           inDegree.set(tableName, (inDegree.get(tableName) || 0) + 1);
@@ -446,7 +323,6 @@ export class DependencyResolver {
     const result: string[] = [];
     const queue: string[] = [];
 
-    // Find tables with no dependencies/dependents
     for (const [tableName, degree] of inDegree) {
       if (degree === 0) {
         queue.push(tableName);
@@ -471,10 +347,27 @@ export class DependencyResolver {
       }
     }
 
-    // Should not have cycles in modified graph
     if (result.length !== nodes.size) {
+      if (mode === 'internal') {
+        throw new Error(
+          `Internal error: topological sort failed even after removing cycle-forming edges. ` +
+          `Processed ${result.length} out of ${nodes.size} tables.`
+        );
+      }
+
+      const cycles = this.getCircularDependencies();
+      if (cycles.length > 0) {
+        const cycleDescriptions = cycles.map(cycle => cycle.join(' → ')).join('\n  ');
+        const orderType = mode === 'creation' ? 'creation' : 'deletion';
+        throw new Error(
+          `Circular dependency detected. Cannot resolve table ${orderType} order.\n` +
+          `Detected cycles:\n  ${cycleDescriptions}\n` +
+          `Tables involved in cycles cannot be ${mode === 'creation' ? 'created because they reference each other' : 'deleted in a valid order'}.`
+        );
+      }
+      const orderType = mode === 'creation' ? 'creation' : 'deletion';
       throw new Error(
-        `Internal error: topological sort failed even after removing cycle-forming edges. ` +
+        `Cannot resolve table ${orderType} order. ` +
         `Processed ${result.length} out of ${nodes.size} tables.`
       );
     }
