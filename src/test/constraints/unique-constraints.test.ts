@@ -474,5 +474,40 @@ describe("Unique Constraints", () => {
         client.query("INSERT INTO products (sku, name, price) VALUES ('PROD-001', 'Product 2', 149.99)")
       ).rejects.toThrow(/unique_sku/);
     });
+
+    test("should create unique constraint names with table prefix for multiple tables with same column", async () => {
+      const schema = `
+        CREATE TABLE table_a (
+          id SERIAL PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE
+        );
+
+        CREATE TABLE table_b (
+          id SERIAL PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE
+        );
+
+        CREATE TABLE table_c (
+          id SERIAL PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const result = await client.query(`
+        SELECT tc.table_name, tc.constraint_name
+        FROM information_schema.table_constraints tc
+        WHERE tc.constraint_type = 'UNIQUE'
+          AND tc.table_schema = 'public'
+          AND tc.table_name IN ('table_a', 'table_b', 'table_c')
+        ORDER BY tc.table_name
+      `);
+
+      expect(result.rows).toHaveLength(3);
+      expect(result.rows[0].constraint_name).toBe('table_a_code_unique');
+      expect(result.rows[1].constraint_name).toBe('table_b_code_unique');
+      expect(result.rows[2].constraint_name).toBe('table_c_code_unique');
+    });
   });
 });
