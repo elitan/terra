@@ -51,7 +51,7 @@ export function extractAllConstraints(
               if (check) checkConstraints.push(check);
             } else if (contype === "CONSTR_UNIQUE") {
               uniqueConstraints.push({
-                name: c.Constraint.conname || `${colName}_unique`,
+                name: c.Constraint.conname,
                 columns: [colName],
               });
             } else if (contype === "CONSTR_FOREIGN") {
