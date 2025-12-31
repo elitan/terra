@@ -1396,14 +1396,32 @@ export class SchemaDiffer {
       return "";
     }
 
-    // Sort alterations: drops first, then other operations
-    // This prevents dependency issues (e.g., dropping a constraint before dropping a column)
+    // Sort alterations: drops first, then alters, then adds
+    // Within each category, order by dependency (e.g., constraints before columns for drops)
+    const operationPriority: Record<string, number> = {
+      drop_foreign_key: 0,
+      drop_unique: 1,
+      drop_check: 2,
+      drop_primary_key: 3,
+      drop_column: 4,
+      alter_column_type: 10,
+      alter_column_set_default: 11,
+      alter_column_drop_default: 12,
+      alter_column_set_not_null: 13,
+      alter_column_drop_not_null: 14,
+      add_column: 20,
+      add_primary_key: 21,
+      add_check: 22,
+      add_unique: 23,
+      add_foreign_key: 24,
+    };
+
     const sorted = [...alterations].sort((a, b) => {
       const isADrop = a.type.startsWith("drop_");
       const isBDrop = b.type.startsWith("drop_");
       if (isADrop && !isBDrop) return -1;
       if (!isADrop && isBDrop) return 1;
-      return 0;
+      return (operationPriority[a.type] ?? 99) - (operationPriority[b.type] ?? 99);
     });
 
     const builder = new SQLBuilder()

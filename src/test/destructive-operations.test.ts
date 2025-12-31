@@ -568,4 +568,77 @@ describe("Destructive Operation Safety", () => {
       });
     });
   });
+
+  describe("Batched ALTER TABLE Ordering", () => {
+    test("should drop constraints before columns in batched ALTER TABLE", async () => {
+      const initialSchema = `
+        CREATE TABLE test_ordering (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          email VARCHAR(255) NOT NULL UNIQUE,
+          status VARCHAR(20) CHECK (status IN ('active', 'inactive'))
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ['public'], true);
+      await client.query("INSERT INTO test_ordering (name, email, status) VALUES ('Test', 'test@example.com', 'active')");
+
+      const updatedSchema = `
+        CREATE TABLE test_ordering (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(updatedSchema, ['public'], true);
+
+      const columns = await client.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'test_ordering'
+        ORDER BY column_name
+      `);
+
+      expect(columns.rows.map(r => r.column_name)).toEqual(['id', 'name']);
+    });
+
+    test("should add columns before constraints in batched ALTER TABLE", async () => {
+      const initialSchema = `
+        CREATE TABLE ref_table (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE TABLE test_ordering2 (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ['public'], true);
+
+      const updatedSchema = `
+        CREATE TABLE ref_table (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE TABLE test_ordering2 (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100) NOT NULL,
+          ref_id INTEGER,
+          CONSTRAINT fk_ref FOREIGN KEY (ref_id) REFERENCES ref_table(id)
+        );
+      `;
+
+      await schemaService.apply(updatedSchema, ['public'], true);
+
+      const constraints = await client.query(`
+        SELECT constraint_name, constraint_type
+        FROM information_schema.table_constraints
+        WHERE table_name = 'test_ordering2' AND constraint_type = 'FOREIGN KEY'
+      `);
+
+      expect(constraints.rows).toHaveLength(1);
+      expect(constraints.rows[0].constraint_name).toBe('fk_ref');
+    });
+  });
 });
