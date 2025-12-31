@@ -405,7 +405,7 @@ describe("ENUM Types", () => {
       expect(result.rows).toHaveLength(1);
     });
 
-    it("should handle race condition gracefully when enum becomes used during removal", async () => {
+    it("should fail atomically when trying to drop enum still in use", async () => {
       const initialSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive');
         CREATE TYPE priority AS ENUM ('low', 'high');
@@ -418,10 +418,8 @@ describe("ENUM Types", () => {
 
       await schemaService.apply(initialSchema, ['public'], true);
 
-      // Simulate concurrent change: add column using priority enum
       await client.query(`ALTER TABLE users ADD COLUMN p priority`);
 
-      // Schema no longer declares priority enum - removal should be attempted
       const updatedSchema = `
         CREATE TYPE status AS ENUM ('active', 'inactive');
 
@@ -432,10 +430,8 @@ describe("ENUM Types", () => {
         );
       `;
 
-      // Should not throw - handles 2BP01 error gracefully
-      await schemaService.apply(updatedSchema, ['public'], true);
+      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow();
 
-      // Verify priority enum still exists (wasn't dropped due to being in use)
       const result = await client.query(`
         SELECT typname FROM pg_type WHERE typname = 'priority' AND typtype = 'e'
       `);

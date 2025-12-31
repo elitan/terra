@@ -208,15 +208,29 @@ export class SchemaService {
         }
       }
 
-      await this.executeStatements(client, sequenceStatements, autoApprove);
-      await this.executor.executePlan(client, plan, autoApprove);
-      await this.executeEnumRemovals(client, desiredEnums, currentEnums, schemas);
-      await this.executeStatements(client, functionStatements, autoApprove);
-      await this.executeStatements(client, procedureStatements, autoApprove);
-      await this.executeStatements(client, viewStatements, autoApprove);
-      await this.executeStatements(client, triggerStatements, autoApprove);
-      await this.executeStatements(client, commentStatements, autoApprove);
-      await this.executeStatements(client, extensionDropStatements, autoApprove)
+      const enumRemovalStatements = this.enumHandler.generateRemovalStatements(
+        desiredEnums, currentEnums
+      );
+
+      const combinedPlan: MigrationPlan = {
+        transactional: [
+          ...sequenceStatements,
+          ...plan.transactional,
+          ...plan.deferred,
+          ...enumRemovalStatements,
+          ...functionStatements,
+          ...procedureStatements,
+          ...viewStatements,
+          ...triggerStatements,
+          ...commentStatements,
+          ...extensionDropStatements
+        ],
+        concurrent: plan.concurrent,
+        deferred: [],
+        hasChanges: true
+      };
+
+      await this.executor.executePlan(client, combinedPlan, autoApprove);
     } finally {
       if (lockOptions && !dryRun) {
         await this.databaseService.releaseAdvisoryLock(client, lockOptions.lockName);
@@ -255,33 +269,6 @@ export class SchemaService {
       return await this.parser.parseSchema(input);
     } else {
       return await this.parser.parseSchemaFile(input);
-    }
-  }
-
-  private async executeStatements(client: Client, statements: string[], autoApprove: boolean): Promise<void> {
-    if (statements.length === 0) return;
-    await this.executor.executePlan(client, {
-      transactional: statements,
-      concurrent: [],
-      deferred: [],
-      hasChanges: true
-    }, autoApprove);
-  }
-
-  private async executeEnumRemovals(client: Client, desiredEnums: any[], currentEnums: any[], schemas: string[]): Promise<void> {
-    const statements = await this.enumHandler.generateRemovalStatements(desiredEnums, currentEnums, client, schemas);
-    for (const statement of statements) {
-      try {
-        await client.query(statement);
-      } catch (error: any) {
-        if (error.code === '2BP01') {
-          const match = statement.match(/DROP TYPE\s+(?:"?(\w+)"?\.)?"?(\w+)"?/i);
-          const typeName = match ? (match[1] ? `${match[1]}.${match[2]}` : match[2]) : 'unknown';
-          Logger.warning(`Could not drop ENUM '${typeName}': now in use (concurrent change). Will retry next migration.`);
-        } else {
-          throw error;
-        }
-      }
     }
   }
 

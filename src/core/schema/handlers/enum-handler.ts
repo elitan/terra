@@ -1,4 +1,3 @@
-import { Client } from "pg";
 import type { EnumType } from "../../../types/schema";
 import { Logger } from "../../../utils/logger";
 import { SQLBuilder } from "../../../utils/sql-builder";
@@ -37,28 +36,17 @@ export class EnumHandler {
     return { transactional, concurrent };
   }
 
-  async generateRemovalStatements(
+  generateRemovalStatements(
     desiredEnums: EnumType[],
-    currentEnums: EnumType[],
-    client: Client,
-    schemas: string[]
-  ): Promise<string[]> {
+    currentEnums: EnumType[]
+  ): string[] {
     const statements: string[] = [];
     const desiredEnumNames = new Set(desiredEnums.map(e => e.name));
 
     for (const currentEnum of currentEnums) {
       if (!desiredEnumNames.has(currentEnum.name)) {
-        const isUsed = await this.isTypeUsed(currentEnum.name, client, schemas);
-
-        if (!isUsed) {
-          statements.push(generateDropTypeSQL(currentEnum.name, currentEnum.schema));
-          Logger.info(`Dropping unused ENUM type '${currentEnum.name}'`);
-        } else {
-          Logger.warning(
-            `ENUM type '${currentEnum.name}' is not in schema but is still referenced by table columns. ` +
-            `Cannot auto-drop. Remove column references first.`
-          );
-        }
+        statements.push(generateDropTypeSQL(currentEnum.name, currentEnum.schema));
+        Logger.info(`Dropping ENUM type '${currentEnum.name}'`);
       }
     }
 
@@ -109,15 +97,5 @@ export class EnumHandler {
     }
 
     return statements;
-  }
-
-  private async isTypeUsed(enumName: string, client: Client, schemas: string[]): Promise<boolean> {
-    const result = await client.query(`
-      SELECT COUNT(*) as usage_count
-      FROM information_schema.columns
-      WHERE udt_name = $1 AND table_schema = ANY($2::text[])
-    `, [enumName, schemas]);
-
-    return parseInt(result.rows[0].usage_count) > 0;
   }
 }
