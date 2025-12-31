@@ -43,6 +43,7 @@ export interface Index {
   tableName: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: string[];
+  opclasses?: Record<string, string>; // Maps column name to operator class (e.g., gin_trgm_ops)
   type?: "btree" | "hash" | "gist" | "spgist" | "gin" | "brin";
   unique?: boolean;
   concurrent?: boolean;

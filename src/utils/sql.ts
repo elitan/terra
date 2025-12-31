@@ -96,6 +96,30 @@ export function normalizeDefault(value: string | null | undefined): string | und
   return normalized.trim();
 }
 
+export function normalizeExpression(expr: string): string {
+  let normalized = expr
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/::[a-z_]+(\([^)]*\))?/gi, '')
+    .replace(/\(([a-z_][a-z0-9_]*)\)/gi, '$1');
+  while (/^\(.*\)$/.test(normalized)) {
+    const inner = normalized.slice(1, -1);
+    let depth = 0;
+    let balanced = true;
+    for (const char of inner) {
+      if (char === '(') depth++;
+      if (char === ')') depth--;
+      if (depth < 0) { balanced = false; break; }
+    }
+    if (balanced && depth === 0) {
+      normalized = inner.trim();
+    } else {
+      break;
+    }
+  }
+  return normalized.replace(/\s+/g, ' ').trim();
+}
+
 export function columnsAreDifferent(desired: Column, current: Column): boolean {
   const normalizedDesiredType = normalizeType(desired.type);
   const normalizedCurrentType = normalizeType(current.type);
@@ -156,7 +180,7 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
     if (
       desired.generated.always !== current.generated.always ||
       desired.generated.stored !== current.generated.stored ||
-      desired.generated.expression !== current.generated.expression
+      normalizeExpression(desired.generated.expression) !== normalizeExpression(current.generated.expression)
     ) {
       return true;
     }
