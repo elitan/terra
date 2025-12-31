@@ -101,6 +101,7 @@ export class DatabaseService {
     const lockKey = lockKeyResult.rows[0].lock_key;
 
     // Try to acquire the lock with timeout logic
+    let delay = 100;
     while (true) {
       const result = await client.query(
         "SELECT pg_try_advisory_lock($1) as acquired",
@@ -119,8 +120,8 @@ export class DatabaseService {
         );
       }
 
-      // Wait 100ms before retrying
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 5000);
     }
   }
 
