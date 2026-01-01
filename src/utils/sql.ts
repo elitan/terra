@@ -37,6 +37,9 @@ export function normalizeType(type: string): string {
     "timestamp without time zone": "TIMESTAMP",
     "timestamp with time zone": "TIMESTAMPTZ",
     timestamptz: "TIMESTAMPTZ",
+    "time without time zone": "TIME",
+    "time with time zone": "TIMETZ",
+    timetz: "TIMETZ",
     // PostgreSQL integer type aliases
     int: "INT4",
     int2: "INT2",
