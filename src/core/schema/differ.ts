@@ -1363,8 +1363,7 @@ export class SchemaDiffer {
     currentConstraints: UniqueConstraint[],
     alterations: TableAlteration[]
   ): void {
-    const getStructuralKey = (c: UniqueConstraint) =>
-      [...c.columns].sort().join(',');
+    const getStructuralKey = (c: UniqueConstraint) => c.columns.join(',');
 
     const currentMap = new Map(
       currentConstraints.map(c => [getStructuralKey(c), c])
