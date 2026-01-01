@@ -29,6 +29,8 @@ export function normalizeType(type: string): string {
   // Normalize PostgreSQL types to match our parsed types
   const typeMap: Record<string, string> = {
     "character varying": "VARCHAR",
+    character: "CHAR",
+    bpchar: "CHAR",
     text: "TEXT",
     boolean: "BOOLEAN",
     bool: "BOOLEAN",
@@ -57,6 +59,12 @@ export function normalizeType(type: string): string {
   // Handle VARCHAR with length
   if (type.startsWith("character varying")) {
     return type.replace("character varying", "VARCHAR");
+  }
+
+  // Handle CHAR with length (bpchar is PostgreSQL's internal name for CHAR)
+  const lowerTypePrefix = type.toLowerCase();
+  if (lowerTypePrefix.startsWith("character(") || lowerTypePrefix.startsWith("bpchar(")) {
+    return type.replace(/^(character|bpchar)/i, "CHAR");
   }
 
   // Handle NUMERIC/DECIMAL with precision and scale
