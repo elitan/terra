@@ -100,7 +100,7 @@ export function normalizeExpression(expr: string): string {
   let normalized = expr
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/::[a-z_]+(\([^)]*\))?/gi, '')
+    .replace(/::"?[a-z_]+"?(\([^)]*\))?/gi, '')
     .replace(/\(([a-z_][a-z0-9_]*)\)/gi, '$1');
   while (/^\(.*\)$/.test(normalized)) {
     const inner = normalized.slice(1, -1);

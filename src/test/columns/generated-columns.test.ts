@@ -257,4 +257,26 @@ describe("Generated Columns", () => {
 
     expect(plan.hasChanges).toBe(false);
   });
+
+  test("should be idempotent with tsvector and setweight expressions", async () => {
+    const schema = `
+      CREATE TABLE articles (
+        id SERIAL PRIMARY KEY,
+        title TEXT,
+        body TEXT,
+        search_vector TSVECTOR GENERATED ALWAYS AS (
+          setweight(to_tsvector('english', COALESCE(title, '')), 'A') ||
+          setweight(to_tsvector('english', COALESCE(body, '')), 'B')
+        ) STORED
+      );
+    `;
+
+    await executeColumnMigration(client, schema, services);
+
+    const currentSchema = await services.inspector.getCurrentSchema(client);
+    const desiredTables = await services.parser.parseCreateTableStatements(schema);
+    const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
+
+    expect(plan.hasChanges).toBe(false);
+  });
 });
