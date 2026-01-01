@@ -57,6 +57,11 @@ export function normalizeType(type: string): string {
     "BIGINT": "INT8",
     // PostgreSQL treats DECIMAL and NUMERIC as the same type
     decimal: "NUMERIC",
+    // Floating point types
+    real: "FLOAT4",
+    float4: "FLOAT4",
+    "double precision": "FLOAT8",
+    float8: "FLOAT8",
   };
 
   // Handle VARCHAR with length
