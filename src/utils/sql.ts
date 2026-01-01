@@ -109,7 +109,17 @@ export function normalizeDefault(value: string | null | undefined): string | und
   // Examples: '100::integer', 'hello'::character varying', 'CURRENT_TIMESTAMP::timestamp without time zone'
   normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\([^)]*\))?$/i, '');
 
-  return normalized.trim();
+  normalized = normalized.trim();
+
+  // Strip quotes from numeric literals
+  // PostgreSQL stores negative numbers as '-100'::integer, after stripping the cast we get '-100'
+  // But the parser gives us -100 without quotes
+  const quotedNumeric = normalized.match(/^'(-?\d+(?:\.\d+)?)'$/);
+  if (quotedNumeric) {
+    normalized = quotedNumeric[1]!;
+  }
+
+  return normalized;
 }
 
 export function normalizeExpression(expr: string): string {
