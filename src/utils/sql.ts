@@ -104,10 +104,18 @@ export function normalizeDefault(value: string | null | undefined): string | und
     return undefined;
   }
 
-  // Strip PostgreSQL's type cast suffix (::typename or ::typename(params))
+  // Strip PostgreSQL's type cast suffix (::typename or ::typename(params) or ::typename[])
   // This regex handles multi-word types like "timestamp without time zone" and "character varying"
-  // Examples: '100::integer', 'hello'::character varying', 'CURRENT_TIMESTAMP::timestamp without time zone'
-  normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\([^)]*\))?$/i, '');
+  // Also handles array types like text[]
+  // Examples: '100::integer', 'hello'::character varying', 'CURRENT_TIMESTAMP::timestamp without time zone', '{}::text[]'
+  normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\([^)]*\))?(\[\])?$/i, '');
+
+  // Handle CAST(expr AS type) syntax - convert to just the expression
+  // Examples: CAST(ARRAY[] AS text[]) -> ARRAY[]
+  const castMatch = normalized.match(/^CAST\((.+)\s+AS\s+[a-z_]+(\[\])?\)$/i);
+  if (castMatch) {
+    normalized = castMatch[1]!.trim();
+  }
 
   normalized = normalized.trim();
 
