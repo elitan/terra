@@ -44,7 +44,7 @@ describe("Bug Hunting: Edge Cases That Should Pass", () => {
       `;
 
       const currentSchema = await services.inspector.getCurrentSchema(client);
-      const desiredTables = await services.parser.parseCreateTableStatements(schema);
+      const { tables: desiredTables } = await services.parser.parseSchema(schema);
       const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
 
       expect(plan.hasChanges).toBe(false);
@@ -72,7 +72,7 @@ describe("Bug Hunting: Edge Cases That Should Pass", () => {
       `;
 
       const currentSchema = await services.inspector.getCurrentSchema(client);
-      const desiredTables = await services.parser.parseCreateTableStatements(schema);
+      const { tables: desiredTables } = await services.parser.parseSchema(schema);
       const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
 
       expect(plan.hasChanges).toBe(false);

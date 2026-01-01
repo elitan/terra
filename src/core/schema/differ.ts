@@ -779,7 +779,9 @@ export class SchemaDiffer {
       if (index1.columns[i] !== index2.columns[i]) return false;
     }
 
-    if (index1.where !== index2.where) return false;
+    const where1 = index1.where ? normalizeExpression(index1.where) : undefined;
+    const where2 = index2.where ? normalizeExpression(index2.where) : undefined;
+    if (where1 !== where2) return false;
     if (index1.expression !== index2.expression) return false;
     if (index1.tablespace !== index2.tablespace) return false;
 
