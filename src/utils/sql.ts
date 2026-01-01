@@ -135,7 +135,17 @@ export function normalizeExpression(expr: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/::"?[a-z_]+"?(\([^)]*\))?/gi, '')
-    .replace(/\(([a-z_][a-z0-9_]*)\)/gi, '$1');
+    .replace(/\(([a-z_][a-z0-9_]*)\)/gi, '$1')
+    .replace(/\((-?\d+(?:\.\d+)?)\)/g, '$1');
+
+  let prevNormalized: string;
+  do {
+    prevNormalized = normalized;
+    normalized = normalized
+      .replace(/\(([a-z_][a-z0-9_]*\s*[<>=!]+\s*-?\d+(?:\.\d+)?)\)/gi, '$1')
+      .replace(/\(([a-z_][a-z0-9_]*\s+(?:IS\s+(?:NOT\s+)?NULL|IN\s+\([^)]*\)))\)/gi, '$1');
+  } while (normalized !== prevNormalized);
+
   while (/^\(.*\)$/.test(normalized)) {
     const inner = normalized.slice(1, -1);
     let depth = 0;
