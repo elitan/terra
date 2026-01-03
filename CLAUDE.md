@@ -3,6 +3,24 @@
 - never create markdown files
 - no emojis
 
+## Commit and PR conventions
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages and PR titles (PRs are squash-merged, so the PR title becomes the commit message).
+
+| Prefix | When to use | Release section |
+|--------|-------------|-----------------|
+| `feat:` | New features | Features |
+| `fix:` | Bug fixes | Bug Fixes |
+| `chore:` | Maintenance, deps, CI | Other Changes |
+| `docs:` | Documentation | Other Changes |
+| `refactor:` | Code refactoring | Other Changes |
+| `test:` | Adding/updating tests | Other Changes |
+
+Examples:
+- `feat: add support for PostgreSQL array types`
+- `fix: handle NULL values in column defaults`
+- `chore: update dependencies`
+
 ## What is pgterra
 
 Declarative PostgreSQL schema management. Users write `CREATE` statements, pgterra generates `ALTER`/`DROP` to reach that state.
