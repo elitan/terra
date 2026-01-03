@@ -98,24 +98,34 @@ export async function getTableNames(client: Client): Promise<string[]> {
 export async function getTableColumns(client: Client, tableName: string) {
   const result = await client.query(
     `
-    SELECT 
-      column_name,
-      data_type,
-      is_nullable,
-      column_default
-    FROM information_schema.columns 
-    WHERE table_name = $1 AND table_schema = 'public'
-    ORDER BY ordinal_position
+    SELECT
+      a.attname as column_name,
+      format_type(a.atttypid, a.atttypmod) as data_type,
+      NOT a.attnotnull as is_nullable,
+      pg_get_expr(ad.adbin, ad.adrelid) as column_default
+    FROM pg_attribute a
+    LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = $1 AND n.nspname = 'public'
+      AND a.attnum > 0 AND NOT a.attisdropped
+    ORDER BY a.attnum
   `,
     [tableName]
   );
 
-  return result.rows.map((row) => ({
-    name: row.column_name,
-    type: row.data_type,
-    nullable: row.is_nullable === "YES",
-    default: row.column_default,
-  }));
+  return result.rows.map((row) => {
+    let dataType = row.data_type;
+    if (!dataType.endsWith('[]')) {
+      dataType = dataType.replace(/\(\d+(?:,\d+)?\)$/, '');
+    }
+    return {
+      name: row.column_name,
+      type: dataType,
+      nullable: row.is_nullable,
+      default: row.column_default,
+    };
+  });
 }
 
 export function waitForDb(timeoutMs: number = 10000): Promise<void> {

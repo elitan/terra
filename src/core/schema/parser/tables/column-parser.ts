@@ -105,6 +105,19 @@ function extractDataType(typeName: any): string {
       }
     }
 
+    if (typeName.arrayBounds && typeName.arrayBounds.length > 0) {
+      for (const bound of typeName.arrayBounds) {
+        const boundVal = bound?.Integer?.ival ?? bound;
+        if (boundVal === -1) {
+          type += '[]';
+        } else if (typeof boundVal === 'number' && boundVal > 0) {
+          type += `[${boundVal}]`;
+        } else {
+          type += '[]';
+        }
+      }
+    }
+
     return type;
   } catch (error) {
     Logger.warning(

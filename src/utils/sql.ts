@@ -64,6 +64,15 @@ export function normalizeType(type: string): string {
     float8: "FLOAT8",
   };
 
+  // Handle array types by extracting base type, normalizing it, and adding single []
+  // PostgreSQL normalizes all multi-dimensional arrays to single-dimension (e.g. integer[][] -> integer[])
+  const arrayMatch = type.match(/^(.+?)(\[\])+$/);
+  if (arrayMatch) {
+    const baseType = arrayMatch[1];
+    const normalizedBase = normalizeType(baseType);
+    return normalizedBase + '[]';
+  }
+
   // Handle VARCHAR with length
   if (type.startsWith("character varying")) {
     return type.replace("character varying", "VARCHAR");
