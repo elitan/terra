@@ -139,6 +139,9 @@ export function normalizeExpression(expr: string): string {
     .replace(/\((-?\d+(?:\.\d+)?)\)/g, '$1')
     .replace(/(?<![a-z0-9_])\(([a-z_][a-z0-9_]*)\)/gi, '$1');
 
+  normalized = normalizeAnyArrayToIn(normalized);
+  normalized = normalizeBetween(normalized);
+
   let prevNormalized: string;
   do {
     prevNormalized = normalized;
@@ -165,6 +168,22 @@ export function normalizeExpression(expr: string): string {
     }
   }
   return normalized.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeAnyArrayToIn(expr: string): string {
+  const anyArrayPattern = /(\w+)\s*=\s*ANY\s*\(\s*ARRAY\s*\[(.*?)\]\s*\)/gi;
+  return expr.replace(anyArrayPattern, (_, col, values) => {
+    const cleanedValues = values
+      .split(',')
+      .map((v: string) => v.trim().replace(/::[a-z_]+(\[\])?/gi, ''))
+      .join(', ');
+    return `${col} IN (${cleanedValues})`;
+  });
+}
+
+function normalizeBetween(expr: string): string {
+  const betweenPattern = /\(?\s*(\w+)\s*>=\s*(\d+)\s*\)\s*AND\s*\(\s*\1\s*<=\s*(\d+)\s*\)?/gi;
+  return expr.replace(betweenPattern, '$1 BETWEEN $2 AND $3');
 }
 
 export function columnsAreDifferent(desired: Column, current: Column): boolean {

@@ -512,5 +512,49 @@ describe("Check Constraints", () => {
         client.query("INSERT INTO products (name, price) VALUES ('Test', -5)")
       ).rejects.toThrow(/positive_price/);
     });
+
+    test("should be idempotent when constraint names differ but expressions match", async () => {
+      await client.query(`
+        CREATE TABLE exercises (
+          id SERIAL PRIMARY KEY,
+          difficulty TEXT NOT NULL,
+          CONSTRAINT exercises_difficulty_check CHECK (difficulty IN ('beginner', 'intermediate', 'advanced'))
+        );
+      `);
+
+      const desiredSchema = `
+        CREATE TABLE exercises (
+          id SERIAL PRIMARY KEY,
+          difficulty TEXT NOT NULL,
+          CONSTRAINT exercises_check CHECK (difficulty IN ('beginner', 'intermediate', 'advanced'))
+        );
+      `;
+
+      const plan = await schemaService.plan(desiredSchema);
+
+      expect(plan.hasChanges).toBe(false);
+    });
+
+    test("should be idempotent for BETWEEN constraints with different names", async () => {
+      await client.query(`
+        CREATE TABLE workouts (
+          id SERIAL PRIMARY KEY,
+          rpe INTEGER NOT NULL,
+          CONSTRAINT workouts_rpe_check CHECK (rpe BETWEEN 1 AND 10)
+        );
+      `);
+
+      const desiredSchema = `
+        CREATE TABLE workouts (
+          id SERIAL PRIMARY KEY,
+          rpe INTEGER NOT NULL,
+          CONSTRAINT workouts_check CHECK (rpe BETWEEN 1 AND 10)
+        );
+      `;
+
+      const plan = await schemaService.plan(desiredSchema);
+
+      expect(plan.hasChanges).toBe(false);
+    });
   });
 });
