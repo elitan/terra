@@ -70,7 +70,7 @@ export function normalizeType(type: string): string {
   // Handle array types by extracting base type, normalizing it, and adding single []
   // PostgreSQL normalizes all multi-dimensional arrays to single-dimension (e.g. integer[][] -> integer[])
   const arrayMatch = type.match(/^(.+?)(\[\])+$/);
-  if (arrayMatch) {
+  if (arrayMatch && arrayMatch[1]) {
     const baseType = arrayMatch[1];
     const normalizedBase = normalizeType(baseType);
     return normalizedBase + '[]';
@@ -236,20 +236,32 @@ export function normalizeExpression(expr: string): string {
 }
 
 function normalizeAnyArrayToIn(expr: string): string {
-  // Match: col = ANY (ARRAY[...]) or col = ANY ((ARRAY[...])::type[])
-  const anyArrayPattern = /(\w+)\s*=\s*ANY\s*\(\s*\(?ARRAY\s*\[(.*?)\]\)?(?:::[a-z_]+(?:\s+[a-z_]+)*(?:\[\])?)?\s*\)/gi;
-  return expr.replace(anyArrayPattern, (_, col, values) => {
+  // Match: col = ANY (ARRAY[...]) - basic pattern
+  // Also matches: col = ANY ((ARRAY[...])) - with extra parens around ARRAY
+  // Try the pattern with inner parens first (more specific), then without
+  let result = expr;
+
+  // Pattern with inner parens: ANY ((ARRAY[...]))
+  const patternWithInnerParens = /(\w+)\s*=\s*ANY\s*\(\s*\(ARRAY\s*\[(.*?)\]\)\s*\)/gi;
+  result = result.replace(patternWithInnerParens, (_, col, values) => {
     const cleanedValues = values
       .split(',')
-      .map((v: string) => {
-        let cleaned = v.trim();
-        // Strip type casts including multi-word types like "character varying"
-        cleaned = cleaned.replace(/::[a-z_]+(?:\s+[a-z_]+)*(?:\[\])?$/gi, '');
-        return cleaned;
-      })
+      .map((v: string) => v.trim())
       .join(', ');
     return `${col} IN (${cleanedValues})`;
   });
+
+  // Pattern without inner parens: ANY (ARRAY[...])
+  const patternWithoutInnerParens = /(\w+)\s*=\s*ANY\s*\(\s*ARRAY\s*\[(.*?)\]\s*\)/gi;
+  result = result.replace(patternWithoutInnerParens, (_, col, values) => {
+    const cleanedValues = values
+      .split(',')
+      .map((v: string) => v.trim())
+      .join(', ');
+    return `${col} IN (${cleanedValues})`;
+  });
+
+  return result;
 }
 
 function normalizeBetween(expr: string): string {
