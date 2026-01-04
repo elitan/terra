@@ -98,9 +98,14 @@ export function normalizeType(type: string): string {
   // Handle NUMERIC/DECIMAL with precision and scale
   if (type.toLowerCase().startsWith("numeric(") || type.toLowerCase().startsWith("decimal(")) {
     // Extract precision and scale: numeric(10,2) -> NUMERIC(10,2)
-    const match = type.match(/^(numeric|decimal)\((\d+),(\d+)\)$/i);
-    if (match) {
-      return `NUMERIC(${match[2]},${match[3]})`;
+    const matchWithScale = type.match(/^(numeric|decimal)\((\d+),(\d+)\)$/i);
+    if (matchWithScale) {
+      return `NUMERIC(${matchWithScale[2]},${matchWithScale[3]})`;
+    }
+    // PostgreSQL normalizes NUMERIC(10) to NUMERIC(10,0)
+    const matchPrecisionOnly = type.match(/^(numeric|decimal)\((\d+)\)$/i);
+    if (matchPrecisionOnly) {
+      return `NUMERIC(${matchPrecisionOnly[2]},0)`;
     }
   }
 
@@ -158,12 +163,18 @@ export function normalizeDefault(value: string | null | undefined): string | und
     (_, field) => `EXTRACT('${field.toLowerCase()}' FROM `
   );
 
-  // Strip type casts from COALESCE arguments (but NOT regclass used in nextval)
+  // Strip type casts from function arguments (but NOT regclass used in nextval)
   // COALESCE(NULL::text, 'value'::text) -> COALESCE(NULL, 'value')
+  // length('default'::text) -> length('default')
   // But keep: nextval('users_id_seq'::regclass) unchanged
-  if (normalized.toUpperCase().startsWith('COALESCE')) {
-    normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\[[^\]]*\])?/gi, '');
+  const upperNorm = normalized.toUpperCase();
+  if (!upperNorm.startsWith('NEXTVAL')) {
+    // Strip type casts that appear inside function calls (before closing paren or comma)
+    normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\[[^\]]*\])?(?=\s*[,)])/gi, '');
   }
+
+  // Normalize NOW() to CURRENT_TIMESTAMP (they are equivalent)
+  normalized = normalized.replace(/\bnow\(\)/gi, 'CURRENT_TIMESTAMP');
 
   // Normalize whitespace
   normalized = normalized.replace(/\s+/g, ' ').trim();
