@@ -62,6 +62,9 @@ export function normalizeType(type: string): string {
     float4: "FLOAT4",
     "double precision": "FLOAT8",
     float8: "FLOAT8",
+    // BIT types - varbit is alias for bit varying
+    "bit varying": "BIT VARYING",
+    varbit: "BIT VARYING",
   };
 
   // Handle array types by extracting base type, normalizing it, and adding single []
@@ -84,6 +87,14 @@ export function normalizeType(type: string): string {
     return type.replace(/^(character|bpchar)/i, "CHAR");
   }
 
+  // Handle BIT VARYING with length (varbit is PostgreSQL's internal name)
+  if (lowerTypePrefix.startsWith("bit varying(") || lowerTypePrefix.startsWith("varbit(")) {
+    const match = type.match(/^(bit varying|varbit)\((\d+)\)$/i);
+    if (match) {
+      return `BIT VARYING(${match[2]})`;
+    }
+  }
+
   // Handle NUMERIC/DECIMAL with precision and scale
   if (type.toLowerCase().startsWith("numeric(") || type.toLowerCase().startsWith("decimal(")) {
     // Extract precision and scale: numeric(10,2) -> NUMERIC(10,2)
@@ -99,28 +110,20 @@ export function normalizeType(type: string): string {
 }
 
 export function normalizeDefault(value: string | null | undefined): string | undefined {
-  // Treat null and undefined as "no default"
   if (value === null || value === undefined) {
     return undefined;
   }
 
-  // Trim first to handle leading/trailing whitespace
   let normalized = value.trim();
 
-  // Treat the string "NULL" as equivalent to undefined (no explicit default)
-  // PostgreSQL stores DEFAULT NULL as null in column_default
   if (normalized.toUpperCase() === 'NULL') {
     return undefined;
   }
 
   // Strip PostgreSQL's type cast suffix (::typename or ::typename(params) or ::typename[])
-  // This regex handles multi-word types like "timestamp without time zone" and "character varying"
-  // Also handles array types like text[]
-  // Examples: '100::integer', 'hello'::character varying', 'CURRENT_TIMESTAMP::timestamp without time zone', '{}::text[]'
   normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\([^)]*\))?(\[\])?$/i, '');
 
-  // Handle CAST(expr AS type) syntax - convert to just the expression
-  // Examples: CAST(ARRAY[] AS text[]) -> ARRAY[]
+  // Handle CAST(expr AS type) syntax
   const castMatch = normalized.match(/^CAST\((.+)\s+AS\s+[a-z_]+(\[\])?\)$/i);
   if (castMatch) {
     normalized = castMatch[1]!.trim();
@@ -129,27 +132,66 @@ export function normalizeDefault(value: string | null | undefined): string | und
   normalized = normalized.trim();
 
   // Strip quotes from numeric literals
-  // PostgreSQL stores negative numbers as '-100'::integer, after stripping the cast we get '-100'
-  // But the parser gives us -100 without quotes
   const quotedNumeric = normalized.match(/^'(-?\d+(?:\.\d+)?)'$/);
   if (quotedNumeric) {
     normalized = quotedNumeric[1]!;
   }
 
+  // Strip outer parentheses if the entire expression is wrapped
+  // PostgreSQL wraps expression defaults like `1 + 1` as `(1 + 1)`
+  while (/^\([^()]*\)$/.test(normalized) || isBalancedOuterParens(normalized)) {
+    const inner = normalized.slice(1, -1).trim();
+    if (inner === normalized.slice(1, -1).trim()) {
+      normalized = inner;
+    } else {
+      break;
+    }
+  }
+
+  // Strip pg_catalog. schema prefix from function calls
+  normalized = normalized.replace(/\bpg_catalog\./gi, '');
+
+  // Normalize EXTRACT function: EXTRACT(year FROM ...) -> EXTRACT('year' FROM ...)
+  // Parser outputs with quotes, DB outputs without quotes
+  normalized = normalized.replace(
+    /\bEXTRACT\s*\(\s*'?(\w+)'?\s+FROM\s+/gi,
+    (_, field) => `EXTRACT('${field.toLowerCase()}' FROM `
+  );
+
+  // Strip inline type casts from COALESCE and other functions
+  // COALESCE(NULL::text, 'value'::text) -> COALESCE(NULL, 'value')
+  normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\[[^\]]*\])?/gi, '');
+
+  // Normalize whitespace
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+
   return normalized;
+}
+
+function isBalancedOuterParens(str: string): boolean {
+  if (!str.startsWith('(') || !str.endsWith(')')) return false;
+  let depth = 0;
+  for (let i = 0; i < str.length - 1; i++) {
+    if (str[i] === '(') depth++;
+    if (str[i] === ')') depth--;
+    if (depth === 0) return false;
+  }
+  return depth === 1;
 }
 
 export function normalizeExpression(expr: string): string {
   let normalized = expr
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/::"?[a-z_]+"?(\([^)]*\))?/gi, '')
+    // Strip type casts including multi-word types like "character varying"
+    .replace(/::"?[a-z_]+"?(?:\s+[a-z_]+)*(?:\([^)]*\))?(?:\[\])?/gi, '')
     .replace(/\bpg_catalog\./gi, '')
     .replace(/\((-?\d+(?:\.\d+)?)\)/g, '$1')
     .replace(/(?<![a-z0-9_])\(([a-z_][a-z0-9_]*)\)/gi, '$1');
 
   normalized = normalizeAnyArrayToIn(normalized);
   normalized = normalizeBetween(normalized);
+  normalized = normalizeLikeOperator(normalized);
 
   let prevNormalized: string;
   do {
@@ -180,11 +222,17 @@ export function normalizeExpression(expr: string): string {
 }
 
 function normalizeAnyArrayToIn(expr: string): string {
-  const anyArrayPattern = /(\w+)\s*=\s*ANY\s*\(\s*ARRAY\s*\[(.*?)\]\s*\)/gi;
+  // Match: col = ANY (ARRAY[...]) or col = ANY ((ARRAY[...])::type[])
+  const anyArrayPattern = /(\w+)\s*=\s*ANY\s*\(\s*\(?ARRAY\s*\[(.*?)\]\)?(?:::[a-z_]+(?:\s+[a-z_]+)*(?:\[\])?)?\s*\)/gi;
   return expr.replace(anyArrayPattern, (_, col, values) => {
     const cleanedValues = values
       .split(',')
-      .map((v: string) => v.trim().replace(/::[a-z_]+(\[\])?/gi, ''))
+      .map((v: string) => {
+        let cleaned = v.trim();
+        // Strip type casts including multi-word types like "character varying"
+        cleaned = cleaned.replace(/::[a-z_]+(?:\s+[a-z_]+)*(?:\[\])?$/gi, '');
+        return cleaned;
+      })
       .join(', ');
     return `${col} IN (${cleanedValues})`;
   });
@@ -195,29 +243,55 @@ function normalizeBetween(expr: string): string {
   return expr.replace(betweenPattern, '$1 BETWEEN $2 AND $3');
 }
 
+function normalizeLikeOperator(expr: string): string {
+  // PostgreSQL transforms LIKE to ~~ and NOT LIKE to !~~
+  // col ~~ 'pattern' -> col LIKE 'pattern'
+  // col !~~ 'pattern' -> col NOT LIKE 'pattern'
+  let normalized = expr.replace(/(\w+)\s*~~\s*('[^']*')/gi, '$1 LIKE $2');
+  normalized = normalized.replace(/(\w+)\s*!~~\s*('[^']*')/gi, '$1 NOT LIKE $2');
+  return normalized;
+}
+
 export function columnsAreDifferent(desired: Column, current: Column): boolean {
   const normalizedDesiredType = normalizeType(desired.type);
   const normalizedCurrentType = normalizeType(current.type);
 
-  // Special handling for SERIAL columns
-  // SERIAL in schema becomes integer with nextval() default in database
-  if (desired.type === "SERIAL" && current.type === "integer") {
-    // SERIAL columns are expected to become integer with nextval default
+  // Map SERIAL types to their base PostgreSQL types
+  const serialTypeMap: Record<string, string> = {
+    SERIAL: "integer",
+    SMALLSERIAL: "smallint",
+    BIGSERIAL: "bigint",
+  };
+
+  // Map base types to their SERIAL equivalents for reverse lookup
+  const baseToSerialMap: Record<string, string> = {
+    INTEGER: "SERIAL",
+    SMALLINT: "SMALLSERIAL",
+    BIGINT: "BIGSERIAL",
+  };
+
+  // Special handling for SERIAL-like columns (SERIAL, SMALLSERIAL, BIGSERIAL)
+  // These become integer/smallint/bigint with nextval() default in database
+  const desiredUpperType = desired.type.toUpperCase();
+  const expectedBaseType = serialTypeMap[desiredUpperType];
+  if (expectedBaseType && current.type === expectedBaseType) {
     if (current.default?.includes("nextval")) {
-      // Check if nullability is consistent (SERIAL is NOT NULL by default)
       const nullabilityMatches = desired.nullable === current.nullable;
       return !nullabilityMatches;
     }
   }
 
-  // If desired is INTEGER and current is INTEGER, but current has nextval default,
-  // the current column is actually a SERIAL that we want to convert to plain INTEGER
+  // If desired is a base integer type and current has nextval default,
+  // the current column is actually a SERIAL type that we want to convert to plain integer
+  const desiredBaseType = desiredUpperType;
   if (
-    desired.type === "INTEGER" &&
-    current.type === "integer" &&
+    baseToSerialMap[desiredBaseType] &&
     current.default?.includes("nextval")
   ) {
-    return true; // Need to modify to remove the SERIAL behavior
+    const expectedBase = serialTypeMap[baseToSerialMap[desiredBaseType]!];
+    if (current.type === expectedBase) {
+      return true; // Need to modify to remove the SERIAL behavior
+    }
   }
 
   // Check if types are different
@@ -237,8 +311,9 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
 
   // Only consider it different if one has a non-null/non-undefined default and the other doesn't
   if (currentDefault !== desiredDefault) {
-    // Special case: SERIAL columns with nextval defaults are expected
-    if (desired.type === "SERIAL" && current.default?.includes("nextval")) {
+    // Special case: SERIAL-like columns with nextval defaults are expected
+    const serialTypes = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"];
+    if (serialTypes.includes(desired.type.toUpperCase()) && current.default?.includes("nextval")) {
       return false;
     }
     return true;
