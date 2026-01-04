@@ -158,9 +158,12 @@ export function normalizeDefault(value: string | null | undefined): string | und
     (_, field) => `EXTRACT('${field.toLowerCase()}' FROM `
   );
 
-  // Strip inline type casts from COALESCE and other functions
+  // Strip type casts from COALESCE arguments (but NOT regclass used in nextval)
   // COALESCE(NULL::text, 'value'::text) -> COALESCE(NULL, 'value')
-  normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\[[^\]]*\])?/gi, '');
+  // But keep: nextval('users_id_seq'::regclass) unchanged
+  if (normalized.toUpperCase().startsWith('COALESCE')) {
+    normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\[[^\]]*\])?/gi, '');
+  }
 
   // Normalize whitespace
   normalized = normalized.replace(/\s+/g, ' ').trim();
