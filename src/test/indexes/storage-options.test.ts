@@ -387,6 +387,74 @@ describe("Index Storage Options", () => {
     });
   });
 
+  describe("Storage Parameter Normalization (Issue #65)", () => {
+    test("should be idempotent with storage parameters - no changes on re-apply", async () => {
+      await client.query(`
+        CREATE TABLE storage_idempotent_test (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255)
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX idx_storage_idempotent ON storage_idempotent_test (email)
+        WITH (fillfactor = 80);
+      `);
+
+      const schemaSQL = `
+        CREATE TABLE storage_idempotent_test (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255)
+        );
+
+        CREATE INDEX idx_storage_idempotent ON storage_idempotent_test (email)
+        WITH (fillfactor = 80);
+      `;
+
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
+
+      if (tables.length > 0) {
+        tables[0]!.indexes = indexes;
+      }
+
+      const currentSchema = await inspector.getCurrentSchema(client);
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+      const migrationPlan = differ.generateMigrationPlan(tables, currentSchema);
+
+      const allStatements = [
+        ...migrationPlan.transactional,
+        ...migrationPlan.concurrent,
+      ];
+      const indexStatements = allStatements.filter((s: string) =>
+        s.includes("idx_storage_idempotent")
+      );
+
+      expect(indexStatements).toHaveLength(0);
+    });
+
+    test("should normalize quoted storage parameter values from DB", async () => {
+      await client.query(`
+        CREATE TABLE quote_norm_test (
+          id SERIAL PRIMARY KEY,
+          data TEXT
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX idx_quote_norm ON quote_norm_test (data)
+        WITH (fillfactor = 75);
+      `);
+
+      const tables = await inspector.getCurrentSchema(client);
+      const testTable = tables.find((t) => t.name === "quote_norm_test");
+      const index = testTable?.indexes?.find((i) => i.name === "idx_quote_norm");
+
+      expect(index?.storageParameters?.fillfactor).toBe("75");
+    });
+  });
+
   describe("Edge Cases and Validation", () => {
     test("should handle indexes without WITH clause", async () => {
       const sql = `

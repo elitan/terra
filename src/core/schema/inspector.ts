@@ -290,7 +290,7 @@ export class DatabaseInspector {
       if (match && match.length >= 3 && match[1] && match[2] !== undefined) {
         const key = match[1];
         const value = match[2];
-        parameters[key] = value;
+        parameters[key] = value.replace(/^'(.*)'$/, '$1');
       }
     }
 
@@ -312,7 +312,7 @@ export class DatabaseInspector {
       case "brin":
         return "brin";
       default:
-        return "btree"; // Default fallback
+        return accessMethod.toLowerCase() as Index["type"];
     }
   }
 
