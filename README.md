@@ -8,70 +8,57 @@ Declarative schema management for PostgreSQL and SQLite.
 npm install -g dbterra
 ```
 
-## Usage
+## Quick Start
 
-**1. Create schema.sql:**
+### PostgreSQL
 
 ```sql
+-- schema.sql
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) NOT NULL UNIQUE
 );
 ```
 
-**2. Preview changes:**
-
 ```bash
-dbterra plan
+export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
+dbterra plan   # preview changes
+dbterra apply  # apply changes
 ```
 
-**3. Apply:**
+### SQLite
+
+```sql
+-- schema.sql
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE
+);
+```
 
 ```bash
+export DATABASE_URL="sqlite:///path/to/database.db"
+dbterra plan
 dbterra apply
 ```
 
-**4. Update schema.sql:**
+## How It Works
 
-```sql
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) NOT NULL UNIQUE,
-  name VARCHAR(100) NOT NULL,        -- added
-  active BOOLEAN DEFAULT true        -- added
-);
+1. Write your desired schema as CREATE statements
+2. Run `dbterra plan` to see what changes are needed
+3. Run `dbterra apply` to execute the changes
 
-CREATE TABLE posts (                 -- added
-  id SERIAL PRIMARY KEY,
-  title VARCHAR(255) NOT NULL,
-  user_id INTEGER NOT NULL,
-  CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE INDEX idx_user_email ON users (LOWER(email));  -- added
-```
-
-**5. dbterra generates the ALTER statements:**
-
-```bash
-$ dbterra plan
-ALTER TABLE users ADD COLUMN name VARCHAR(100) NOT NULL
-ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT true
-CREATE TABLE posts (...)
-CREATE INDEX idx_user_email ON users (LOWER(email))
-
-$ dbterra apply
-```
+dbterra compares your schema file against the current database state and generates the necessary ALTER/DROP/CREATE statements.
 
 ## Configuration
 
-Database connection via `DATABASE_URL` or individual variables:
+### PostgreSQL
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
 ```
 
-Or:
+Or individual variables:
 
 ```bash
 export DB_HOST=localhost
@@ -81,115 +68,37 @@ export DB_USER=postgres
 export DB_PASSWORD=password
 ```
 
-## What's supported
+### SQLite
 
-**Tables & Columns:**
-All PostgreSQL column types, default values, NOT NULL constraints
-
-**Functions & Procedures:**
-User-defined functions and procedures with full PostgreSQL feature support
-
-**Triggers:**
-Table triggers with BEFORE/AFTER/INSTEAD OF timing
-
-**Sequences:**
-Custom sequences with configurable properties
-
-**Constraints:**
-```sql
--- Primary keys
-id SERIAL PRIMARY KEY
-
--- Foreign keys with actions
-CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-
--- Check constraints
-CONSTRAINT check_positive CHECK (quantity > 0)
-
--- Unique constraints
-email VARCHAR(255) UNIQUE
-CONSTRAINT unique_email UNIQUE (email, domain)
+```bash
+export DATABASE_URL="sqlite:///path/to/database.db"
+# or
+export DATABASE_URL="/path/to/database.db"
+# or in-memory
+export DATABASE_URL=":memory:"
 ```
 
-**Indexes:**
-```sql
--- Basic
-CREATE INDEX idx_email ON users (email);
+## Feature Support
 
--- Partial
-CREATE INDEX idx_active_users ON users (email) WHERE active = true;
+| Feature | PostgreSQL | SQLite |
+|---------|------------|--------|
+| Tables & Columns | Yes | Yes |
+| Primary Keys | Yes | Yes |
+| Foreign Keys | Yes | Yes |
+| Indexes | Yes | Yes |
+| Unique Constraints | Yes | Yes |
+| Check Constraints | Yes | Yes |
+| Views | Yes | Yes |
+| ENUM Types | Yes | No |
+| Sequences | Yes | No |
+| Functions | Yes | No |
+| Procedures | Yes | No |
+| Triggers | Yes | No |
+| Materialized Views | Yes | No |
+| Schemas | Yes | No |
+| Extensions | Yes | No |
 
--- Expression
-CREATE INDEX idx_lower_email ON users (LOWER(email));
-
--- Concurrent (built automatically when safe)
-```
-
-**ENUM types:**
-```sql
-CREATE TYPE status AS ENUM ('pending', 'active', 'inactive');
-
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  status status NOT NULL
-);
-```
-
-**Views:**
-```sql
-CREATE VIEW active_users AS
-SELECT id, email FROM users WHERE active = true;
-
-CREATE MATERIALIZED VIEW user_stats AS
-SELECT COUNT(*) as total FROM users;
-```
-
-**Functions:**
-```sql
-CREATE FUNCTION calculate_total(quantity INT, price DECIMAL)
-RETURNS DECIMAL
-AS $$
-  SELECT quantity * price
-$$
-LANGUAGE SQL IMMUTABLE;
-```
-
-**Procedures:**
-```sql
-CREATE PROCEDURE archive_old_posts(days_old INT)
-LANGUAGE SQL
-AS $$
-  DELETE FROM posts WHERE created_at < NOW() - INTERVAL '1 day' * days_old;
-$$;
-```
-
-**Triggers:**
-```sql
--- First create a trigger function
-CREATE FUNCTION update_modified_timestamp()
-RETURNS TRIGGER
-AS $$
-  BEGIN
-    NEW.modified_at = NOW();
-    RETURN NEW;
-  END;
-$$
-LANGUAGE plpgsql;
-
--- Then create the trigger
-CREATE TRIGGER set_modified_timestamp
-BEFORE UPDATE ON users
-FOR EACH ROW
-EXECUTE FUNCTION update_modified_timestamp();
-```
-
-**Sequences:**
-```sql
-CREATE SEQUENCE custom_id_seq
-START 1000
-INCREMENT 1
-CACHE 20;
-```
+SQLite uses table recreation for schema changes that ALTER TABLE doesn't support (column type changes, constraint modifications, etc.).
 
 ## Commands
 
@@ -198,6 +107,50 @@ dbterra plan                    # Preview changes
 dbterra plan -f custom.sql      # Use custom schema file
 dbterra apply                   # Apply changes
 dbterra apply -f custom.sql     # Apply from custom file
+```
+
+## Examples
+
+### Constraints
+
+```sql
+-- Primary keys
+id SERIAL PRIMARY KEY           -- PostgreSQL
+id INTEGER PRIMARY KEY          -- SQLite
+
+-- Foreign keys
+CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+-- Check constraints
+CONSTRAINT check_positive CHECK (quantity > 0)
+
+-- Unique constraints
+CONSTRAINT unique_email UNIQUE (email)
+```
+
+### Indexes
+
+```sql
+CREATE INDEX idx_email ON users (email);
+CREATE INDEX idx_active ON users (email) WHERE active = true;  -- partial index
+CREATE UNIQUE INDEX idx_unique_email ON users (email);
+```
+
+### PostgreSQL-only Features
+
+```sql
+-- ENUM types
+CREATE TYPE status AS ENUM ('pending', 'active', 'inactive');
+
+-- Views
+CREATE VIEW active_users AS SELECT * FROM users WHERE active = true;
+CREATE MATERIALIZED VIEW user_stats AS SELECT COUNT(*) FROM users;
+
+-- Functions
+CREATE FUNCTION add(a INT, b INT) RETURNS INT AS $$ SELECT a + b $$ LANGUAGE SQL;
+
+-- Sequences
+CREATE SEQUENCE custom_seq START 1000 INCREMENT 1;
 ```
 
 ## Development
@@ -209,12 +162,12 @@ git clone https://github.com/elitan/dbterra.git
 cd dbterra
 bun install
 
-# Start test database
+# PostgreSQL tests
 docker compose up -d
-
-# Run tests
-export DATABASE_URL="postgres://test_user:test_password@localhost:5487/sql_terraform_test"
 bun test
+
+# SQLite tests (no docker needed)
+bun test src/test/sqlite/
 ```
 
 ## License
