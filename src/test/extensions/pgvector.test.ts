@@ -69,7 +69,7 @@ describe("Extension Support - pgvector", () => {
     client = await createPgvectorClient();
     await cleanDatabase(client);
     const databaseService = createPgvectorDatabaseService();
-    schemaService = new SchemaService(databaseService);
+    schemaService = createTestSchemaService();
     inspector = new DatabaseInspector();
   });
 

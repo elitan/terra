@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import fc from "fast-check";
 import { SchemaService } from "../../core/schema/service";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestDatabaseService } from "../utils";
+import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
 import { tableName, columnName, typeAliasPair } from "./arbitraries";
 
 /**
@@ -19,8 +19,8 @@ describe("Property-Based: Default Value Normalization", () => {
   beforeEach(async () => {
     client = await createTestClient();
     await cleanDatabase(client);
-    const databaseService = createTestDatabaseService();
-    service = new SchemaService(databaseService);
+    
+    service = createTestSchemaService();
   });
 
   afterEach(async () => {

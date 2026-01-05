@@ -5,7 +5,7 @@ import {
   createTestClient,
   cleanDatabase,
   getTableColumns,
-  createTestDatabaseService,
+  createTestSchemaService,
 } from "../../utils";
 
 describe("PostgreSQL Type Cast Normalization", () => {
@@ -16,8 +16,8 @@ describe("PostgreSQL Type Cast Normalization", () => {
     client = await createTestClient();
     await cleanDatabase(client);
 
-    const databaseService = createTestDatabaseService();
-    service = new SchemaService(databaseService);
+    
+    service = createTestSchemaService();
   });
 
   afterEach(async () => {

@@ -5,7 +5,7 @@ import {
   createTestClient,
   cleanDatabase,
   getTableColumns,
-  createTestDatabaseService,
+  createTestSchemaService,
 } from "../../utils";
 
 describe("TEXT to VARCHAR conversion with default values", () => {
@@ -16,8 +16,8 @@ describe("TEXT to VARCHAR conversion with default values", () => {
     client = await createTestClient();
     await cleanDatabase(client);
 
-    const databaseService = createTestDatabaseService();
-    service = new SchemaService(databaseService);
+    
+    service = createTestSchemaService();
   });
 
   afterEach(async () => {

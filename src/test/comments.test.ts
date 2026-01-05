@@ -11,7 +11,7 @@ describe("COMMENT ON", () => {
   beforeEach(() => {
     config = loadConfig();
     databaseService = new DatabaseService(config);
-    schemaService = new SchemaService(databaseService);
+    schemaService = createTestSchemaService();
   });
 
   test("should add comment on schema", async () => {

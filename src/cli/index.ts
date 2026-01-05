@@ -1,5 +1,4 @@
 import { Command } from "commander";
-import { loadConfig } from "../core/database/config";
 import { applyCommand } from "./commands/index";
 import packageJson from "../../package.json";
 
@@ -7,12 +6,25 @@ function collectSchemas(value: string, previous: string[]) {
   return previous.concat([value]);
 }
 
+function getConnectionString(urlOption?: string): string {
+  const url = urlOption || process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "Database connection required. Provide -u/--url or set DATABASE_URL environment variable.\n" +
+      "Examples:\n" +
+      "  PostgreSQL: postgres://user:pass@localhost:5432/dbname\n" +
+      "  SQLite:     sqlite:///path/to/database.db or ./database.sqlite"
+    );
+  }
+  return url;
+}
+
 export async function runCLI() {
   const program = new Command();
 
   program
-    .name("pgterra")
-    .description("Declarative schema management for Postgres")
+    .name("dbterra")
+    .description("Declarative schema management for PostgreSQL and SQLite")
     .version(packageJson.version, "-v, --version");
 
   program
@@ -23,11 +35,11 @@ export async function runCLI() {
     .option("-s, --schema <schema>", "Database schema to manage (can be specified multiple times, defaults to 'public')", collectSchemas, [])
     .option("--auto-approve", "Skip confirmation prompt")
     .option("--dry-run", "Show migration plan without executing changes")
-    .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "pgterra_migrate_execute")
+    .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "dbterra_migrate_execute")
     .option("--lock-timeout <seconds>", "Maximum time to wait for advisory lock in seconds", "10")
     .action(async (options) => {
-      const config = loadConfig(options.url);
-      await applyCommand(options, config);
+      const connectionString = getConnectionString(options.url);
+      await applyCommand(options, connectionString);
     });
 
   await program.parseAsync();

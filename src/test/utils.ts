@@ -1,6 +1,8 @@
 import { Client } from "pg";
 import type { DatabaseConfig } from "../types/config";
 import { DatabaseService } from "../core/database/client";
+import type { PostgresConnectionConfig } from "../providers/types";
+import { PostgresProvider } from "../providers/postgres";
 
 function getTestDbConfig(): DatabaseConfig {
   const databaseUrl = process.env.DATABASE_URL;
@@ -24,6 +26,14 @@ function getTestDbConfig(): DatabaseConfig {
   };
 }
 
+export function getTestConnectionConfig(): PostgresConnectionConfig {
+  const config = getTestDbConfig();
+  return {
+    dialect: "postgres",
+    ...config,
+  };
+}
+
 export const TEST_DB_CONFIG = getTestDbConfig();
 
 export { getTestDbConfig };
@@ -38,6 +48,17 @@ export async function createTestClient(): Promise<Client> {
 export function createTestDatabaseService(): DatabaseService {
   const config = getTestDbConfig();
   return new DatabaseService(config);
+}
+
+export function createTestProvider(): PostgresProvider {
+  return new PostgresProvider();
+}
+
+export function createTestSchemaService() {
+  const { SchemaService } = require("../core/schema/service");
+  const provider = createTestProvider();
+  const config = getTestConnectionConfig();
+  return new SchemaService(provider, config);
 }
 
 export async function cleanDatabase(client: Client, schemas: string[] = ['public']): Promise<void> {

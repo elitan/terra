@@ -5,7 +5,7 @@ import {
   createTestClient,
   cleanDatabase,
   getTableColumns,
-  createTestDatabaseService,
+  createTestSchemaService,
 } from "../../utils";
 
 describe("Default Value Idempotency - Issue #11", () => {
@@ -16,8 +16,8 @@ describe("Default Value Idempotency - Issue #11", () => {
     client = await createTestClient();
     await cleanDatabase(client);
 
-    const databaseService = createTestDatabaseService();
-    service = new SchemaService(databaseService);
+    
+    service = createTestSchemaService();
   });
 
   afterEach(async () => {

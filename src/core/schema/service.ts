@@ -1,10 +1,11 @@
-import { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
-import { SchemaParser } from "./parser";
-import { DatabaseInspector } from "./inspector";
-import { SchemaDiffer } from "./differ";
-import { MigrationExecutor } from "../migration/executor";
-import { DatabaseService, type AdvisoryLockOptions } from "../database/client";
+import type {
+  DatabaseProvider,
+  DatabaseClient,
+  ConnectionConfig,
+  AdvisoryLockOptions,
+  ParsedSchema,
+} from "../../providers/types";
 import { Logger } from "../../utils/logger";
 import {
   CommentHandler,
@@ -19,11 +20,8 @@ import {
 } from "./handlers";
 
 export class SchemaService {
-  private parser: SchemaParser;
-  private inspector: DatabaseInspector;
-  private differ: SchemaDiffer;
-  private executor: MigrationExecutor;
-  private databaseService: DatabaseService;
+  private provider: DatabaseProvider;
+  private config: ConnectionConfig;
 
   private schemaHandler: SchemaHandler;
   private commentHandler: CommentHandler;
@@ -35,12 +33,9 @@ export class SchemaService {
   private viewHandler: ViewHandler;
   private triggerHandler: TriggerHandler;
 
-  constructor(databaseService: DatabaseService) {
-    this.databaseService = databaseService;
-    this.parser = new SchemaParser();
-    this.inspector = new DatabaseInspector();
-    this.differ = new SchemaDiffer();
-    this.executor = new MigrationExecutor(databaseService);
+  constructor(provider: DatabaseProvider, config: ConnectionConfig) {
+    this.provider = provider;
+    this.config = config;
 
     this.schemaHandler = new SchemaHandler();
     this.commentHandler = new CommentHandler();
@@ -54,13 +49,24 @@ export class SchemaService {
   }
 
   async plan(schemaFile: string): Promise<MigrationPlan> {
-    const client = await this.databaseService.createClient();
+    const client = await this.provider.createClient(this.config);
 
     try {
       const parsedSchema = await this.parseSchemaInput(schemaFile);
-      const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
-      const currentSchema = await this.inspector.getCurrentSchema(client);
-      const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
+      const validation = this.provider.validateSchema(parsedSchema);
+      if (!validation.valid) {
+        for (const error of validation.errors) {
+          Logger.error(`${error.code}: ${error.message}`);
+          if (error.suggestion) {
+            Logger.info(`  Suggestion: ${error.suggestion}`);
+          }
+        }
+        throw new Error("Schema validation failed for target database");
+      }
+
+      const desiredSchema = parsedSchema.tables;
+      const currentSchema = await this.provider.getCurrentSchema(client);
+      const plan = this.provider.generateMigrationPlan(desiredSchema, currentSchema);
 
       if (!plan.hasChanges) {
         Logger.success("No changes needed - database is up to date");
@@ -104,56 +110,104 @@ export class SchemaService {
     lockOptions?: AdvisoryLockOptions,
     dryRun: boolean = false
   ): Promise<void> {
-    const client = await this.databaseService.createClient();
+    const client = await this.provider.createClient(this.config);
 
     try {
-      if (lockOptions && !dryRun) {
-        await this.databaseService.acquireAdvisoryLock(client, lockOptions);
+      if (lockOptions && !dryRun && this.provider.acquireAdvisoryLock) {
+        await this.provider.acquireAdvisoryLock(client, lockOptions);
       }
+
       const parsedSchema = await this.parseSchemaInput(schemaFile);
-      const desiredSchema = Array.isArray(parsedSchema) ? parsedSchema : parsedSchema.tables;
-      const desiredEnums = Array.isArray(parsedSchema) ? [] : parsedSchema.enums;
-      const desiredViews = Array.isArray(parsedSchema) ? [] : parsedSchema.views;
-      const desiredFunctions = Array.isArray(parsedSchema) ? [] : parsedSchema.functions;
-      const desiredProcedures = Array.isArray(parsedSchema) ? [] : parsedSchema.procedures;
-      const desiredTriggers = Array.isArray(parsedSchema) ? [] : parsedSchema.triggers;
-      const desiredSequences = Array.isArray(parsedSchema) ? [] : parsedSchema.sequences;
-      const desiredExtensions = Array.isArray(parsedSchema) ? [] : parsedSchema.extensions;
-      const desiredSchemas = Array.isArray(parsedSchema) ? [] : parsedSchema.schemas || [];
-      const desiredComments = Array.isArray(parsedSchema) ? [] : parsedSchema.comments || [];
+      const validation = this.provider.validateSchema(parsedSchema);
+      if (!validation.valid) {
+        for (const error of validation.errors) {
+          Logger.error(`${error.code}: ${error.message}`);
+          if (error.suggestion) {
+            Logger.info(`  Suggestion: ${error.suggestion}`);
+          }
+        }
+        throw new Error("Schema validation failed for target database");
+      }
 
-      this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
-        desiredFunctions, desiredProcedures, desiredTriggers, desiredSequences);
+      const desiredSchema = parsedSchema.tables;
+      const desiredEnums = parsedSchema.enums;
+      const desiredViews = parsedSchema.views;
+      const desiredFunctions = parsedSchema.functions;
+      const desiredProcedures = parsedSchema.procedures;
+      const desiredTriggers = parsedSchema.triggers;
+      const desiredSequences = parsedSchema.sequences;
+      const desiredExtensions = parsedSchema.extensions;
+      const desiredSchemas = parsedSchema.schemas || [];
+      const desiredComments = parsedSchema.comments || [];
 
-      const currentSchema = await this.inspector.getCurrentSchema(client, schemas);
-      const currentEnums = await this.inspector.getCurrentEnums(client, schemas);
-      const currentViews = await this.inspector.getCurrentViews(client, schemas);
-      const currentFunctions = await this.inspector.getCurrentFunctions(client, schemas);
-      const currentProcedures = await this.inspector.getCurrentProcedures(client, schemas);
-      const currentTriggers = await this.inspector.getCurrentTriggers(client, schemas);
-      const currentSequences = await this.inspector.getCurrentSequences(client, schemas);
-      const currentExtensions = await this.inspector.getCurrentExtensions(client, schemas);
-      const currentSchemas = await this.inspector.getCurrentSchemas(client, schemas);
-      const currentComments = await this.inspector.getCurrentComments(client, schemas);
+      if (this.provider.supportsFeature("schemas")) {
+        this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
+          desiredFunctions, desiredProcedures, desiredTriggers, desiredSequences);
+      }
 
-      const schemaStatements = this.schemaHandler.generateStatements(desiredSchemas, currentSchemas);
-      const { create: extensionCreateStatements, drop: extensionDropStatements } =
-        this.extensionHandler.generateStatements(desiredExtensions, currentExtensions);
-      const { transactional: enumCreateStatements, concurrent: enumAddValueStatements } =
-        this.enumHandler.generateStatements(desiredEnums, currentEnums);
+      const currentSchema = await this.provider.getCurrentSchema(client, schemas);
+      const currentEnums = await this.provider.getCurrentEnums(client, schemas);
+      const currentViews = await this.provider.getCurrentViews(client, schemas);
+      const currentFunctions = await this.provider.getCurrentFunctions(client, schemas);
+      const currentProcedures = await this.provider.getCurrentProcedures(client, schemas);
+      const currentTriggers = await this.provider.getCurrentTriggers(client, schemas);
+      const currentSequences = await this.provider.getCurrentSequences(client, schemas);
+      const currentExtensions = await this.provider.getCurrentExtensions(client, schemas);
+      const currentSchemas = await this.provider.getCurrentSchemas(client, schemas);
+      const currentComments = await this.provider.getCurrentComments(client, schemas);
 
-      const plan = this.differ.generateMigrationPlan(desiredSchema, currentSchema);
+      let schemaStatements: string[] = [];
+      let extensionCreateStatements: string[] = [];
+      let extensionDropStatements: string[] = [];
+      let enumCreateStatements: string[] = [];
+      let enumAddValueStatements: string[] = [];
+      let sequenceStatements: string[] = [];
+      let functionStatements: string[] = [];
+      let procedureStatements: string[] = [];
+      let triggerStatements: string[] = [];
+      let commentStatements: string[] = [];
+
+      if (this.provider.supportsFeature("schemas")) {
+        schemaStatements = this.schemaHandler.generateStatements(desiredSchemas, currentSchemas);
+      }
+
+      if (this.provider.supportsFeature("extensions")) {
+        const extResult = this.extensionHandler.generateStatements(desiredExtensions, currentExtensions);
+        extensionCreateStatements = extResult.create;
+        extensionDropStatements = extResult.drop;
+      }
+
+      if (this.provider.supportsFeature("enums")) {
+        const enumResult = this.enumHandler.generateStatements(desiredEnums, currentEnums);
+        enumCreateStatements = enumResult.transactional;
+        enumAddValueStatements = enumResult.concurrent;
+      }
+
+      const plan = this.provider.generateMigrationPlan(desiredSchema, currentSchema);
 
       plan.transactional = [...schemaStatements, ...extensionCreateStatements, ...enumCreateStatements, ...plan.transactional];
       plan.concurrent = [...enumAddValueStatements, ...plan.concurrent];
       plan.hasChanges = plan.transactional.length > 0 || plan.concurrent.length > 0;
 
-      const sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
-      const functionStatements = this.functionHandler.generateStatements(desiredFunctions, currentFunctions);
-      const procedureStatements = this.procedureHandler.generateStatements(desiredProcedures, currentProcedures);
+      if (this.provider.supportsFeature("sequences")) {
+        sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
+      }
+
+      if (this.provider.supportsFeature("stored_functions")) {
+        functionStatements = this.functionHandler.generateStatements(desiredFunctions, currentFunctions);
+      }
+
+      if (this.provider.supportsFeature("stored_procedures")) {
+        procedureStatements = this.procedureHandler.generateStatements(desiredProcedures, currentProcedures);
+      }
+
       const viewStatements = this.viewHandler.generateStatements(desiredViews, currentViews);
-      const triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
-      const commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
+
+      if (this.provider.supportsFeature("triggers")) {
+        triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
+      }
+
+      commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
 
       const totalChanges = plan.transactional.length + plan.concurrent.length + plan.deferred.length +
                           sequenceStatements.length + functionStatements.length +
@@ -208,9 +262,12 @@ export class SchemaService {
         }
       }
 
-      const enumRemovalStatements = this.enumHandler.generateRemovalStatements(
-        desiredEnums, currentEnums
-      );
+      let enumRemovalStatements: string[] = [];
+      if (this.provider.supportsFeature("enums")) {
+        enumRemovalStatements = this.enumHandler.generateRemovalStatements(
+          desiredEnums, currentEnums
+        );
+      }
 
       const combinedPlan: MigrationPlan = {
         transactional: [
@@ -230,12 +287,34 @@ export class SchemaService {
         hasChanges: true
       };
 
-      await this.executor.executePlan(client, combinedPlan, autoApprove);
+      await this.executePlan(client, combinedPlan, autoApprove);
     } finally {
-      if (lockOptions && !dryRun) {
-        await this.databaseService.releaseAdvisoryLock(client, lockOptions.lockName);
+      if (lockOptions && !dryRun && this.provider.releaseAdvisoryLock) {
+        await this.provider.releaseAdvisoryLock(client, lockOptions.lockName);
       }
       await client.end();
+    }
+  }
+
+  private async executePlan(
+    client: DatabaseClient,
+    plan: MigrationPlan,
+    autoApprove: boolean
+  ): Promise<void> {
+    if (plan.transactional.length > 0) {
+      await this.provider.executeInTransaction(client, plan.transactional);
+    }
+
+    if (plan.concurrent.length > 0) {
+      for (const statement of plan.concurrent) {
+        try {
+          await client.query(statement);
+          Logger.success(`Executed: ${statement.substring(0, 60)}...`);
+        } catch (error) {
+          Logger.error(`Failed: ${statement}`);
+          throw error;
+        }
+      }
     }
   }
 
@@ -255,9 +334,9 @@ export class SchemaService {
     });
   }
 
-  private async parseSchemaInput(input: string) {
+  private async parseSchemaInput(input: string): Promise<ParsedSchema> {
     if (input === "") {
-      return await this.parser.parseSchema(input);
+      return await this.provider.parseSchema(input);
     }
 
     if (
@@ -266,21 +345,23 @@ export class SchemaService {
       input.includes('\n') ||
       input.length > 500
     ) {
-      return await this.parser.parseSchema(input);
+      return await this.provider.parseSchema(input);
     } else {
-      return await this.parser.parseSchemaFile(input);
+      const fs = await import('fs/promises');
+      const content = await fs.readFile(input, 'utf-8');
+      return await this.provider.parseSchema(content, input);
     }
   }
 
   private validateSchemaReferences(
     managedSchemas: string[],
-    tables: any[],
-    enums: any[],
-    views: any[],
-    functions: any[],
-    procedures: any[],
-    triggers: any[],
-    sequences: any[]
+    tables: { name: string; schema?: string }[],
+    enums: { name: string; schema?: string }[],
+    views: { name: string; schema?: string }[],
+    functions: { name: string; schema?: string }[],
+    procedures: { name: string; schema?: string }[],
+    triggers: { name: string; schema?: string }[],
+    sequences: { name: string; schema?: string }[]
   ): void {
     const errors: string[] = [];
 
@@ -303,7 +384,7 @@ export class SchemaService {
       throw new Error(
         `Schema validation failed:\n${errors.join('\n')}\n\n` +
         `To fix this, either:\n` +
-        `1. Add the missing schema(s) using -s flag: terra apply -s ${managedSchemas.join(' -s ')} -s <missing_schema>\n` +
+        `1. Add the missing schema(s) using -s flag: dbterra apply -s ${managedSchemas.join(' -s ')} -s <missing_schema>\n` +
         `2. Remove or modify the objects to use only managed schemas`
       );
     }

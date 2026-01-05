@@ -1,10 +1,11 @@
 {
-  "name": "pgterra",
-  "version": "0.2.19",
-  "description": "Declarative schema management for Postgres",
+  "name": "dbterra",
+  "version": "0.3.0",
+  "description": "Declarative schema management for PostgreSQL and SQLite",
   "keywords": [
     "postgres",
     "postgresql",
+    "sqlite",
     "schema",
     "migration",
     "database",
@@ -12,13 +13,13 @@
     "cli",
     "sql"
   ],
-  "homepage": "https://github.com/elitan/pgterra#readme",
+  "homepage": "https://github.com/elitan/dbterra#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/elitan/pgterra.git"
+    "url": "https://github.com/elitan/dbterra.git"
   },
   "bugs": {
-    "url": "https://github.com/elitan/pgterra/issues"
+    "url": "https://github.com/elitan/dbterra/issues"
   },
   "author": {
     "name": "Johan Eliasson",
@@ -26,7 +27,7 @@
   },
   "license": "MIT",
   "bin": {
-    "pgterra": "./dist/index.js"
+    "dbterra": "./dist/index.js"
   },
   "type": "module",
   "files": [
@@ -68,15 +69,18 @@
     "release:major": "bun run scripts/release.ts major"
   },
   "dependencies": {
+    "better-sqlite3": "^12.5.0",
     "boxen": "^8.0.1",
     "chalk": "^5.3.0",
     "commander": "^11.1.0",
     "diff": "^5.1.0",
     "ora": "^9.0.0",
     "pg": "^8.11.3",
-    "pgsql-parser": "^17.8.2"
+    "pgsql-parser": "^17.8.2",
+    "sql.js": "^1.13.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "latest",
     "@types/diff": "^5.0.8",
     "@types/pg": "^8.10.9",

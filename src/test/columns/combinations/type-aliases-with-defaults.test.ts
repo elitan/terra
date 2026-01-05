@@ -5,7 +5,7 @@ import {
   createTestClient,
   cleanDatabase,
   getTableColumns,
-  createTestDatabaseService,
+  createTestSchemaService,
 } from "../../utils";
 
 describe("Type Aliases with Defaults - Combination Testing", () => {
@@ -16,8 +16,8 @@ describe("Type Aliases with Defaults - Combination Testing", () => {
     client = await createTestClient();
     await cleanDatabase(client);
 
-    const databaseService = createTestDatabaseService();
-    service = new SchemaService(databaseService);
+    
+    service = createTestSchemaService();
   });
 
   afterEach(async () => {

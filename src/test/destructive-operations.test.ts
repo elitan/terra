@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../core/schema/service";
 import { DatabaseService } from "../core/database/client";
-import { createTestClient, cleanDatabase, createTestDatabaseService } from "./utils";
+import { createTestClient, cleanDatabase, createTestSchemaService } from "./utils";
 
 describe("Destructive Operation Safety", () => {
   let client: Client;
@@ -11,8 +11,8 @@ describe("Destructive Operation Safety", () => {
   beforeEach(async () => {
     client = await createTestClient();
     await cleanDatabase(client);
-    const databaseService = createTestDatabaseService();
-    schemaService = new SchemaService(databaseService);
+    
+    schemaService = createTestSchemaService();
   });
 
   afterEach(async () => {

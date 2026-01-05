@@ -11,7 +11,7 @@ describe("Triggers", () => {
   beforeEach(() => {
     config = loadConfig();
     databaseService = new DatabaseService(config);
-    schemaService = new SchemaService(databaseService);
+    schemaService = createTestSchemaService();
   });
 
   test("should create a simple trigger with trigger function", async () => {

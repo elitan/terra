@@ -12,7 +12,7 @@ describe("Materialized View Operations", () => {
     client = await createTestClient();
     await cleanDatabase(client);
     const databaseService = new DatabaseService(getTestDbConfig());
-    schemaService = new SchemaService(databaseService);
+    schemaService = createTestSchemaService();
   });
 
   afterEach(async () => {

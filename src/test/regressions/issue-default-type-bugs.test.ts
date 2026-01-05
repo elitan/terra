@@ -5,7 +5,7 @@ import {
   createTestClient,
   cleanDatabase,
   getTableColumns,
-  createTestDatabaseService,
+  createTestSchemaService,
 } from "../utils";
 
 /**
@@ -23,8 +23,8 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
     client = await createTestClient();
     await cleanDatabase(client);
 
-    const databaseService = createTestDatabaseService();
-    service = new SchemaService(databaseService);
+    
+    service = createTestSchemaService();
   });
 
   afterEach(async () => {

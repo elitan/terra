@@ -11,7 +11,7 @@ describe("CREATE SCHEMA", () => {
   beforeEach(() => {
     config = loadConfig();
     databaseService = new DatabaseService(config);
-    schemaService = new SchemaService(databaseService);
+    schemaService = createTestSchemaService();
   });
 
   test("should create a new schema and table", async () => {

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../core/schema/service";
-import { createTestClient, cleanDatabase, createTestDatabaseService } from "./utils";
+import { createTestClient, cleanDatabase, createTestSchemaService } from "./utils";
 
 describe("Reserved Word Identifiers", () => {
   let client: Client;
@@ -10,8 +10,8 @@ describe("Reserved Word Identifiers", () => {
   beforeEach(async () => {
     client = await createTestClient();
     await cleanDatabase(client);
-    const databaseService = createTestDatabaseService();
-    schemaService = new SchemaService(databaseService);
+    
+    schemaService = createTestSchemaService();
   });
 
   afterEach(async () => {
