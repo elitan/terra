@@ -22,7 +22,7 @@ Declarative PostgreSQL schema management.
 ## Install
 
 ```bash
-npm install -g pgterra
+npm install -g dbterra
 ```
 
 ## Usage
@@ -39,13 +39,13 @@ CREATE TABLE users (
 **2. Preview changes:**
 
 ```bash
-pgterra plan
+dbterra plan
 ```
 
 **3. Apply:**
 
 ```bash
-pgterra apply
+dbterra apply
 ```
 
 **4. Update schema.sql:**
@@ -71,13 +71,13 @@ CREATE INDEX idx_user_email ON users (LOWER(email));  -- added
 **5. Terra generates the ALTER statements:**
 
 ```bash
-$ pgterra plan
+$ dbterra plan
 ALTER TABLE users ADD COLUMN name VARCHAR(100) NOT NULL
 ALTER TABLE users ADD COLUMN active BOOLEAN DEFAULT true
 CREATE TABLE posts (...)
 CREATE INDEX idx_user_email ON users (LOWER(email))
 
-$ pgterra apply
+$ dbterra apply
 ```
 
 ## Configuration
@@ -211,10 +211,10 @@ CACHE 20;
 ## Commands
 
 ```bash
-pgterra plan                    # Preview changes
-pgterra plan -f custom.sql      # Use custom schema file
-pgterra apply                   # Apply changes
-pgterra apply -f custom.sql     # Apply from custom file
+dbterra plan                    # Preview changes
+dbterra plan -f custom.sql      # Use custom schema file
+dbterra apply                   # Apply changes
+dbterra apply -f custom.sql     # Apply from custom file
 ```
 
 ## Development
