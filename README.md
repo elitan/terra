@@ -1,23 +1,6 @@
-<div align="center">
-  <img src="assets/readme-hero.png" alt="Terra - Declarative PostgreSQL schema management" />
-  <br />
-  <br />
-  <a href="https://github.com/elitan/terra/stargazers">
-    <img alt="GitHub Stars" src="https://img.shields.io/github/stars/elitan/terra?style=social" />
-  </a>
-    <a href="https://discord.gg/PtePt2wx7R">
-    <img alt="Discord" src="https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white" />
-  </a>
-  <a href="https://x.com/elitasson">
-    <img alt="Twitter Follow" src="https://img.shields.io/twitter/follow/elitasson?style=social" />
-  </a>
-</div>
+# dbterra
 
-<br />
-
-# Terra
-
-Declarative PostgreSQL schema management.
+Declarative schema management for PostgreSQL and SQLite.
 
 ## Install
 
@@ -68,7 +51,7 @@ CREATE TABLE posts (                 -- added
 CREATE INDEX idx_user_email ON users (LOWER(email));  -- added
 ```
 
-**5. Terra generates the ALTER statements:**
+**5. dbterra generates the ALTER statements:**
 
 ```bash
 $ dbterra plan
@@ -222,8 +205,8 @@ dbterra apply -f custom.sql     # Apply from custom file
 Requires [Bun](https://bun.sh):
 
 ```bash
-git clone https://github.com/elitan/terra.git
-cd terra
+git clone https://github.com/elitan/dbterra.git
+cd dbterra
 bun install
 
 # Start test database
