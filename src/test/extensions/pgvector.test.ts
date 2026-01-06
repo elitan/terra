@@ -3,7 +3,7 @@ import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
 import { DatabaseService } from "../../core/database/client";
 import { DatabaseInspector } from "../../core/schema/inspector";
-import { createTestSchemaService } from "../utils";
+import { PostgresProvider } from "../../providers/postgres";
 
 /**
  * Extension Tests - pgvector
@@ -12,26 +12,27 @@ import { createTestSchemaService } from "../utils";
  * Use DATABASE_URL to point to the pgvector instance (port 5488).
  */
 
+const PGVECTOR_CONFIG = {
+  host: "localhost",
+  port: 5488,
+  database: "sql_terraform_test",
+  user: "test_user",
+  password: "test_password",
+};
+
 async function createPgvectorClient(): Promise<Client> {
-  const client = new Client({
-    host: "localhost",
-    port: 5488, // pgvector instance
-    database: "sql_terraform_test",
-    user: "test_user",
-    password: "test_password",
-  });
+  const client = new Client(PGVECTOR_CONFIG);
   await client.connect();
   return client;
 }
 
 function createPgvectorDatabaseService(): DatabaseService {
-  return new DatabaseService({
-    host: "localhost",
-    port: 5488,
-    database: "sql_terraform_test",
-    user: "test_user",
-    password: "test_password",
-  });
+  return new DatabaseService(PGVECTOR_CONFIG);
+}
+
+function createPgvectorSchemaService(): SchemaService {
+  const provider = new PostgresProvider();
+  return new SchemaService(provider, { dialect: "postgres", ...PGVECTOR_CONFIG });
 }
 
 async function cleanDatabase(client: Client) {
@@ -69,8 +70,7 @@ describe("Extension Support - pgvector", () => {
   beforeEach(async () => {
     client = await createPgvectorClient();
     await cleanDatabase(client);
-    const databaseService = createPgvectorDatabaseService();
-    schemaService = createTestSchemaService();
+    schemaService = createPgvectorSchemaService();
     inspector = new DatabaseInspector();
   });
 

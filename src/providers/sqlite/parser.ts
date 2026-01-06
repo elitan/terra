@@ -1,4 +1,4 @@
-import initSqlJs, { Database as SqlJsDatabase } from "sql.js";
+import initSqlJs, { Database as SqlJsDatabase, SqlValue } from "sql.js";
 import type { ParsedSchema } from "../types";
 import type {
   Table,
@@ -128,7 +128,7 @@ export class SQLiteParser {
     const result = db.exec(`PRAGMA table_info("${tableName}")`);
     if (!result[0]) return [];
 
-    return result[0].values.map(row => {
+    return result[0].values.map((row: SqlValue[]) => {
       const info: TableInfo = {
         cid: row[0] as number,
         name: row[1] as string,
@@ -152,9 +152,9 @@ export class SQLiteParser {
     if (!result[0]) return null;
 
     const pkColumns = result[0].values
-      .filter(row => (row[5] as number) > 0)
-      .sort((a, b) => (a[5] as number) - (b[5] as number))
-      .map(row => row[1] as string);
+      .filter((row: SqlValue[]) => (row[5] as number) > 0)
+      .sort((a: SqlValue[], b: SqlValue[]) => (a[5] as number) - (b[5] as number))
+      .map((row: SqlValue[]) => row[1] as string);
 
     if (pkColumns.length === 0) return null;
 
@@ -226,8 +226,8 @@ export class SQLiteParser {
       if (!indexInfoResult[0]) continue;
 
       const columns = indexInfoResult[0].values
-        .sort((a, b) => (a[0] as number) - (b[0] as number))
-        .map(col => col[2] as string);
+        .sort((a: SqlValue[], b: SqlValue[]) => (a[0] as number) - (b[0] as number))
+        .map((col: SqlValue[]) => col[2] as string);
 
       const index: Index = {
         name: info.name,
@@ -262,7 +262,7 @@ export class SQLiteParser {
     let match;
 
     while ((match = checkRegex.exec(sql)) !== null) {
-      constraints.push({ expression: match[1].trim() });
+      constraints.push({ expression: match[1]!.trim() });
     }
 
     return constraints;
@@ -293,7 +293,7 @@ export class SQLiteParser {
 
       return {
         name,
-        definition: defMatch ? defMatch[1].trim() : '',
+        definition: defMatch?.[1]?.trim() ?? '',
       };
     });
   }

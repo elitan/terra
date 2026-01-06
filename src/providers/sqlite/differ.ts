@@ -165,11 +165,13 @@ export class SQLiteDiffer {
     const cSorted = [...c].sort((a, b) => a.columns.join(',').localeCompare(b.columns.join(',')));
 
     for (let i = 0; i < dSorted.length; i++) {
-      if (dSorted[i].columns.join(',') !== cSorted[i].columns.join(',')) return true;
-      if (dSorted[i].referencedTable !== cSorted[i].referencedTable) return true;
-      if (dSorted[i].referencedColumns.join(',') !== cSorted[i].referencedColumns.join(',')) return true;
-      if (dSorted[i].onDelete !== cSorted[i].onDelete) return true;
-      if (dSorted[i].onUpdate !== cSorted[i].onUpdate) return true;
+      const dItem = dSorted[i]!;
+      const cItem = cSorted[i]!;
+      if (dItem.columns.join(',') !== cItem.columns.join(',')) return true;
+      if (dItem.referencedTable !== cItem.referencedTable) return true;
+      if (dItem.referencedColumns.join(',') !== cItem.referencedColumns.join(',')) return true;
+      if (dItem.onDelete !== cItem.onDelete) return true;
+      if (dItem.onUpdate !== cItem.onUpdate) return true;
     }
 
     return false;

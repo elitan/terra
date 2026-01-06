@@ -14,13 +14,14 @@ export class SQLiteClient implements DatabaseClient {
     params?: unknown[]
   ): Promise<QueryResult<T>> {
     const stmt = this.db.prepare(sql);
+    const sqlParams = params as (string | number | bigint | boolean | null | Uint8Array)[] | undefined;
     if (sql.trim().toUpperCase().startsWith("SELECT") ||
         sql.trim().toUpperCase().startsWith("PRAGMA")) {
-      const rows = params ? stmt.all(...params) : stmt.all();
+      const rows = sqlParams ? stmt.all(...sqlParams) : stmt.all();
       return { rows: rows as T[] };
     } else {
-      if (params) {
-        stmt.run(...params);
+      if (sqlParams) {
+        stmt.run(...sqlParams);
       } else {
         stmt.run();
       }

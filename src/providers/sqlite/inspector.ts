@@ -210,7 +210,7 @@ export class SQLiteInspector {
 
     while ((match = checkRegex.exec(sql)) !== null) {
       constraints.push({
-        expression: match[1].trim(),
+        expression: match[1]!.trim(),
       });
     }
 
@@ -242,7 +242,7 @@ export class SQLiteInspector {
       const defMatch = row.sql?.match(/AS\s+(.+)$/is);
       return {
         name: row.name,
-        definition: defMatch ? defMatch[1].trim() : '',
+        definition: defMatch?.[1]?.trim() ?? '',
       };
     });
   }
