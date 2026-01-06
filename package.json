@@ -13,13 +13,13 @@
     "cli",
     "sql"
   ],
-  "homepage": "https://github.com/elitan/dbterra#readme",
+  "homepage": "https://github.com/elitan/terradb#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/elitan/dbterra.git"
+    "url": "https://github.com/elitan/terradb.git"
   },
   "bugs": {
-    "url": "https://github.com/elitan/dbterra/issues"
+    "url": "https://github.com/elitan/terradb/issues"
   },
   "author": {
     "name": "Johan Eliasson",

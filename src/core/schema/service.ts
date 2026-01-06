@@ -384,7 +384,7 @@ export class SchemaService {
       throw new Error(
         `Schema validation failed:\n${errors.join('\n')}\n\n` +
         `To fix this, either:\n` +
-        `1. Add the missing schema(s) using -s flag: dbterra apply -s ${managedSchemas.join(' -s ')} -s <missing_schema>\n` +
+        `1. Add the missing schema(s) using -s flag: terradb apply -s ${managedSchemas.join(' -s ')} -s <missing_schema>\n` +
         `2. Remove or modify the objects to use only managed schemas`
       );
     }

@@ -23,7 +23,7 @@ export async function runCLI() {
   const program = new Command();
 
   program
-    .name("dbterra")
+    .name("terradb")
     .description("Declarative schema management for PostgreSQL and SQLite")
     .version(packageJson.version, "-v, --version");
 
@@ -35,7 +35,7 @@ export async function runCLI() {
     .option("-s, --schema <schema>", "Database schema to manage (can be specified multiple times, defaults to 'public')", collectSchemas, [])
     .option("--auto-approve", "Skip confirmation prompt")
     .option("--dry-run", "Show migration plan without executing changes")
-    .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "dbterra_migrate_execute")
+    .option("--lock-name <name>", "Advisory lock name to prevent concurrent migrations", "terradb_migrate_execute")
     .option("--lock-timeout <seconds>", "Maximum time to wait for advisory lock in seconds", "10")
     .action(async (options) => {
       const connectionString = getConnectionString(options.url);

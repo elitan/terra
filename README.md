@@ -1,11 +1,11 @@
-# dbterra
+# terradb
 
 Declarative schema management for PostgreSQL and SQLite.
 
 ## Install
 
 ```bash
-npm install -g dbterra
+npm install -g terradb
 ```
 
 ## Quick Start
@@ -22,8 +22,8 @@ CREATE TABLE users (
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
-dbterra plan   # preview changes
-dbterra apply  # apply changes
+terradb plan   # preview changes
+terradb apply  # apply changes
 ```
 
 ### SQLite
@@ -38,17 +38,17 @@ CREATE TABLE users (
 
 ```bash
 export DATABASE_URL="sqlite:///path/to/database.db"
-dbterra plan
-dbterra apply
+terradb plan
+terradb apply
 ```
 
 ## How It Works
 
 1. Write your desired schema as CREATE statements
-2. Run `dbterra plan` to see what changes are needed
-3. Run `dbterra apply` to execute the changes
+2. Run `terradb plan` to see what changes are needed
+3. Run `terradb apply` to execute the changes
 
-dbterra compares your schema file against the current database state and generates the necessary ALTER/DROP/CREATE statements.
+terradb compares your schema file against the current database state and generates the necessary ALTER/DROP/CREATE statements.
 
 ## Configuration
 
@@ -103,10 +103,10 @@ SQLite uses table recreation for schema changes that ALTER TABLE doesn't support
 ## Commands
 
 ```bash
-dbterra plan                    # Preview changes
-dbterra plan -f custom.sql      # Use custom schema file
-dbterra apply                   # Apply changes
-dbterra apply -f custom.sql     # Apply from custom file
+terradb plan                    # Preview changes
+terradb plan -f custom.sql      # Use custom schema file
+terradb apply                   # Apply changes
+terradb apply -f custom.sql     # Apply from custom file
 ```
 
 ## Examples
@@ -158,8 +158,8 @@ CREATE SEQUENCE custom_seq START 1000 INCREMENT 1;
 Requires [Bun](https://bun.sh):
 
 ```bash
-git clone https://github.com/elitan/dbterra.git
-cd dbterra
+git clone https://github.com/elitan/terradb.git
+cd terradb
 bun install
 
 # PostgreSQL tests

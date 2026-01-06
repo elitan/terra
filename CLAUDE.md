@@ -21,9 +21,9 @@ Examples:
 - `fix: handle NULL values in column defaults`
 - `chore: update dependencies`
 
-## What is dbterra
+## What is terradb
 
-Declarative schema management for PostgreSQL and SQLite. Users write `CREATE` statements, dbterra generates `ALTER`/`DROP` to reach that state.
+Declarative schema management for PostgreSQL and SQLite. Users write `CREATE` statements, terradb generates `ALTER`/`DROP` to reach that state.
 
 ## Commands
 
