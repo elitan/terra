@@ -1,5 +1,5 @@
 {
-  "name": "dbterra",
+  "name": "terradb",
   "version": "0.3.0",
   "description": "Declarative schema management for PostgreSQL and SQLite",
   "keywords": [
@@ -27,7 +27,7 @@
   },
   "license": "MIT",
   "bin": {
-    "dbterra": "./dist/index.js"
+    "terradb": "./dist/index.js"
   },
   "type": "module",
   "files": [
