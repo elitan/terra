@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../core/schema/service";
 import { DatabaseService } from "../core/database/client";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "./utils";
+import { createTestClient, cleanDatabase, createTestSchemaService, createTestDatabaseService } from "./utils";
 
 describe("Advisory Lock", () => {
   let client: Client;
@@ -192,7 +192,7 @@ describe("Advisory Lock", () => {
     }
 
     // Now verify we can acquire the lock again (it was released)
-    
+    const databaseService = createTestDatabaseService();
     const testClient = await databaseService.createClient();
 
     try {

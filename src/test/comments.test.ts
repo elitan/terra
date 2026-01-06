@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { SchemaService } from "../core/schema/service";
 import { DatabaseService } from "../core/database/client";
 import { loadConfig } from "../core/database/config";
+import { createTestSchemaService } from "./utils";
 
 describe("COMMENT ON", () => {
   let schemaService: SchemaService;

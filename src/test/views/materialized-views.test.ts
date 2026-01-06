@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
 import { DatabaseService } from "../../core/database/client";
-import { createTestClient, cleanDatabase, getTestDbConfig } from "../utils";
+import { createTestClient, cleanDatabase, getTestDbConfig, createTestSchemaService } from "../utils";
 
 describe("Materialized View Operations", () => {
   let client: Client;

@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
 import { DatabaseService } from "../../core/database/client";
 import { DatabaseInspector } from "../../core/schema/inspector";
+import { createTestSchemaService } from "../utils";
 
 /**
  * Extension Tests - pgvector
