@@ -1,12 +1,37 @@
-import { Database } from "bun:sqlite";
 import type { DatabaseClient, QueryResult, SQLiteConnectionConfig } from "../types";
 
-export class SQLiteClient implements DatabaseClient {
-  private db: Database;
+interface SQLiteDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown[];
+    run(...params: unknown[]): void;
+  };
+  close(): void;
+  transaction<T>(fn: () => T): () => T;
+}
 
-  constructor(config: SQLiteConnectionConfig) {
-    this.db = new Database(config.filename);
-    this.db.exec("PRAGMA foreign_keys = ON");
+const isBun = typeof globalThis.Bun !== "undefined";
+
+async function loadDatabase(filename: string): Promise<SQLiteDatabase> {
+  if (isBun) {
+    const { Database } = await import("bun:sqlite");
+    return new Database(filename);
+  } else {
+    const Database = (await import("better-sqlite3")).default;
+    return new Database(filename);
+  }
+}
+
+export class SQLiteClient implements DatabaseClient {
+  private db!: SQLiteDatabase;
+
+  private constructor() {}
+
+  static async create(config: SQLiteConnectionConfig): Promise<SQLiteClient> {
+    const client = new SQLiteClient();
+    client.db = await loadDatabase(config.filename);
+    client.db.exec("PRAGMA foreign_keys = ON");
+    return client;
   }
 
   async query<T = Record<string, unknown>>(
@@ -33,7 +58,7 @@ export class SQLiteClient implements DatabaseClient {
     this.db.close();
   }
 
-  get raw(): Database {
+  get raw(): SQLiteDatabase {
     return this.db;
   }
 

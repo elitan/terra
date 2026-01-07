@@ -57,7 +57,7 @@ export class SQLiteProvider implements DatabaseProvider {
     if (config.dialect !== "sqlite") {
       throw new Error("SQLiteProvider requires sqlite config");
     }
-    return new SQLiteClient(config as SQLiteConnectionConfig);
+    return SQLiteClient.create(config as SQLiteConnectionConfig);
   }
 
   async parseSchema(sql: string, filePath?: string): Promise<ParsedSchema> {
