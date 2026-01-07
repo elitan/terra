@@ -15,10 +15,10 @@ const isBun = typeof globalThis.Bun !== "undefined";
 async function loadDatabase(filename: string): Promise<SQLiteDatabase> {
   if (isBun) {
     const { Database } = await import("bun:sqlite");
-    return new Database(filename);
+    return new Database(filename) as unknown as SQLiteDatabase;
   } else {
     const Database = (await import("better-sqlite3")).default;
-    return new Database(filename);
+    return new Database(filename) as unknown as SQLiteDatabase;
   }
 }
 
