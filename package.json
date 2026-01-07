@@ -1,6 +1,6 @@
 {
   "name": "terradb",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Declarative schema management for PostgreSQL and SQLite",
   "keywords": [
     "postgres",
