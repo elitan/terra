@@ -254,4 +254,152 @@ describe("Partial Index Support", () => {
       );
     });
   });
+
+  describe("Partial Index Idempotency (Issue #80)", () => {
+    test("should be idempotent with boolean WHERE clause", async () => {
+      await client.query(`
+        CREATE TABLE saved_filters (
+          id SERIAL PRIMARY KEY,
+          user_id INT NOT NULL,
+          type TEXT NOT NULL,
+          is_default BOOLEAN DEFAULT false,
+          deleted_at TIMESTAMPTZ
+        );
+      `);
+
+      await client.query(`
+        CREATE UNIQUE INDEX idx_single_default_filter
+          ON saved_filters (user_id, type)
+          WHERE is_default = true AND deleted_at IS NULL;
+      `);
+
+      const schemaSQL = `
+        CREATE TABLE saved_filters (
+          id SERIAL PRIMARY KEY,
+          user_id INT NOT NULL,
+          type TEXT NOT NULL,
+          is_default BOOLEAN DEFAULT false,
+          deleted_at TIMESTAMPTZ
+        );
+
+        CREATE UNIQUE INDEX idx_single_default_filter
+          ON saved_filters (user_id, type)
+          WHERE is_default = true AND deleted_at IS NULL;
+      `;
+
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
+
+      if (tables.length > 0) {
+        tables[0]!.indexes = indexes;
+      }
+
+      const currentSchema = await inspector.getCurrentSchema(client);
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+      const migrationPlan = differ.generateMigrationPlan(tables, currentSchema);
+
+      const allStatements = [
+        ...migrationPlan.transactional,
+        ...migrationPlan.concurrent,
+      ];
+      const indexStatements = allStatements.filter((s: string) =>
+        s.includes("idx_single_default_filter")
+      );
+
+      expect(indexStatements).toHaveLength(0);
+    });
+
+    test("should be idempotent with simple boolean true comparison", async () => {
+      await client.query(`
+        CREATE TABLE partial_bool_test (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255),
+          active BOOLEAN DEFAULT true
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX idx_active ON partial_bool_test (email) WHERE active = true;
+      `);
+
+      const schemaSQL = `
+        CREATE TABLE partial_bool_test (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255),
+          active BOOLEAN DEFAULT true
+        );
+
+        CREATE INDEX idx_active ON partial_bool_test (email) WHERE active = true;
+      `;
+
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
+
+      if (tables.length > 0) {
+        tables[0]!.indexes = indexes;
+      }
+
+      const currentSchema = await inspector.getCurrentSchema(client);
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+      const migrationPlan = differ.generateMigrationPlan(tables, currentSchema);
+
+      const allStatements = [
+        ...migrationPlan.transactional,
+        ...migrationPlan.concurrent,
+      ];
+      const indexStatements = allStatements.filter((s: string) =>
+        s.includes("idx_active")
+      );
+
+      expect(indexStatements).toHaveLength(0);
+    });
+
+    test("should be idempotent with IS NULL condition", async () => {
+      await client.query(`
+        CREATE TABLE partial_null_test (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255),
+          deleted_at TIMESTAMPTZ
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX idx_not_deleted ON partial_null_test (email) WHERE deleted_at IS NULL;
+      `);
+
+      const schemaSQL = `
+        CREATE TABLE partial_null_test (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255),
+          deleted_at TIMESTAMPTZ
+        );
+
+        CREATE INDEX idx_not_deleted ON partial_null_test (email) WHERE deleted_at IS NULL;
+      `;
+
+      const tables = await parser.parseCreateTableStatements(schemaSQL);
+      const indexes = await parser.parseCreateIndexStatements(schemaSQL);
+
+      if (tables.length > 0) {
+        tables[0]!.indexes = indexes;
+      }
+
+      const currentSchema = await inspector.getCurrentSchema(client);
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+      const migrationPlan = differ.generateMigrationPlan(tables, currentSchema);
+
+      const allStatements = [
+        ...migrationPlan.transactional,
+        ...migrationPlan.concurrent,
+      ];
+      const indexStatements = allStatements.filter((s: string) =>
+        s.includes("idx_not_deleted")
+      );
+
+      expect(indexStatements).toHaveLength(0);
+    });
+  });
 });
