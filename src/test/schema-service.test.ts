@@ -257,6 +257,95 @@ describe("SchemaService - MigrationPlanner Removal", () => {
     });
   });
 
+  describe("Unmanaged schema filtering", () => {
+    test("should ignore tables from unmanaged schemas", async () => {
+      await client.query("CREATE SCHEMA IF NOT EXISTS other_schema");
+
+      const schema = `
+        CREATE TABLE public.filter_test_users (
+          id SERIAL PRIMARY KEY,
+          name VARCHAR(100)
+        );
+        CREATE TABLE other_schema.filter_test_data (
+          id SERIAL PRIMARY KEY,
+          value TEXT
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const result = await client.query(`
+        SELECT table_schema, table_name
+        FROM information_schema.tables
+        WHERE table_name IN ('filter_test_users', 'filter_test_data')
+        AND table_schema IN ('public', 'other_schema')
+      `);
+
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].table_name).toBe('filter_test_users');
+      expect(result.rows[0].table_schema).toBe('public');
+
+      await client.query("DROP SCHEMA IF EXISTS other_schema CASCADE");
+    });
+
+    test("should preserve FKs referencing external schemas", async () => {
+      await client.query("CREATE SCHEMA IF NOT EXISTS ext_schema");
+      await client.query(`
+        CREATE TABLE ext_schema.ext_users (id SERIAL PRIMARY KEY)
+      `);
+
+      const schema = `
+        CREATE TABLE fk_test_posts (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES ext_schema.ext_users(id)
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const fks = await client.query(`
+        SELECT
+          ccu.table_schema as ref_schema,
+          ccu.table_name as ref_table
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON ccu.constraint_name = tc.constraint_name
+        WHERE tc.table_name = 'fk_test_posts'
+          AND tc.constraint_type = 'FOREIGN KEY'
+      `);
+
+      expect(fks.rows).toHaveLength(1);
+      expect(fks.rows[0].ref_schema).toBe('ext_schema');
+
+      await client.query("DROP TABLE fk_test_posts CASCADE");
+      await client.query("DROP SCHEMA ext_schema CASCADE");
+    });
+
+    test("should ignore views from unmanaged schemas", async () => {
+      await client.query("CREATE SCHEMA IF NOT EXISTS view_test_schema");
+
+      const schema = `
+        CREATE TABLE public.view_test_users (id SERIAL PRIMARY KEY);
+        CREATE VIEW view_test_schema.ignored_view AS SELECT * FROM public.view_test_users;
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const views = await client.query(`
+        SELECT table_schema, table_name
+        FROM information_schema.views
+        WHERE table_name = 'ignored_view'
+      `);
+
+      expect(views.rows).toHaveLength(0);
+
+      await client.query("DROP SCHEMA IF EXISTS view_test_schema CASCADE");
+    });
+  });
+
   describe("Integration with SchemaDiffer", () => {
     test("should correctly diff complex schema changes", async () => {
       // Initial schema
