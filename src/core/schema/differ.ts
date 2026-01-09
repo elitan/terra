@@ -934,9 +934,6 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    const normalizeExpression = (expr: string) =>
-      expr.replace(/\s+/g, ' ').trim();
-
     const currentMap = new Map(
       currentConstraints.map(c => [normalizeExpression(c.expression), c])
     );
