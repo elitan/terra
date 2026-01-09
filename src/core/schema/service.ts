@@ -129,21 +129,27 @@ export class SchemaService {
         throw new Error("Schema validation failed for target database");
       }
 
-      const desiredSchema = parsedSchema.tables;
-      const desiredEnums = parsedSchema.enums;
-      const desiredViews = parsedSchema.views;
-      const desiredFunctions = parsedSchema.functions;
-      const desiredProcedures = parsedSchema.procedures;
-      const desiredTriggers = parsedSchema.triggers;
-      const desiredSequences = parsedSchema.sequences;
-      const desiredExtensions = parsedSchema.extensions;
-      const desiredSchemas = parsedSchema.schemas || [];
-      const desiredComments = parsedSchema.comments || [];
-
+      let filtered = parsedSchema;
       if (this.provider.supportsFeature("schemas")) {
-        this.validateSchemaReferences(schemas, desiredSchema, desiredEnums, desiredViews,
-          desiredFunctions, desiredProcedures, desiredTriggers, desiredSequences);
+        const originalCount = this.countObjects(parsedSchema);
+        filtered = this.filterUnmanagedSchemas(schemas, parsedSchema);
+        const filteredCount = this.countObjects(filtered);
+        const ignoredCount = originalCount - filteredCount;
+        if (ignoredCount > 0) {
+          Logger.warning(`Ignored ${ignoredCount} object(s) from unmanaged schemas`);
+        }
       }
+
+      const desiredSchema = filtered.tables;
+      const desiredEnums = filtered.enums;
+      const desiredViews = filtered.views;
+      const desiredFunctions = filtered.functions;
+      const desiredProcedures = filtered.procedures;
+      const desiredTriggers = filtered.triggers;
+      const desiredSequences = filtered.sequences;
+      const desiredExtensions = filtered.extensions;
+      const desiredSchemas = filtered.schemas || [];
+      const desiredComments = filtered.comments || [];
 
       const currentSchema = await this.provider.getCurrentSchema(client, schemas);
       const currentEnums = await this.provider.getCurrentEnums(client, schemas);
@@ -353,40 +359,30 @@ export class SchemaService {
     }
   }
 
-  private validateSchemaReferences(
+  private filterUnmanagedSchemas(
     managedSchemas: string[],
-    tables: { name: string; schema?: string }[],
-    enums: { name: string; schema?: string }[],
-    views: { name: string; schema?: string }[],
-    functions: { name: string; schema?: string }[],
-    procedures: { name: string; schema?: string }[],
-    triggers: { name: string; schema?: string }[],
-    sequences: { name: string; schema?: string }[]
-  ): void {
-    const errors: string[] = [];
+    parsed: ParsedSchema
+  ): ParsedSchema {
+    const isManaged = (schema: string | undefined) =>
+      managedSchemas.includes(schema || 'public');
 
-    const checkSchema = (objType: string, objName: string, objSchema: string | undefined) => {
-      const schema = objSchema || 'public';
-      if (!managedSchemas.includes(schema)) {
-        errors.push(`${objType} '${objSchema ? objSchema + '.' : ''}${objName}' references schema '${schema}' which is not in the managed schema list: [${managedSchemas.join(', ')}]`);
-      }
+    return {
+      tables: parsed.tables.filter(t => isManaged(t.schema)),
+      enums: parsed.enums.filter(e => isManaged(e.schema)),
+      views: parsed.views.filter(v => isManaged(v.schema)),
+      functions: parsed.functions.filter(f => isManaged(f.schema)),
+      procedures: parsed.procedures.filter(p => isManaged(p.schema)),
+      triggers: parsed.triggers.filter(t => isManaged(t.schema)),
+      sequences: parsed.sequences.filter(s => isManaged(s.schema)),
+      extensions: parsed.extensions,
+      schemas: parsed.schemas,
+      comments: parsed.comments.filter(c => isManaged(c.schemaName)),
     };
+  }
 
-    tables.forEach(t => checkSchema('Table', t.name, t.schema));
-    enums.forEach(e => checkSchema('ENUM type', e.name, e.schema));
-    views.forEach(v => checkSchema('View', v.name, v.schema));
-    functions.forEach(f => checkSchema('Function', f.name, f.schema));
-    procedures.forEach(p => checkSchema('Procedure', p.name, p.schema));
-    triggers.forEach(t => checkSchema('Trigger', t.name, t.schema));
-    sequences.forEach(s => checkSchema('Sequence', s.name, s.schema));
-
-    if (errors.length > 0) {
-      throw new Error(
-        `Schema validation failed:\n${errors.join('\n')}\n\n` +
-        `To fix this, either:\n` +
-        `1. Add the missing schema(s) using -s flag: terradb apply -s ${managedSchemas.join(' -s ')} -s <missing_schema>\n` +
-        `2. Remove or modify the objects to use only managed schemas`
-      );
-    }
+  private countObjects(parsed: ParsedSchema): number {
+    return parsed.tables.length + parsed.enums.length + parsed.views.length +
+      parsed.functions.length + parsed.procedures.length + parsed.triggers.length +
+      parsed.sequences.length;
   }
 }
