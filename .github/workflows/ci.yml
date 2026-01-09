@@ -40,6 +40,20 @@ jobs:
         ports:
           - 5488:5432
 
+      postgres-postgis:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5489:5432
+
     steps:
     - uses: actions/checkout@v4
     
