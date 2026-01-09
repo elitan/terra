@@ -9,6 +9,14 @@ function normalizeBody(body: string): string {
   return body.replace(/\s+/g, ' ').trim();
 }
 
+function normalizeVolatility(v: Function['volatility']): string {
+  return v || 'VOLATILE';
+}
+
+function normalizeParallel(p: Function['parallel']): string {
+  return p || 'UNSAFE';
+}
+
 const config: HandlerConfig<Function> = {
   name: "function",
   getKey: (f) => f.name,
@@ -18,7 +26,8 @@ const config: HandlerConfig<Function> = {
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
     desired.returnType !== current.returnType ||
     desired.language !== current.language ||
-    desired.volatility !== current.volatility,
+    normalizeVolatility(desired.volatility) !== normalizeVolatility(current.volatility) ||
+    normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel),
 };
 
 export class FunctionHandler {
