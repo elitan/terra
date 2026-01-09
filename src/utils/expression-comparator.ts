@@ -99,6 +99,35 @@ function normalizeAstNode(node: unknown): unknown {
       }
     }
 
+    // Convert <> ALL (ARRAY[...]) to NOT IN (...) for consistent comparison
+    // PostgreSQL normalizes "col NOT IN ('a', 'b')" to "col <> ALL (ARRAY['a', 'b'])"
+    // ALL: A_Expr { kind: "AEXPR_OP_ALL", name: [<>], lexpr: col, rexpr: A_ArrayExpr }
+    // NOT IN parses as: A_Expr { kind: "AEXPR_IN", name: [<>], lexpr: col, rexpr: List }
+    if (aExpr.kind === "AEXPR_OP_ALL") {
+      const col = normalizeAstNode(aExpr.lexpr);
+      let rexpr = aExpr.rexpr as Record<string, unknown>;
+
+      // Unwrap TypeCast if present (PostgreSQL wraps array in ::text[] cast)
+      if (rexpr?.TypeCast) {
+        const typeCast = rexpr.TypeCast as Record<string, unknown>;
+        rexpr = typeCast.arg as Record<string, unknown>;
+      }
+
+      const arrayExpr = rexpr?.A_ArrayExpr as Record<string, unknown[]>;
+      const elements = arrayExpr?.elements;
+      if (elements) {
+        const normalizedItems = elements.map(e => normalizeAstNode(e));
+        return {
+          A_Expr: {
+            kind: "AEXPR_IN",
+            name: aExpr.name,
+            lexpr: col,
+            rexpr: { List: { items: normalizedItems } },
+          },
+        };
+      }
+    }
+
     // Normalize LIKE/ILIKE to AEXPR_OP (PostgreSQL stores LIKE as ~~ with AEXPR_OP)
     if (aExpr.kind === "AEXPR_LIKE" || aExpr.kind === "AEXPR_ILIKE") {
       return {
