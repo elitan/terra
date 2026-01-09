@@ -17,13 +17,13 @@ function normalizeAstNode(node: unknown): unknown {
     if (innerValue?.A_Const) {
       const aConst = innerValue.A_Const as Record<string, unknown>;
       if (aConst.sval) {
-        const sval = aConst.sval as Record<string, string>;
+        const sval = aConst.sval as Record<string, string | undefined>;
         const strVal = sval.sval;
-        const numVal = Number(strVal);
-        if (!isNaN(numVal) && Number.isInteger(numVal)) {
-          return { A_Const: { ival: { ival: numVal } } };
-        }
-        if (!isNaN(numVal)) {
+        if (strVal && strVal !== '' && /^-?\d+(\.\d+)?$/.test(strVal)) {
+          const numVal = Number(strVal);
+          if (Number.isInteger(numVal)) {
+            return { A_Const: { ival: { ival: numVal } } };
+          }
           return { A_Const: { fval: { fval: String(numVal) } } };
         }
       }

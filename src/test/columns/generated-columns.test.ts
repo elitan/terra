@@ -279,4 +279,25 @@ describe("Generated Columns", () => {
 
     expect(plan.hasChanges).toBe(false);
   });
+
+  test("should be idempotent with COALESCE in generated expressions (issue #71)", async () => {
+    const schema = `
+      CREATE TABLE users (
+        id SERIAL PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        fulltext_vector TEXT GENERATED ALWAYS AS (
+          COALESCE(lower(first_name), '') || ' ' || COALESCE(lower(last_name), '')
+        ) STORED
+      );
+    `;
+
+    await executeColumnMigration(client, schema, services);
+
+    const currentSchema = await services.inspector.getCurrentSchema(client);
+    const desiredTables = await services.parser.parseCreateTableStatements(schema);
+    const plan = services.differ.generateMigrationPlan(desiredTables, currentSchema);
+
+    expect(plan.hasChanges).toBe(false);
+  });
 });
