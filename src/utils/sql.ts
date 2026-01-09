@@ -265,7 +265,8 @@ function normalizeAnyArrayToIn(expr: string): string {
 }
 
 function normalizeBetween(expr: string): string {
-  const betweenPattern = /\(?\s*(\w+)\s*>=\s*(\d+)\s*\)\s*AND\s*\(\s*\1\s*<=\s*(\d+)\s*\)?/gi;
+  // Match both: (col >= X) AND (col <= Y)  and  col >= X AND col <= Y
+  const betweenPattern = /\(?\s*(\w+)\s*>=\s*(\d+)\s*\)?\s*AND\s*\(?\s*\1\s*<=\s*(\d+)\s*\)?/gi;
   return expr.replace(betweenPattern, '$1 BETWEEN $2 AND $3');
 }
 

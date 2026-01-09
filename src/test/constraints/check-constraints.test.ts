@@ -556,5 +556,28 @@ describe("Check Constraints", () => {
 
       expect(plan.hasChanges).toBe(false);
     });
+
+    test("should be idempotent when PostgreSQL adds parentheses to AND conditions", async () => {
+      // Issue #70: PostgreSQL normalizes "rating >= 0 AND rating <= 5" to
+      // "((rating >= 0) AND (rating <= 5))" with extra parentheses
+      await client.query(`
+        CREATE TABLE people (
+          id SERIAL PRIMARY KEY,
+          rating INT,
+          CONSTRAINT people_rating_check CHECK (rating >= 0 AND rating <= 5)
+        );
+      `);
+
+      const desiredSchema = `
+        CREATE TABLE people (
+          id SERIAL PRIMARY KEY,
+          rating INT,
+          CONSTRAINT people_rating_check CHECK (rating >= 0 AND rating <= 5)
+        );
+      `;
+
+      const plan = await schemaService.plan(desiredSchema);
+      expect(plan.hasChanges).toBe(false);
+    });
   });
 });
