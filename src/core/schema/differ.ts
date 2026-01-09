@@ -27,6 +27,7 @@ import {
   splitSchemaTable,
   getBareTableName,
 } from "../../utils/sql";
+import { expressionsEqual } from "../../utils/expression-comparator";
 import { SQLBuilder } from "../../utils/sql-builder";
 import { DependencyResolver } from "./dependency-resolver";
 
@@ -934,24 +935,24 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    const currentMap = new Map(
-      currentConstraints.map(c => [normalizeExpression(c.expression), c])
-    );
-    const desiredMap = new Map(
-      desiredConstraints.map(c => [normalizeExpression(c.expression), c])
-    );
+    const findMatchingConstraint = (
+      expr: string,
+      constraints: CheckConstraint[]
+    ): CheckConstraint | undefined => {
+      return constraints.find(c => expressionsEqual(expr, c.expression));
+    };
 
-    for (const [key, constraint] of currentMap) {
-      if (!desiredMap.has(key)) {
-        if (constraint.name) {
-          statements.push(generateDropCheckConstraintSQL(tableName, constraint.name));
+    for (const current of currentConstraints) {
+      if (!findMatchingConstraint(current.expression, desiredConstraints)) {
+        if (current.name) {
+          statements.push(generateDropCheckConstraintSQL(tableName, current.name));
         }
       }
     }
 
-    for (const [key, constraint] of desiredMap) {
-      if (!currentMap.has(key)) {
-        statements.push(generateAddCheckConstraintSQL(tableName, constraint));
+    for (const desired of desiredConstraints) {
+      if (!findMatchingConstraint(desired.expression, currentConstraints)) {
+        statements.push(generateAddCheckConstraintSQL(tableName, desired));
       }
     }
 
@@ -1269,27 +1270,27 @@ export class SchemaDiffer {
     currentConstraints: CheckConstraint[],
     alterations: TableAlteration[]
   ): void {
-    const currentMap = new Map(
-      currentConstraints.map(c => [normalizeExpression(c.expression), c])
-    );
-    const desiredMap = new Map(
-      desiredConstraints.map(c => [normalizeExpression(c.expression), c])
-    );
+    const findMatchingConstraint = (
+      expr: string,
+      constraints: CheckConstraint[]
+    ): CheckConstraint | undefined => {
+      return constraints.find(c => expressionsEqual(expr, c.expression));
+    };
 
-    for (const [key, constraint] of currentMap) {
-      if (!desiredMap.has(key) && constraint.name) {
+    for (const current of currentConstraints) {
+      if (!findMatchingConstraint(current.expression, desiredConstraints) && current.name) {
         alterations.push({
           type: "drop_check",
-          constraintName: constraint.name,
+          constraintName: current.name,
         });
       }
     }
 
-    for (const [key, constraint] of desiredMap) {
-      if (!currentMap.has(key)) {
+    for (const desired of desiredConstraints) {
+      if (!findMatchingConstraint(desired.expression, currentConstraints)) {
         alterations.push({
           type: "add_check",
-          constraint,
+          constraint: desired,
         });
       }
     }
