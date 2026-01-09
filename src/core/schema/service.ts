@@ -375,7 +375,7 @@ export class SchemaService {
       triggers: parsed.triggers.filter(t => isManaged(t.schema)),
       sequences: parsed.sequences.filter(s => isManaged(s.schema)),
       extensions: parsed.extensions,
-      schemas: parsed.schemas,
+      schemas: parsed.schemas.filter(s => managedSchemas.includes(s.name)),
       comments: parsed.comments.filter(c => isManaged(c.schemaName)),
     };
   }
