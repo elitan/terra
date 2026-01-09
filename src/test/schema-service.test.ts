@@ -344,6 +344,46 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
       await client.query("DROP SCHEMA IF EXISTS view_test_schema CASCADE");
     });
+
+    test("should not create schema when all its objects are unmanaged", async () => {
+      await client.query("DROP SCHEMA IF EXISTS finance CASCADE");
+
+      const schema = `
+        CREATE SCHEMA IF NOT EXISTS finance;
+
+        CREATE TABLE finance.transactions (
+          id SERIAL PRIMARY KEY,
+          amount DECIMAL
+        );
+
+        CREATE TABLE public.users (
+          id SERIAL PRIMARY KEY
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const schemaResult = await client.query(`
+        SELECT schema_name
+        FROM information_schema.schemata
+        WHERE schema_name = 'finance'
+      `);
+
+      expect(schemaResult.rows).toHaveLength(0);
+
+      const tableResult = await client.query(`
+        SELECT table_schema, table_name
+        FROM information_schema.tables
+        WHERE table_name IN ('transactions', 'users')
+        AND table_schema IN ('public', 'finance')
+      `);
+
+      expect(tableResult.rows).toHaveLength(1);
+      expect(tableResult.rows[0].table_name).toBe('users');
+      expect(tableResult.rows[0].table_schema).toBe('public');
+
+      await client.query("DROP SCHEMA IF EXISTS finance CASCADE");
+    });
   });
 
   describe("Integration with SchemaDiffer", () => {
