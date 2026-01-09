@@ -23,11 +23,16 @@ export class DatabaseInspector {
   async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
     const tables: Table[] = [];
 
-    // Get all tables from specified schemas
+    // Get all tables from specified schemas (excluding extension-owned tables)
     const tablesResult = await client.query(`
-      SELECT table_name, table_schema
-      FROM information_schema.tables
-      WHERE table_schema = ANY($1::text[]) AND table_type = 'BASE TABLE'
+      SELECT t.table_name, t.table_schema
+      FROM information_schema.tables t
+      JOIN pg_class c ON c.relname = t.table_name
+      JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.table_schema
+      LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+      WHERE t.table_schema = ANY($1::text[])
+        AND t.table_type = 'BASE TABLE'
+        AND d.objid IS NULL
     `, [schemas]);
 
     for (const row of tablesResult.rows) {
