@@ -871,8 +871,8 @@ export class SchemaDiffer {
 
     if (index.expression) {
       let expr = index.expression;
-      const needsInnerParens = !expr.startsWith('(') && /[+\-*/%^&|<>=!]/.test(expr);
-      if (needsInnerParens) {
+      const hasOperators = /[+\-*/%^&|<>=!]/.test(expr);
+      if (hasOperators) {
         expr = `(${expr})`;
       }
       const sortOrder = index.sortOrders?.[0];
