@@ -48,10 +48,11 @@ export function parseColumn(columnDef: any): Column | null {
 
     const generated = extractGeneratedColumn(columnDef.constraints || []);
 
+    const isSerial = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"].includes(type.toUpperCase());
     return {
       name,
       type,
-      nullable: !constraints.notNull && !constraints.primary,
+      nullable: !constraints.notNull && !constraints.primary && !isSerial,
       default: defaultValue,
       generated,
     };
