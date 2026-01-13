@@ -117,6 +117,24 @@ export function normalizeType(type: string): string {
     }
   }
 
+  // Handle timestamp/time types with precision (format: "timestamp(4) without time zone")
+  const timestampMatch = type.match(/^timestamp\((\d+)\)\s+without\s+time\s+zone$/i);
+  if (timestampMatch) {
+    return `TIMESTAMP(${timestampMatch[1]})`;
+  }
+  const timestamptzMatch = type.match(/^timestamp\((\d+)\)\s+with\s+time\s+zone$/i);
+  if (timestamptzMatch) {
+    return `TIMESTAMPTZ(${timestamptzMatch[1]})`;
+  }
+  const timeMatch = type.match(/^time\((\d+)\)\s+without\s+time\s+zone$/i);
+  if (timeMatch) {
+    return `TIME(${timeMatch[1]})`;
+  }
+  const timetzMatch = type.match(/^time\((\d+)\)\s+with\s+time\s+zone$/i);
+  if (timetzMatch) {
+    return `TIMETZ(${timetzMatch[1]})`;
+  }
+
   // Normalize to lowercase first for case-insensitive matching
   const lowerType = type.toLowerCase();
   return typeMap[lowerType] || type.toUpperCase();
