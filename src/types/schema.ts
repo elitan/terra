@@ -43,6 +43,7 @@ export interface Index {
   tableName: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: string[];
+  sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
   opclasses?: Record<string, string>; // Maps column name to operator class (e.g., gin_trgm_ops)
   type?: "btree" | "hash" | "gist" | "spgist" | "gin" | "brin" | (string & {});
   unique?: boolean;

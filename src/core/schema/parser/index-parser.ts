@@ -24,17 +24,27 @@ export function parseCreateIndex(stmt: any): Index | null {
     const indexParams = stmt.indexParams || [];
 
     const columns: string[] = [];
+    const sortOrders: ('ASC' | 'DESC')[] = [];
     let opclasses: Record<string, string> | undefined;
     let expression: string | undefined;
 
+    function parseOrdering(ordering: string | number | undefined): 'ASC' | 'DESC' {
+      if (ordering === 'SORTBY_DESC' || ordering === 2) return 'DESC';
+      return 'ASC';
+    }
+
     if (indexParams.length === 1 && indexParams[0].IndexElem?.expr) {
       expression = deparseSync([indexParams[0].IndexElem.expr]).trim();
+      const ordering = indexParams[0].IndexElem.ordering;
+      sortOrders.push(parseOrdering(ordering));
     } else {
       for (const param of indexParams) {
         if (param.IndexElem) {
           const colName = param.IndexElem.name;
+          const ordering = param.IndexElem.ordering;
           if (colName) {
             columns.push(colName);
+            sortOrders.push(parseOrdering(ordering));
             if (param.IndexElem.opclass && param.IndexElem.opclass.length > 0) {
               const opclassName = param.IndexElem.opclass
                 .map((node: any) => node.String?.sval)
@@ -47,11 +57,13 @@ export function parseCreateIndex(stmt: any): Index | null {
             }
           } else if (param.IndexElem.expr) {
             expression = deparseSync([param.IndexElem.expr]).trim();
+            sortOrders.push(parseOrdering(ordering));
             break;
           }
         }
       }
     }
+    const hasNonDefaultSort = sortOrders.some(s => s === 'DESC');
 
     const type = (stmt.accessMethod || 'btree').toLowerCase() as Index["type"];
 
@@ -122,6 +134,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       tableName,
       schema,
       columns,
+      sortOrders: hasNonDefaultSort ? sortOrders : undefined,
       opclasses,
       type,
       unique,

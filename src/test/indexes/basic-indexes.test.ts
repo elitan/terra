@@ -366,12 +366,9 @@ describe("PostgreSQL Basic Index Support", () => {
 
       const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Should drop old index and create new one
-      const allStatements = [...plan.transactional, ...plan.concurrent];
-      expect(allStatements).toContain(
-        'DROP INDEX CONCURRENTLY "idx_users_email";'
-      );
-      expect(allStatements).toContain(
+      // Modified indexes use non-concurrent drop to keep in same transaction with create
+      expect(plan.transactional).toContain('DROP INDEX "idx_users_email";');
+      expect(plan.transactional).toContain(
         'CREATE INDEX "idx_users_email" ON "users" ("email", "name");'
       );
     });

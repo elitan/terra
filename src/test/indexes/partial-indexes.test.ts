@@ -190,12 +190,9 @@ describe("Partial Index Support", () => {
 
       const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Should drop old index and create new partial index
-      const allStatements = [...plan.transactional, ...plan.concurrent];
-      expect(allStatements).toContain(
-        'DROP INDEX CONCURRENTLY "idx_users_email";'
-      );
-      expect(allStatements).toContain(
+      // Modified indexes use non-concurrent drop for atomicity
+      expect(plan.transactional).toContain('DROP INDEX "idx_users_email";');
+      expect(plan.transactional).toContain(
         'CREATE INDEX "idx_users_email" ON "users" ("email") WHERE active = true;'
       );
     });
@@ -244,13 +241,10 @@ describe("Partial Index Support", () => {
 
       const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Should recreate index with new condition
-      const allStatements = [...plan.transactional, ...plan.concurrent];
-      expect(allStatements).toContain(
-        'DROP INDEX CONCURRENTLY "idx_orders_status";'
-      );
-      expect(allStatements).toContain(
-        'CREATE INDEX CONCURRENTLY "idx_orders_status" ON "orders" ("status") WHERE status IN (\'active\', \'pending\');'
+      // Modified indexes use non-concurrent drop for atomicity
+      expect(plan.transactional).toContain('DROP INDEX "idx_orders_status";');
+      expect(plan.transactional).toContain(
+        'CREATE INDEX "idx_orders_status" ON "orders" ("status") WHERE status IN (\'active\', \'pending\');'
       );
     });
   });

@@ -184,11 +184,16 @@ export class DatabaseInspector {
         ic.reloptions as storage_options,
         CASE
           WHEN ix.indexprs IS NOT NULL THEN
-            -- Extract expression from the full index definition
-            -- Use a more specific regex to extract content between USING btree ( and )
+            -- Extract expression from pg_get_indexdef, removing outer parens and sort options
             regexp_replace(
-              regexp_replace(i.indexdef, ' WHERE .*$', ''),  -- Remove WHERE clause first
-              '^.*USING btree \\((.+)\\)$', '\\1'  -- Extract content between USING btree ( and )
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(i.indexdef, ' WHERE .*$', ''),  -- Remove WHERE clause first
+                  '^.*USING [a-z]+ \\((.+)\\)$', '\\1'  -- Extract content between USING method ( and )
+                ),
+                ' (ASC|DESC|NULLS FIRST|NULLS LAST)+$', '', 'gi'  -- Remove sort options
+              ),
+              '^\\((.+)\\)$', '\\1'  -- Remove outer parentheses
             )
           ELSE NULL
         END as expression_def,
@@ -229,7 +234,9 @@ export class DatabaseInspector {
               '^\\((.*)\\)$', '\\1'  -- Remove outer parentheses
             )
           ELSE NULL
-        END as where_clause
+        END as where_clause,
+        -- indoption: bit 0 = DESC, bit 1 = NULLS FIRST
+        ix.indoption::int2[] as sort_options
       FROM pg_indexes i
       JOIN pg_namespace n ON n.nspname = i.schemaname
       JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = n.oid
@@ -256,6 +263,7 @@ export class DatabaseInspector {
     return result.rows.map((row: any) => {
       const columns = row.column_names || [];
       const opclassNames = row.opclass_names || [];
+      const sortOptions: number[] = row.sort_options || [];
       let opclasses: Record<string, string> | undefined;
       for (let i = 0; i < columns.length; i++) {
         if (opclassNames[i]) {
@@ -263,11 +271,14 @@ export class DatabaseInspector {
           opclasses[columns[i]] = opclassNames[i];
         }
       }
+      const sortOrders = sortOptions.map((opt: number) => (opt & 1) ? 'DESC' : 'ASC') as ('ASC' | 'DESC')[];
+      const hasNonDefaultSort = sortOrders.some(s => s === 'DESC');
       return {
         name: row.index_name,
         tableName: row.table_name,
         schema: row.table_schema,
         columns,
+        sortOrders: hasNonDefaultSort ? sortOrders : undefined,
         opclasses,
         type: this.mapPostgreSQLIndexType(row.access_method),
         unique: row.is_unique,

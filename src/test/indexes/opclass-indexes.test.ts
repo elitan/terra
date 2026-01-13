@@ -210,11 +210,9 @@ describe("PostgreSQL Index Operator Class Support", () => {
 
       const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      const allStatements = [...plan.transactional, ...plan.concurrent];
-      expect(allStatements).toContain(
-        'DROP INDEX CONCURRENTLY "idx_docs_title";'
-      );
-      expect(allStatements).toContain(
+      // Modified indexes use non-concurrent drop for atomicity
+      expect(plan.transactional).toContain('DROP INDEX "idx_docs_title";');
+      expect(plan.transactional).toContain(
         'CREATE INDEX "idx_docs_title" ON "docs" USING GIN ("title" gin_trgm_ops);'
       );
     });
