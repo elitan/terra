@@ -66,6 +66,13 @@ export function normalizeType(type: string): string {
     // BIT types - varbit is alias for bit varying
     "bit varying": "BIT VARYING",
     varbit: "BIT VARYING",
+    // SERIAL types normalize to their base integer types
+    smallserial: "INT2",
+    serial: "INT4",
+    bigserial: "INT8",
+    SMALLSERIAL: "INT2",
+    SERIAL: "INT4",
+    BIGSERIAL: "INT8",
   };
 
   // Handle array types by extracting base type, normalizing it, and adding single []
@@ -301,24 +308,22 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
   // Special handling for SERIAL-like columns (SERIAL, SMALLSERIAL, BIGSERIAL)
   // These become integer/smallint/bigint with nextval() default in database
   const desiredUpperType = desired.type.toUpperCase();
-  const expectedBaseType = serialTypeMap[desiredUpperType];
-  if (expectedBaseType && current.type === expectedBaseType) {
+  const isDesiredSerial = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"].includes(desiredUpperType);
+  if (isDesiredSerial && normalizedDesiredType === normalizedCurrentType) {
     if (current.default?.includes("nextval")) {
-      const nullabilityMatches = desired.nullable === current.nullable;
-      return !nullabilityMatches;
+      // Serial columns are implicitly NOT NULL, so desired.nullable being undefined means NOT NULL
+      const desiredIsNotNull = desired.nullable === false || desired.nullable === undefined;
+      const currentIsNotNull = current.nullable === false;
+      return desiredIsNotNull !== currentIsNotNull;
     }
   }
 
   // If desired is a base integer type and current has nextval default,
   // the current column is actually a SERIAL type that we want to convert to plain integer
-  const desiredBaseType = desiredUpperType;
-  if (
-    baseToSerialMap[desiredBaseType] &&
-    current.default?.includes("nextval")
-  ) {
-    const expectedBase = serialTypeMap[baseToSerialMap[desiredBaseType]!];
-    if (current.type === expectedBase) {
-      return true; // Need to modify to remove the SERIAL behavior
+  const isDesiredBaseInt = ["INT2", "INT4", "INT8", "SMALLINT", "INTEGER", "BIGINT"].includes(desiredUpperType);
+  if (isDesiredBaseInt && current.default?.includes("nextval")) {
+    if (normalizedDesiredType === normalizedCurrentType) {
+      return true; // Need to modify to remove the SERIAL behavior (drop default)
     }
   }
 
