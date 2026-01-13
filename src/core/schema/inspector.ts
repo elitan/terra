@@ -336,29 +336,28 @@ export class DatabaseInspector {
     const result = await client.query(
       `
       SELECT
-        tc.constraint_name,
-        kcu.column_name,
-        ccu.table_schema AS referenced_schema,
-        ccu.table_name AS referenced_table,
-        ccu.column_name AS referenced_column,
-        rc.delete_rule,
-        rc.update_rule,
-        kcu.ordinal_position
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-        AND tc.table_name = kcu.table_name
-      JOIN information_schema.constraint_column_usage ccu
-        ON ccu.constraint_name = tc.constraint_name
-        AND ccu.table_schema = tc.table_schema
-      JOIN information_schema.referential_constraints rc
-        ON rc.constraint_name = tc.constraint_name
-        AND rc.constraint_schema = tc.table_schema
-      WHERE tc.table_name = $1
-        AND tc.table_schema = $2
-        AND tc.constraint_type = 'FOREIGN KEY'
-      ORDER BY tc.constraint_name, kcu.ordinal_position
+        c.conname AS constraint_name,
+        (SELECT array_agg(a.attname ORDER BY ord.n)
+         FROM unnest(c.conkey) WITH ORDINALITY AS ord(col, n)
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ord.col
+        ) AS columns,
+        ref_ns.nspname AS referenced_schema,
+        ref_cl.relname AS referenced_table,
+        (SELECT array_agg(a.attname ORDER BY ord.n)
+         FROM unnest(c.confkey) WITH ORDINALITY AS ord(col, n)
+         JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = ord.col
+        ) AS referenced_columns,
+        c.confdeltype AS delete_rule,
+        c.confupdtype AS update_rule
+      FROM pg_constraint c
+      JOIN pg_class cl ON cl.oid = c.conrelid
+      JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+      JOIN pg_class ref_cl ON ref_cl.oid = c.confrelid
+      JOIN pg_namespace ref_ns ON ref_ns.oid = ref_cl.relnamespace
+      WHERE c.contype = 'f'
+        AND cl.relname = $1
+        AND ns.nspname = $2
+      ORDER BY c.conname
       `,
       [tableName, tableSchema]
     );
@@ -367,62 +366,30 @@ export class DatabaseInspector {
       return [];
     }
 
-    // Group foreign key constraints by constraint name
-    const constraintGroups = new Map<string, any[]>();
-    
-    for (const row of result.rows) {
-      const constraintName = row.constraint_name;
-      if (!constraintGroups.has(constraintName)) {
-        constraintGroups.set(constraintName, []);
-      }
-      constraintGroups.get(constraintName)!.push(row);
-    }
+    const actionMap: Record<string, 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION'> = {
+      'a': 'NO ACTION',
+      'r': 'RESTRICT',
+      'c': 'CASCADE',
+      'n': 'SET NULL',
+      'd': 'SET DEFAULT',
+    };
 
-    const foreignKeys: ForeignKeyConstraint[] = [];
+    const parseArrayLiteral = (val: string | string[]): string[] => {
+      if (Array.isArray(val)) return val;
+      if (!val || val === '{}') return [];
+      return val.slice(1, -1).split(',');
+    };
 
-    for (const [constraintName, rows] of constraintGroups) {
-      const firstRow = rows[0];
-      
-      // Extract columns and referenced columns (maintaining order)
-      const columns = rows.map(row => row.column_name);
-      const referencedColumns = rows.map(row => row.referenced_column);
-      
-      // Map PostgreSQL action rules to our types
-      const onDelete = this.mapReferentialAction(firstRow.delete_rule);
-      const onUpdate = this.mapReferentialAction(firstRow.update_rule);
-
-      foreignKeys.push({
-        name: constraintName,
-        columns,
-        referencedTable: firstRow.referenced_schema === 'public'
-          ? firstRow.referenced_table
-          : `${firstRow.referenced_schema}.${firstRow.referenced_table}`,
-        referencedColumns,
-        onDelete,
-        onUpdate,
-      });
-    }
-
-    return foreignKeys;
-  }
-
-  private mapReferentialAction(rule: string | null): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION' | undefined {
-    if (!rule) return undefined;
-
-    switch (rule.toUpperCase()) {
-      case 'CASCADE':
-        return 'CASCADE';
-      case 'RESTRICT':
-        return 'RESTRICT';
-      case 'SET NULL':
-        return 'SET NULL';
-      case 'SET DEFAULT':
-        return 'SET DEFAULT';
-      case 'NO ACTION':
-        return 'NO ACTION';
-      default:
-        return undefined;
-    }
+    return result.rows.map(row => ({
+      name: row.constraint_name,
+      columns: parseArrayLiteral(row.columns),
+      referencedTable: row.referenced_schema === 'public'
+        ? row.referenced_table
+        : `${row.referenced_schema}.${row.referenced_table}`,
+      referencedColumns: parseArrayLiteral(row.referenced_columns),
+      onDelete: actionMap[row.delete_rule],
+      onUpdate: actionMap[row.update_rule],
+    }));
   }
 
   async getCheckConstraints(client: Client, tableName: string, tableSchema: string): Promise<CheckConstraint[]> {

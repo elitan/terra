@@ -1006,44 +1006,55 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    // Generate a structural key for FK matching (independent of constraint name)
-    const getFkStructuralKey = (c: ForeignKeyConstraint) =>
+    const getStructuralKey = (c: ForeignKeyConstraint) =>
       `${c.columns.join(',')}->${c.referencedTable}.${c.referencedColumns.join(',')}`;
 
-    // Create maps for easier comparison using structural keys
-    const currentMap = new Map(
-      currentConstraints.map(c => [getFkStructuralKey(c), c])
+    const currentByName = new Map(
+      currentConstraints.filter(c => c.name).map(c => [c.name!, c])
     );
-    const desiredMap = new Map(
-      desiredConstraints.map(c => [getFkStructuralKey(c), c])
+    const currentByStructure = new Map(
+      currentConstraints.map(c => [getStructuralKey(c), c])
     );
 
-    // Drop removed constraints (but skip those that will be auto-dropped by column removal)
-    for (const [key, constraint] of currentMap) {
-      if (!desiredMap.has(key)) {
-        // Check if this constraint depends on columns being dropped
-        const dependsOnDroppedColumn = constraint.columns.some(col => droppedColumns.has(col));
-        
-        if (!dependsOnDroppedColumn && constraint.name) {
-          // Only explicitly drop if it won't be auto-dropped by column removal
-          statements.push(generateDropForeignKeySQL(tableName, constraint.name));
+    const matchedCurrentNames = new Set<string>();
+
+    for (const desired of desiredConstraints) {
+      const structKey = getStructuralKey(desired);
+
+      if (desired.name) {
+        const currentByNameMatch = currentByName.get(desired.name);
+        if (currentByNameMatch) {
+          matchedCurrentNames.add(desired.name);
+          if (this.foreignKeysDiffer(desired, currentByNameMatch)) {
+            statements.push(generateDropForeignKeySQL(tableName, desired.name));
+            statements.push(generateAddForeignKeySQL(tableName, desired));
+          }
+        } else {
+          statements.push(generateAddForeignKeySQL(tableName, desired));
+        }
+      } else {
+        const currentByStructMatch = currentByStructure.get(structKey);
+        if (currentByStructMatch) {
+          if (currentByStructMatch.name) {
+            matchedCurrentNames.add(currentByStructMatch.name);
+          }
+          if (this.foreignKeysDiffer(desired, currentByStructMatch)) {
+            if (currentByStructMatch.name) {
+              statements.push(generateDropForeignKeySQL(tableName, currentByStructMatch.name));
+            }
+            statements.push(generateAddForeignKeySQL(tableName, desired));
+          }
+        } else {
+          statements.push(generateAddForeignKeySQL(tableName, desired));
         }
       }
     }
 
-    // Add new constraints or modify existing ones
-    for (const [key, constraint] of desiredMap) {
-      if (!currentMap.has(key)) {
-        statements.push(generateAddForeignKeySQL(tableName, constraint));
-      } else {
-        // Check if the constraint has changed
-        const currentConstraint = currentMap.get(key)!;
-        if (this.foreignKeysDiffer(constraint, currentConstraint)) {
-          // Drop and recreate to modify
-          if (currentConstraint.name) {
-            statements.push(generateDropForeignKeySQL(tableName, currentConstraint.name));
-          }
-          statements.push(generateAddForeignKeySQL(tableName, constraint));
+    for (const current of currentConstraints) {
+      if (current.name && !matchedCurrentNames.has(current.name)) {
+        const dependsOnDroppedColumn = current.columns.some(col => droppedColumns.has(col));
+        if (!dependsOnDroppedColumn) {
+          statements.push(generateDropForeignKeySQL(tableName, current.name));
         }
       }
     }
@@ -1052,29 +1063,27 @@ export class SchemaDiffer {
   }
 
   private foreignKeysDiffer(a: ForeignKeyConstraint, b: ForeignKeyConstraint): boolean {
-    // Check if columns differ
     if (a.columns.length !== b.columns.length ||
         !a.columns.every((col, i) => col === b.columns[i])) {
       return true;
     }
 
-    // Check if referenced columns differ
     if (a.referencedColumns.length !== b.referencedColumns.length ||
         !a.referencedColumns.every((col, i) => col === b.referencedColumns[i])) {
       return true;
     }
 
-    // Check if referenced table differs
     if (a.referencedTable !== b.referencedTable) {
       return true;
     }
 
-    // Check if action clauses differ
-    if (a.onDelete !== b.onDelete || a.onUpdate !== b.onUpdate) {
+    const normalizeAction = (action: string | undefined) =>
+      !action || action === 'NO ACTION' ? undefined : action;
+    if (normalizeAction(a.onDelete) !== normalizeAction(b.onDelete) ||
+        normalizeAction(a.onUpdate) !== normalizeAction(b.onUpdate)) {
       return true;
     }
 
-    // Check if deferrable settings differ
     if (a.deferrable !== b.deferrable || a.initiallyDeferred !== b.initiallyDeferred) {
       return true;
     }
@@ -1363,49 +1372,55 @@ export class SchemaDiffer {
     droppedColumns: Set<string>,
     alterations: TableAlteration[]
   ): void {
-    // Generate a structural key for FK matching (independent of constraint name)
-    const getFkStructuralKey = (c: ForeignKeyConstraint) =>
+    const getStructuralKey = (c: ForeignKeyConstraint) =>
       `${c.columns.join(',')}->${c.referencedTable}.${c.referencedColumns.join(',')}`;
 
-    const currentMap = new Map(
-      currentConstraints.map(c => [getFkStructuralKey(c), c])
+    const currentByName = new Map(
+      currentConstraints.filter(c => c.name).map(c => [c.name!, c])
     );
-    const desiredMap = new Map(
-      desiredConstraints.map(c => [getFkStructuralKey(c), c])
+    const currentByStructure = new Map(
+      currentConstraints.map(c => [getStructuralKey(c), c])
     );
 
-    // Drop removed constraints (skip those auto-dropped by column removal)
-    for (const [key, constraint] of currentMap) {
-      if (!desiredMap.has(key)) {
-        const dependsOnDroppedColumn = constraint.columns.some(col => droppedColumns.has(col));
-        if (!dependsOnDroppedColumn && constraint.name) {
-          alterations.push({
-            type: "drop_foreign_key",
-            constraintName: constraint.name,
-          });
+    const matchedCurrentNames = new Set<string>();
+
+    for (const desired of desiredConstraints) {
+      const structKey = getStructuralKey(desired);
+
+      if (desired.name) {
+        const currentByNameMatch = currentByName.get(desired.name);
+        if (currentByNameMatch) {
+          matchedCurrentNames.add(desired.name);
+          if (this.foreignKeysDiffer(desired, currentByNameMatch)) {
+            alterations.push({ type: "drop_foreign_key", constraintName: desired.name });
+            alterations.push({ type: "add_foreign_key", constraint: desired });
+          }
+        } else {
+          alterations.push({ type: "add_foreign_key", constraint: desired });
+        }
+      } else {
+        const currentByStructMatch = currentByStructure.get(structKey);
+        if (currentByStructMatch) {
+          if (currentByStructMatch.name) {
+            matchedCurrentNames.add(currentByStructMatch.name);
+          }
+          if (this.foreignKeysDiffer(desired, currentByStructMatch)) {
+            if (currentByStructMatch.name) {
+              alterations.push({ type: "drop_foreign_key", constraintName: currentByStructMatch.name });
+            }
+            alterations.push({ type: "add_foreign_key", constraint: desired });
+          }
+        } else {
+          alterations.push({ type: "add_foreign_key", constraint: desired });
         }
       }
     }
 
-    // Add new constraints or modify existing ones
-    for (const [key, constraint] of desiredMap) {
-      if (!currentMap.has(key)) {
-        alterations.push({
-          type: "add_foreign_key",
-          constraint,
-        });
-      } else {
-        const currentConstraint = currentMap.get(key)!;
-        if (this.foreignKeysDiffer(constraint, currentConstraint) && currentConstraint.name) {
-          // Drop and recreate
-          alterations.push({
-            type: "drop_foreign_key",
-            constraintName: currentConstraint.name,
-          });
-          alterations.push({
-            type: "add_foreign_key",
-            constraint,
-          });
+    for (const current of currentConstraints) {
+      if (current.name && !matchedCurrentNames.has(current.name)) {
+        const dependsOnDroppedColumn = current.columns.some(col => droppedColumns.has(col));
+        if (!dependsOnDroppedColumn) {
+          alterations.push({ type: "drop_foreign_key", constraintName: current.name });
         }
       }
     }
