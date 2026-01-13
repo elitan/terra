@@ -713,17 +713,13 @@ export class SchemaDiffer {
       ...this.generateIndexCreationStatements(indexComparison.toAdd)
     );
 
-    // Handle modified indexes (drop + create)
-    statements.push(
-      ...this.generateIndexDropStatements(
-        indexComparison.toModify.map((mod) => mod.current)
-      )
-    );
-    statements.push(
-      ...this.generateIndexCreationStatements(
-        indexComparison.toModify.map((mod) => mod.desired)
-      )
-    );
+    // Handle modified indexes (drop + create) - use non-concurrent to keep in same transaction
+    for (const mod of indexComparison.toModify) {
+      const dropBuilder = new SQLBuilder();
+      dropBuilder.p("DROP INDEX").ident(mod.current.name).p(";");
+      statements.push(dropBuilder.build());
+      statements.push(this.generateCreateIndexSQL(mod.desired, false));
+    }
 
     return statements;
   }
@@ -780,6 +776,13 @@ export class SchemaDiffer {
       if (index1.columns[i] !== index2.columns[i]) return false;
     }
 
+    const sortOrders1 = index1.sortOrders || index1.columns.map(() => 'ASC');
+    const sortOrders2 = index2.sortOrders || index2.columns.map(() => 'ASC');
+    if (sortOrders1.length !== sortOrders2.length) return false;
+    for (let i = 0; i < sortOrders1.length; i++) {
+      if (sortOrders1[i] !== sortOrders2[i]) return false;
+    }
+
     const where1 = index1.where;
     const where2 = index2.where;
     if (where1 && where2) {
@@ -787,7 +790,13 @@ export class SchemaDiffer {
     } else if (where1 !== where2) {
       return false;
     }
-    if (index1.expression !== index2.expression) return false;
+    const expr1 = index1.expression;
+    const expr2 = index2.expression;
+    if (expr1 && expr2) {
+      if (!expressionsEqual(expr1, expr2)) return false;
+    } else if (expr1 !== expr2) {
+      return false;
+    }
     if (index1.tablespace !== index2.tablespace) return false;
 
     const opclasses1 = index1.opclasses || {};
@@ -861,12 +870,27 @@ export class SchemaDiffer {
     }
 
     if (index.expression) {
-      builder.p(`(${index.expression})`);
+      let expr = index.expression;
+      const needsInnerParens = !expr.startsWith('(') && /[+\-*/%^&|<>=!]/.test(expr);
+      if (needsInnerParens) {
+        expr = `(${expr})`;
+      }
+      const sortOrder = index.sortOrders?.[0];
+      if (sortOrder === 'DESC') {
+        builder.p(`(${expr} DESC)`);
+      } else {
+        builder.p(`(${expr})`);
+      }
     } else {
-      const quotedColumns = index.columns.map(col => {
+      const quotedColumns = index.columns.map((col, i) => {
         const quoted = `"${col.replace(/"/g, '""')}"`;
         const opclass = index.opclasses?.[col];
-        return opclass ? `${quoted} ${opclass}` : quoted;
+        const sortOrder = index.sortOrders?.[i];
+        let result = opclass ? `${quoted} ${opclass}` : quoted;
+        if (sortOrder === 'DESC') {
+          result += ' DESC';
+        }
+        return result;
       }).join(", ");
       builder.p(`(${quotedColumns})`);
     }
@@ -946,17 +970,28 @@ export class SchemaDiffer {
       return constraints.find(c => expressionsEqual(expr, c.expression));
     };
 
-    for (const current of currentConstraints) {
-      if (!findMatchingConstraint(current.expression, desiredConstraints)) {
-        if (current.name) {
-          statements.push(generateDropCheckConstraintSQL(tableName, current.name));
+    const processedCurrentNames = new Set<string>();
+
+    for (const desired of desiredConstraints) {
+      const matchingCurrent = findMatchingConstraint(desired.expression, currentConstraints);
+      if (matchingCurrent) {
+        if (matchingCurrent.name) {
+          processedCurrentNames.add(matchingCurrent.name);
         }
+        if (matchingCurrent.name !== desired.name) {
+          if (matchingCurrent.name) {
+            statements.push(generateDropCheckConstraintSQL(tableName, matchingCurrent.name));
+          }
+          statements.push(generateAddCheckConstraintSQL(tableName, desired));
+        }
+      } else {
+        statements.push(generateAddCheckConstraintSQL(tableName, desired));
       }
     }
 
-    for (const desired of desiredConstraints) {
-      if (!findMatchingConstraint(desired.expression, currentConstraints)) {
-        statements.push(generateAddCheckConstraintSQL(tableName, desired));
+    for (const current of currentConstraints) {
+      if (current.name && !processedCurrentNames.has(current.name)) {
+        statements.push(generateDropCheckConstraintSQL(tableName, current.name));
       }
     }
 
@@ -1281,20 +1316,39 @@ export class SchemaDiffer {
       return constraints.find(c => expressionsEqual(expr, c.expression));
     };
 
-    for (const current of currentConstraints) {
-      if (!findMatchingConstraint(current.expression, desiredConstraints) && current.name) {
+    const processedCurrentNames = new Set<string>();
+
+    for (const desired of desiredConstraints) {
+      const matchingCurrent = findMatchingConstraint(desired.expression, currentConstraints);
+      if (matchingCurrent) {
+        if (matchingCurrent.name) {
+          processedCurrentNames.add(matchingCurrent.name);
+        }
+        if (matchingCurrent.name !== desired.name) {
+          if (matchingCurrent.name) {
+            alterations.push({
+              type: "drop_check",
+              constraintName: matchingCurrent.name,
+            });
+          }
+          alterations.push({
+            type: "add_check",
+            constraint: desired,
+          });
+        }
+      } else {
         alterations.push({
-          type: "drop_check",
-          constraintName: current.name,
+          type: "add_check",
+          constraint: desired,
         });
       }
     }
 
-    for (const desired of desiredConstraints) {
-      if (!findMatchingConstraint(desired.expression, currentConstraints)) {
+    for (const current of currentConstraints) {
+      if (current.name && !processedCurrentNames.has(current.name)) {
         alterations.push({
-          type: "add_check",
-          constraint: desired,
+          type: "drop_check",
+          constraintName: current.name,
         });
       }
     }

@@ -176,17 +176,12 @@ describe("Index Integration Tests", () => {
       expect(hasDropStatement).toBe(true);
       expect(hasCreateStatement).toBe(true);
 
-      // 4. Apply migration
-      for (const statement of migrationPlan.concurrent) {
-        if (statement.includes("DROP INDEX")) {
-          await client.query(statement);
-        }
-      }
-
+      // 4. Apply migration - now drops and creates are both in transactional for atomicity
       for (const statement of migrationPlan.transactional) {
-        if (statement.includes("CREATE INDEX")) {
-          await client.query(statement);
-        }
+        await client.query(statement);
+      }
+      for (const statement of migrationPlan.concurrent) {
+        await client.query(statement);
       }
 
       // 5. Verify modification
@@ -408,21 +403,12 @@ describe("Index Integration Tests", () => {
       const currentSchema = await inspector.getCurrentSchema(client);
       const migrationPlan = differ.generateMigrationPlan(tables, currentSchema);
 
-      // Apply drops first
-      for (const statement of migrationPlan.concurrent) {
-        if (statement.includes("DROP INDEX")) {
-          await client.query(statement);
-        }
+      // Apply all statements in order - drops now in transactional for atomicity
+      for (const statement of migrationPlan.transactional) {
+        await client.query(statement);
       }
-
-      // Then apply creates
-      for (const statement of [
-        ...migrationPlan.transactional,
-        ...migrationPlan.concurrent,
-      ]) {
-        if (statement.includes("CREATE")) {
-          await client.query(statement);
-        }
+      for (const statement of migrationPlan.concurrent) {
+        await client.query(statement);
       }
 
       // 4. Verify complex final state

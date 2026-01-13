@@ -513,7 +513,7 @@ describe("Check Constraints", () => {
       ).rejects.toThrow(/positive_price/);
     });
 
-    test("should be idempotent when constraint names differ but expressions match", async () => {
+    test("should detect constraint rename when names differ but expressions match", async () => {
       await client.query(`
         CREATE TABLE exercises (
           id SERIAL PRIMARY KEY,
@@ -532,10 +532,10 @@ describe("Check Constraints", () => {
 
       const plan = await schemaService.plan(desiredSchema);
 
-      expect(plan.hasChanges).toBe(false);
+      expect(plan.hasChanges).toBe(true);
     });
 
-    test("should be idempotent for BETWEEN constraints with different names", async () => {
+    test("should detect constraint rename for BETWEEN constraints with different names", async () => {
       await client.query(`
         CREATE TABLE workouts (
           id SERIAL PRIMARY KEY,
@@ -554,7 +554,7 @@ describe("Check Constraints", () => {
 
       const plan = await schemaService.plan(desiredSchema);
 
-      expect(plan.hasChanges).toBe(false);
+      expect(plan.hasChanges).toBe(true);
     });
 
     test("should be idempotent when PostgreSQL adds parentheses to AND conditions", async () => {

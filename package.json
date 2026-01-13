@@ -64,9 +64,9 @@
     "test:destructive": "bun --env-file=.env test src/test/destructive-operations.test.ts",
     "test:properties": "bun --env-file=.env test src/test/properties/",
     "test:properties:watch": "bun --env-file=.env test --watch src/test/properties/",
-    "release:patch": "bun run scripts/release.ts patch",
-    "release:minor": "bun run scripts/release.ts minor",
-    "release:major": "bun run scripts/release.ts major"
+    "release:patch": "bun run tools/release.ts patch",
+    "release:minor": "bun run tools/release.ts minor",
+    "release:major": "bun run tools/release.ts major"
   },
   "dependencies": {
     "better-sqlite3": "^12.5.0",

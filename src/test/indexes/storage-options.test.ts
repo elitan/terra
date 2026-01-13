@@ -298,13 +298,10 @@ describe("Index Storage Options", () => {
 
       const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Should recreate index with new storage parameters
-      const allStatements = [...plan.transactional, ...plan.concurrent];
-      expect(allStatements).toContain(
-        'DROP INDEX CONCURRENTLY "idx_users_email";'
-      );
-      expect(allStatements).toContain(
-        'CREATE INDEX CONCURRENTLY "idx_users_email" ON "users" ("email") WITH (fillfactor=90);'
+      // Modified indexes use non-concurrent drop for atomicity
+      expect(plan.transactional).toContain('DROP INDEX "idx_users_email";');
+      expect(plan.transactional).toContain(
+        'CREATE INDEX "idx_users_email" ON "users" ("email") WITH (fillfactor=90);'
       );
     });
 
@@ -352,13 +349,10 @@ describe("Index Storage Options", () => {
 
       const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
 
-      // Should recreate index in new tablespace
-      const allStatements = [...plan.transactional, ...plan.concurrent];
-      expect(allStatements).toContain(
-        'DROP INDEX CONCURRENTLY "idx_users_email";'
-      );
-      expect(allStatements).toContain(
-        'CREATE INDEX CONCURRENTLY "idx_users_email" ON "users" ("email") TABLESPACE new_tablespace;'
+      // Modified indexes use non-concurrent drop for atomicity
+      expect(plan.transactional).toContain('DROP INDEX "idx_users_email";');
+      expect(plan.transactional).toContain(
+        'CREATE INDEX "idx_users_email" ON "users" ("email") TABLESPACE new_tablespace;'
       );
     });
 
