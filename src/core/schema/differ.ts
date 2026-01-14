@@ -1193,6 +1193,7 @@ export class SchemaDiffer {
 
     // Collect check constraint alterations
     this.collectCheckConstraintAlterations(
+      desiredTable.name,
       desiredTable.checkConstraints || [],
       currentTable.checkConstraints || [],
       alterations
@@ -1314,6 +1315,7 @@ export class SchemaDiffer {
    * Collects check constraint alterations
    */
   private collectCheckConstraintAlterations(
+    tableName: string,
     desiredConstraints: CheckConstraint[],
     currentConstraints: CheckConstraint[],
     alterations: TableAlteration[]
@@ -1325,6 +1327,9 @@ export class SchemaDiffer {
       return constraints.find(c => expressionsEqual(expr, c.expression));
     };
 
+    const bareTableName = getBareTableName(tableName);
+    const fallbackName = `${bareTableName}_check`;
+
     const processedCurrentNames = new Set<string>();
 
     for (const desired of desiredConstraints) {
@@ -1333,7 +1338,9 @@ export class SchemaDiffer {
         if (matchingCurrent.name) {
           processedCurrentNames.add(matchingCurrent.name);
         }
-        if (matchingCurrent.name !== desired.name) {
+        const desiredEffectiveName = desired.name || fallbackName;
+        const currentEffectiveName = matchingCurrent.name || fallbackName;
+        if (currentEffectiveName !== desiredEffectiveName) {
           if (matchingCurrent.name) {
             alterations.push({
               type: "drop_check",

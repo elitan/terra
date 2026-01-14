@@ -105,4 +105,30 @@ describe("Issue #70 - CHECK constraint idempotency with IN/NOT IN", () => {
 
     expect(plan.hasChanges).toBe(false);
   });
+
+  test("should be idempotent for unnamed constraints after first migration", async () => {
+    const schemaService = createTestSchemaService();
+
+    await client.query(`
+      CREATE TABLE exercises (
+        id SERIAL PRIMARY KEY,
+        difficulty TEXT CHECK (difficulty IN ('beginner', 'intermediate', 'advanced'))
+      );
+    `);
+
+    const desiredSchema = `
+      CREATE TABLE exercises (
+        id SERIAL PRIMARY KEY,
+        difficulty TEXT CHECK (difficulty IN ('beginner', 'intermediate', 'advanced'))
+      );
+    `;
+
+    const plan1 = await schemaService.plan(desiredSchema);
+    expect(plan1.hasChanges).toBe(true);
+
+    await schemaService.apply(desiredSchema, ['public'], true);
+
+    const plan2 = await schemaService.plan(desiredSchema);
+    expect(plan2.hasChanges).toBe(false);
+  });
 });
