@@ -1,35 +1,14 @@
+import Database from "libsql";
 import type { DatabaseClient, QueryResult, SQLiteConnectionConfig } from "../types";
 
-interface SQLiteDatabase {
-  exec(sql: string): void;
-  prepare(sql: string): {
-    all(...params: unknown[]): unknown[];
-    run(...params: unknown[]): void;
-  };
-  close(): void;
-  transaction<T>(fn: () => T): () => T;
-}
-
-const isBun = typeof globalThis.Bun !== "undefined";
-
-async function loadDatabase(filename: string): Promise<SQLiteDatabase> {
-  if (isBun) {
-    const { Database } = await import("bun:sqlite");
-    return new Database(filename) as unknown as SQLiteDatabase;
-  } else {
-    const Database = (await import("better-sqlite3")).default;
-    return new Database(filename) as unknown as SQLiteDatabase;
-  }
-}
-
 export class SQLiteClient implements DatabaseClient {
-  private db!: SQLiteDatabase;
+  private db!: InstanceType<typeof Database>;
 
   private constructor() {}
 
   static async create(config: SQLiteConnectionConfig): Promise<SQLiteClient> {
     const client = new SQLiteClient();
-    client.db = await loadDatabase(config.filename);
+    client.db = new Database(config.filename);
     client.db.exec("PRAGMA foreign_keys = ON");
     return client;
   }
@@ -58,7 +37,7 @@ export class SQLiteClient implements DatabaseClient {
     this.db.close();
   }
 
-  get raw(): SQLiteDatabase {
+  get raw(): InstanceType<typeof Database> {
     return this.db;
   }
 
