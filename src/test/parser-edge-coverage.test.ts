@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { parseCreateSequence } from "../core/schema/parser/sequence-parser";
 import { parseCreateTrigger } from "../core/schema/parser/trigger-parser";
+import { parseCreateFunction } from "../core/schema/parser/function-parser";
+import {
+  parseCreateMaterializedView,
+  parseCreateView,
+} from "../core/schema/parser/view-parser";
+import { parseCreateIndex } from "../core/schema/parser/index-parser";
 import {
   extractColumns,
   parseColumn,
@@ -378,6 +384,233 @@ describe("Parser edge coverage", () => {
       expect(parsed?.generated?.always).toBe(true);
       expect(parsed?.generated?.expression).toBe("a");
       expect(parsed?.generated?.stored).toBe(true);
+    });
+  });
+
+  describe("function parser edge paths", () => {
+    test("returns null when body is missing", () => {
+      const fn = parseCreateFunction({
+        funcname: [{ String: { sval: "f" } }],
+        returnType: { names: [{ String: { sval: "int4" } }] },
+        options: [{ DefElem: { defname: "language", arg: { String: { sval: "sql" } } } }],
+      });
+
+      expect(fn).toBeNull();
+    });
+
+    test("handles thrown return type extraction", () => {
+      const node: any = {
+        funcname: [{ String: { sval: "f" } }],
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+        ],
+      };
+
+      Object.defineProperty(node, "returnType", {
+        get() {
+          throw new Error("bad return type");
+        },
+      });
+
+      expect(parseCreateFunction(node)).toBeNull();
+    });
+
+    test("handles parameter extraction and default extraction failures", () => {
+      const badParamNode: any = {
+        funcname: [{ String: { sval: "f" } }],
+        returnType: { names: [{ String: { sval: "int4" } }] },
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+        ],
+      };
+      Object.defineProperty(badParamNode, "parameters", {
+        get() {
+          throw new Error("bad parameters");
+        },
+      });
+      expect(parseCreateFunction(badParamNode)?.parameters).toEqual([]);
+
+      const badDefaultNode = parseCreateFunction({
+        funcname: [{ String: { sval: "f2" } }],
+        parameters: [
+          {
+            FunctionParameter: {
+              name: "a",
+              mode: "FUNC_PARAM_DEFAULT",
+              argType: {
+                get names() {
+                  throw new Error("bad names");
+                },
+              },
+              defexpr: {
+                get expr() {
+                  throw new Error("bad expr");
+                },
+              },
+            },
+          },
+        ],
+        returnType: { names: [{ String: { sval: "int4" } }] },
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+        ],
+      });
+
+      expect(badDefaultNode?.parameters).toEqual([{ name: "a", type: "unknown", default: "" }]);
+    });
+
+    test("handles option extraction failures after language and body", () => {
+      let calls = 0;
+      const node: any = {
+        funcname: [{ String: { sval: "f3" } }],
+        returnType: { names: [{ String: { sval: "int4" } }] },
+      };
+      Object.defineProperty(node, "options", {
+        get() {
+          calls += 1;
+          if (calls <= 6) {
+            return [
+              { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+              { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+            ];
+          }
+          throw new Error("bad options");
+        },
+      });
+
+      const fn = parseCreateFunction(node);
+      expect(fn?.name).toBe("f3");
+      expect(fn?.volatility).toBeUndefined();
+      expect(fn?.parallel).toBeUndefined();
+      expect(fn?.securityDefiner).toBeUndefined();
+      expect(fn?.strict).toBeUndefined();
+      expect(fn?.cost).toBeUndefined();
+      expect(fn?.rows).toBeUndefined();
+    });
+
+    test("handles unsupported option values", () => {
+      const fn = parseCreateFunction({
+        funcname: [{ String: { sval: "f4" } }],
+        returnType: { names: [{ String: { sval: "int4" } }] },
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+          { DefElem: { defname: "volatility", arg: { String: { sval: "random" } } } },
+          { DefElem: { defname: "parallel", arg: { String: { sval: "odd" } } } },
+          { DefElem: { defname: "security", arg: { Integer: { ival: 0 } } } },
+        ],
+      });
+
+      expect(fn?.volatility).toBeUndefined();
+      expect(fn?.parallel).toBeUndefined();
+      expect(fn?.securityDefiner).toBe(false);
+    });
+  });
+
+  describe("view parser edge paths", () => {
+    test("parses security_barrier variants", () => {
+      const trueView = parseCreateView(
+        {
+          view: { relname: "v1", schemaname: "public" },
+          query: { SelectStmt: { targetList: [{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } }] } },
+          withCheckOption: "LOCAL_CHECK_OPTION",
+          options: [{ DefElem: { defname: "security_barrier", arg: { String: { sval: "true" } } } }],
+        },
+        ""
+      );
+      const falseView = parseCreateView(
+        {
+          view: { relname: "v2" },
+          query: { SelectStmt: { targetList: [{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } }] } },
+          options: [{ DefElem: { defname: "security_barrier", arg: { String: { sval: "false" } } } }],
+        },
+        ""
+      );
+
+      expect(trueView?.securityBarrier).toBe(true);
+      expect(trueView?.checkOption).toBe("LOCAL");
+      expect(falseView?.securityBarrier).toBe(false);
+    });
+
+    test("returns null when view parsing throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "view", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+
+      expect(parseCreateView(stmt, "")).toBeNull();
+    });
+
+    test("returns null when materialized view parsing throws", () => {
+      const stmt: any = { objtype: "OBJECT_MATVIEW" };
+      Object.defineProperty(stmt, "into", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+
+      expect(parseCreateMaterializedView(stmt)).toBeNull();
+    });
+  });
+
+  describe("index parser edge paths", () => {
+    test("parses storage params and quoted tablespace", () => {
+      const index = parseCreateIndex({
+        idxname: "idx_users_email",
+        relation: { relname: "users", schemaname: "public" },
+        indexParams: [{ IndexElem: { name: "email", ordering: "SORTBY_DESC" } }],
+        options: [
+          { DefElem: { defname: "fillfactor", arg: { Integer: { ival: 70 } } } },
+          { DefElem: { defname: "note", arg: { A_Const: { String: { sval: "x" } } } } },
+          { DefElem: { defname: "count", arg: { A_Const: { Integer: { ival: 3 } } } } },
+        ],
+        tableSpace: { String: { sval: "Fast Space" } },
+      });
+
+      expect(index?.sortOrders).toEqual(["DESC"]);
+      expect(index?.storageParameters).toEqual({ fillfactor: "70", note: "x", count: "3" });
+      expect(index?.tablespace).toBe("\"Fast Space\"");
+    });
+
+    test("drops empty storage params and handles expression index", () => {
+      const index = parseCreateIndex({
+        idxname: "idx_expr",
+        relation: { relname: "users" },
+        indexParams: [
+          {
+            IndexElem: {
+              expr: {
+                FuncCall: {
+                  funcname: [{ String: { sval: "lower" } }],
+                  args: [{ ColumnRef: { fields: [{ String: { sval: "email" } }] } }],
+                },
+              },
+              ordering: 2,
+            },
+          },
+        ],
+        options: [{ DefElem: { defname: "unused", arg: { TypeName: { names: [] } } } }],
+      });
+
+      expect(index?.expression?.toLowerCase()).toContain("lower");
+      expect(index?.storageParameters).toBeUndefined();
+      expect(index?.sortOrders).toEqual(["DESC"]);
+    });
+
+    test("returns null when index parsing throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "idxname", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+
+      expect(parseCreateIndex(stmt)).toBeNull();
     });
   });
 });
