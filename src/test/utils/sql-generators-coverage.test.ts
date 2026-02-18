@@ -1,0 +1,229 @@
+import { describe, expect, test } from "bun:test";
+import {
+  columnsAreDifferent,
+  generateAddCheckConstraintSQL,
+  generateAddForeignKeySQL,
+  generateAddPrimaryKeySQL,
+  generateAddUniqueConstraintSQL,
+  generateCreateFunctionSQL,
+  generateCreateOrReplaceViewSQL,
+  generateCreateProcedureSQL,
+  generateCreateSequenceSQL,
+  generateCreateTriggerSQL,
+  generateCreateTypeSQL,
+  generateCreateViewSQL,
+  generateDropCheckConstraintSQL,
+  generateDropForeignKeySQL,
+  generateDropPrimaryKeySQL,
+  generateDropProcedureSQL,
+  generateDropSequenceSQL,
+  generateDropTriggerSQL,
+  generateDropTypeSQL,
+  generateDropUniqueConstraintSQL,
+  generateDropViewSQL,
+  generatePrimaryKeyClause,
+  generateRefreshMaterializedViewSQL,
+  getQualifiedTableName,
+  normalizeDefault,
+  normalizeExpression,
+  normalizeType,
+  splitSchemaTable,
+} from "../../utils/sql";
+import type {
+  Function,
+  Procedure,
+  Sequence,
+  Table,
+  Trigger,
+  View,
+} from "../../types/schema";
+
+describe("SQL generators coverage", () => {
+  test("split and qualify table names", () => {
+    expect(splitSchemaTable("public.users")).toEqual(["users", "public"]);
+    expect(splitSchemaTable("users")).toEqual(["users", undefined]);
+    expect(getQualifiedTableName("users", "public")).toBe("public.users");
+    expect(getQualifiedTableName("users")).toBe("users");
+
+    const table: Table = {
+      name: "orders",
+      schema: "audit",
+      columns: [],
+    };
+    expect(getQualifiedTableName(table)).toBe("audit.orders");
+  });
+
+  test("normalizes type aliases and precision formats", () => {
+    expect(normalizeType("varbit(12)")).toBe("BIT VARYING(12)");
+    expect(normalizeType("decimal(10)")).toBe("NUMERIC(10,0)");
+    expect(normalizeType("timestamp(4) without time zone")).toBe("TIMESTAMP(4)");
+    expect(normalizeType("time(2) with time zone")).toBe("TIMETZ(2)");
+    expect(normalizeType("integer[][]")).toBe("INT4[]");
+  });
+
+  test("normalizes defaults and expressions", () => {
+    expect(normalizeDefault("((42::integer))")).toBe("42::integer");
+    expect(normalizeDefault("pg_catalog.now()")).toBe("CURRENT_TIMESTAMP");
+    expect(normalizeDefault("NULL")).toBeUndefined();
+    expect(normalizeExpression("id = ANY ((ARRAY[1,2,3]))")).toBe("id IN (1, 2, 3)");
+    expect(normalizeExpression("a ~~ 'x%'")).toBe("a LIKE 'x%'");
+    expect(normalizeExpression("(age >= 1) AND (age <= 10)")).toBe("age BETWEEN 1 AND 10");
+  });
+
+  test("compares generated columns correctly", () => {
+    const desired = {
+      name: "full_name",
+      type: "TEXT",
+      nullable: false,
+      generated: {
+        always: true,
+        stored: true,
+        expression: "first || ' ' || last",
+      },
+    };
+    const current = {
+      name: "full_name",
+      type: "TEXT",
+      nullable: false,
+      generated: {
+        always: false,
+        stored: true,
+        expression: "first || ' ' || last",
+      },
+    };
+
+    expect(columnsAreDifferent(desired, current)).toBe(true);
+  });
+
+  test("builds key and constraint SQL", () => {
+    expect(generatePrimaryKeyClause({ columns: ["id"] })).toBe("PRIMARY KEY (\"id\")");
+    expect(generateAddPrimaryKeySQL("public.users", { columns: ["id"] })).toContain("ADD CONSTRAINT");
+    expect(generateDropPrimaryKeySQL("public.users", "users_pkey")).toContain("DROP CONSTRAINT \"users_pkey\"");
+
+    const fkSQL = generateAddForeignKeySQL("orders", {
+      columns: ["user_id"],
+      referencedTable: "public.users",
+      referencedColumns: ["id"],
+      onDelete: "CASCADE",
+      onUpdate: "SET NULL",
+    });
+    expect(fkSQL).toContain("FOREIGN KEY");
+    expect(fkSQL).toContain("ON DELETE CASCADE");
+    expect(fkSQL).toContain("ON UPDATE SET NULL");
+    expect(generateDropForeignKeySQL("orders", "fk_orders_users")).toContain("DROP CONSTRAINT");
+
+    expect(generateAddCheckConstraintSQL("users", { expression: "age > 0" })).toContain("CHECK (age > 0)");
+    expect(generateDropCheckConstraintSQL("users", "users_check")).toContain("DROP CONSTRAINT");
+    expect(generateAddUniqueConstraintSQL("users", { columns: ["email"] })).toContain("UNIQUE (\"email\")");
+    expect(generateDropUniqueConstraintSQL("users", "users_email_unique")).toContain("DROP CONSTRAINT");
+  });
+
+  test("builds view SQL variations", () => {
+    const view: View = {
+      name: "active_users",
+      definition: "SELECT * FROM users WHERE active = true",
+      securityBarrier: true,
+      checkOption: "LOCAL",
+    };
+
+    const createView = generateCreateViewSQL(view);
+    expect(createView).toContain("CREATE VIEW");
+    expect(createView).toContain("security_barrier = true");
+    expect(createView).toContain("WITH LOCAL CHECK OPTION");
+
+    const materialized: View = {
+      name: "mv_users",
+      materialized: true,
+      definition: "SELECT id FROM users",
+    };
+    expect(generateCreateOrReplaceViewSQL(materialized)).toContain("DROP MATERIALIZED VIEW IF EXISTS");
+    expect(generateCreateOrReplaceViewSQL(view)).toContain("CREATE OR REPLACE VIEW");
+    expect(generateDropViewSQL("v_users")).toContain("DROP VIEW IF EXISTS");
+    expect(generateDropViewSQL("mv_users", true)).toContain("DROP MATERIALIZED VIEW IF EXISTS");
+    expect(generateRefreshMaterializedViewSQL("mv_users", true)).toContain("CONCURRENTLY");
+  });
+
+  test("builds function and procedure SQL variations", () => {
+    const fn: Function = {
+      name: "compute",
+      parameters: [
+        { mode: "IN", name: "a", type: "integer" },
+        { name: "b", type: "text", default: "'x'" },
+      ],
+      returnType: "integer",
+      language: "plpgsql",
+      body: "BEGIN RETURN 1; END",
+      volatility: "STABLE",
+      parallel: "SAFE",
+      securityDefiner: true,
+      strict: true,
+      cost: 3,
+      rows: 5,
+    };
+    const fnSQL = generateCreateFunctionSQL(fn);
+    expect(fnSQL).toContain("STABLE");
+    expect(fnSQL).toContain("PARALLEL SAFE");
+    expect(fnSQL).toContain("SECURITY DEFINER");
+    expect(fnSQL).toContain("STRICT");
+    expect(fnSQL).toContain("COST 3");
+    expect(fnSQL).toContain("ROWS 5");
+
+    expect(generateDropForeignKeySQL("x", "y")).toContain("ALTER TABLE");
+
+    const proc: Procedure = {
+      name: "sync_users",
+      parameters: [{ mode: "INOUT", name: "p", type: "integer", default: "0" }],
+      language: "sql",
+      body: "SELECT 1",
+      securityDefiner: true,
+    };
+    const procSQL = generateCreateProcedureSQL(proc);
+    expect(procSQL).toContain("INOUT");
+    expect(procSQL).toContain("DEFAULT 0");
+    expect(procSQL).toContain("SECURITY DEFINER");
+    expect(generateDropProcedureSQL(proc)).toContain("DROP PROCEDURE IF EXISTS");
+  });
+
+  test("builds trigger, sequence, and enum SQL", () => {
+    const trigger: Trigger = {
+      name: "trg_users",
+      tableName: "users",
+      timing: "BEFORE",
+      events: ["INSERT", "UPDATE"],
+      forEach: "ROW",
+      when: "NEW.id IS NOT NULL",
+      functionName: "audit_users",
+      functionArgs: ["'x'", "1"],
+    };
+    const triggerSQL = generateCreateTriggerSQL(trigger);
+    expect(triggerSQL).toContain("FOR EACH ROW");
+    expect(triggerSQL).toContain("WHEN (NEW.id IS NOT NULL)");
+    expect(triggerSQL).toContain("'x', 1");
+    expect(generateDropTriggerSQL(trigger)).toContain("DROP TRIGGER IF EXISTS");
+
+    const sequence: Sequence = {
+      name: "user_seq",
+      dataType: "BIGINT",
+      increment: 2,
+      minValue: 1,
+      maxValue: 100,
+      start: 10,
+      cache: 5,
+      cycle: false,
+      ownedBy: "public.users.id",
+    };
+    const seqSQL = generateCreateSequenceSQL(sequence);
+    expect(seqSQL).toContain("AS BIGINT");
+    expect(seqSQL).toContain("NO CYCLE");
+    expect(seqSQL).toContain("OWNED BY public.users.id");
+    expect(generateDropSequenceSQL("user_seq")).toContain("DROP SEQUENCE IF EXISTS");
+
+    const enumSQL = generateCreateTypeSQL({
+      name: "status",
+      schema: "public",
+      values: ["new", "done"],
+    });
+    expect(enumSQL).toContain("CREATE TYPE \"public\".\"status\"");
+    expect(generateDropTypeSQL("status", "public")).toContain("DROP TYPE \"public\".\"status\"");
+  });
+});
