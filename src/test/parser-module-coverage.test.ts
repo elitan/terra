@@ -1,0 +1,644 @@
+import { describe, expect, test } from "bun:test";
+import { parse } from "pgsql-parser";
+import { MigrationExecutor } from "../core/migration/executor";
+import { parseCreateExtension } from "../core/schema/parser/extension-parser";
+import { parseCreateFunction } from "../core/schema/parser/function-parser";
+import { parseCreateType } from "../core/schema/parser/enum-parser";
+import { parseCreateProcedure } from "../core/schema/parser/procedure-parser";
+import { parseCreateSchema } from "../core/schema/parser/schema-definition-parser";
+import { parseCreateSequence } from "../core/schema/parser/sequence-parser";
+import { parseCreateTrigger } from "../core/schema/parser/trigger-parser";
+import {
+  extractAllConstraints,
+  parseForeignKey,
+  parseTablePrimaryKey,
+  parseUniqueConstraint,
+} from "../core/schema/parser/tables/constraint-parser";
+
+describe("Parser module coverage", () => {
+  describe("extension parser", () => {
+    test("parses extension options", () => {
+      const extension = parseCreateExtension({
+        extname: "vector",
+        options: [
+          { DefElem: { defname: "schema", arg: { String: { sval: "public" } } } },
+          { DefElem: { defname: "new_version", arg: { String: { sval: "0.8.0" } } } },
+          { DefElem: { defname: "cascade" } },
+        ],
+      });
+
+      expect(extension).toEqual({
+        name: "vector",
+        schema: "public",
+        version: "0.8.0",
+        cascade: true,
+      });
+    });
+
+    test("returns null for missing extension name", () => {
+      expect(parseCreateExtension({ options: [] })).toBeNull();
+    });
+
+    test("returns null when statement access throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "extname", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      expect(parseCreateExtension(stmt)).toBeNull();
+    });
+  });
+
+  describe("schema parser", () => {
+    test("parses schema name", () => {
+      expect(parseCreateSchema({ schemaname: "analytics" })).toEqual({ name: "analytics" });
+    });
+
+    test("returns null for missing schema name", () => {
+      expect(parseCreateSchema({})).toBeNull();
+    });
+
+    test("returns null when schema parse throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "schemaname", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      expect(parseCreateSchema(stmt)).toBeNull();
+    });
+  });
+
+  describe("enum parser", () => {
+    test("parses schema qualified enum type", () => {
+      const parsed = parseCreateType({
+        typeName: [{ String: { sval: "public" } }, { String: { sval: "status" } }],
+        vals: [{ String: { sval: "pending" } }, { String: { sval: "active" } }],
+      });
+
+      expect(parsed).toEqual({
+        name: "status",
+        schema: "public",
+        values: ["pending", "active"],
+      });
+    });
+
+    test("returns null for missing required fields", () => {
+      expect(parseCreateType({})).toBeNull();
+      expect(parseCreateType({ typeName: [{ String: { sval: "status" } }] })).toBeNull();
+      expect(parseCreateType({ vals: [{ String: { sval: "x" } }] })).toBeNull();
+    });
+
+    test("throws for empty enum values", () => {
+      expect(() =>
+        parseCreateType({
+          typeName: [{ String: { sval: "status" } }],
+          vals: [{ String: { sval: "" } }],
+        })
+      ).toThrow("Invalid ENUM type");
+    });
+
+    test("returns null on unexpected parse errors", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "typeName", {
+        get() {
+          throw "boom";
+        },
+      });
+
+      expect(parseCreateType(stmt)).toBeNull();
+    });
+  });
+
+  describe("sequence parser", () => {
+    test("parses sequence with full options", () => {
+      const sequence = parseCreateSequence({
+        sequence: { relname: "invoice_seq", schemaname: "public" },
+        options: [
+          {
+            DefElem: {
+              defname: "as",
+              arg: {
+                TypeName: {
+                  names: [{ String: { sval: "pg_catalog" } }, { String: { sval: "int8" } }],
+                },
+              },
+            },
+          },
+          { DefElem: { defname: "increment", arg: { Integer: { ival: 3 } } } },
+          { DefElem: { defname: "minvalue", arg: { Float: { fval: 1.5 } } } },
+          { DefElem: { defname: "maxvalue", arg: { Integer: { ival: 9000 } } } },
+          { DefElem: { defname: "start", arg: { Integer: { ival: 100 } } } },
+          { DefElem: { defname: "cache", arg: { Integer: { ival: 25 } } } },
+          { DefElem: { defname: "cycle", arg: { Integer: { ival: 1 } } } },
+          {
+            DefElem: {
+              defname: "owned_by",
+              arg: {
+                List: {
+                  items: [
+                    { String: { sval: "public" } },
+                    { String: { sval: "users" } },
+                    { String: { sval: "id" } },
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      });
+
+      expect(sequence).toEqual({
+        name: "invoice_seq",
+        schema: "public",
+        dataType: "BIGINT",
+        increment: 3,
+        minValue: 1.5,
+        maxValue: 9000,
+        start: 100,
+        cache: 25,
+        cycle: true,
+        ownedBy: "public.users.id",
+      });
+    });
+
+    test("handles CYCLE boolean and OWNED BY NONE", () => {
+      const sequence = parseCreateSequence({
+        sequence: { relname: "simple_seq" },
+        options: [
+          { DefElem: { defname: "as", arg: { TypeName: { names: [{ String: { sval: "smallint" } }] } } } },
+          { DefElem: { defname: "cycle", arg: { Boolean: { boolval: false } } } },
+          {
+            DefElem: {
+              defname: "owned_by",
+              arg: { List: { items: [{ String: { sval: "none" } }] } },
+            },
+          },
+        ],
+      });
+
+      expect(sequence).toEqual({
+        name: "simple_seq",
+        schema: undefined,
+        dataType: "SMALLINT",
+        increment: undefined,
+        minValue: undefined,
+        maxValue: undefined,
+        start: undefined,
+        cache: undefined,
+        cycle: false,
+        ownedBy: undefined,
+      });
+    });
+
+    test("returns null when sequence name is missing", () => {
+      expect(parseCreateSequence({ sequence: { schemaname: "public" } })).toBeNull();
+    });
+
+    test("returns null when sequence parse throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "sequence", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      expect(parseCreateSequence(stmt)).toBeNull();
+    });
+  });
+
+  describe("function parser", () => {
+    test("parses function metadata and options", () => {
+      const fn = parseCreateFunction({
+        funcname: [{ String: { sval: "public" } }, { String: { sval: "compute_total" } }],
+        parameters: [
+          {
+            FunctionParameter: {
+              name: "a",
+              mode: "FUNC_PARAM_IN",
+              argType: { names: [{ String: { sval: "int4" } }] },
+            },
+          },
+          {
+            FunctionParameter: {
+              name: "b",
+              mode: "FUNC_PARAM_DEFAULT",
+              argType: { names: [{ String: { sval: "varchar" } }] },
+              defexpr: { expr: { text: "'x'" } },
+            },
+          },
+          {
+            FunctionParameter: {
+              name: "out_value",
+              mode: "FUNC_PARAM_OUT",
+              argType: { names: [{ String: { sval: "int8" } }] },
+            },
+          },
+        ],
+        returnType: { names: [{ String: { sval: "int4" } }] },
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          {
+            DefElem: {
+              defname: "as",
+              arg: {
+                List: {
+                  items: [{ String: { sval: "SELECT 1" } }, { String: { sval: "RETURN 1" } }],
+                },
+              },
+            },
+          },
+          { DefElem: { defname: "volatility", arg: { String: { sval: "stable" } } } },
+          { DefElem: { defname: "parallel", arg: { String: { sval: "restricted" } } } },
+          { DefElem: { defname: "security", arg: { Integer: { ival: 1 } } } },
+          { DefElem: { defname: "strict", arg: { Integer: { ival: 1 } } } },
+          { DefElem: { defname: "cost", arg: { Float: { fval: 4.2 } } } },
+          { DefElem: { defname: "rows", arg: { Integer: { ival: 25 } } } },
+        ],
+      });
+
+      expect(fn).toEqual({
+        name: "compute_total",
+        schema: undefined,
+        parameters: [
+          { name: "a", type: "integer", mode: "IN" },
+          { name: "b", type: "character varying", default: "'x'" },
+          { name: "out_value", type: "bigint", mode: "OUT" },
+        ],
+        returnType: "integer",
+        language: "sql",
+        body: "SELECT 1\nRETURN 1",
+        volatility: "STABLE",
+        parallel: "RESTRICTED",
+        securityDefiner: true,
+        strict: true,
+        cost: 4.2,
+        rows: 25,
+      });
+    });
+
+    test("returns null when required function fields are missing", () => {
+      expect(parseCreateFunction({ options: [] })).toBeNull();
+      expect(
+        parseCreateFunction({
+          funcname: [{ String: { sval: "f" } }],
+          options: [{ DefElem: { defname: "language", arg: { String: { sval: "sql" } } } }],
+        })
+      ).toBeNull();
+      expect(
+        parseCreateFunction({
+          funcname: [{ String: { sval: "f" } }],
+          returnType: { names: [{ String: { sval: "int4" } }] },
+          options: [],
+        })
+      ).toBeNull();
+    });
+
+    test("handles unknown parameter type and boolean security", () => {
+      const fn = parseCreateFunction({
+        funcname: [{ String: { sval: "f" } }],
+        parameters: [{ FunctionParameter: { name: "x", mode: "FUNC_PARAM_INOUT", argType: null } }],
+        returnType: { names: [{ String: { sval: "bool" } }] },
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "plpgsql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "BEGIN END" } }] } } } },
+          { DefElem: { defname: "security", arg: { Boolean: { boolval: false } } } },
+          { DefElem: { defname: "parallel", arg: { String: { sval: "safe" } } } },
+          { DefElem: { defname: "volatility", arg: { String: { sval: "immutable" } } } },
+        ],
+      });
+
+      expect(fn?.parameters).toEqual([{ name: "x", type: "unknown", mode: "INOUT" }]);
+      expect(fn?.securityDefiner).toBe(false);
+      expect(fn?.parallel).toBe("SAFE");
+      expect(fn?.volatility).toBe("IMMUTABLE");
+      expect(fn?.returnType).toBe("boolean");
+    });
+
+    test("returns null when function parse throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "funcname", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      expect(parseCreateFunction(stmt)).toBeNull();
+    });
+  });
+
+  describe("procedure parser", () => {
+    test("parses procedure metadata and options", () => {
+      const proc = parseCreateProcedure({
+        funcname: [{ String: { sval: "public" } }, { String: { sval: "sync_users" } }],
+        parameters: [
+          {
+            FunctionParameter: {
+              name: "p_id",
+              mode: "FUNC_PARAM_IN",
+              argType: { names: [{ String: { sval: "int4" } }] },
+            },
+          },
+          {
+            FunctionParameter: {
+              name: "p_name",
+              mode: "FUNC_PARAM_DEFAULT",
+              argType: { names: [{ String: { sval: "varchar" } }] },
+              defexpr: {
+                A_Const: {
+                  sval: { sval: "x" },
+                },
+              },
+            },
+          },
+          {
+            FunctionParameter: {
+              name: "p_flag",
+              mode: "FUNC_PARAM_INOUT",
+              argType: null,
+            },
+          },
+        ],
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "plpgsql" } } } },
+          {
+            DefElem: {
+              defname: "as",
+              arg: {
+                List: {
+                  items: [{ String: { sval: "BEGIN" } }, { String: { sval: "END" } }],
+                },
+              },
+            },
+          },
+          { DefElem: { defname: "security", arg: { Integer: { ival: 1 } } } },
+        ],
+      });
+
+      expect(proc).toBeDefined();
+      expect(proc?.name).toBe("sync_users");
+      expect(proc?.schema).toBe("public");
+      expect(proc?.language).toBe("plpgsql");
+      expect(proc?.body).toBe("BEGIN\nEND");
+      expect(proc?.securityDefiner).toBe(true);
+      expect(proc?.parameters).toEqual([
+        { name: "p_id", type: "integer", mode: "IN" },
+        { name: "p_name", type: "character varying", default: "'x'" },
+        { name: "p_flag", type: "unknown", mode: "INOUT" },
+      ]);
+    });
+
+    test("returns null when required fields are missing", () => {
+      expect(parseCreateProcedure({})).toBeNull();
+      expect(parseCreateProcedure({ funcname: [{ String: { sval: "p" } }], options: [] })).toBeNull();
+      expect(
+        parseCreateProcedure({
+          funcname: [{ String: { sval: "p" } }],
+          options: [{ DefElem: { defname: "language", arg: { String: { sval: "sql" } } } }],
+        })
+      ).toBeNull();
+    });
+
+    test("handles thrown extraction paths", () => {
+      const badNameNode: any = {};
+      Object.defineProperty(badNameNode, "funcname", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      expect(parseCreateProcedure(badNameNode)).toBeNull();
+
+      const badLanguageNode: any = {
+        funcname: [{ String: { sval: "proc" } }],
+      };
+      Object.defineProperty(badLanguageNode, "options", {
+        get() {
+          throw new Error("bad language");
+        },
+      });
+      expect(parseCreateProcedure(badLanguageNode)).toBeNull();
+
+      let bodyGetterCount = 0;
+      const badBodyNode: any = {
+        funcname: [{ String: { sval: "proc" } }],
+      };
+      Object.defineProperty(badBodyNode, "options", {
+        get() {
+          bodyGetterCount += 1;
+          if (bodyGetterCount === 1) {
+            return [{ DefElem: { defname: "language", arg: { String: { sval: "sql" } } } }];
+          }
+          throw new Error("bad body");
+        },
+      });
+      expect(parseCreateProcedure(badBodyNode)).toBeNull();
+    });
+
+    test("continues when parameter or security extraction fails", () => {
+      const badParamsNode: any = {
+        funcname: [{ String: { sval: "proc_with_bad_params" } }],
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+        ],
+      };
+      Object.defineProperty(badParamsNode, "parameters", {
+        get() {
+          throw new Error("bad params");
+        },
+      });
+
+      const parsedWithBadParams = parseCreateProcedure(badParamsNode);
+      expect(parsedWithBadParams?.parameters).toEqual([]);
+
+      let optionsGetterCount = 0;
+      const badSecurityNode: any = {
+        funcname: [{ String: { sval: "proc_with_bad_security" } }],
+      };
+      Object.defineProperty(badSecurityNode, "options", {
+        get() {
+          optionsGetterCount += 1;
+          if (optionsGetterCount <= 6) {
+            return [
+              { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+              { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+            ];
+          }
+          throw new Error("bad security");
+        },
+      });
+
+      const parsedWithBadSecurity = parseCreateProcedure(badSecurityNode);
+      expect(parsedWithBadSecurity?.name).toBe("proc_with_bad_security");
+      expect(parsedWithBadSecurity?.securityDefiner).toBeUndefined();
+    });
+  });
+
+  describe("trigger parser", () => {
+    test("parses trigger with full bitmasks", () => {
+      const trigger = parseCreateTrigger({
+        trigname: "trg_all",
+        relation: { relname: "orders" },
+        timing: 64,
+        events: 4 | 8 | 16 | 32,
+        row: true,
+        funcname: [{ String: { sval: "public" } }, { String: { sval: "audit_orders" } }],
+        args: [{ A_Const: { sval: { sval: "x" } } }],
+      });
+
+      expect(trigger).toEqual({
+        name: "trg_all",
+        tableName: "orders",
+        schema: undefined,
+        timing: "INSTEAD OF",
+        events: ["INSERT", "DELETE", "UPDATE", "TRUNCATE"],
+        forEach: "ROW",
+        when: undefined,
+        functionName: "audit_orders",
+        functionArgs: undefined,
+      });
+    });
+
+    test("parses default timing and statement-level trigger", () => {
+      const trigger = parseCreateTrigger({
+        trigname: "trg_insert",
+        relation: { relname: "orders" },
+        timing: 0,
+        events: 4,
+        row: false,
+        funcname: [{ String: { sval: "run" } }],
+      });
+
+      expect(trigger?.timing).toBe("AFTER");
+      expect(trigger?.events).toEqual(["INSERT"]);
+      expect(trigger?.forEach).toBe("STATEMENT");
+    });
+
+    test("returns null for missing trigger fields", () => {
+      expect(parseCreateTrigger({})).toBeNull();
+      expect(parseCreateTrigger({ trigname: "x", relation: { relname: "t" }, events: 4 })).toBeNull();
+      expect(
+        parseCreateTrigger({ trigname: "x", relation: { relname: "t" }, events: 4, funcname: [] })
+      ).toBeNull();
+    });
+
+    test("returns null when trigger parse throws", () => {
+      const stmt: any = {};
+      Object.defineProperty(stmt, "trigname", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      expect(parseCreateTrigger(stmt)).toBeNull();
+    });
+  });
+
+  describe("constraint parser", () => {
+    test("extracts column and table constraints", async () => {
+      const ast = await parse(`
+        CREATE TABLE child (
+          id INT PRIMARY KEY,
+          parent_id INT,
+          score INT CHECK (score > 0),
+          email TEXT UNIQUE,
+          CONSTRAINT fk_parent FOREIGN KEY (parent_id)
+            REFERENCES public.parent(id)
+            ON DELETE CASCADE ON UPDATE SET NULL,
+          CONSTRAINT uq_parent_email UNIQUE (parent_id, email)
+        );
+      `);
+
+      const tableElts = ast.stmts[0]?.stmt?.CreateStmt?.tableElts || [];
+      const constraints = extractAllConstraints(tableElts, "child");
+
+      expect(constraints.primaryKey).toEqual({ columns: ["id"] });
+      expect(constraints.foreignKeys).toHaveLength(1);
+      expect(constraints.foreignKeys[0]).toEqual({
+        name: "fk_parent",
+        columns: ["parent_id"],
+        referencedTable: "public.parent",
+        referencedColumns: ["id"],
+        onDelete: "CASCADE",
+        onUpdate: "SET NULL",
+      });
+      expect(constraints.checkConstraints).toHaveLength(1);
+      expect(constraints.checkConstraints[0]?.expression.toLowerCase()).toContain("score > 0");
+      expect(constraints.uniqueConstraints).toEqual([
+        { name: undefined, columns: ["email"] },
+        { name: "uq_parent_email", columns: ["parent_id", "email"] },
+      ]);
+    });
+
+    test("parses foreign key and unique/primary constraints directly", () => {
+      const fk = parseForeignKey({
+        conname: "fk_simple",
+        fk_attrs: [{ String: { sval: "user_id" } }],
+        pktable: { schemaname: "public", relname: "users" },
+        pk_attrs: [{ String: { sval: "id" } }],
+        fk_del_action: "a",
+        fk_upd_action: "r",
+      });
+
+      expect(fk).toEqual({
+        name: "fk_simple",
+        columns: ["user_id"],
+        referencedTable: "public.users",
+        referencedColumns: ["id"],
+        onDelete: "NO ACTION",
+        onUpdate: "RESTRICT",
+      });
+
+      expect(parseForeignKey({ fk_attrs: [{ String: { sval: "x" } }] })).toBeNull();
+      expect(parseUniqueConstraint({ conname: "uq", keys: [{ String: { sval: "email" } }] })).toEqual({
+        name: "uq",
+        columns: ["email"],
+      });
+      expect(parseTablePrimaryKey({ conname: "pk", keys: [{ String: { sval: "id" } }] })).toEqual({
+        name: "pk",
+        columns: ["id"],
+      });
+    });
+
+    test("handles malformed nodes", () => {
+      const badUnique: any = {};
+      Object.defineProperty(badUnique, "keys", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+
+      const badPk: any = {};
+      Object.defineProperty(badPk, "keys", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+
+      expect(parseUniqueConstraint(badUnique)).toBeNull();
+      expect(parseTablePrimaryKey(badPk)).toBeNull();
+    });
+  });
+
+  describe("migration executor helpers", () => {
+    test("detects destructive operations", () => {
+      const executor = new MigrationExecutor({} as any);
+
+      expect((executor as any).isDestructiveOperation("DROP TABLE users" as string)).toBe(true);
+      expect((executor as any).isDestructiveOperation("ALTER TABLE users DROP COLUMN email" as string)).toBe(true);
+      expect((executor as any).isDestructiveOperation("DROP TYPE status" as string)).toBe(true);
+      expect((executor as any).isDestructiveOperation("DROP VIEW active_users" as string)).toBe(true);
+      expect((executor as any).isDestructiveOperation("CREATE TABLE users (id INT)" as string)).toBe(false);
+    });
+
+    test("filters destructive statements", () => {
+      const executor = new MigrationExecutor({} as any);
+      const filtered = (executor as any).getDestructiveOperations([
+        "CREATE TABLE users (id INT)",
+        "DROP TABLE users",
+        "ALTER TABLE users ADD COLUMN name TEXT",
+        "ALTER TABLE users DROP COLUMN name",
+      ] as string[]);
+
+      expect(filtered).toEqual(["DROP TABLE users", "ALTER TABLE users DROP COLUMN name"]);
+    });
+  });
+});

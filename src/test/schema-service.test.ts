@@ -16,7 +16,7 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("plan() method", () => {
@@ -289,7 +289,8 @@ describe("SchemaService - MigrationPlanner Removal", () => {
     });
 
     test("should preserve FKs referencing external schemas", async () => {
-      await client.query("CREATE SCHEMA IF NOT EXISTS ext_schema");
+      await client.query("DROP SCHEMA IF EXISTS ext_schema CASCADE");
+      await client.query("CREATE SCHEMA ext_schema");
       await client.query(`
         CREATE TABLE ext_schema.ext_users (id SERIAL PRIMARY KEY)
       `);
@@ -320,8 +321,8 @@ describe("SchemaService - MigrationPlanner Removal", () => {
       expect(fks.rows).toHaveLength(1);
       expect(fks.rows[0].ref_schema).toBe('ext_schema');
 
-      await client.query("DROP TABLE fk_test_posts CASCADE");
-      await client.query("DROP SCHEMA ext_schema CASCADE");
+      await client.query("DROP TABLE IF EXISTS fk_test_posts CASCADE");
+      await client.query("DROP SCHEMA IF EXISTS ext_schema CASCADE");
     });
 
     test("should ignore views from unmanaged schemas", async () => {
