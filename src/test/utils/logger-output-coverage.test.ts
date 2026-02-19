@@ -3,6 +3,11 @@ import { Logger } from "../../utils/logger";
 import { OutputFormatter } from "../../utils/output-formatter";
 
 describe("Logger and output formatter coverage", () => {
+  test("class constructors can be instantiated", () => {
+    expect(new (Logger as any)()).toBeInstanceOf(Logger);
+    expect(new (OutputFormatter as any)()).toBeInstanceOf(OutputFormatter);
+  });
+
   test("logger methods write via console", () => {
     const logs: unknown[][] = [];
     const errors: unknown[][] = [];

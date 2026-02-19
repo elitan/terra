@@ -82,6 +82,11 @@ describe("Handler module coverage", () => {
   });
 
   describe("schema handler", () => {
+    test("constructor instantiates", () => {
+      const handler = new (SchemaHandler as any)();
+      expect(handler).toBeInstanceOf(SchemaHandler);
+    });
+
     test("creates schemas with options and skips existing schemas", () => {
       const handler = new SchemaHandler();
       const desired: SchemaDefinition[] = [
