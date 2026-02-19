@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { ExtensionHandler } from "../core/schema/handlers/extension-handler";
 import { ProcedureHandler } from "../core/schema/handlers/procedure-handler";
 import { SequenceHandler } from "../core/schema/handlers/sequence-handler";
 import { SchemaHandler } from "../core/schema/handlers/schema-handler";
-import type { Procedure, SchemaDefinition, Sequence } from "../types/schema";
+import type { Extension, Procedure, SchemaDefinition, Sequence } from "../types/schema";
 
 function makeSequence(overrides: Partial<Sequence> = {}): Sequence {
   return {
@@ -27,7 +28,59 @@ function makeProcedure(overrides: Partial<Procedure> = {}): Procedure {
   };
 }
 
+function makeExtension(overrides: Partial<Extension> = {}): Extension {
+  return {
+    name: "pgcrypto",
+    ...overrides,
+  };
+}
+
 describe("Handler module coverage", () => {
+  describe("extension handler", () => {
+    test("creates and drops extensions with full options", () => {
+      const handler = new ExtensionHandler();
+      const result = handler.generateStatements(
+        [
+          makeExtension({
+            name: "vector",
+            schema: "public",
+            version: "0.8.0",
+            cascade: true,
+          }),
+        ],
+        [makeExtension({ name: "old_ext" })]
+      );
+
+      expect(result.drop).toHaveLength(1);
+      expect(result.drop[0]).toContain("DROP EXTENSION IF EXISTS");
+      expect(result.drop[0]).toContain("\"old_ext\"");
+      expect(result.drop[0]).toContain("CASCADE");
+
+      expect(result.create).toHaveLength(1);
+      expect(result.create[0]).toContain("CREATE EXTENSION IF NOT EXISTS");
+      expect(result.create[0]).toContain("\"vector\"");
+      expect(result.create[0]).toContain("SCHEMA");
+      expect(result.create[0]).toContain("VERSION '0.8.0'");
+      expect(result.create[0]).toContain("CASCADE");
+    });
+
+    test("skips existing extension and handles version drift path", () => {
+      const handler = new ExtensionHandler();
+
+      const unchanged = handler.generateStatements(
+        [makeExtension({ name: "pgcrypto", version: "1.3" })],
+        [makeExtension({ name: "pgcrypto", version: "1.3" })]
+      );
+      expect(unchanged).toEqual({ create: [], drop: [] });
+
+      const drift = handler.generateStatements(
+        [makeExtension({ name: "pgcrypto", version: "1.4" })],
+        [makeExtension({ name: "pgcrypto", version: "1.3" })]
+      );
+      expect(drift).toEqual({ create: [], drop: [] });
+    });
+  });
+
   describe("schema handler", () => {
     test("creates schemas with options and skips existing schemas", () => {
       const handler = new SchemaHandler();
