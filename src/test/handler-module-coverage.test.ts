@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { ProcedureHandler } from "../core/schema/handlers/procedure-handler";
 import { SequenceHandler } from "../core/schema/handlers/sequence-handler";
-import type { Procedure, Sequence } from "../types/schema";
+import { SchemaHandler } from "../core/schema/handlers/schema-handler";
+import type { Procedure, SchemaDefinition, Sequence } from "../types/schema";
 
 function makeSequence(overrides: Partial<Sequence> = {}): Sequence {
   return {
@@ -27,6 +28,25 @@ function makeProcedure(overrides: Partial<Procedure> = {}): Procedure {
 }
 
 describe("Handler module coverage", () => {
+  describe("schema handler", () => {
+    test("creates schemas with options and skips existing schemas", () => {
+      const handler = new SchemaHandler();
+      const desired: SchemaDefinition[] = [
+        { name: "analytics", ifNotExists: true, owner: "reporter" },
+        { name: "public" },
+      ];
+      const current: SchemaDefinition[] = [{ name: "public" }];
+
+      const statements = handler.generateStatements(desired, current);
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).toContain("CREATE SCHEMA");
+      expect(statements[0]).toContain("IF NOT EXISTS");
+      expect(statements[0]).toContain("\"analytics\"");
+      expect(statements[0]).toContain("AUTHORIZATION");
+      expect(statements[0]).toContain("\"reporter\"");
+    });
+  });
+
   describe("sequence handler", () => {
     test("creates unmanaged sequences", () => {
       const handler = new SequenceHandler();
