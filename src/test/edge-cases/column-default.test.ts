@@ -14,7 +14,7 @@ describe("Edge case: column default values and changes", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

@@ -1,22 +1,10 @@
-/**
- * Procedure Parser
- *
- * Handles parsing of PostgreSQL CREATE PROCEDURE statements from CST.
- */
-
 import { Logger } from "../../../utils/logger";
+import { deparseSync } from "pgsql-parser";
 import type { Procedure, FunctionParameter } from "../../../types/schema";
 
-/**
- * Parse CREATE PROCEDURE statement from pgsql-parser AST
- */
 export function parseCreateProcedure(node: any): Procedure | null {
-  Logger.warning("Procedure parsing not yet fully implemented for pgsql-parser");
-  return null;
   try {
-    const fullName = node.name?.text || node.name?.name || null;
-    const name = fullName;
-    const schema: string | undefined = undefined;
+    const { name, schema } = extractProcedureNameAndSchema(node);
     if (!name) return null;
 
     const parameters = extractProcedureParameters(node);
@@ -45,50 +33,61 @@ export function parseCreateProcedure(node: any): Procedure | null {
     };
   } catch (error) {
     Logger.warning(
-      // @ts-expect-error - error is unknown but String() handles it
       `Failed to parse CREATE PROCEDURE from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
 }
 
-/**
- * Extract procedure name from CST node
- */
-function extractProcedureName(node: any): string | null {
+function extractProcedureNameAndSchema(node: any): { name: string | null; schema: string | undefined } {
   try {
-    return node.name?.name || node.name?.text || null;
-  } catch (error) {
-    return null;
+    if (!node.funcname || !Array.isArray(node.funcname)) {
+      return { name: null, schema: undefined };
+    }
+
+    const names = node.funcname.map((n: any) => n.String?.sval).filter(Boolean);
+    if (names.length === 0) {
+      return { name: null, schema: undefined };
+    }
+
+    return {
+      name: names[names.length - 1] as string,
+      schema: names.length > 1 ? (names[names.length - 2] as string) : undefined,
+    };
+  } catch {
+    return { name: null, schema: undefined };
   }
 }
 
-/**
- * Extract procedure parameters from CST node
- */
 function extractProcedureParameters(node: any): FunctionParameter[] {
   const parameters: FunctionParameter[] = [];
 
   try {
-    const items = node.params?.expr?.items || [];
+    if (!node.parameters || !Array.isArray(node.parameters)) {
+      return parameters;
+    }
 
-    for (const item of items) {
-      if (item.type === "function_param") {
-        const param: FunctionParameter = {
-          name: item.name?.name || item.name?.text,
-          type: extractDataType(item.dataType),
-        };
+    for (const parameter of node.parameters) {
+      const fpNode = parameter.FunctionParameter;
+      if (!fpNode) continue;
 
-        if (item.mode) {
-          param.mode = item.mode.name || item.mode.text;
+      const param: FunctionParameter = {
+        name: fpNode.name || undefined,
+        type: extractDataType(fpNode.argType),
+      };
+
+      if (fpNode.mode) {
+        const mode = fpNode.mode.replace("FUNC_PARAM_", "");
+        if (mode !== "DEFAULT") {
+          param.mode = mode as FunctionParameter["mode"];
         }
-
-        if (item.default) {
-          param.default = extractDefaultValue(item.default);
-        }
-
-        parameters.push(param);
       }
+
+      if (fpNode.defexpr) {
+        param.default = extractDefaultValue(fpNode.defexpr);
+      }
+
+      parameters.push(param);
     }
   } catch (error) {
     Logger.warning(
@@ -99,94 +98,119 @@ function extractProcedureParameters(node: any): FunctionParameter[] {
   return parameters;
 }
 
-/**
- * Extract data type from CST node
- */
 function extractDataType(dataTypeNode: any): string {
   if (!dataTypeNode) return "unknown";
 
   try {
-    if (dataTypeNode.type === "named_data_type") {
-      let typeName = dataTypeNode.name?.name || dataTypeNode.name?.text || "unknown";
+    if (dataTypeNode.names && Array.isArray(dataTypeNode.names)) {
+      const typeNames = dataTypeNode.names.map((n: any) => n.String?.sval).filter(Boolean);
+      const typeName = typeNames.length > 0 ? typeNames[typeNames.length - 1] : "unknown";
 
-      if (dataTypeNode.size && dataTypeNode.size.expr) {
-        const size = dataTypeNode.size.expr.text || dataTypeNode.size.expr.value;
-        typeName += `(${size})`;
-      }
+      const typeMap: Record<string, string> = {
+        int4: "integer",
+        int2: "smallint",
+        int8: "bigint",
+        float4: "real",
+        float8: "double precision",
+        bool: "boolean",
+        varchar: "character varying",
+      };
 
-      return typeName;
+      return typeMap[typeName] || typeName;
     }
 
     return "unknown";
-  } catch (error) {
+  } catch {
     return "unknown";
   }
 }
 
-/**
- * Extract default value from CST node
- */
-function extractDefaultValue(defaultNode: any): string {
+function extractDefaultValue(defaultNode: any): string | undefined {
   try {
-    if (defaultNode.expr) {
-      return defaultNode.expr.text || defaultNode.expr.value || "";
+    const sql = deparseSync([
+      {
+        SelectStmt: {
+          targetList: [
+            {
+              ResTarget: {
+                val: defaultNode,
+              },
+            },
+          ],
+          op: "SETOP_NONE",
+          limitOption: "LIMIT_OPTION_DEFAULT",
+        },
+      },
+    ]).trim();
+
+    if (sql.startsWith("SELECT ")) {
+      return sql.slice(7).trim();
     }
-    return "";
-  } catch (error) {
-    return "";
+
+    return sql || undefined;
+  } catch {
+    return undefined;
   }
 }
 
-/**
- * Extract language from LANGUAGE clause
- */
 function extractLanguage(node: any): string | null {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "language_clause") {
-        return clause.name?.name || clause.name?.text || null;
+    if (!node.options || !Array.isArray(node.options)) return null;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === "language") {
+        return defElem.arg?.String?.sval || null;
       }
     }
+
     return null;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
 
-/**
- * Extract procedure body from AS clause
- */
 function extractProcedureBody(node: any): string | null {
   try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "as_clause") {
-        if (clause.expr && clause.expr.type === "string_literal") {
-          return clause.expr.value || clause.expr.text || null;
+    if (!node.options || !Array.isArray(node.options)) return null;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === "as") {
+        const listItems = defElem.arg?.List?.items;
+        if (!listItems || !Array.isArray(listItems)) {
+          return null;
+        }
+
+        const bodyParts = listItems.map((item: any) => item.String?.sval).filter(Boolean);
+        return bodyParts.join("\n") || null;
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function extractSecurityDefiner(node: any): boolean | undefined {
+  try {
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem && defElem.defname === "security") {
+        if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
+          return defElem.arg.Boolean.boolval;
+        }
+        if (typeof defElem.arg?.Integer?.ival === "number") {
+          return defElem.arg.Integer.ival === 1;
         }
       }
     }
-    return null;
-  } catch (error) {
-    return null;
-  }
-}
 
-/**
- * Extract SECURITY DEFINER flag
- */
-function extractSecurityDefiner(node: any): boolean | undefined {
-  try {
-    const clauses = node.clauses || [];
-    for (const clause of clauses) {
-      if (clause.type === "security_clause") {
-        const security = clause.securityKw?.name || clause.securityKw?.text;
-        return security === "DEFINER";
-      }
-    }
     return undefined;
-  } catch (error) {
+  } catch {
     return undefined;
   }
 }

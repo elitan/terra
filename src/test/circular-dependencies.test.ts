@@ -15,7 +15,7 @@ describe("Circular Dependencies", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Two-table Cycles", () => {

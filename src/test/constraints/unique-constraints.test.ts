@@ -16,7 +16,7 @@ describe("Unique Constraints", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic Unique Constraint Operations", () => {

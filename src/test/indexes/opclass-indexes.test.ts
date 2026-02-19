@@ -20,7 +20,7 @@ describe("PostgreSQL Index Operator Class Support", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Parser - Operator Class Support", () => {

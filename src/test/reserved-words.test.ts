@@ -16,7 +16,7 @@ describe("Reserved Word Identifiers", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Table Names", () => {

@@ -179,11 +179,13 @@ describe("View Parsing", () => {
       expect(view.checkOption).toBe('CASCADED');
     });
 
-    test.skip("should parse security_barrier option", async () => {
+    test("should parse security_barrier option", async () => {
       const sql = `
-        CREATE VIEW secure_users AS
+        CREATE VIEW secure_users
+        WITH (security_barrier = true)
+        AS
         SELECT id, email FROM users
-        WITH (security_barrier = true);
+        ;
       `;
 
       const result = await parser.parseSchema(sql);

@@ -23,7 +23,7 @@ describe("Numeric Type Conversions and Edge Cases", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("INTEGER Boundary Value Testing", () => {

@@ -24,7 +24,7 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
     } catch (error) {
       // Ignore cleanup errors
     }
-    await client.end();
+    await client?.end();
   });
 
   describe("String to Numeric Conversion Failures", () => {

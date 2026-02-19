@@ -14,7 +14,7 @@ describe("Edge case: index types (btree, hash, gin, gist)", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

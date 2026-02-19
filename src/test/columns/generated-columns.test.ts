@@ -22,7 +22,7 @@ describe("Generated Columns", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("should parse GENERATED ALWAYS AS STORED columns", async () => {

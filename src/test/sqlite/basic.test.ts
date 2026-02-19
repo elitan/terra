@@ -192,7 +192,7 @@ describe("SQLite Basic Operations", () => {
 
       const client = await provider.createClient(config);
       const tables = await provider.getCurrentSchema(client);
-      await client.end();
+      await client?.end();
 
       expect(tables).toHaveLength(1);
       expect(tables[0].name).toBe("users");
@@ -212,7 +212,7 @@ describe("SQLite Basic Operations", () => {
 
       const client = await provider.createClient(config);
       const tables = await provider.getCurrentSchema(client);
-      await client.end();
+      await client?.end();
 
       expect(tables).toHaveLength(1);
     });
@@ -237,7 +237,7 @@ describe("SQLite Basic Operations", () => {
 
       const client = await provider.createClient(config);
       const tables = await provider.getCurrentSchema(client);
-      await client.end();
+      await client?.end();
 
       expect(tables[0].columns).toHaveLength(3);
       expect(tables[0].columns.find(c => c.name === "email")).toBeDefined();

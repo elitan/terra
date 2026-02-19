@@ -4,6 +4,9 @@ import { SchemaService } from "../../core/schema/service";
 import { Client } from "pg";
 import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
 import { typeAliasPair, tableName, columnName } from "./arbitraries";
+import { configurePropertyTests } from "./property-test-options";
+
+configurePropertyTests();
 
 /**
  * Property-Based Tests for Type Normalization
@@ -25,7 +28,7 @@ describe("Property-Based: Type Normalization", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("property: type alias pairs are commutative (A→B = B→A)", async () => {

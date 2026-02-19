@@ -4,6 +4,9 @@ import { SchemaService } from "../../core/schema/service";
 import { Client } from "pg";
 import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
 import { tableName, columnName, typeAliasPair } from "./arbitraries";
+import { configurePropertyTests } from "./property-test-options";
+
+configurePropertyTests();
 
 /**
  * Property-Based Tests for Default Value Normalization
@@ -25,7 +28,7 @@ describe("Property-Based: Default Value Normalization", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("property: numeric defaults are normalized correctly", async () => {

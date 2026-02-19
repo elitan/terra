@@ -22,7 +22,7 @@ describe("Type Aliases with Defaults - Combination Testing", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Type Change with Unchanged Default (Same Value)", () => {

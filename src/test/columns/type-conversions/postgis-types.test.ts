@@ -19,7 +19,7 @@ describe("PostGIS Spatial Types", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Geography Type Parsing", () => {

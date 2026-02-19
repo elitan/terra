@@ -4,6 +4,9 @@ import { SchemaService } from "../../core/schema/service";
 import { Client } from "pg";
 import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
 import { tableSchema, schemaWithTypeAlias, testDataArray } from "./arbitraries";
+import { configurePropertyTests } from "./property-test-options";
+
+configurePropertyTests();
 
 /**
  * Property-Based Tests for Schema Idempotency
@@ -25,7 +28,7 @@ describe("Property-Based: Schema Idempotency", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("property: apply(schema) is always idempotent", async () => {

@@ -35,12 +35,29 @@ export function parseCreateView(stmt: any, originalSql: string): View | null {
       }
     }
 
+    let securityBarrier: boolean | undefined = undefined;
+    if (stmt.options && Array.isArray(stmt.options)) {
+      for (const option of stmt.options) {
+        const defElem = option.DefElem;
+        if (defElem?.defname !== "security_barrier") continue;
+
+        if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
+          securityBarrier = defElem.arg.Boolean.boolval;
+        } else if (defElem.arg?.String?.sval === "true") {
+          securityBarrier = true;
+        } else if (defElem.arg?.String?.sval === "false") {
+          securityBarrier = false;
+        }
+      }
+    }
+
     return {
       name: viewName,
       schema,
       definition,
       materialized,
       checkOption,
+      securityBarrier,
     };
   } catch (error) {
     Logger.warning(

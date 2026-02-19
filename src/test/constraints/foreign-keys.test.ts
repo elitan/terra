@@ -16,7 +16,7 @@ describe("Foreign Key Constraints", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic Foreign Key Operations", () => {

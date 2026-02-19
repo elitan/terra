@@ -14,7 +14,7 @@ describe("Edge case: unique constraints vs unique indexes", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

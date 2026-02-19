@@ -36,7 +36,7 @@ describe("SQLite Indexes", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const nonConstraintIndexes = tables[0].indexes?.filter(i => !i.constraint) || [];
     expect(nonConstraintIndexes).toHaveLength(1);
@@ -54,7 +54,7 @@ describe("SQLite Indexes", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const idx = tables[0].indexes?.find(i => i.name === "idx_users_email_unique");
     expect(idx?.unique).toBe(true);
@@ -72,7 +72,7 @@ describe("SQLite Indexes", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const idx = tables[0].indexes?.find(i => i.name === "idx_orders_user_status");
     expect(idx?.columns).toEqual(["user_id", "status"]);
@@ -92,7 +92,7 @@ describe("SQLite Indexes", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const nonConstraintIndexes = tables[0].indexes?.filter(i => !i.constraint) || [];
     expect(nonConstraintIndexes).toHaveLength(2);
@@ -109,7 +109,7 @@ describe("SQLite Indexes", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(1);
     const nonConstraintIndexes = tables[0].indexes?.filter(i => !i.constraint) || [];
@@ -155,7 +155,7 @@ describe("SQLite Views", () => {
     await client.query(`CREATE VIEW active_users AS SELECT id, name FROM users WHERE active = 1`);
 
     const views = await provider.getCurrentViews(client);
-    await client.end();
+    await client?.end();
 
     expect(views).toHaveLength(1);
     expect(views[0].name).toBe("active_users");
@@ -194,7 +194,7 @@ describe("SQLite Foreign Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const books = tables.find(t => t.name === "books");
     expect(books?.foreignKeys).toHaveLength(1);
@@ -214,7 +214,7 @@ describe("SQLite Foreign Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const children = tables.find(t => t.name === "children");
     expect(children?.foreignKeys?.[0].onDelete).toBe("CASCADE");
@@ -239,7 +239,7 @@ describe("SQLite Foreign Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const notes = tables.find(t => t.name === "order_notes");
     expect(notes?.foreignKeys?.[0].columns).toEqual(["order_id", "line_num"]);

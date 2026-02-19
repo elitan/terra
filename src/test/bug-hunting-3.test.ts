@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase } from "./utils";
+import { createTestClient, cleanDatabase, createTestSchemaService } from "./utils";
 import {
   createColumnTestServices,
   executeColumnMigration,
@@ -17,7 +17,7 @@ describe("Bug Hunting Round 3: Additional Edge Cases", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("NUMERIC precision/scale edge cases", () => {
@@ -249,7 +249,7 @@ describe("Bug Hunting Round 3: Additional Edge Cases", () => {
     });
   });
 
-  describe.skip("ENUM type edge cases", () => {
+  describe("ENUM type edge cases", () => {
     // Note: ENUM type handling requires the executor to create the type first
     // This is a limitation of the test helper, not the differ logic
     test("should be idempotent with basic ENUM type", async () => {
@@ -261,7 +261,8 @@ describe("Bug Hunting Round 3: Additional Edge Cases", () => {
         );
       `;
 
-      await executeColumnMigration(client, schema, services);
+      const schemaService = createTestSchemaService();
+      await schemaService.apply(schema, ['public'], true);
 
       const currentSchema = await services.inspector.getCurrentSchema(client);
       const desiredTables = await services.parser.parseCreateTableStatements(schema);
@@ -279,7 +280,8 @@ describe("Bug Hunting Round 3: Additional Edge Cases", () => {
         );
       `;
 
-      await executeColumnMigration(client, schema, services);
+      const schemaService = createTestSchemaService();
+      await schemaService.apply(schema, ['public'], true);
 
       const currentSchema = await services.inspector.getCurrentSchema(client);
       const desiredTables = await services.parser.parseCreateTableStatements(schema);

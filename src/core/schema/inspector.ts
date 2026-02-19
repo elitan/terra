@@ -533,6 +533,7 @@ export class DatabaseInspector {
         v.table_schema as schema_name,
         v.view_definition,
         v.check_option,
+        c.reloptions,
         v.is_updatable,
         v.is_insertable_into
       FROM information_schema.views v
@@ -555,6 +556,16 @@ export class DatabaseInspector {
       // Set check option if present
       if (row.check_option && row.check_option !== 'NONE') {
         view.checkOption = row.check_option as 'CASCADED' | 'LOCAL';
+      }
+
+      if (Array.isArray(row.reloptions)) {
+        const securityBarrierOption = row.reloptions.find((option: string) =>
+          option.startsWith("security_barrier=")
+        );
+        if (securityBarrierOption) {
+          const [, value] = securityBarrierOption.split("=");
+          view.securityBarrier = value === "true";
+        }
       }
 
       views.push(view);

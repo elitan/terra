@@ -7,6 +7,9 @@ import {
   tableName,
   columnName
 } from "./arbitraries";
+import { configurePropertyTests } from "./property-test-options";
+
+configurePropertyTests();
 
 /**
  * Property-Based Tests for View Management
@@ -28,7 +31,7 @@ describe("Property-Based: View Management", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("property: simple view creation is idempotent", async () => {

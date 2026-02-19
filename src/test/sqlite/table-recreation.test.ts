@@ -42,7 +42,7 @@ describe("SQLite Table Recreation", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const ageCol = tables[0].columns.find(c => c.name === "age");
     expect(ageCol?.type).toBe("TEXT");
@@ -66,7 +66,7 @@ describe("SQLite Table Recreation", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns).toHaveLength(2);
     expect(tables[0].columns.find(c => c.name === "email")).toBeUndefined();
@@ -83,7 +83,7 @@ describe("SQLite Table Recreation", () => {
     const client = await provider.createClient(config);
     await client.query(`INSERT INTO users (id, name) VALUES (1, 'Alice')`);
     await client.query(`INSERT INTO users (id, name) VALUES (2, 'Bob')`);
-    await client.end();
+    await client?.end();
 
     await schemaService.apply(`
       CREATE TABLE users (
@@ -119,7 +119,7 @@ describe("SQLite Table Recreation", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].primaryKey?.columns).toEqual(["code"]);
   });
@@ -142,7 +142,7 @@ describe("SQLite Table Recreation", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const products = tables.find(t => t.name === "products");
     expect(products?.foreignKeys).toHaveLength(1);

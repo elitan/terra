@@ -30,7 +30,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "val")?.type).toBe("INTEGER");
   });
@@ -42,7 +42,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "val")?.type).toBe("TEXT");
   });
@@ -54,7 +54,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "val")?.type).toBe("REAL");
   });
@@ -66,7 +66,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "val")?.type).toBe("BLOB");
   });
@@ -78,7 +78,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "val")?.type).toBe("NUMERIC");
   });
@@ -90,7 +90,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "val")?.type).toContain("VARCHAR");
   });
@@ -102,7 +102,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const col = tables[0].columns.find(c => c.name === "active");
     expect(col).toBeDefined();
@@ -122,7 +122,7 @@ describe("SQLite Column Types", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns).toHaveLength(6);
   });
@@ -152,7 +152,7 @@ describe("SQLite Column Defaults", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "status")?.default).toBe("'pending'");
   });
@@ -164,7 +164,7 @@ describe("SQLite Column Defaults", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "count")?.default).toBe("0");
   });
@@ -176,7 +176,7 @@ describe("SQLite Column Defaults", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "price")?.default).toBe("9.99");
   });
@@ -188,7 +188,7 @@ describe("SQLite Column Defaults", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "optional")?.default).toBe("NULL");
   });
@@ -200,7 +200,7 @@ describe("SQLite Column Defaults", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "created_at")?.default).toBe("CURRENT_TIMESTAMP");
   });
@@ -212,7 +212,7 @@ describe("SQLite Column Defaults", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "active")?.default).toBe("1");
   });
@@ -242,7 +242,7 @@ describe("SQLite Column Nullability", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "name")?.nullable).toBe(false);
   });
@@ -254,7 +254,7 @@ describe("SQLite Column Nullability", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "name")?.nullable).toBe(true);
   });
@@ -270,7 +270,7 @@ describe("SQLite Column Nullability", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "name")?.nullable).toBe(false);
   });
@@ -286,7 +286,7 @@ describe("SQLite Column Nullability", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "name")?.nullable).toBe(true);
   });
@@ -304,7 +304,7 @@ describe("SQLite Column Nullability", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "name")?.nullable).toBe(false);
     expect(tables[0].columns.find(c => c.name === "email")?.nullable).toBe(false);

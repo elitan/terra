@@ -18,7 +18,7 @@ describe("Index Storage Options", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Storage Parameters Parsing", () => {

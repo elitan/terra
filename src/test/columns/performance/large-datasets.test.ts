@@ -25,7 +25,7 @@ describe("Large Dataset Migration Performance", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("VARCHAR Type Conversions with Large Datasets", () => {

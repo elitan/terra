@@ -22,7 +22,7 @@ describe("TEXT to VARCHAR conversion with default values", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("should convert TEXT DEFAULT 'value' to VARCHAR(255) DEFAULT 'value' without extra operations", async () => {

@@ -10,6 +10,9 @@ import {
   columnName,
   partialIndexWhere
 } from "./arbitraries";
+import { configurePropertyTests } from "./property-test-options";
+
+configurePropertyTests();
 
 /**
  * Property-Based Tests for Index Management
@@ -31,7 +34,7 @@ describe("Property-Based: Index Management", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("property: basic index creation is idempotent", async () => {

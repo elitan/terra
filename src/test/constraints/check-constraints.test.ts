@@ -16,7 +16,7 @@ describe("Check Constraints", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic Check Constraint Operations", () => {

@@ -22,7 +22,7 @@ describe("PostgreSQL Type Cast Normalization", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Default Value Type Casts", () => {
@@ -243,7 +243,7 @@ describe("PostgreSQL Type Cast Normalization", () => {
       expect(plan.transactional.length).toBe(0);
     });
 
-    test.skip("should handle negative integer defaults (known limitation)", async () => {
+    test("should handle negative integer defaults", async () => {
       // TODO: This test currently fails - negative integers in defaults need special handling
       // PostgreSQL may store them differently (e.g., with parentheses or special casting)
       // This is a known limitation that should be addressed in a future update

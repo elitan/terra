@@ -19,7 +19,7 @@ describe("Partial Index Support", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Parser Support", () => {

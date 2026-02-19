@@ -75,8 +75,10 @@ describe("Extension Support - pgvector", () => {
   });
 
   afterEach(async () => {
-    await cleanDatabase(client);
-    await client.end();
+    if (client) {
+      await cleanDatabase(client);
+    }
+    await client?.end();
   });
 
   describe("Extension Object Filtering", () => {

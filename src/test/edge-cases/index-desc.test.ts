@@ -14,7 +14,7 @@ describe("Edge case: descending index columns (asc/desc)", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

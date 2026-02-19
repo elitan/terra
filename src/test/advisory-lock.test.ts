@@ -17,7 +17,7 @@ describe("Advisory Lock", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("should successfully acquire and release advisory lock", async () => {

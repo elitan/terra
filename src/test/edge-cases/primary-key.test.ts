@@ -14,7 +14,7 @@ describe("Edge case: primary key constraints and modifications", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

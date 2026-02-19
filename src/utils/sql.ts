@@ -633,7 +633,13 @@ export function generateCreateViewSQL(view: View): string {
     builder.p("CREATE VIEW");
   }
 
-  builder.ident(view.name).p(`AS ${view.definition}`);
+  builder.ident(view.name);
+
+  if (!view.materialized && view.securityBarrier !== undefined) {
+    builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
+  }
+
+  builder.p(`AS ${view.definition}`);
 
   // Add WITH CHECK OPTION if specified (not for materialized views)
   if (view.checkOption && !view.materialized) {
@@ -664,8 +670,13 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
 
   const builder = new SQLBuilder()
     .p("CREATE OR REPLACE VIEW")
-    .ident(view.name)
-    .p(`AS ${view.definition}`);
+    .ident(view.name);
+
+  if (view.securityBarrier !== undefined) {
+    builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
+  }
+
+  builder.p(`AS ${view.definition}`);
 
   // Add WITH CHECK OPTION if specified
   if (view.checkOption) {

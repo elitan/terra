@@ -35,7 +35,7 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns).toHaveLength(1);
   });
@@ -52,7 +52,7 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns).toHaveLength(16);
   });
@@ -67,7 +67,7 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].name).toBe("my table");
     expect(tables[0].columns[0].name).toBe("my column");
@@ -85,7 +85,7 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].name).toBe("user_accounts");
     expect(tables[0].columns.find(c => c.name === "first_name")).toBeDefined();
@@ -101,7 +101,7 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].name).toBe("table1");
   });
@@ -116,7 +116,7 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(1);
   });
@@ -148,7 +148,7 @@ describe("SQLite Idempotency", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(1);
   });
@@ -168,7 +168,7 @@ describe("SQLite Idempotency", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(2);
   });
@@ -184,7 +184,7 @@ describe("SQLite Idempotency", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].indexes?.filter(i => !i.constraint)).toHaveLength(1);
   });
@@ -203,7 +203,7 @@ describe("SQLite Idempotency", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "email")?.nullable).toBe(false);
   });
@@ -222,7 +222,7 @@ describe("SQLite Idempotency", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "count")?.default).toBe("0");
   });
@@ -254,7 +254,7 @@ describe("SQLite Multiple Tables", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(3);
   });
@@ -271,7 +271,7 @@ describe("SQLite Multiple Tables", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(2);
   });
@@ -288,7 +288,7 @@ describe("SQLite Multiple Tables", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(1);
     expect(tables[0].name).toBe("users");
@@ -327,7 +327,7 @@ describe("SQLite Multiple Tables", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(4);
 
@@ -363,7 +363,7 @@ describe("SQLite Data Preservation", () => {
 
     const client = await provider.createClient(config);
     await client.query(`INSERT INTO users (id, name) VALUES (1, 'Alice'), (2, 'Bob')`);
-    await client.end();
+    await client?.end();
 
     await schemaService.apply(`
       CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT);
@@ -384,7 +384,7 @@ describe("SQLite Data Preservation", () => {
 
     const client = await provider.createClient(config);
     await client.query(`INSERT INTO items VALUES (1, 'Widget', 100), (2, 'Gadget', 200)`);
-    await client.end();
+    await client?.end();
 
     await schemaService.apply(`
       CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, price REAL);
@@ -406,7 +406,7 @@ describe("SQLite Data Preservation", () => {
 
     const client = await provider.createClient(config);
     await client.query(`INSERT INTO users VALUES (1, 'Alice', 'x', 'alice@test.com')`);
-    await client.end();
+    await client?.end();
 
     await schemaService.apply(`
       CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);

@@ -1,32 +1,21 @@
-/**
- * Sequence Parser
- *
- * Handles parsing of PostgreSQL CREATE SEQUENCE statements from CST.
- */
-
 import { Logger } from "../../../utils/logger";
 import type { Sequence } from "../../../types/schema";
 
-/**
- * Parse CREATE SEQUENCE statement from pgsql-parser AST
- */
 export function parseCreateSequence(node: any): Sequence | null {
-  Logger.warning("Sequence parsing not yet fully implemented for pgsql-parser");
-  return null;
   try {
-    const fullName = node.name?.text || node.name?.name || null;
-    const name = fullName;
-    const schema: string | undefined = undefined;
+    const name = node.sequence?.relname || null;
+    const schema = node.sequence?.schemaname || undefined;
     if (!name) return null;
 
-    const dataType = extractDataType(node);
-    const increment = extractIncrement(node);
-    const minValue = extractMinValue(node);
-    const maxValue = extractMaxValue(node);
-    const start = extractStart(node);
-    const cache = extractCache(node);
-    const cycle = extractCycle(node);
-    const ownedBy = extractOwnedBy(node);
+    const options = getOptions(node);
+    const dataType = extractDataType(options);
+    const increment = extractNumericOption(options, "increment");
+    const minValue = extractNumericOption(options, "minvalue");
+    const maxValue = extractNumericOption(options, "maxvalue");
+    const start = extractNumericOption(options, "start");
+    const cache = extractNumericOption(options, "cache");
+    const cycle = extractCycle(options);
+    const ownedBy = extractOwnedBy(options);
 
     return {
       name,
@@ -42,166 +31,103 @@ export function parseCreateSequence(node: any): Sequence | null {
     };
   } catch (error) {
     Logger.warning(
-      // @ts-expect-error - error is unknown but String() handles it
       `Failed to parse CREATE SEQUENCE from CST: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
 }
 
-/**
- * Extract sequence name from CST node
- */
-function extractSequenceName(node: any): string | null {
+function getOptions(node: any): any[] {
   try {
-    return node.name?.name || node.name?.text || null;
-  } catch (error) {
-    return null;
+    return Array.isArray(node.options) ? node.options : [];
+  } catch {
+    return [];
   }
 }
 
-/**
- * Extract data type (AS SMALLINT/INTEGER/BIGINT)
- */
-function extractDataType(node: any): Sequence['dataType'] | undefined {
+function extractDataType(options: any[]): Sequence["dataType"] | undefined {
   try {
-    const options = node.options || [];
     for (const option of options) {
-      if (option.type === "sequence_option_as") {
-        const typeName = option.dataType?.name?.name || option.dataType?.name?.text;
-        if (typeName === "SMALLINT" || typeName === "INTEGER" || typeName === "BIGINT") {
-          return typeName;
-        }
-      }
-    }
-    return undefined;
-  } catch (error) {
-    return undefined;
-  }
-}
+      const defElem = option.DefElem;
+      if (defElem?.defname !== "as") continue;
 
-/**
- * Extract INCREMENT value
- */
-function extractIncrement(node: any): number | undefined {
-  try {
-    const options = node.options || [];
-    for (const option of options) {
-      if (option.type === "sequence_option_increment") {
-        return option.value?.value || undefined;
-      }
+      const names = defElem.arg?.TypeName?.names || [];
+      const typeNames = names.map((n: any) => n.String?.sval).filter(Boolean);
+      const typeName = typeNames.length > 0 ? typeNames[typeNames.length - 1] : undefined;
+
+      if (typeName === "int2") return "SMALLINT";
+      if (typeName === "int4") return "INTEGER";
+      if (typeName === "int8") return "BIGINT";
+      if (typeName === "smallint") return "SMALLINT";
+      if (typeName === "integer") return "INTEGER";
+      if (typeName === "bigint") return "BIGINT";
+      return undefined;
     }
     return undefined;
-  } catch (error) {
+  } catch {
     return undefined;
   }
 }
 
-/**
- * Extract MINVALUE
- */
-function extractMinValue(node: any): number | undefined {
+function extractNumericOption(options: any[], key: string): number | undefined {
   try {
-    const options = node.options || [];
     for (const option of options) {
-      if (option.type === "sequence_option_minvalue") {
-        return option.value?.value || undefined;
+      const defElem = option.DefElem;
+      if (defElem?.defname !== key) continue;
+
+      if (typeof defElem.arg?.Integer?.ival === "number") {
+        return defElem.arg.Integer.ival;
+      }
+
+      if (typeof defElem.arg?.Float?.fval === "number") {
+        return defElem.arg.Float.fval;
       }
     }
     return undefined;
-  } catch (error) {
+  } catch {
     return undefined;
   }
 }
 
-/**
- * Extract MAXVALUE
- */
-function extractMaxValue(node: any): number | undefined {
+function extractCycle(options: any[]): boolean | undefined {
   try {
-    const options = node.options || [];
     for (const option of options) {
-      if (option.type === "sequence_option_maxvalue") {
-        return option.value?.value || undefined;
+      const defElem = option.DefElem;
+      if (defElem?.defname !== "cycle") continue;
+
+      if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
+        return defElem.arg.Boolean.boolval;
+      }
+
+      if (typeof defElem.arg?.Integer?.ival === "number") {
+        return defElem.arg.Integer.ival === 1;
       }
     }
     return undefined;
-  } catch (error) {
+  } catch {
     return undefined;
   }
 }
 
-/**
- * Extract START value
- */
-function extractStart(node: any): number | undefined {
+function extractOwnedBy(options: any[]): string | undefined {
   try {
-    const options = node.options || [];
     for (const option of options) {
-      if (option.type === "sequence_option_start") {
-        return option.value?.value || undefined;
-      }
-    }
-    return undefined;
-  } catch (error) {
-    return undefined;
-  }
-}
+      const defElem = option.DefElem;
+      if (defElem?.defname !== "owned_by") continue;
 
-/**
- * Extract CACHE value
- */
-function extractCache(node: any): number | undefined {
-  try {
-    const options = node.options || [];
-    for (const option of options) {
-      if (option.type === "sequence_option_cache") {
-        return option.value?.value || undefined;
-      }
-    }
-    return undefined;
-  } catch (error) {
-    return undefined;
-  }
-}
+      const items = defElem.arg?.List?.items || [];
+      const names = items.map((item: any) => item.String?.sval).filter(Boolean);
 
-/**
- * Extract CYCLE flag
- */
-function extractCycle(node: any): boolean | undefined {
-  try {
-    const options = node.options || [];
-    for (const option of options) {
-      if (option.type === "sequence_option_cycle") {
-        return true;
+      if (names.length === 1 && String(names[0]).toLowerCase() === "none") {
+        return undefined;
       }
-      if (option.type === "sequence_option_no_cycle") {
-        return false;
-      }
-    }
-    return undefined;
-  } catch (error) {
-    return undefined;
-  }
-}
 
-/**
- * Extract OWNED BY
- */
-function extractOwnedBy(node: any): string | undefined {
-  try {
-    const options = node.options || [];
-    for (const option of options) {
-      if (option.type === "sequence_option_owned_by") {
-        if (option.table && option.column) {
-          const table = option.table.name || option.table.text;
-          const column = option.column.name || option.column.text;
-          return `${table}.${column}`;
-        }
+      if (names.length >= 2) {
+        return names.join(".");
       }
     }
     return undefined;
-  } catch (error) {
+  } catch {
     return undefined;
   }
 }

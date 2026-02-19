@@ -19,7 +19,7 @@ describe("Concurrent Index Operations", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Parser Support", () => {

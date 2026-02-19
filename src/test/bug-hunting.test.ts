@@ -18,7 +18,7 @@ describe("Bug Hunting: Edge Cases That Should Pass", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Partial Index WHERE Clause Normalization", () => {

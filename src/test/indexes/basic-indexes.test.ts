@@ -19,7 +19,7 @@ describe("PostgreSQL Basic Index Support", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Phase 1.1 & 1.2: Parser - CREATE INDEX Support", () => {

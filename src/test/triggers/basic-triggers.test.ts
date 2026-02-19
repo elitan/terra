@@ -52,7 +52,7 @@ describe("Triggers", () => {
       expect(result.rows.length).toBe(1);
       expect(result.rows[0].tgname).toBe('update_users_timestamp');
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -118,7 +118,7 @@ describe("Triggers", () => {
       // BEFORE trigger should have bit 2 set
       expect(result.rows[0].tgtype & 2).toBe(2);
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -175,7 +175,7 @@ $$
       `);
       expect(result.rows.length).toBe(0);
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -219,7 +219,7 @@ $$
       expect(tgtype & 4).toBe(4);  // INSERT
       expect(tgtype & 16).toBe(16); // UPDATE
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 });

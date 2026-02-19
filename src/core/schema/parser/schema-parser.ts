@@ -93,6 +93,9 @@ export class SchemaParser {
     // This handles: column_name TYPE constraints
     // Only match after whitespace or comma to ensure it's in a column position
     for (const keyword of keywords) {
+      const createTablePattern = new RegExp(`(\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?)${keyword}(\\b)`, 'gi');
+      sql = sql.replace(createTablePattern, `$1"${keyword}"$2`);
+
       // Match keyword preceded by whitespace/comma and followed by a type
       // Make sure it's not already quoted and not preceded by CREATE/ALTER
       const pattern = new RegExp(`(?<![CREATE|ALTER]\\s{1,20})(?<=\\s|,)\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
@@ -276,9 +279,16 @@ export class SchemaParser {
             views.push(view);
           }
         } else if (stmt.CreateFunctionStmt) {
-          const func = parseCreateFunction(stmt.CreateFunctionStmt);
-          if (func) {
-            functions.push(func);
+          if (stmt.CreateFunctionStmt.is_procedure) {
+            const proc = parseCreateProcedure(stmt.CreateFunctionStmt);
+            if (proc) {
+              procedures.push(proc);
+            }
+          } else {
+            const func = parseCreateFunction(stmt.CreateFunctionStmt);
+            if (func) {
+              functions.push(func);
+            }
           }
         } else if (stmt.CreateProcedureStmt) {
           const proc = parseCreateProcedure(stmt.CreateProcedureStmt);

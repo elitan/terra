@@ -102,7 +102,11 @@ function extractDataType(typeName: any): string {
       }).filter(Boolean);
 
       if (params.length > 0) {
-        type += `(${params.join(',')})`;
+        if (type === "INTERVAL" && params.length === 2 && params[0] === 32767) {
+          type += `(${params[1]})`;
+        } else {
+          type += `(${params.join(',')})`;
+        }
       }
     }
 

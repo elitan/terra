@@ -10,6 +10,9 @@ import {
   tableName,
   columnName
 } from "./arbitraries";
+import { configurePropertyTests } from "./property-test-options";
+
+configurePropertyTests();
 
 /**
  * Property-Based Tests for Constraint Management
@@ -32,7 +35,7 @@ describe("Property-Based: Constraint Management", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("property: foreign key creation is idempotent", async () => {

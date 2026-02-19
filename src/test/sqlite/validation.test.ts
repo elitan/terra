@@ -368,7 +368,7 @@ describe("SQLite Connection", () => {
     expect(fs.existsSync(dbPath)).toBe(false);
 
     const client = await provider.createClient(config);
-    await client.end();
+    await client?.end();
 
     expect(fs.existsSync(dbPath)).toBe(true);
   });
@@ -378,7 +378,7 @@ describe("SQLite Connection", () => {
     await client.query("CREATE TABLE t (id INTEGER)");
     await client.query("INSERT INTO t VALUES (1), (2), (3)");
     const result = await client.query<{id: number}>("SELECT * FROM t ORDER BY id");
-    await client.end();
+    await client?.end();
 
     expect(result.rows).toHaveLength(3);
     expect(result.rows[0].id).toBe(1);
@@ -389,7 +389,7 @@ describe("SQLite Connection", () => {
     const client = await provider.createClient(memConfig);
     await client.query("CREATE TABLE t (id INTEGER)");
     const result = await client.query("SELECT * FROM t");
-    await client.end();
+    await client?.end();
 
     expect(result.rows).toHaveLength(0);
   });

@@ -23,7 +23,7 @@ describe("Mixed Column Operations", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Add, Keep, and Remove Operations", () => {

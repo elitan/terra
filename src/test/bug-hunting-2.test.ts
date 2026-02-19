@@ -17,7 +17,7 @@ describe("Bug Hunting Round 2: Additional Edge Cases", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("BIT and VARBIT Type Edge Cases", () => {
@@ -728,7 +728,7 @@ describe("Bug Hunting Round 2: Additional Edge Cases", () => {
   });
 
   describe("INTERVAL Type with Precision", () => {
-    test.skip("should be idempotent with INTERVAL type with precision", async () => {
+    test("should be idempotent with INTERVAL type with precision", async () => {
       // Note: Parser returns INTERVAL(32767,3) instead of INTERVAL(3)
       // This is a parser issue, not a differ bug
       const schema = `
@@ -1000,11 +1000,12 @@ describe("Bug Hunting Round 2: Additional Edge Cases", () => {
     });
   });
 
-  describe.skip("FK to Non-Public Schema", () => {
+  describe("FK to Non-Public Schema", () => {
     // Note: Parser currently doesn't support schema-qualified FK references
     // This is a parser limitation, not a differ bug
     test("should be idempotent with FK referencing table in another schema", async () => {
-      await client.query(`CREATE SCHEMA IF NOT EXISTS other_schema`);
+      await client.query(`DROP SCHEMA IF EXISTS other_schema CASCADE`);
+      await client.query(`CREATE SCHEMA other_schema`);
       await client.query(`
         CREATE TABLE other_schema.referenced (
           id SERIAL PRIMARY KEY
@@ -1028,7 +1029,7 @@ describe("Bug Hunting Round 2: Additional Edge Cases", () => {
     });
   });
 
-  describe.skip("Table Name as Reserved Word Without Quotes", () => {
+  describe("Table Name as Reserved Word Without Quotes", () => {
     // Note: Parser requires reserved words to be quoted
     // This is expected parser behavior, not a bug
     test("should handle unquoted reserved word as table name via auto-quoting", async () => {

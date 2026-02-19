@@ -23,7 +23,7 @@ describe("Expression Index Support", () => {
 
   afterEach(async () => {
     await client.query("DROP TABLE IF EXISTS expression_test CASCADE");
-    await client.end();
+    await client?.end();
   });
 
   describe("Parser Support", () => {

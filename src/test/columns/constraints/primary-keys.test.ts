@@ -791,6 +791,6 @@ describe("Primary Key Support", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 });

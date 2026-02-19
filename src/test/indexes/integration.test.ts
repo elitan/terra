@@ -21,7 +21,7 @@ describe("Index Integration Tests", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("End-to-End Workflow", () => {

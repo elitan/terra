@@ -65,19 +65,27 @@ jobs:
     - name: Install dependencies
       run: bun install
     
-    - name: Wait for PostgreSQL
+    - name: Wait for PostgreSQL services
       run: |
-        for i in {1..30}; do
-          if pg_isready -h localhost -p 5487 -U test_user; then
-            echo "PostgreSQL is ready"
-            break
+        for port in 5487 5488 5489; do
+          ready=0
+          for i in {1..30}; do
+            if pg_isready -h localhost -p $port -U test_user; then
+              echo "PostgreSQL on port $port is ready"
+              ready=1
+              break
+            fi
+            echo "Waiting for PostgreSQL on port $port... ($i/30)"
+            sleep 2
+          done
+          if [ $ready -ne 1 ]; then
+            echo "PostgreSQL on port $port did not become ready"
+            exit 1
           fi
-          echo "Waiting for PostgreSQL... ($i/30)"
-          sleep 2
         done
 
-    - name: Run tests
-      run: bun test
+    - name: Run tests with coverage gate
+      run: bun run test:coverage
       env:
         DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
     
@@ -116,19 +124,26 @@ jobs:
 
     - name: Wait for PostgreSQL
       run: |
+        ready=0
         for i in {1..30}; do
           if pg_isready -h localhost -p 5487 -U test_user; then
             echo "PostgreSQL is ready"
+            ready=1
             break
           fi
           echo "Waiting for PostgreSQL... ($i/30)"
           sleep 2
         done
+        if [ $ready -ne 1 ]; then
+          echo "PostgreSQL did not become ready"
+          exit 1
+        fi
 
     - name: Run property tests
       run: bun run test:properties
       env:
         DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
+        FC_SEED: "20260218"
 
   lint:
     runs-on: ubuntu-latest

@@ -28,7 +28,7 @@ describe("Performance Regression Testing", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Benchmark Establishment", () => {

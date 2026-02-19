@@ -19,7 +19,7 @@ describe("Array Type Operations", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Array Type Idempotency", () => {

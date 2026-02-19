@@ -11,7 +11,7 @@ describe("Issue #70 - CHECK constraint idempotency with IN/NOT IN", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   test("should be idempotent for NOT IN expressions (PostgreSQL normalizes to <> ALL)", async () => {

@@ -30,7 +30,7 @@ describe("SQLite Primary Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].primaryKey?.columns).toEqual(["id"]);
   });
@@ -47,7 +47,7 @@ describe("SQLite Primary Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].primaryKey?.columns).toEqual(["a", "b"]);
   });
@@ -65,7 +65,7 @@ describe("SQLite Primary Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].primaryKey?.columns).toEqual(["year", "month", "day"]);
   });
@@ -77,7 +77,7 @@ describe("SQLite Primary Keys", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].primaryKey?.columns).toEqual(["code"]);
   });
@@ -108,7 +108,7 @@ describe("SQLite Unique Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const uniqueIndexes = tables[0].indexes?.filter(i => i.unique) || [];
     expect(uniqueIndexes.length).toBeGreaterThanOrEqual(1);
@@ -125,7 +125,7 @@ describe("SQLite Unique Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const idx = tables[0].indexes?.find(i => i.name === "idx_t_email");
     expect(idx?.unique).toBe(true);
@@ -143,7 +143,7 @@ describe("SQLite Unique Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const idx = tables[0].indexes?.find(i => i.name === "idx_name");
     expect(idx?.unique).toBe(true);
@@ -163,7 +163,7 @@ describe("SQLite Unique Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const uniqueIndexes = tables[0].indexes?.filter(i => i.unique) || [];
     expect(uniqueIndexes.length).toBeGreaterThanOrEqual(2);
@@ -208,7 +208,7 @@ describe("SQLite Check Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].checkConstraints?.length).toBeGreaterThanOrEqual(1);
   });
@@ -236,7 +236,7 @@ describe("SQLite Check Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].checkConstraints?.length).toBeGreaterThanOrEqual(3);
   });
@@ -270,7 +270,7 @@ describe("SQLite Foreign Key Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const children = tables.find(t => t.name === "children");
     expect(children?.foreignKeys).toHaveLength(1);
@@ -288,7 +288,7 @@ describe("SQLite Foreign Key Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const children = tables.find(t => t.name === "children");
     expect(children?.foreignKeys?.[0].onDelete).toBe("SET NULL");
@@ -306,7 +306,7 @@ describe("SQLite Foreign Key Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const children = tables.find(t => t.name === "children");
     expect(children?.foreignKeys?.[0].onUpdate).toBe("CASCADE");
@@ -324,7 +324,7 @@ describe("SQLite Foreign Key Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const children = tables.find(t => t.name === "children");
     expect(children?.foreignKeys?.[0].onDelete).toBe("RESTRICT");
@@ -345,7 +345,7 @@ describe("SQLite Foreign Key Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const posts = tables.find(t => t.name === "posts");
     expect(posts?.foreignKeys).toHaveLength(2);
@@ -363,7 +363,7 @@ describe("SQLite Foreign Key Constraints", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const employees = tables.find(t => t.name === "employees");
     expect(employees?.foreignKeys?.[0].referencedTable).toBe("employees");

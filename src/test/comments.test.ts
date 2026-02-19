@@ -37,7 +37,7 @@ describe("COMMENT ON", () => {
       expect(result.rows[0].description).toBe('Test schema for comments');
     } finally {
       await client.query('DROP SCHEMA IF EXISTS test_comments CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -65,7 +65,7 @@ describe("COMMENT ON", () => {
       expect(result.rows[0].description).toBe('Test table for users');
     } finally {
       await client.query('DROP TABLE IF EXISTS test_table CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -99,7 +99,7 @@ describe("COMMENT ON", () => {
       expect(result.rows[0].description).toBe('New comment');
     } finally {
       await client.query('DROP TABLE IF EXISTS test_update_comment CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -141,7 +141,7 @@ describe("COMMENT ON", () => {
       expect(nameComment?.comment).toBe('User full name');
     } finally {
       await client.query('DROP TABLE IF EXISTS test_column_comment CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -179,7 +179,7 @@ describe("COMMENT ON", () => {
       expect(result.rows[0].description).toBe('Updated email comment');
     } finally {
       await client.query('DROP TABLE IF EXISTS test_column_update CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -219,7 +219,7 @@ describe("COMMENT ON", () => {
       expect(result.rows[0].description).toBe('Email address');
     } finally {
       await client.query('DROP TABLE IF EXISTS test_comment_only CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -266,7 +266,7 @@ describe("COMMENT ON", () => {
       expect(commentResult.rows[0].description).toBe('Updated status comment');
     } finally {
       await client.query('DROP TABLE IF EXISTS test_type_and_comment CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 });

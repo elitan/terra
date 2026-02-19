@@ -29,7 +29,7 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Bug 1: Unnecessary DEFAULT operations during type changes", () => {

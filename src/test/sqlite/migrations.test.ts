@@ -42,7 +42,7 @@ describe("SQLite Schema Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns).toHaveLength(3);
     expect(tables[0].columns.find(c => c.name === "name")?.nullable).toBe(false);
@@ -72,7 +72,7 @@ describe("SQLite Schema Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(2);
     expect(tables.find(t => t.name === "a")).toBeUndefined();
@@ -87,7 +87,7 @@ describe("SQLite Schema Evolution", () => {
 
     const client = await provider.createClient(config);
     await client.query(`INSERT INTO users VALUES (1, 'Alice')`);
-    await client.end();
+    await client?.end();
 
     await schemaService.apply(`
       CREATE TABLE users (id INTEGER PRIMARY KEY, first_name TEXT);
@@ -113,7 +113,7 @@ describe("SQLite Schema Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].columns.find(c => c.name === "a")).toBeDefined();
     expect(tables[0].columns.find(c => c.name === "b")).toBeDefined();
@@ -150,7 +150,7 @@ describe("SQLite Index Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].indexes?.find(i => i.name === "idx_email")).toBeDefined();
   });
@@ -167,7 +167,7 @@ describe("SQLite Index Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables[0].indexes?.find(i => i.name === "idx_email")).toBeUndefined();
   });
@@ -185,7 +185,7 @@ describe("SQLite Index Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const idx = tables[0].indexes?.find(i => i.name === "idx_search");
     expect(idx?.columns).toEqual(["email", "name"]);
@@ -204,7 +204,7 @@ describe("SQLite Index Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const idx = tables[0].indexes?.find(i => i.name === "idx_email");
     expect(idx?.unique).toBe(true);
@@ -245,7 +245,7 @@ describe("SQLite Foreign Key Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const posts = tables.find(t => t.name === "posts");
     expect(posts?.foreignKeys).toHaveLength(1);
@@ -268,7 +268,7 @@ describe("SQLite Foreign Key Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const posts = tables.find(t => t.name === "posts");
     expect(posts?.foreignKeys || []).toHaveLength(0);
@@ -295,7 +295,7 @@ describe("SQLite Foreign Key Evolution", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     const posts = tables.find(t => t.name === "posts");
     expect(posts?.foreignKeys?.[0].onDelete).toBe("CASCADE");
@@ -350,7 +350,7 @@ describe("SQLite Complex Migrations", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(3);
 
@@ -379,7 +379,7 @@ describe("SQLite Complex Migrations", () => {
 
     const client = await provider.createClient(config);
     const tables = await provider.getCurrentSchema(client);
-    await client.end();
+    await client?.end();
 
     expect(tables).toHaveLength(2);
     expect(tables.find(t => t.name === "users")).toBeDefined();

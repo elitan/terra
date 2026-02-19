@@ -29,7 +29,7 @@ describe("Simultaneous Type Changes", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Two Column Simultaneous Type Changes", () => {

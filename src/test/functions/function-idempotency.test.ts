@@ -39,7 +39,7 @@ describe("Function idempotency", () => {
   afterEach(async () => {
     await dropAllFunctions(client);
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("should not recreate plpgsql function due to whitespace differences", async () => {

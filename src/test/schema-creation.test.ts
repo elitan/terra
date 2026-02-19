@@ -48,7 +48,7 @@ describe("CREATE SCHEMA", () => {
       expect(tableResult.rows.length).toBe(1);
     } finally {
       await client.query('DROP SCHEMA IF EXISTS test_schema CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -71,7 +71,7 @@ describe("CREATE SCHEMA", () => {
       expect(result.rows.length).toBe(1);
     } finally {
       await client.query('DROP SCHEMA IF EXISTS test_existing CASCADE');
-      await client.end();
+      await client?.end();
     }
   });
 });

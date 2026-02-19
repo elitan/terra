@@ -17,7 +17,7 @@ describe("Materialized View Operations", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic Materialized Views", () => {

@@ -32,7 +32,7 @@ describe("Functions", () => {
       const result = await client.query("SELECT add_numbers(2, 3) as result");
       expect(result.rows[0].result).toBe(5);
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -64,7 +64,7 @@ describe("Functions", () => {
       const result = await client.query("SELECT multiply(2, 3) as result");
       expect(result.rows[0].result).toBe(12);
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 
@@ -90,7 +90,7 @@ describe("Functions", () => {
         client.query("SELECT test_function() as result")
       ).rejects.toThrow();
     } finally {
-      await client.end();
+      await client?.end();
     }
   });
 });

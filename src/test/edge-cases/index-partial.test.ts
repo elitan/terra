@@ -14,7 +14,7 @@ describe("Edge case: partial indexes with where clause", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

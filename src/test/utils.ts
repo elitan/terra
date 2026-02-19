@@ -61,7 +61,11 @@ export function createTestSchemaService() {
   return new SchemaService(provider, config);
 }
 
-export async function cleanDatabase(client: Client, schemas: string[] = ['public']): Promise<void> {
+export async function cleanDatabase(client: Client | undefined, schemas: string[] = ['public']): Promise<void> {
+  if (!client) {
+    return;
+  }
+
   for (const schema of schemas) {
     if (schema !== 'public') {
       await client.query(`DROP SCHEMA IF EXISTS ${client.escapeIdentifier(schema)} CASCADE`);
@@ -104,6 +108,44 @@ export async function cleanDatabase(client: Client, schemas: string[] = ['public
       `);
     }
   }
+}
+
+export type PostgresTestHarness = {
+  setup: (schemas?: string[]) => Promise<Client>;
+  teardown: (schemas?: string[]) => Promise<void>;
+  getClient: () => Client;
+};
+
+export function createPostgresTestHarness(): PostgresTestHarness {
+  let client: Client | undefined;
+
+  async function setup(schemas: string[] = ['public']): Promise<Client> {
+    client = await createTestClient();
+    await cleanDatabase(client, schemas);
+    return client;
+  }
+
+  async function teardown(schemas: string[] = ['public']): Promise<void> {
+    if (!client) {
+      return;
+    }
+
+    try {
+      await cleanDatabase(client, schemas);
+    } finally {
+      await client.end();
+      client = undefined;
+    }
+  }
+
+  function getClient(): Client {
+    if (!client) {
+      throw new Error("Test client is not initialized");
+    }
+    return client;
+  }
+
+  return { setup, teardown, getClient };
 }
 
 export async function getTableNames(client: Client): Promise<string[]> {

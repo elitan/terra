@@ -23,7 +23,7 @@ describe("Column Addition Operations", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic Column Addition", () => {

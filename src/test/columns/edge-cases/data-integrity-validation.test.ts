@@ -24,7 +24,7 @@ describe("Data Integrity Validation", () => {
     } catch (error) {
       // Ignore cleanup errors
     }
-    await client.end();
+    await client?.end();
   });
 
   describe("Value Preservation During Type Changes", () => {

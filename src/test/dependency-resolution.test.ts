@@ -1,22 +1,20 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../core/schema/service";
-import { DatabaseService } from "../core/database/client";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "./utils";
+import { createPostgresTestHarness, createTestSchemaService } from "./utils";
 
 describe("Dependency Resolution", () => {
+  const harness = createPostgresTestHarness();
   let client: Client;
   let schemaService: SchemaService;
 
   beforeEach(async () => {
-    client = await createTestClient();
-    await cleanDatabase(client);
-    
+    client = await harness.setup();
     schemaService = createTestSchemaService();
   });
 
   afterEach(async () => {
-    await client.end();
+    await harness.teardown();
   });
 
   describe("Table Creation Order", () => {

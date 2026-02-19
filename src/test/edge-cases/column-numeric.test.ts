@@ -14,7 +14,7 @@ describe("Edge case: numeric/decimal precision and scale", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   const schemaV1 = `

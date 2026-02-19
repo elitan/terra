@@ -26,7 +26,7 @@ describe("Executor Error Handling", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("PostgreSQL error handling", () => {

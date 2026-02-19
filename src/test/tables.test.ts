@@ -24,7 +24,7 @@ describe("Table Operations - End to End", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("should migrate from empty database to simple table", async () => {

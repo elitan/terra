@@ -16,7 +16,7 @@ describe("Destructive Operation Safety", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Table Dropping Safety", () => {

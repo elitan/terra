@@ -22,7 +22,7 @@ describe("Type Alias Idempotency", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("INT vs INTEGER Equivalence", () => {

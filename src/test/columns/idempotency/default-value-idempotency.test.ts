@@ -22,7 +22,7 @@ describe("Default Value Idempotency - Issue #11", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   test("should not detect changes after applying schema with defaults", async () => {

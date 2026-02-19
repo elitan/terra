@@ -23,7 +23,7 @@ describe("Column Removal Operations", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic Column Removal", () => {

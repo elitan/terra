@@ -34,7 +34,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Constraint Creation and Handling", () => {

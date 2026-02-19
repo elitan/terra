@@ -16,7 +16,7 @@ describe("ENUM Types", () => {
   });
 
   afterEach(async () => {
-    await client.end();
+    await client?.end();
   });
 
   describe("Basic ENUM Type Creation", () => {

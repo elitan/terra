@@ -27,7 +27,7 @@ describe("String Type Conversions and Edge Cases", () => {
 
   afterEach(async () => {
     await cleanDatabase(client);
-    await client.end();
+    await client?.end();
   });
 
   describe("Unicode and Multi-byte Character Testing", () => {
