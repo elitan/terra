@@ -1,15 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { parseCreateFunction } from "../core/schema/parser/function-parser";
 
+function languageOption(language: string): Record<string, unknown> {
+  return { DefElem: { defname: "language", arg: { String: { sval: language } } } };
+}
+
+function asOption(...parts: string[]): Record<string, unknown> {
+  return {
+    DefElem: {
+      defname: "as",
+      arg: { List: { items: parts.map(function (part) { return { String: { sval: part } }; }) } },
+    },
+  };
+}
+
 function baseNode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     funcname: [{ String: { sval: "f_test" } }],
     parameters: [],
     returnType: { names: [{ String: { sval: "int4" } }] },
-    options: [
-      { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
-      { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
-    ],
+    options: [languageOption("sql"), asOption("SELECT 1")],
     ...overrides,
   };
 }
@@ -29,13 +39,8 @@ describe("Function parser private coverage", () => {
           },
         ],
         options: [
-          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
-          {
-            DefElem: {
-              defname: "as",
-              arg: { List: { items: [{ String: { sval: "BEGIN" } }, { String: { sval: "END" } }] } },
-            },
-          },
+          languageOption("sql"),
+          asOption("BEGIN", "END"),
           { DefElem: { defname: "security", arg: { Integer: { ival: 1 } } } },
         ],
       })
@@ -92,7 +97,7 @@ describe("Function parser private coverage", () => {
     const parsed = parseCreateFunction(
       baseNode({
         options: [
-          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          languageOption("sql"),
           badBodyOption,
         ],
       })
