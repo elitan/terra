@@ -25,6 +25,27 @@ function makePrimaryKey(columns: string[], name?: string): PrimaryKeyConstraint 
 }
 
 describe("SchemaDiffer private coverage", () => {
+  test("checks constraint-backed index helper", () => {
+    const differ = new SchemaDiffer();
+    expect(
+      (differ as any).isConstraintBackedIndex({
+        name: "users_email_key",
+        tableName: "users",
+        columns: ["email"],
+        type: "btree",
+        constraint: "users_email_key",
+      })
+    ).toBe(true);
+    expect(
+      (differ as any).isConstraintBackedIndex({
+        name: "idx_users_email",
+        tableName: "users",
+        columns: ["email"],
+        type: "btree",
+      })
+    ).toBe(false);
+  });
+
   test("generateColumnStatements handles add modify and drop", () => {
     const differ = new SchemaDiffer();
     const desired = makeTable({
@@ -156,5 +177,106 @@ describe("SchemaDiffer private coverage", () => {
 
     expect(dropOnly).toHaveLength(1);
     expect(addOnly).toHaveLength(1);
+  });
+
+  test("generateConstraintStatementsWithColumnContext covers check foreign key and unique branches", () => {
+    const differ = new SchemaDiffer();
+    const desired = makeTable({
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "email", type: "TEXT", nullable: false }),
+      ],
+      checkConstraints: [
+        { name: "users_email_check", expression: "email <> ''" },
+        { name: "users_id_check", expression: "id > 0" },
+      ],
+      foreignKeys: [
+        {
+          name: "fk_profile",
+          columns: ["id"],
+          referencedTable: "profiles",
+          referencedColumns: ["id"],
+          onDelete: "CASCADE",
+        },
+        {
+          columns: ["email"],
+          referencedTable: "contacts",
+          referencedColumns: ["email"],
+          onDelete: "SET NULL",
+        },
+        {
+          name: "fk_new_named",
+          columns: ["id"],
+          referencedTable: "accounts",
+          referencedColumns: ["id"],
+        },
+        {
+          columns: ["id"],
+          referencedTable: "teams",
+          referencedColumns: ["id"],
+        },
+      ],
+      uniqueConstraints: [{ name: "uq_email", columns: ["email"] }],
+    });
+    const current = makeTable({
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "old_email", type: "TEXT", nullable: true }),
+      ],
+      checkConstraints: [
+        { name: "users_old_check", expression: "email <> ''" },
+        { name: "users_age_check", expression: "age > 0" },
+      ],
+      foreignKeys: [
+        {
+          name: "fk_profile",
+          columns: ["id"],
+          referencedTable: "profiles",
+          referencedColumns: ["id"],
+          onDelete: "RESTRICT",
+        },
+        {
+          name: "fk_email_old",
+          columns: ["email"],
+          referencedTable: "contacts",
+          referencedColumns: ["email"],
+          onDelete: "NO ACTION",
+        },
+        {
+          name: "fk_old_email",
+          columns: ["old_email"],
+          referencedTable: "contacts",
+          referencedColumns: ["email"],
+        },
+        {
+          name: "fk_unused",
+          columns: ["id"],
+          referencedTable: "departments",
+          referencedColumns: ["id"],
+        },
+      ],
+      uniqueConstraints: [{ name: "uq_old_email", columns: ["old_email"] }],
+    });
+
+    const statements = (differ as any).generateConstraintStatementsWithColumnContext(
+      desired,
+      current,
+      "\"public\".\"users\""
+    ) as string[];
+
+    const sql = statements.join("\n");
+    expect(sql).toContain("DROP CONSTRAINT \"users_old_check\"");
+    expect(sql).toContain("ADD CONSTRAINT \"users_email_check\" CHECK");
+    expect(sql).toContain("ADD CONSTRAINT \"users_id_check\" CHECK");
+    expect(sql).toContain("DROP CONSTRAINT \"users_age_check\"");
+    expect(sql).toContain("DROP CONSTRAINT \"fk_profile\"");
+    expect(sql).toContain("DROP CONSTRAINT \"fk_email_old\"");
+    expect(sql).toContain("DROP CONSTRAINT \"fk_unused\"");
+    expect(sql).not.toContain("DROP CONSTRAINT \"fk_old_email\"");
+    expect(sql).toContain("ADD CONSTRAINT \"fk_profile\" FOREIGN KEY");
+    expect(sql).toContain("ADD CONSTRAINT \"fk_new_named\" FOREIGN KEY");
+    expect(sql).toContain("REFERENCES \"teams\" (\"id\")");
+    expect(sql).toContain("DROP CONSTRAINT \"uq_old_email\"");
+    expect(sql).toContain("ADD CONSTRAINT \"uq_email\" UNIQUE");
   });
 });
