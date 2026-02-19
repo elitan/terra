@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { CommentHandler } from "../core/schema/handlers/comment-handler";
 import { ExtensionHandler } from "../core/schema/handlers/extension-handler";
 import { ProcedureHandler } from "../core/schema/handlers/procedure-handler";
 import { SequenceHandler } from "../core/schema/handlers/sequence-handler";
 import { SchemaHandler } from "../core/schema/handlers/schema-handler";
-import type { Extension, Procedure, SchemaDefinition, Sequence } from "../types/schema";
+import type { Comment, Extension, Procedure, SchemaDefinition, Sequence } from "../types/schema";
 
 function makeSequence(overrides: Partial<Sequence> = {}): Sequence {
   return {
@@ -31,6 +32,16 @@ function makeProcedure(overrides: Partial<Procedure> = {}): Procedure {
 function makeExtension(overrides: Partial<Extension> = {}): Extension {
   return {
     name: "pgcrypto",
+    ...overrides,
+  };
+}
+
+function makeComment(overrides: Partial<Comment> = {}): Comment {
+  return {
+    objectType: "TABLE",
+    objectName: "users",
+    schemaName: "public",
+    comment: "table comment",
     ...overrides,
   };
 }
@@ -102,6 +113,51 @@ describe("Handler module coverage", () => {
       expect(statements[0]).toContain("\"analytics\"");
       expect(statements[0]).toContain("AUTHORIZATION");
       expect(statements[0]).toContain("\"reporter\"");
+    });
+  });
+
+  describe("comment handler", () => {
+    test("skips unchanged comments and updates changed comments", () => {
+      const handler = new CommentHandler();
+      const desired = [
+        makeComment({ objectName: "users", comment: "same" }),
+        makeComment({ objectName: "orders", comment: "new value" }),
+      ];
+      const current = [
+        makeComment({ objectName: "users", comment: "same" }),
+        makeComment({ objectName: "orders", comment: "old value" }),
+      ];
+
+      const statements = handler.generateStatements(desired, current);
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).toContain("COMMENT ON TABLE");
+      expect(statements[0]).toContain("\"orders\"");
+      expect(statements[0]).toContain("new value");
+    });
+
+    test("creates schema and column comment SQL with escaping", () => {
+      const handler = new CommentHandler();
+      const statements = handler.generateStatements(
+        [
+          makeComment({ objectType: "SCHEMA", objectName: "analytics", schemaName: undefined, comment: "owner's schema" }),
+          makeComment({
+            objectType: "COLUMN",
+            objectName: "events",
+            schemaName: "public",
+            columnName: "metadata",
+            comment: "column's note",
+          }),
+        ],
+        []
+      );
+
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain("COMMENT ON SCHEMA");
+      expect(statements[0]).toContain("\"analytics\"");
+      expect(statements[0]).toContain("owner''s schema");
+      expect(statements[1]).toContain("COMMENT ON COLUMN");
+      expect(statements[1]).toContain("\"public\".\"events\".\"metadata\"");
+      expect(statements[1]).toContain("column''s note");
     });
   });
 
