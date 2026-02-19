@@ -70,7 +70,6 @@ function createMockProvider(options: {
   plan?: MigrationPlan;
   validation?: ValidationResult;
   features?: Set<string>;
-  queryErrorSql?: string;
 } = {}): { provider: DatabaseProvider; state: MockState } {
   const state: MockState = {
     clientEndCalls: 0,
@@ -81,17 +80,14 @@ function createMockProvider(options: {
     releaseCalls: [],
   };
 
-  const parsedSchema = options.parsedSchema || createParsedSchema();
-  const plan = options.plan || createPlan();
-  const validation = options.validation || createValidation();
-  const features = options.features || new Set<string>();
+  const parsedSchema = options.parsedSchema ?? createParsedSchema();
+  const plan = options.plan ?? createPlan();
+  const validation = options.validation ?? createValidation();
+  const features = options.features ?? new Set<string>();
 
   const client: DatabaseClient = {
     query: async function (sql: string) {
       state.clientQueries.push(sql);
-      if (options.queryErrorSql && sql === options.queryErrorSql) {
-        throw new Error("query failed");
-      }
       return { rows: [] };
     },
     end: async function () {
@@ -276,7 +272,7 @@ describe("SchemaService private coverage", function () {
   });
 
   test("executePlan runs transaction and throws on concurrent query error", async function () {
-    const mock = createMockProvider({ queryErrorSql: "BAD" });
+    const mock = createMockProvider();
     const service = createService(mock.provider);
     const privateService = service as unknown as {
       executePlan: (client: DatabaseClient, plan: MigrationPlan, autoApprove: boolean) => Promise<void>;

@@ -29,12 +29,8 @@ describe("Expression comparator coverage", () => {
   });
 
   test("handles ANY and ALL with subquery right-hand side", () => {
-    expect(expressionsEqual("status = ANY(SELECT status FROM t)", "status = ANY (SELECT status FROM t)")).toBe(
-      true
-    );
-    expect(
-      expressionsEqual("status <> ALL(SELECT status FROM t)", "status <> ALL (SELECT status FROM t)")
-    ).toBe(true);
+    expect(expressionsEqual("status = ANY(SELECT status FROM t)", "status = ANY (SELECT status FROM t)")).toBe(true);
+    expect(expressionsEqual("status <> ALL(SELECT status FROM t)", "status <> ALL (SELECT status FROM t)")).toBe(true);
   });
 
   test("normalizes LIKE and ILIKE operation shapes", () => {
