@@ -934,10 +934,8 @@ export class DatabaseInspector {
       return [];
     }
 
-    // This is a simplified parser - PostgreSQL's format is complex
-    // Example: "a integer, b text DEFAULT 'hello'::text"
     const params: any[] = [];
-    const argParts = argsString.split(',').map(s => s.trim());
+    const argParts = this.splitFunctionArguments(argsString);
 
     for (const arg of argParts) {
       const match = arg.match(/^(?:(IN|OUT|INOUT|VARIADIC)\s+)?(?:(\w+)\s+)?(.+?)(?:\s+DEFAULT\s+(.+))?$/i);
@@ -955,6 +953,54 @@ export class DatabaseInspector {
     }
 
     return params;
+  }
+
+  private splitFunctionArguments(argsString: string): string[] {
+    const args: string[] = [];
+    let current = "";
+    let depthParen = 0;
+    let depthBracket = 0;
+    let inQuote = false;
+
+    for (let i = 0; i < argsString.length; i++) {
+      const char = argsString[i];
+
+      if (char === "'") {
+        current += char;
+        if (inQuote && argsString[i + 1] === "'") {
+          current += "'";
+          i++;
+          continue;
+        }
+        inQuote = !inQuote;
+        continue;
+      }
+
+      if (!inQuote) {
+        if (char === "(") depthParen++;
+        if (char === ")") depthParen = Math.max(0, depthParen - 1);
+        if (char === "[") depthBracket++;
+        if (char === "]") depthBracket = Math.max(0, depthBracket - 1);
+      }
+
+      if (char === "," && !inQuote && depthParen === 0 && depthBracket === 0) {
+        const value = current.trim();
+        if (value) {
+          args.push(value);
+        }
+        current = "";
+        continue;
+      }
+
+      current += char;
+    }
+
+    const finalValue = current.trim();
+    if (finalValue) {
+      args.push(finalValue);
+    }
+
+    return args;
   }
 
   // Get all extensions from the database
