@@ -196,10 +196,12 @@ describe("Handler module coverage", () => {
         []
       );
 
-      expect(statements).toHaveLength(1);
+      expect(statements).toHaveLength(2);
       expect(statements[0]).toContain("CREATE SEQUENCE");
       expect(statements[0]).toContain("\"owned_seq\"");
-      expect(statements[0]).toContain("OWNED BY public.users.id");
+      expect(statements[1]).toContain("ALTER SEQUENCE");
+      expect(statements[1]).toContain("\"owned_seq\"");
+      expect(statements[1]).toContain("OWNED BY public.users.id");
     });
 
     test("drops removed unmanaged sequences", () => {

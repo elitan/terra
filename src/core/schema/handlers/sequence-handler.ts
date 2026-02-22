@@ -4,6 +4,7 @@ import {
   generateDropSequenceSQL,
 } from "../../../utils/sql";
 import { Logger } from "../../../utils/logger";
+import { SQLBuilder } from "../../../utils/sql-builder";
 
 type NormalizedSequence = {
   dataType: "SMALLINT" | "INTEGER" | "BIGINT";
@@ -115,6 +116,29 @@ function getSequenceKey(sequence: Sequence): string {
   return `${sequence.schema || "public"}.${sequence.name}`;
 }
 
+function generateOwnedByStatement(sequence: Sequence): string | null {
+  if (!sequence.ownedBy) {
+    return null;
+  }
+
+  const builder = new SQLBuilder();
+  builder.p("ALTER SEQUENCE").table(sequence.name, sequence.schema);
+  builder.p(`OWNED BY ${sequence.ownedBy}`);
+  return builder.build() + ";";
+}
+
+function generateCreateSequenceStatements(sequence: Sequence): string[] {
+  const createSequence = sequence.ownedBy
+    ? { ...sequence, ownedBy: undefined }
+    : sequence;
+  const statements = [generateCreateSequenceSQL(createSequence)];
+  const ownedByStatement = generateOwnedByStatement(sequence);
+  if (ownedByStatement) {
+    statements.push(ownedByStatement);
+  }
+  return statements;
+}
+
 export class SequenceHandler {
   generateStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {
     const statements: string[] = [];
@@ -139,7 +163,7 @@ export class SequenceHandler {
       const currentSequence = currentMap.get(key);
 
       if (!currentSequence) {
-        statements.push(generateCreateSequenceSQL(desiredSequence));
+        statements.push(...generateCreateSequenceStatements(desiredSequence));
         Logger.info(`Creating sequence '${key}'`);
         continue;
       }
@@ -151,7 +175,7 @@ export class SequenceHandler {
 
       if (sequencesNeedUpdate(desiredSequence, currentSequence)) {
         statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
-        statements.push(generateCreateSequenceSQL(desiredSequence));
+        statements.push(...generateCreateSequenceStatements(desiredSequence));
         Logger.info(`Updating sequence '${key}'`);
       } else {
         Logger.info(`sequence '${key}' is up to date, skipping`);
