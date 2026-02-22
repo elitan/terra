@@ -86,14 +86,31 @@ function normalizeParameterMode(mode: Function["parameters"][number]["mode"]): s
   return mode;
 }
 
-function normalizeFunctionParameters(func: Function): Array<{ name?: string; mode: string; type: string }> {
+function normalizeFunctionParameters(
+  func: Function
+): Array<{ name?: string; mode: string; type: string; default?: string }> {
   return func.parameters.map(function (param) {
     return {
       name: param.name || undefined,
       mode: normalizeParameterMode(param.mode),
       type: normalizeParameterType(param.type),
+      default: normalizeParameterDefault(param.default),
     };
   });
+}
+
+function normalizeParameterDefault(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value
+    .replace(
+      /::\s*(?:"[^"]+"|[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)(?:\[\])?/gi,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getFunctionKey(func: Function): string {
