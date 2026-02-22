@@ -938,21 +938,215 @@ export class DatabaseInspector {
     const argParts = this.splitFunctionArguments(argsString);
 
     for (const arg of argParts) {
-      const match = arg.match(/^(?:(IN|OUT|INOUT|VARIADIC)\s+)?(?:(\w+)\s+)?(.+?)(?:\s+DEFAULT\s+(.+))?$/i);
-      if (match) {
-        const [, mode, name, type, defaultVal] = match;
-        if (type) {
-          params.push({
-            name: name || undefined,
-            type: type.trim(),
-            mode: mode?.toUpperCase() || undefined,
-            default: defaultVal || undefined,
-          });
-        }
+      const parsed = this.parseFunctionArgument(arg);
+      if (parsed) {
+        params.push(parsed);
       }
     }
 
     return params;
+  }
+
+  private parseFunctionArgument(arg: string): any | null {
+    let content = arg.trim();
+    if (!content) {
+      return null;
+    }
+
+    let mode: string | undefined;
+    const modeMatch = content.match(/^(INOUT|IN|OUT|VARIADIC)\s+/i);
+    if (modeMatch) {
+      mode = modeMatch[1].toUpperCase();
+      content = content.slice(modeMatch[0].length).trim();
+    }
+
+    const { signaturePart, defaultValue } = this.extractArgumentDefault(content);
+    const { name, type } = this.extractArgumentNameAndType(signaturePart);
+    if (!type) {
+      return null;
+    }
+
+    return {
+      name,
+      type,
+      mode,
+      default: defaultValue,
+    };
+  }
+
+  private extractArgumentDefault(value: string): { signaturePart: string; defaultValue: string | undefined } {
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let depthParen = 0;
+    let depthBracket = 0;
+
+    for (let i = 0; i < value.length; i++) {
+      const char = value[i];
+
+      if (char === "'" && !inDoubleQuote) {
+        if (inSingleQuote && value[i + 1] === "'") {
+          i++;
+          continue;
+        }
+        inSingleQuote = !inSingleQuote;
+        continue;
+      }
+
+      if (char === '"' && !inSingleQuote) {
+        if (inDoubleQuote && value[i + 1] === '"') {
+          i++;
+          continue;
+        }
+        inDoubleQuote = !inDoubleQuote;
+        continue;
+      }
+
+      if (inSingleQuote || inDoubleQuote) {
+        continue;
+      }
+
+      if (char === "(") depthParen++;
+      if (char === ")") depthParen = Math.max(0, depthParen - 1);
+      if (char === "[") depthBracket++;
+      if (char === "]") depthBracket = Math.max(0, depthBracket - 1);
+
+      if (depthParen !== 0 || depthBracket !== 0) {
+        continue;
+      }
+
+      if (i > 0 && /\s/.test(value[i - 1]) && value.slice(i).toUpperCase().startsWith("DEFAULT ")) {
+        return {
+          signaturePart: value.slice(0, i).trim(),
+          defaultValue: value.slice(i + 8).trim() || undefined,
+        };
+      }
+    }
+
+    return {
+      signaturePart: value.trim(),
+      defaultValue: undefined,
+    };
+  }
+
+  private extractArgumentNameAndType(value: string): { name: string | undefined; type: string } {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { name: undefined, type: "" };
+    }
+
+    if (trimmed.startsWith('"')) {
+      const quoted = this.readQuotedIdentifier(trimmed);
+      if (quoted) {
+        const rest = trimmed.slice(quoted.length).trim();
+        if (rest) {
+          return {
+            name: this.unquoteIdentifier(quoted),
+            type: rest,
+          };
+        }
+      }
+    }
+
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_$]*)\s+(.+)$/);
+    if (!match) {
+      return { name: undefined, type: trimmed };
+    }
+
+    const candidateName = match[1];
+    const candidateType = match[2].trim();
+    if (this.isLikelyTypeToken(candidateName)) {
+      return { name: undefined, type: trimmed };
+    }
+
+    return {
+      name: candidateName,
+      type: candidateType,
+    };
+  }
+
+  private readQuotedIdentifier(value: string): string | null {
+    if (!value.startsWith('"')) {
+      return null;
+    }
+
+    let i = 1;
+    while (i < value.length) {
+      if (value[i] === '"') {
+        if (value[i + 1] === '"') {
+          i += 2;
+          continue;
+        }
+
+        return value.slice(0, i + 1);
+      }
+      i++;
+    }
+
+    return null;
+  }
+
+  private unquoteIdentifier(value: string): string {
+    if (!value.startsWith('"') || !value.endsWith('"')) {
+      return value;
+    }
+
+    return value.slice(1, -1).replace(/""/g, '"');
+  }
+
+  private isLikelyTypeToken(value: string): boolean {
+    return new Set([
+      "array",
+      "bigint",
+      "bigserial",
+      "bit",
+      "bool",
+      "boolean",
+      "box",
+      "bytea",
+      "char",
+      "character",
+      "cidr",
+      "circle",
+      "date",
+      "decimal",
+      "double",
+      "float",
+      "inet",
+      "int",
+      "int2",
+      "int4",
+      "int8",
+      "integer",
+      "interval",
+      "json",
+      "jsonb",
+      "line",
+      "lseg",
+      "macaddr",
+      "money",
+      "numeric",
+      "path",
+      "pg_lsn",
+      "point",
+      "polygon",
+      "real",
+      "serial",
+      "smallint",
+      "smallserial",
+      "text",
+      "time",
+      "timetz",
+      "timestamp",
+      "timestamptz",
+      "tsquery",
+      "tsvector",
+      "txid_snapshot",
+      "uuid",
+      "varbit",
+      "varchar",
+      "void",
+      "xml",
+    ]).has(value.toLowerCase());
   }
 
   private splitFunctionArguments(argsString: string): string[] {
