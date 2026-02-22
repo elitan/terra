@@ -810,7 +810,13 @@ export class SchemaDiffer {
     // Handle modified indexes (drop + create) - use non-concurrent to keep in same transaction
     for (const mod of toModify) {
       const dropBuilder = new SQLBuilder();
-      dropBuilder.p("DROP INDEX").ident(mod.current.name).p(";");
+      dropBuilder.p("DROP INDEX");
+      if (mod.current.schema) {
+        dropBuilder.table(mod.current.name, mod.current.schema);
+      } else {
+        dropBuilder.ident(mod.current.name);
+      }
+      dropBuilder.p(";");
       statements.push(dropBuilder.build());
       statements.push(this.generateCreateIndexSQL(mod.desired, false));
     }
@@ -934,7 +940,12 @@ export class SchemaDiffer {
       } else {
         builder.p("DROP INDEX");
       }
-      return builder.ident(index.name).p(";").build();
+      if (index.schema) {
+        builder.table(index.name, index.schema);
+      } else {
+        builder.ident(index.name);
+      }
+      return builder.p(";").build();
     });
   }
 
