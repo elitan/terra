@@ -37,6 +37,24 @@ function getProcedureSignature(proc: Procedure): string {
   }).join(",");
 }
 
+function normalizeParameterMode(mode: Procedure["parameters"][number]["mode"]): string {
+  if (!mode || mode === "IN") {
+    return "IN";
+  }
+
+  return mode;
+}
+
+function normalizeProcedureParameters(proc: Procedure): Array<{ name?: string; mode: string; type: string }> {
+  return proc.parameters.map(function (param) {
+    return {
+      name: param.name || undefined,
+      mode: normalizeParameterMode(param.mode),
+      type: normalizeParameterType(param.type),
+    };
+  });
+}
+
 function getProcedureKey(proc: Procedure): string {
   return `${proc.schema || "public"}.${proc.name}(${getProcedureSignature(proc)})`;
 }
@@ -51,6 +69,8 @@ const config: HandlerConfig<Procedure> = {
   generateDrop: generateDropProcedureSQL,
   generateCreate: generateCreateProcedureSQL,
   needsUpdate: (desired, current) =>
+    JSON.stringify(normalizeProcedureParameters(desired)) !==
+      JSON.stringify(normalizeProcedureParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
     desired.language !== current.language ||
     normalizeSecurityDefiner(desired.securityDefiner) !==
