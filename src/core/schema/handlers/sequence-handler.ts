@@ -168,11 +168,6 @@ export class SequenceHandler {
         continue;
       }
 
-      if (currentSequence.ownedBy && !desiredSequence.ownedBy) {
-        Logger.info(`sequence '${key}' is owned by a table column, skipping`);
-        continue;
-      }
-
       if (sequencesNeedUpdate(desiredSequence, currentSequence)) {
         statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
         statements.push(...generateCreateSequenceStatements(desiredSequence));
