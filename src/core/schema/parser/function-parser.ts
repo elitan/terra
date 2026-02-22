@@ -119,7 +119,9 @@ function extractFunctionParameters(node: any): FunctionParameter[] {
       // Mode is stored as FUNC_PARAM_IN, FUNC_PARAM_OUT, etc.
       if (fpNode.mode) {
         const modeStr = fpNode.mode.replace('FUNC_PARAM_', '');
-        if (modeStr !== 'DEFAULT') {
+        if (modeStr === 'TABLE') {
+          param.mode = "OUT";
+        } else if (modeStr !== 'DEFAULT') {
           param.mode = modeStr as 'IN' | 'OUT' | 'INOUT' | 'VARIADIC';
         }
       }
