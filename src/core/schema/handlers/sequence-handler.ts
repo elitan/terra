@@ -121,8 +121,7 @@ function generateOwnedByStatement(sequence: Sequence): string | null {
     return null;
   }
 
-  const ownedByTarget = sequence.ownedBy
-    .split(".")
+  const ownedByTarget = splitOwnedByTarget(sequence.ownedBy)
     .map(function (part) {
       const identifier = part.replace(/^"|"$/g, "");
       if (/^[a-z_][a-z0-9_]*$/.test(identifier)) {
@@ -136,6 +135,43 @@ function generateOwnedByStatement(sequence: Sequence): string | null {
   builder.p("ALTER SEQUENCE").table(sequence.name, sequence.schema);
   builder.p(`OWNED BY ${ownedByTarget}`);
   return builder.build() + ";";
+}
+
+function splitOwnedByTarget(target: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let inQuote = false;
+
+  for (let i = 0; i < target.length; i++) {
+    const char = target[i];
+
+    if (char === '"') {
+      current += char;
+      if (inQuote && target[i + 1] === '"') {
+        current += '"';
+        i++;
+        continue;
+      }
+      inQuote = !inQuote;
+      continue;
+    }
+
+    if (char === "." && !inQuote) {
+      if (current) {
+        segments.push(current);
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments;
 }
 
 function generateCreateSequenceStatements(sequence: Sequence): string[] {

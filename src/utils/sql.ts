@@ -911,8 +911,7 @@ export function generateCreateSequenceSQL(seq: Sequence): string {
 }
 
 function quoteOwnedByTarget(target: string): string {
-  return target
-    .split(".")
+  return splitOwnedByTarget(target)
     .map(function (part) {
       const identifier = part.replace(/^"|"$/g, "");
       if (/^[a-z_][a-z0-9_]*$/.test(identifier)) {
@@ -921,6 +920,43 @@ function quoteOwnedByTarget(target: string): string {
       return `"${identifier.replace(/"/g, '""')}"`;
     })
     .join(".");
+}
+
+function splitOwnedByTarget(target: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let inQuote = false;
+
+  for (let i = 0; i < target.length; i++) {
+    const char = target[i];
+
+    if (char === '"') {
+      current += char;
+      if (inQuote && target[i + 1] === '"') {
+        current += '"';
+        i++;
+        continue;
+      }
+      inQuote = !inQuote;
+      continue;
+    }
+
+    if (char === "." && !inQuote) {
+      if (current) {
+        segments.push(current);
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments;
 }
 
 export function generateDropSequenceSQL(sequenceName: string, schema?: string): string {
