@@ -211,5 +211,16 @@ describe("Parser Error Handling", () => {
       const result = await parser.parseSchema(sqlWithKeywords);
       expect(result.tables[0].columns).toHaveLength(5);
     });
+
+    test("should keep quoted reserved keyword in unique constraint", async function () {
+      const sql = `
+        CREATE TABLE test_table (
+          "status" TEXT,
+          UNIQUE ("status")
+        );
+      `;
+
+      await expect(parser.parseSchema(sql)).resolves.toBeDefined();
+    });
   });
 });

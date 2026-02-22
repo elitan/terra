@@ -102,7 +102,7 @@ export class SchemaParser {
       sql = sql.replace(pattern, `"${keyword}"`);
 
       // Also match in UNIQUE constraints: UNIQUE (column1, keyword, column3)
-      const uniquePattern = new RegExp(`(UNIQUE\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      const uniquePattern = new RegExp(`(UNIQUE\\s*\\([^)]*?)(?<!")\\b${keyword}\\b(?!")`, 'gi');
       sql = sql.replace(uniquePattern, `$1"${keyword}"`);
 
       // Also match in PRIMARY KEY and FOREIGN KEY constraints
