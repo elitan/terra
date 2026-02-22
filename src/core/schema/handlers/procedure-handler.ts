@@ -41,6 +41,10 @@ function getProcedureKey(proc: Procedure): string {
   return `${proc.schema || "public"}.${proc.name}(${getProcedureSignature(proc)})`;
 }
 
+function normalizeSecurityDefiner(value: Procedure['securityDefiner']): boolean {
+  return Boolean(value);
+}
+
 const config: HandlerConfig<Procedure> = {
   name: "procedure",
   getKey: getProcedureKey,
@@ -48,7 +52,9 @@ const config: HandlerConfig<Procedure> = {
   generateCreate: generateCreateProcedureSQL,
   needsUpdate: (desired, current) =>
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
-    desired.language !== current.language,
+    desired.language !== current.language ||
+    normalizeSecurityDefiner(desired.securityDefiner) !==
+      normalizeSecurityDefiner(current.securityDefiner),
 };
 
 export class ProcedureHandler {
