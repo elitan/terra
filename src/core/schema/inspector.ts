@@ -1154,30 +1154,42 @@ export class DatabaseInspector {
     let current = "";
     let depthParen = 0;
     let depthBracket = 0;
-    let inQuote = false;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
 
     for (let i = 0; i < argsString.length; i++) {
       const char = argsString[i];
 
-      if (char === "'") {
+      if (char === "'" && !inDoubleQuote) {
         current += char;
-        if (inQuote && argsString[i + 1] === "'") {
+        if (inSingleQuote && argsString[i + 1] === "'") {
           current += "'";
           i++;
           continue;
         }
-        inQuote = !inQuote;
+        inSingleQuote = !inSingleQuote;
         continue;
       }
 
-      if (!inQuote) {
+      if (char === '"' && !inSingleQuote) {
+        current += char;
+        if (inDoubleQuote && argsString[i + 1] === '"') {
+          current += '"';
+          i++;
+          continue;
+        }
+        inDoubleQuote = !inDoubleQuote;
+        continue;
+      }
+
+      if (!inSingleQuote && !inDoubleQuote) {
         if (char === "(") depthParen++;
         if (char === ")") depthParen = Math.max(0, depthParen - 1);
         if (char === "[") depthBracket++;
         if (char === "]") depthBracket = Math.max(0, depthBracket - 1);
       }
 
-      if (char === "," && !inQuote && depthParen === 0 && depthBracket === 0) {
+      if (char === "," && !inSingleQuote && !inDoubleQuote && depthParen === 0 && depthBracket === 0) {
         const value = current.trim();
         if (value) {
           args.push(value);
