@@ -98,7 +98,7 @@ export class SchemaParser {
 
       // Match keyword preceded by whitespace/comma and followed by a type
       // Make sure it's not already quoted and not preceded by CREATE/ALTER
-      const pattern = new RegExp(`(?<![CREATE|ALTER]\\s{1,20})(?<=\\s|,)\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
+      const pattern = new RegExp(`(?<![CREATE|ALTER]\\s{1,20})(?<=\\s|,|\\()\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
       sql = sql.replace(pattern, `"${keyword}"`);
 
       // Also match in UNIQUE constraints: UNIQUE (column1, keyword, column3)

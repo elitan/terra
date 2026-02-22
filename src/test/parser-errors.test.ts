@@ -233,5 +233,15 @@ describe("Parser Error Handling", () => {
 
       await expect(parser.parseSchema(sql)).resolves.toBeDefined();
     });
+
+    test("should automatically quote reserved keyword in inline first-column definitions", async function () {
+      const sql = "CREATE TABLE intervals (user INT);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("INT4");
+    });
   });
 });
