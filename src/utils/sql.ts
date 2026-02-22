@@ -904,10 +904,23 @@ export function generateCreateSequenceSQL(seq: Sequence): string {
   }
 
   if (seq.ownedBy) {
-    builder.p(`OWNED BY ${seq.ownedBy}`);
+    builder.p(`OWNED BY ${quoteOwnedByTarget(seq.ownedBy)}`);
   }
 
   return builder.build() + ';';
+}
+
+function quoteOwnedByTarget(target: string): string {
+  return target
+    .split(".")
+    .map(function (part) {
+      const identifier = part.replace(/^"|"$/g, "");
+      if (/^[a-z_][a-z0-9_]*$/.test(identifier)) {
+        return identifier;
+      }
+      return `"${identifier.replace(/"/g, '""')}"`;
+    })
+    .join(".");
 }
 
 export function generateDropSequenceSQL(sequenceName: string, schema?: string): string {
