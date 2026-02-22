@@ -26,6 +26,18 @@ export function parseCreateTable(stmt: any): Table | null {
     const columns = extractColumns(stmt.tableElts || []);
 
     const constraints = extractAllConstraints(stmt.tableElts || [], tableName);
+    const normalizedForeignKeys = constraints.foreignKeys.map((foreignKey) => {
+      if (!schema || schema === "public") {
+        return foreignKey;
+      }
+      if (foreignKey.referencedTable.includes(".")) {
+        return foreignKey;
+      }
+      return {
+        ...foreignKey,
+        referencedTable: `${schema}.${foreignKey.referencedTable}`,
+      };
+    });
 
     return {
       name: tableName,
@@ -33,8 +45,8 @@ export function parseCreateTable(stmt: any): Table | null {
       columns,
       primaryKey: constraints.primaryKey,
       foreignKeys:
-        constraints.foreignKeys.length > 0
-          ? constraints.foreignKeys
+        normalizedForeignKeys.length > 0
+          ? normalizedForeignKeys
           : undefined,
       checkConstraints:
         constraints.checkConstraints.length > 0
