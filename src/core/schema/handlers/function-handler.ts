@@ -78,6 +78,24 @@ function getFunctionSignature(func: Function): string {
   }).join(",");
 }
 
+function normalizeParameterMode(mode: Function["parameters"][number]["mode"]): string {
+  if (!mode || mode === "IN") {
+    return "IN";
+  }
+
+  return mode;
+}
+
+function normalizeFunctionParameters(func: Function): Array<{ name?: string; mode: string; type: string }> {
+  return func.parameters.map(function (param) {
+    return {
+      name: param.name || undefined,
+      mode: normalizeParameterMode(param.mode),
+      type: normalizeParameterType(param.type),
+    };
+  });
+}
+
 function getFunctionKey(func: Function): string {
   return `${func.schema || "public"}.${func.name}(${getFunctionSignature(func)})`;
 }
@@ -88,6 +106,8 @@ const config: HandlerConfig<Function> = {
   generateDrop: generateDropFunctionSQL,
   generateCreate: generateCreateFunctionSQL,
   needsUpdate: (desired, current) =>
+    JSON.stringify(normalizeFunctionParameters(desired)) !==
+      JSON.stringify(normalizeFunctionParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
     normalizeReturnType(desired.returnType) !== normalizeReturnType(current.returnType) ||
     desired.language !== current.language ||
