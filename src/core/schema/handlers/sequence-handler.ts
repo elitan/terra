@@ -121,9 +121,20 @@ function generateOwnedByStatement(sequence: Sequence): string | null {
     return null;
   }
 
+  const ownedByTarget = sequence.ownedBy
+    .split(".")
+    .map(function (part) {
+      const identifier = part.replace(/^"|"$/g, "");
+      if (/^[a-z_][a-z0-9_]*$/.test(identifier)) {
+        return identifier;
+      }
+      return `"${identifier.replace(/"/g, '""')}"`;
+    })
+    .join(".");
+
   const builder = new SQLBuilder();
   builder.p("ALTER SEQUENCE").table(sequence.name, sequence.schema);
-  builder.p(`OWNED BY ${sequence.ownedBy}`);
+  builder.p(`OWNED BY ${ownedByTarget}`);
   return builder.build() + ";";
 }
 
