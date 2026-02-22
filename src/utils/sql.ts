@@ -768,8 +768,23 @@ export function generateCreateFunctionSQL(func: Function): string {
   return builder.build() + ';';
 }
 
+function isIdentityRoutineParameterMode(mode: string | undefined): boolean {
+  return !mode || mode.toUpperCase() !== "OUT";
+}
+
+function getIdentityRoutineParamTypes(parameters: Array<{ type: string; mode?: string }>): string {
+  return parameters
+    .filter(function (parameter) {
+      return isIdentityRoutineParameterMode(parameter.mode);
+    })
+    .map(function (parameter) {
+      return parameter.type;
+    })
+    .join(", ");
+}
+
 export function generateDropFunctionSQL(func: Function): string {
-  const paramTypes = func.parameters.map(p => p.type).join(", ");
+  const paramTypes = getIdentityRoutineParamTypes(func.parameters);
   // Use CASCADE to automatically drop dependent triggers
   const builder = new SQLBuilder();
   builder.p('DROP FUNCTION IF EXISTS').table(func.name, func.schema);
@@ -810,7 +825,7 @@ export function generateCreateProcedureSQL(proc: Procedure): string {
 }
 
 export function generateDropProcedureSQL(proc: Procedure): string {
-  const paramTypes = proc.parameters.map(p => p.type).join(", ");
+  const paramTypes = getIdentityRoutineParamTypes(proc.parameters);
   const builder = new SQLBuilder();
   builder.p('DROP PROCEDURE IF EXISTS').table(proc.name, proc.schema);
   builder.rewriteLastChar('(');

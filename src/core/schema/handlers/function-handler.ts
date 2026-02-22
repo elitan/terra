@@ -72,18 +72,27 @@ function normalizeReturnType(type: string): string {
   return normalizeType(type);
 }
 
-function getFunctionSignature(func: Function): string {
-  return func.parameters.map(function (param) {
-    return normalizeParameterType(param.type);
-  }).join(",");
-}
-
 function normalizeParameterMode(mode: Function["parameters"][number]["mode"]): string {
   if (!mode || mode === "IN") {
     return "IN";
   }
 
   return mode;
+}
+
+function isIdentityParameterMode(mode: Function["parameters"][number]["mode"]): boolean {
+  return normalizeParameterMode(mode) !== "OUT";
+}
+
+function getFunctionSignature(func: Function): string {
+  return func.parameters
+    .filter(function (param) {
+      return isIdentityParameterMode(param.mode);
+    })
+    .map(function (param) {
+      return normalizeParameterType(param.type);
+    })
+    .join(",");
 }
 
 function normalizeFunctionParameters(

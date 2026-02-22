@@ -31,18 +31,27 @@ function normalizeParameterType(type: string): string {
   return `${canonical}${arraySuffix}`;
 }
 
-function getProcedureSignature(proc: Procedure): string {
-  return proc.parameters.map(function (param) {
-    return normalizeParameterType(param.type);
-  }).join(",");
-}
-
 function normalizeParameterMode(mode: Procedure["parameters"][number]["mode"]): string {
   if (!mode || mode === "IN") {
     return "IN";
   }
 
   return mode;
+}
+
+function isIdentityParameterMode(mode: Procedure["parameters"][number]["mode"]): boolean {
+  return normalizeParameterMode(mode) !== "OUT";
+}
+
+function getProcedureSignature(proc: Procedure): string {
+  return proc.parameters
+    .filter(function (param) {
+      return isIdentityParameterMode(param.mode);
+    })
+    .map(function (param) {
+      return normalizeParameterType(param.type);
+    })
+    .join(",");
 }
 
 function normalizeProcedureParameters(
