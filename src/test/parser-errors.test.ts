@@ -243,5 +243,15 @@ describe("Parser Error Handling", () => {
       expect(userColumn).toBeDefined();
       expect(userColumn?.type).toBe("INT4");
     });
+
+    test("should automatically quote reserved keyword for money columns", async function () {
+      const sql = "CREATE TABLE intervals (user MONEY);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("MONEY");
+    });
   });
 });
