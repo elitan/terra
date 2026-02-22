@@ -103,7 +103,10 @@ describe("Handler module coverage", () => {
         [makeExtension({ name: "pgcrypto", version: "1.4" })],
         [makeExtension({ name: "pgcrypto", version: "1.3" })]
       );
-      expect(drift).toEqual({ create: [], drop: [] });
+      expect(drift).toEqual({
+        create: [`ALTER EXTENSION "pgcrypto" UPDATE TO '1.4';`],
+        drop: [],
+      });
     });
   });
 
