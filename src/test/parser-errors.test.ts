@@ -323,5 +323,20 @@ describe("Parser Error Handling", () => {
       expect(userColumn).toBeDefined();
       expect(userColumn?.type).toBe("POINT");
     });
+
+    test("should automatically quote reserved keyword for user-defined types", async function () {
+      const sql = `
+        CREATE TYPE mood AS ENUM ('sad', 'ok');
+        CREATE TABLE users (
+          user mood
+        );
+      `;
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("MOOD");
+    });
   });
 });
