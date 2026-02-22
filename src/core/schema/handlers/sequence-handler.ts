@@ -3,7 +3,7 @@ import {
   generateCreateSequenceSQL,
   generateDropSequenceSQL,
 } from "../../../utils/sql";
-import { generateStatements, type HandlerConfig } from "./base-handler";
+import { Logger } from "../../../utils/logger";
 
 type NormalizedSequence = {
   dataType: "SMALLINT" | "INTEGER" | "BIGINT";
@@ -97,17 +97,49 @@ function getSequenceKey(sequence: Sequence): string {
   return `${sequence.schema || "public"}.${sequence.name}`;
 }
 
-const config: HandlerConfig<Sequence> = {
-  name: "sequence",
-  getKey: getSequenceKey,
-  generateDrop: (sequence) => generateDropSequenceSQL(sequence.name, sequence.schema),
-  generateCreate: generateCreateSequenceSQL,
-  shouldManage: (s) => !s.ownedBy,
-  needsUpdate: sequencesNeedUpdate,
-};
-
 export class SequenceHandler {
   generateStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {
-    return generateStatements(desiredSequences, currentSequences, config);
+    const statements: string[] = [];
+    const currentMap = new Map(currentSequences.map(sequence => [getSequenceKey(sequence), sequence]));
+    const desiredKeys = new Set(desiredSequences.map(getSequenceKey));
+
+    for (const currentSequence of currentSequences) {
+      const key = getSequenceKey(currentSequence);
+      if (!desiredKeys.has(key)) {
+        if (currentSequence.ownedBy) {
+          Logger.info(`sequence '${key}' is owned by a table column, skipping`);
+          continue;
+        }
+
+        statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
+        Logger.info(`Dropping sequence '${key}'`);
+      }
+    }
+
+    for (const desiredSequence of desiredSequences) {
+      const key = getSequenceKey(desiredSequence);
+      const currentSequence = currentMap.get(key);
+
+      if (!currentSequence) {
+        statements.push(generateCreateSequenceSQL(desiredSequence));
+        Logger.info(`Creating sequence '${key}'`);
+        continue;
+      }
+
+      if (currentSequence.ownedBy && !desiredSequence.ownedBy) {
+        Logger.info(`sequence '${key}' is owned by a table column, skipping`);
+        continue;
+      }
+
+      if (sequencesNeedUpdate(desiredSequence, currentSequence)) {
+        statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
+        statements.push(generateCreateSequenceSQL(desiredSequence));
+        Logger.info(`Updating sequence '${key}'`);
+      } else {
+        Logger.info(`sequence '${key}' is up to date, skipping`);
+      }
+    }
+
+    return statements;
   }
 }

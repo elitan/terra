@@ -210,6 +210,13 @@ export class SchemaService {
         sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
       }
 
+      const preSequenceStatements = sequenceStatements.filter(
+        statement => !/\bOWNED\s+BY\b/i.test(statement)
+      );
+      const postSequenceStatements = sequenceStatements.filter(
+        statement => /\bOWNED\s+BY\b/i.test(statement)
+      );
+
       if (this.provider.supportsFeature("stored_functions")) {
         functionStatements = this.functionHandler.generateStatements(desiredFunctions, currentFunctions);
       }
@@ -236,10 +243,11 @@ export class SchemaService {
 
       const combinedPlan: MigrationPlan = {
         transactional: [
-          ...sequenceStatements,
+          ...preSequenceStatements,
           ...plan.transactional,
           ...plan.deferred,
           ...enumRemovalStatements,
+          ...postSequenceStatements,
           ...functionStatements,
           ...procedureStatements,
           ...viewStatements,
