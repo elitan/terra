@@ -54,6 +54,37 @@ function normalizeSingleSourceColumnQualification(definition: string): string {
   return definition.replace(new RegExp(`\\b${escapeRegExp(sourceName)}\\.`, "gi"), "");
 }
 
+function hasBalancedOuterParentheses(value: string): boolean {
+  if (!value.startsWith("(") || !value.endsWith(")")) {
+    return false;
+  }
+
+  let depth = 0;
+  for (let i = 0; i < value.length - 1; i++) {
+    const char = value[i];
+    if (char === "(") depth++;
+    if (char === ")") depth--;
+    if (depth === 0) return false;
+  }
+
+  return depth === 1;
+}
+
+function stripOuterParentheses(value: string): string {
+  let normalized = value.trim();
+  while (hasBalancedOuterParentheses(normalized)) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized;
+}
+
+function normalizeWhereParentheses(definition: string): string {
+  return definition.replace(
+    /\bWHERE\s+(.+?)(?=\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|$)/i,
+    (_match, clause: string) => `WHERE ${stripOuterParentheses(clause)}`
+  );
+}
+
 function normalizeDefinition(def: string, schema?: string): string {
   let normalized = def.replace(/;+\s*$/g, '').replace(/\s+/g, ' ').trim();
   const localSchema = schema || "public";
@@ -63,6 +94,7 @@ function normalizeDefinition(def: string, schema?: string): string {
   normalized = normalized.replace(new RegExp(`\\b${escapedSchema}\\.`, "gi"), "");
   normalized = normalizeSimpleIdentifierQuotes(normalized);
   normalized = normalizeSingleSourceColumnQualification(normalized);
+  normalized = normalizeWhereParentheses(normalized);
 
   return normalized;
 }
