@@ -219,7 +219,16 @@ function extractDefaultValue(defaultNode: any): string {
 function extractReturnType(node: any): string | null {
   try {
     if (node.returnType) {
-      return extractDataType(node.returnType);
+      const type = extractDataType(node.returnType);
+      if (!type) {
+        return null;
+      }
+
+      if (node.returnType.setof === true) {
+        return `SETOF ${type}`;
+      }
+
+      return type;
     }
     return null;
   } catch (error) {
