@@ -21,7 +21,7 @@ export function parseCreateFunction(node: any): Function | null {
     const schema = extractFunctionSchema(node);
 
     const parameters = extractFunctionParameters(node);
-    const returnType = extractReturnType(node);
+    const returnType = extractReturnType(node, parameters);
     if (!returnType) {
       Logger.warning(`Function '${name}' missing return type`);
       return null;
@@ -216,7 +216,7 @@ function extractDefaultValue(defaultNode: any): string {
 /**
  * Extract return type from pgsql-parser AST
  */
-function extractReturnType(node: any): string | null {
+function extractReturnType(node: any, parameters: FunctionParameter[]): string | null {
   try {
     if (node.returnType) {
       const type = extractDataType(node.returnType);
@@ -230,7 +230,20 @@ function extractReturnType(node: any): string | null {
 
       return type;
     }
-    return null;
+
+    const outputParams = parameters.filter(function (parameter) {
+      return parameter.mode === "OUT" || parameter.mode === "INOUT";
+    });
+
+    if (outputParams.length === 0) {
+      return null;
+    }
+
+    if (outputParams.length === 1) {
+      return outputParams[0]?.type || null;
+    }
+
+    return "record";
   } catch (error) {
     return null;
   }
