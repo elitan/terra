@@ -222,5 +222,16 @@ describe("Parser Error Handling", () => {
 
       await expect(parser.parseSchema(sql)).resolves.toBeDefined();
     });
+
+    test("should keep quoted reserved keyword in primary key constraint", async function () {
+      const sql = `
+        CREATE TABLE test_table (
+          "order" INT,
+          PRIMARY KEY ("order")
+        );
+      `;
+
+      await expect(parser.parseSchema(sql)).resolves.toBeDefined();
+    });
   });
 });
