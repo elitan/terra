@@ -55,7 +55,7 @@
     "test:coverage:full": "bun --env-file=.env test --max-concurrency=1 --coverage --coverage-reporter=lcov --timeout 120000 src/test && bun run tools/check-coverage-gate.ts coverage/lcov.info 95 95 src/core/schema/parser:98:98 src/core/schema/differ.ts:98:98 src/core/schema/inspector.ts:98:98 src/core/schema/service.ts:98:98",
     "test:watch": "bun --env-file=.env test --watch src/test",
     "test:sqlite": "bun --env-file=.env test src/test/sqlite",
-    "test:pg:matrix": "bun --env-file=.env test $(rg --files src/test | rg '\\.test\\.ts$' | rg -v '^src/test/(sqlite|extensions|columns/performance|properties)/')",
+    "test:pg:matrix": "bun --env-file=.env test $(find src/test -type f -name '*.test.ts' | grep -Ev '^src/test/(sqlite|extensions|columns/performance|properties)/' | sort)",
     "test:pg:14": "DATABASE_URL=${DATABASE_URL_PG14:-postgres://test_user:test_password@localhost:5486/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:15": "DATABASE_URL=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:16": "DATABASE_URL=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} bun run test:pg:matrix",
