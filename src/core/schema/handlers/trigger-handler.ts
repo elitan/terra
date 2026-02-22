@@ -23,13 +23,15 @@ const config: HandlerConfig<Trigger> = {
     const currentWhen = current.when ? normalizeExpression(current.when) : undefined;
     const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
     const currentArgs = normalizeTriggerArgs(current.functionArgs);
+    const desiredEvents = normalizeTriggerEvents(desired.events);
+    const currentEvents = normalizeTriggerEvents(current.events);
 
     return (
       desired.timing !== current.timing ||
       desired.forEach !== current.forEach ||
       desired.functionName !== current.functionName ||
       (desired.functionSchema || "public") !== (current.functionSchema || "public") ||
-      JSON.stringify(desired.events) !== JSON.stringify(current.events) ||
+      JSON.stringify(desiredEvents) !== JSON.stringify(currentEvents) ||
       desiredWhen !== currentWhen ||
       JSON.stringify(desiredArgs) !== JSON.stringify(currentArgs)
     );
@@ -78,6 +80,21 @@ function normalizeTriggerArg(arg: string): string {
   }
 
   return `'${trimmed.replace(/'/g, "''")}'`;
+}
+
+function normalizeTriggerEvents(events: Trigger["events"]): Trigger["events"] {
+  const order: Record<string, number> = {
+    INSERT: 0,
+    DELETE: 1,
+    UPDATE: 2,
+    TRUNCATE: 3,
+  };
+
+  return [...events].sort((a, b) => {
+    const left = order[a] ?? Number.MAX_SAFE_INTEGER;
+    const right = order[b] ?? Number.MAX_SAFE_INTEGER;
+    return left - right || a.localeCompare(b);
+  });
 }
 
 export class TriggerHandler {
