@@ -273,5 +273,15 @@ describe("Parser Error Handling", () => {
       expect(userColumn).toBeDefined();
       expect(userColumn?.type).toBe("INET");
     });
+
+    test("should automatically quote reserved keyword for xml columns", async function () {
+      const sql = "CREATE TABLE docs (user XML);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("XML");
+    });
   });
 });
