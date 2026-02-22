@@ -5,7 +5,7 @@ import {
   executeColumnMigration,
   EnhancedAssertions,
 } from "../column-test-utils";
-import { getTableColumns, createTestClient } from "../../utils";
+import { cleanDatabase, getTableColumns, createTestClient } from "../../utils";
 import { InvalidData } from "../test-data-generators";
 import type { Column } from "../../../types/schema";
 
@@ -15,15 +15,12 @@ describe("Error Scenarios - Invalid Conversion Attempts", () => {
 
   beforeEach(async () => {
     client = await createTestClient();
+    await cleanDatabase(client);
     services = createColumnTestServices();
   });
 
   afterEach(async () => {
-    try {
-      await client.query(`DROP TABLE IF EXISTS test_table CASCADE;`);
-    } catch (error) {
-      // Ignore cleanup errors
-    }
+    await cleanDatabase(client);
     await client?.end();
   });
 

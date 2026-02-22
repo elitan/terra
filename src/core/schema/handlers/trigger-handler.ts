@@ -2,21 +2,83 @@ import type { Trigger } from "../../../types/schema";
 import {
   generateCreateTriggerSQL,
   generateDropTriggerSQL,
+  normalizeExpression,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 
 const config: HandlerConfig<Trigger> = {
   name: "trigger",
-  getKey: (t) => `${t.tableName}.${t.name}`,
-  getLogName: (t) => `${t.name}' on '${t.tableName}`,
-  generateDrop: generateDropTriggerSQL,
-  generateCreate: generateCreateTriggerSQL,
-  needsUpdate: (desired, current) =>
-    desired.timing !== current.timing ||
-    desired.forEach !== current.forEach ||
-    desired.functionName !== current.functionName ||
-    JSON.stringify(desired.events) !== JSON.stringify(current.events),
+  getKey: (t) => `${t.schema || "public"}.${t.tableName}.${t.name}`,
+  getLogName: (t) => `${t.name}' on '${t.schema || "public"}.${t.tableName}`,
+  generateDrop: generateDropTriggerStatement,
+  generateCreate: generateCreateTriggerStatement,
+  needsUpdate: (desired, current) => {
+    if (hasSqliteDefinition(desired) || hasSqliteDefinition(current)) {
+      const desiredDefinition = normalizeTriggerDefinition(desired.definition || "");
+      const currentDefinition = normalizeTriggerDefinition(current.definition || "");
+      return desiredDefinition !== currentDefinition;
+    }
+
+    const desiredWhen = desired.when ? normalizeExpression(desired.when) : undefined;
+    const currentWhen = current.when ? normalizeExpression(current.when) : undefined;
+    const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
+    const currentArgs = normalizeTriggerArgs(current.functionArgs);
+
+    return (
+      desired.timing !== current.timing ||
+      desired.forEach !== current.forEach ||
+      desired.functionName !== current.functionName ||
+      (desired.functionSchema || "public") !== (current.functionSchema || "public") ||
+      JSON.stringify(desired.events) !== JSON.stringify(current.events) ||
+      desiredWhen !== currentWhen ||
+      JSON.stringify(desiredArgs) !== JSON.stringify(currentArgs)
+    );
+  },
 };
+
+function hasSqliteDefinition(trigger: Trigger): boolean {
+  return typeof trigger.definition === "string" && trigger.definition.trim().length > 0;
+}
+
+function normalizeTriggerDefinition(definition: string): string {
+  return definition.replace(/;+\s*$/g, "").replace(/\s+/g, " ").trim();
+}
+
+function generateDropTriggerStatement(trigger: Trigger): string {
+  if (hasSqliteDefinition(trigger)) {
+    return `DROP TRIGGER IF EXISTS "${trigger.name}";`;
+  }
+
+  return generateDropTriggerSQL(trigger);
+}
+
+function generateCreateTriggerStatement(trigger: Trigger): string {
+  if (hasSqliteDefinition(trigger)) {
+    return `${normalizeTriggerDefinition(trigger.definition || "")};`;
+  }
+
+  return generateCreateTriggerSQL(trigger);
+}
+
+function normalizeTriggerArgs(args: string[] | undefined): string[] {
+  if (!args || args.length === 0) {
+    return [];
+  }
+
+  return args.map(normalizeTriggerArg);
+}
+
+function normalizeTriggerArg(arg: string): string {
+  const trimmed = arg.trim();
+  const isQuoted = trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'");
+
+  if (isQuoted) {
+    const inner = trimmed.slice(1, -1).replace(/''/g, "'");
+    return `'${inner.replace(/'/g, "''")}'`;
+  }
+
+  return `'${trimmed.replace(/'/g, "''")}'`;
+}
 
 export class TriggerHandler {
   generateStatements(desiredTriggers: Trigger[], currentTriggers: Trigger[]): string[] {

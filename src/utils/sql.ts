@@ -485,6 +485,18 @@ export function generateDropPrimaryKeySQL(
     .build();
 }
 
+function appendDeferrableOptions(
+  builder: SQLBuilder,
+  options: { deferrable?: boolean; initiallyDeferred?: boolean }
+): void {
+  if (options.deferrable) {
+    builder.p("DEFERRABLE");
+    if (options.initiallyDeferred) {
+      builder.p("INITIALLY DEFERRED");
+    }
+  }
+}
+
 // Foreign Key SQL generation
 export function generateAddForeignKeySQL(
   tableName: string,
@@ -510,6 +522,8 @@ export function generateAddForeignKeySQL(
   if (foreignKey.onUpdate) {
     builder.p(`ON UPDATE ${foreignKey.onUpdate}`);
   }
+
+  appendDeferrableOptions(builder, foreignKey);
 
   return builder.p(";").build();
 }
@@ -580,13 +594,16 @@ export function generateAddUniqueConstraintSQL(
   const bareTable = getBareTableName(tableName);
   const constraintName = uniqueConstraint.name || `${bareTable}_${uniqueConstraint.columns.join('_')}_unique`;
   const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-  return new SQLBuilder()
+  const builder = new SQLBuilder()
     .p("ALTER TABLE")
     .table(tableName)
     .p("ADD CONSTRAINT")
     .ident(constraintName)
-    .p(`UNIQUE (${columns});`)
-    .build();
+    .p(`UNIQUE (${columns})`);
+
+  appendDeferrableOptions(builder, uniqueConstraint);
+
+  return builder.p(";").build();
 }
 
 export function generateDropUniqueConstraintSQL(
@@ -619,6 +636,7 @@ export function generateUniqueConstraintClause(
   }
 
   builder.p(`UNIQUE (${columns})`);
+  appendDeferrableOptions(builder, uniqueConstraint);
 
   return builder.build();
 }
@@ -633,7 +651,7 @@ export function generateCreateViewSQL(view: View): string {
     builder.p("CREATE VIEW");
   }
 
-  builder.ident(view.name);
+  builder.table(view.name, view.schema);
 
   if (!view.materialized && view.securityBarrier !== undefined) {
     builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
@@ -649,7 +667,7 @@ export function generateCreateViewSQL(view: View): string {
   return builder.p(";").build();
 }
 
-export function generateDropViewSQL(viewName: string, materialized?: boolean): string {
+export function generateDropViewSQL(viewName: string, materialized?: boolean, schema?: string): string {
   const builder = new SQLBuilder();
 
   if (materialized) {
@@ -658,19 +676,19 @@ export function generateDropViewSQL(viewName: string, materialized?: boolean): s
     builder.p("DROP VIEW IF EXISTS");
   }
 
-  return builder.ident(viewName).p(";").build();
+  return builder.table(viewName, schema).p(";").build();
 }
 
 export function generateCreateOrReplaceViewSQL(view: View): string {
   if (view.materialized) {
     // CREATE OR REPLACE doesn't work with materialized views
     // We need to drop and recreate
-    return generateDropViewSQL(view.name, true) + "\n" + generateCreateViewSQL(view);
+    return generateDropViewSQL(view.name, true, view.schema) + "\n" + generateCreateViewSQL(view);
   }
 
   const builder = new SQLBuilder()
     .p("CREATE OR REPLACE VIEW")
-    .ident(view.name);
+    .table(view.name, view.schema);
 
   if (view.securityBarrier !== undefined) {
     builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
@@ -702,7 +720,7 @@ export function generateRefreshMaterializedViewSQL(viewName: string, concurrentl
 export function generateCreateFunctionSQL(func: Function): string {
   const builder = new SQLBuilder();
 
-  builder.p('CREATE FUNCTION').ident(func.name);
+  builder.p('CREATE FUNCTION').table(func.name, func.schema);
   builder.rewriteLastChar('(');
 
   // Add parameters
@@ -754,7 +772,7 @@ export function generateDropFunctionSQL(func: Function): string {
   const paramTypes = func.parameters.map(p => p.type).join(", ");
   // Use CASCADE to automatically drop dependent triggers
   const builder = new SQLBuilder();
-  builder.p('DROP FUNCTION IF EXISTS').ident(func.name);
+  builder.p('DROP FUNCTION IF EXISTS').table(func.name, func.schema);
   builder.rewriteLastChar('(');
   builder.p(`${paramTypes}) CASCADE;`);
   return builder.build();
@@ -764,7 +782,7 @@ export function generateDropFunctionSQL(func: Function): string {
 export function generateCreateProcedureSQL(proc: Procedure): string {
   const builder = new SQLBuilder();
 
-  builder.p('CREATE PROCEDURE').ident(proc.name);
+  builder.p('CREATE PROCEDURE').table(proc.name, proc.schema);
   builder.rewriteLastChar('(');
 
   // Add parameters
@@ -794,7 +812,7 @@ export function generateCreateProcedureSQL(proc: Procedure): string {
 export function generateDropProcedureSQL(proc: Procedure): string {
   const paramTypes = proc.parameters.map(p => p.type).join(", ");
   const builder = new SQLBuilder();
-  builder.p('DROP PROCEDURE IF EXISTS').ident(proc.name);
+  builder.p('DROP PROCEDURE IF EXISTS').table(proc.name, proc.schema);
   builder.rewriteLastChar('(');
   builder.p(`${paramTypes});`);
   return builder.build();
@@ -807,7 +825,7 @@ export function generateCreateTriggerSQL(trigger: Trigger): string {
   builder.p('CREATE TRIGGER').ident(trigger.name);
   builder.p(trigger.timing);
   builder.p(trigger.events.join(" OR "));
-  builder.p('ON').ident(trigger.tableName);
+  builder.p('ON').table(trigger.tableName, trigger.schema);
 
   if (trigger.forEach) {
     builder.p(`FOR EACH ${trigger.forEach}`);
@@ -817,12 +835,14 @@ export function generateCreateTriggerSQL(trigger: Trigger): string {
     builder.p(`WHEN (${trigger.when})`);
   }
 
-  builder.p('EXECUTE FUNCTION').ident(trigger.functionName);
+  builder.p('EXECUTE FUNCTION').table(trigger.functionName, trigger.functionSchema);
   builder.rewriteLastChar('(');
   if (trigger.functionArgs && trigger.functionArgs.length > 0) {
     builder.p(trigger.functionArgs.join(", "));
+    builder.rewriteLastChar(')');
+  } else {
+    builder.p(')');
   }
-  builder.p(')');
 
   return builder.build() + ';';
 }
@@ -830,7 +850,7 @@ export function generateCreateTriggerSQL(trigger: Trigger): string {
 export function generateDropTriggerSQL(trigger: Trigger): string {
   const builder = new SQLBuilder();
   builder.p('DROP TRIGGER IF EXISTS').ident(trigger.name);
-  builder.p('ON').ident(trigger.tableName);
+  builder.p('ON').table(trigger.tableName, trigger.schema);
   return builder.p(';').build();
 }
 
@@ -838,7 +858,7 @@ export function generateDropTriggerSQL(trigger: Trigger): string {
 export function generateCreateSequenceSQL(seq: Sequence): string {
   const builder = new SQLBuilder();
 
-  builder.p('CREATE SEQUENCE').ident(seq.name);
+  builder.p('CREATE SEQUENCE').table(seq.name, seq.schema);
 
   if (seq.dataType) {
     builder.p(`AS ${seq.dataType}`);
@@ -875,9 +895,9 @@ export function generateCreateSequenceSQL(seq: Sequence): string {
   return builder.build() + ';';
 }
 
-export function generateDropSequenceSQL(sequenceName: string): string {
+export function generateDropSequenceSQL(sequenceName: string, schema?: string): string {
   const builder = new SQLBuilder();
-  builder.p('DROP SEQUENCE IF EXISTS').ident(sequenceName);
+  builder.p('DROP SEQUENCE IF EXISTS').table(sequenceName, schema);
   return builder.p(';').build();
 }
 

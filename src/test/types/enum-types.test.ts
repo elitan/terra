@@ -10,7 +10,7 @@ describe("ENUM Types", () => {
 
   beforeEach(async () => {
     client = await createTestClient();
-    await cleanDatabase(client, ['public', 'myapp', 'app']);
+    await cleanDatabase(client, ['public', 'myapp', 'app', 'tenant_a']);
     const databaseService = new DatabaseService(getTestDbConfig());
     schemaService = createTestSchemaService();
   });
@@ -323,6 +323,34 @@ describe("ENUM Types", () => {
         /ENUM type 'priority' modification requires manual intervention.*reordering values/
       );
     });
+
+    it("should reject inserting ENUM value in the middle as unsafe reordering", async () => {
+      const initialSchema = `
+        CREATE TYPE priority AS ENUM ('low', 'medium', 'high');
+
+        CREATE TABLE tasks (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          priority priority NOT NULL
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ['public'], true);
+
+      const updatedSchema = `
+        CREATE TYPE priority AS ENUM ('low', 'urgent', 'medium', 'high');
+
+        CREATE TABLE tasks (
+          id SERIAL PRIMARY KEY,
+          title VARCHAR(255) NOT NULL,
+          priority priority NOT NULL
+        );
+      `;
+
+      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow(
+        /ENUM type 'priority' modification requires manual intervention.*reordering values/
+      );
+    });
   });
 
   describe("ENUM Type Removal", () => {
@@ -625,6 +653,67 @@ describe("ENUM Types", () => {
       await expect(
         client.query(`INSERT INTO myapp.users (name, role) VALUES ('John', 'admin')`)
       ).rejects.toThrow();
+    });
+
+    it("should append only target schema enum values when names match across schemas", async () => {
+      const initialSchema = `
+        CREATE SCHEMA app;
+        CREATE SCHEMA tenant_a;
+
+        CREATE TYPE app.status AS ENUM ('active', 'inactive');
+        CREATE TYPE tenant_a.status AS ENUM ('queued', 'done');
+
+        CREATE TABLE app.users (
+          id SERIAL PRIMARY KEY,
+          status app.status NOT NULL
+        );
+
+        CREATE TABLE tenant_a.jobs (
+          id SERIAL PRIMARY KEY,
+          status tenant_a.status NOT NULL
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ['app', 'tenant_a'], true);
+
+      const updatedSchema = `
+        CREATE SCHEMA app;
+        CREATE SCHEMA tenant_a;
+
+        CREATE TYPE app.status AS ENUM ('active', 'inactive', 'pending');
+        CREATE TYPE tenant_a.status AS ENUM ('queued', 'done');
+
+        CREATE TABLE app.users (
+          id SERIAL PRIMARY KEY,
+          status app.status NOT NULL
+        );
+
+        CREATE TABLE tenant_a.jobs (
+          id SERIAL PRIMARY KEY,
+          status tenant_a.status NOT NULL
+        );
+      `;
+
+      await schemaService.apply(updatedSchema, ['app', 'tenant_a'], true);
+
+      const result = await client.query(`
+        SELECT n.nspname AS enum_schema, e.enumlabel
+        FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        JOIN pg_enum e ON e.enumtypid = t.oid
+        WHERE t.typname = 'status' AND n.nspname IN ('app', 'tenant_a')
+        ORDER BY n.nspname, e.enumsortorder
+      `);
+
+      const appValues = result.rows
+        .filter(row => row.enum_schema === 'app')
+        .map(row => row.enumlabel);
+      const tenantValues = result.rows
+        .filter(row => row.enum_schema === 'tenant_a')
+        .map(row => row.enumlabel);
+
+      expect(appValues).toEqual(['active', 'inactive', 'pending']);
+      expect(tenantValues).toEqual(['queued', 'done']);
     });
   });
 });

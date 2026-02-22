@@ -4,6 +4,7 @@ import {
   ParserError,
   MigrationError,
   DependencyError,
+  StrictModeError,
   ValidationError,
 } from "../types/errors";
 
@@ -145,17 +146,51 @@ describe("Error Classes", () => {
     });
   });
 
+  describe("StrictModeError", () => {
+    test("should create strict mode error with destructive statements", () => {
+      const statements = ['DROP TABLE "users";'];
+      const error = new StrictModeError(
+        "Strict mode blocked destructive migration statements",
+        statements
+      );
+
+      expect(error).toBeInstanceOf(StrictModeError);
+      expect(error.code).toBe("STRICT_MODE_ERROR");
+      expect(error.statements).toEqual(statements);
+    });
+  });
+
   describe("Error inheritance chain", () => {
+    test("keeps stable codes across all terra error subclasses", () => {
+      const errors = [
+        new ParserError("test"),
+        new MigrationError("test"),
+        new DependencyError("test"),
+        new ValidationError("test"),
+        new StrictModeError("test", []),
+      ];
+
+      expect(errors.map((error) => ({ name: error.name, code: error.code }))).toEqual([
+        { name: "ParserError", code: "PARSER_ERROR" },
+        { name: "MigrationError", code: "MIGRATION_ERROR" },
+        { name: "DependencyError", code: "DEPENDENCY_ERROR" },
+        { name: "ValidationError", code: "VALIDATION_ERROR" },
+        { name: "StrictModeError", code: "STRICT_MODE_ERROR" },
+      ]);
+    });
+
     test("all error types should be instanceof TerraError", () => {
       const parserError = new ParserError("test");
       const migrationError = new MigrationError("test");
       const dependencyError = new DependencyError("test");
       const validationError = new ValidationError("test");
+      const strictModeError = new StrictModeError("test", []);
 
       expect(parserError).toBeInstanceOf(TerraError);
       expect(migrationError).toBeInstanceOf(TerraError);
       expect(dependencyError).toBeInstanceOf(TerraError);
       expect(validationError).toBeInstanceOf(TerraError);
+      expect(strictModeError).toBeInstanceOf(TerraError);
     });
 
     test("all error types should be instanceof Error", () => {

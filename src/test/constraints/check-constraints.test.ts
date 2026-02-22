@@ -16,6 +16,7 @@ describe("Check Constraints", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 

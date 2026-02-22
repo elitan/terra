@@ -1,8 +1,23 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Logger } from "../../utils/logger";
 import { OutputFormatter } from "../../utils/output-formatter";
 
 describe("Logger and output formatter coverage", () => {
+  let originalSilent = false;
+  let originalColor = true;
+
+  beforeEach(() => {
+    originalSilent = Logger.isSilent();
+    originalColor = Logger.isColorEnabled();
+    Logger.setSilent(false);
+    Logger.setColorEnabled(false);
+  });
+
+  afterEach(() => {
+    Logger.setSilent(originalSilent);
+    Logger.setColorEnabled(originalColor);
+  });
+
   test("class constructors can be instantiated", () => {
     expect(new (Logger as any)()).toBeInstanceOf(Logger);
     expect(new (OutputFormatter as any)()).toBeInstanceOf(OutputFormatter);

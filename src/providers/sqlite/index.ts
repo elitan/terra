@@ -26,6 +26,7 @@ import { SQLiteInspector } from "./inspector";
 import { SQLiteParser } from "./parser";
 import { SQLiteDiffer } from "./differ";
 import { MigrationError } from "../../types/errors";
+import { Logger } from "../../utils/logger";
 
 const UNSUPPORTED_FEATURES: DatabaseFeature[] = [
   "schemas",
@@ -236,13 +237,23 @@ export class SQLiteProvider implements DatabaseProvider {
     statements: string[]
   ): Promise<void> {
     const sqliteClient = client as SQLiteClient;
-    const ora = (await import("ora")).default;
-    const spinner = ora({ text: "Applying changes...", color: "white" }).start();
+    const useSpinner = !Logger.isSilent();
+    const ora = useSpinner ? (await import("ora")).default : undefined;
+    const spinner = useSpinner
+      ? ora!({ text: "Applying changes...", color: "white" }).start()
+      : undefined;
     const startTime = Date.now();
 
     let currentStatement: string | undefined;
+    const suspendForeignKeys = this.requiresForeignKeySuspension(statements);
+    let foreignKeysSuspended = false;
 
     try {
+      if (suspendForeignKeys) {
+        sqliteClient.execMultiple("PRAGMA foreign_keys = OFF");
+        foreignKeysSuspended = true;
+      }
+
       sqliteClient.inTransaction(() => {
         for (const statement of statements) {
           if (statement.startsWith("--")) {
@@ -251,18 +262,50 @@ export class SQLiteProvider implements DatabaseProvider {
           currentStatement = statement;
           sqliteClient.execMultiple(statement);
         }
+
+        if (suspendForeignKeys) {
+          currentStatement = "PRAGMA foreign_key_check";
+          const violations = sqliteClient.raw.prepare("PRAGMA foreign_key_check").all();
+          if (violations.length > 0) {
+            throw new Error(`Foreign key integrity check failed (${violations.length} violation(s))`);
+          }
+        }
       });
 
+      if (foreignKeysSuspended) {
+        sqliteClient.execMultiple("PRAGMA foreign_keys = ON");
+        foreignKeysSuspended = false;
+      }
+
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
+      if (spinner) {
+        spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
+      }
     } catch (error) {
-      spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply changes" });
+      if (foreignKeysSuspended) {
+        try {
+          sqliteClient.execMultiple("PRAGMA foreign_keys = ON");
+        } catch {}
+      }
+      if (spinner) {
+        spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply changes" });
+      }
 
       throw new MigrationError(
         error instanceof Error ? error.message : String(error),
         currentStatement
       );
     }
+  }
+
+  private requiresForeignKeySuspension(statements: string[]): boolean {
+    const hasTempRecreateTable = statements.some((statement) =>
+      /^CREATE TABLE\s+"_[^"]+_new"\s*\(/i.test(statement.trim())
+    );
+    const hasDropTable = statements.some((statement) =>
+      /^DROP TABLE\s+/i.test(statement.trim())
+    );
+    return hasTempRecreateTable && hasDropTable;
   }
 }
 

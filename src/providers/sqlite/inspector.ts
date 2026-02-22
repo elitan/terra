@@ -269,6 +269,7 @@ export class SQLiteInspector {
         timing: timing === 'INSTEAD OF' ? 'INSTEAD OF' : timing as 'BEFORE' | 'AFTER',
         events,
         functionName: '',
+        definition: sql.trim().replace(/;+\s*$/g, ''),
       };
     });
   }

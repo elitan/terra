@@ -348,7 +348,9 @@ export class DatabaseInspector {
          JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = ord.col
         ) AS referenced_columns,
         c.confdeltype AS delete_rule,
-        c.confupdtype AS update_rule
+        c.confupdtype AS update_rule,
+        c.condeferrable AS deferrable,
+        c.condeferred AS initially_deferred
       FROM pg_constraint c
       JOIN pg_class cl ON cl.oid = c.conrelid
       JOIN pg_namespace ns ON ns.oid = cl.relnamespace
@@ -389,6 +391,8 @@ export class DatabaseInspector {
       referencedColumns: parseArrayLiteral(row.referenced_columns),
       onDelete: actionMap[row.delete_rule],
       onUpdate: actionMap[row.update_rule],
+      ...(row.deferrable ? { deferrable: true } : {}),
+      ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
     }));
   }
 
@@ -439,18 +443,21 @@ export class DatabaseInspector {
     const result = await client.query(
       `
       SELECT
-        tc.constraint_name,
-        kcu.column_name,
-        kcu.ordinal_position
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-        AND tc.table_name = kcu.table_name
-      WHERE tc.table_name = $1
-        AND tc.table_schema = $2
-        AND tc.constraint_type = 'UNIQUE'
-      ORDER BY tc.constraint_name, kcu.ordinal_position
+        c.conname AS constraint_name,
+        (
+          SELECT array_agg(a.attname ORDER BY ord.n)
+          FROM unnest(c.conkey) WITH ORDINALITY AS ord(col, n)
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ord.col
+        ) AS columns,
+        c.condeferrable AS deferrable,
+        c.condeferred AS initially_deferred
+      FROM pg_constraint c
+      JOIN pg_class cl ON cl.oid = c.conrelid
+      JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+      WHERE c.contype = 'u'
+        AND cl.relname = $1
+        AND ns.nspname = $2
+      ORDER BY c.conname
       `,
       [tableName, tableSchema]
     );
@@ -459,30 +466,18 @@ export class DatabaseInspector {
       return [];
     }
 
-    // Group unique constraints by constraint name
-    const constraintGroups = new Map<string, any[]>();
-    
-    for (const row of result.rows) {
-      const constraintName = row.constraint_name;
-      if (!constraintGroups.has(constraintName)) {
-        constraintGroups.set(constraintName, []);
-      }
-      constraintGroups.get(constraintName)!.push(row);
-    }
+    const parseArrayLiteral = (val: string | string[]): string[] => {
+      if (Array.isArray(val)) return val;
+      if (!val || val === '{}') return [];
+      return val.slice(1, -1).split(',');
+    };
 
-    const uniqueConstraints: UniqueConstraint[] = [];
-
-    for (const [constraintName, rows] of constraintGroups) {
-      // Extract columns (maintaining order)
-      const columns = rows.map(row => row.column_name);
-
-      uniqueConstraints.push({
-        name: constraintName,
-        columns,
-      });
-    }
-
-    return uniqueConstraints;
+    return result.rows.map((row) => ({
+      name: row.constraint_name,
+      columns: parseArrayLiteral(row.columns),
+      ...(row.deferrable ? { deferrable: true } : {}),
+      ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
+    }));
   }
 
   async getCurrentEnums(client: Client, schemas: string[] = ['public']): Promise<EnumType[]> {
@@ -498,25 +493,26 @@ export class DatabaseInspector {
       LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND d.objid IS NULL  -- Exclude extension-owned types
-      ORDER BY t.typname, e.enumsortorder
+      ORDER BY n.nspname, t.typname, e.enumsortorder
     `, [schemas]);
 
-    const enumGroups = new Map<string, { schema: string; values: string[] }>();
+    const enumGroups = new Map<string, { name: string; schema: string; values: string[] }>();
 
     for (const row of enumsResult.rows) {
       const enumName = row.enum_name;
       const schemaName = row.schema_name;
       const enumValue = row.enum_value;
+      const enumKey = `${schemaName}.${enumName}`;
 
-      if (!enumGroups.has(enumName)) {
-        enumGroups.set(enumName, { schema: schemaName, values: [] });
+      if (!enumGroups.has(enumKey)) {
+        enumGroups.set(enumKey, { name: enumName, schema: schemaName, values: [] });
       }
-      enumGroups.get(enumName)!.values.push(enumValue);
+      enumGroups.get(enumKey)!.values.push(enumValue);
     }
 
     const enums: EnumType[] = [];
-    for (const [name, data] of enumGroups) {
-      enums.push({ name, schema: data.schema, values: data.values });
+    for (const data of enumGroups.values()) {
+      enums.push({ name: data.name, schema: data.schema, values: data.values });
     }
 
     return enums;
@@ -542,7 +538,7 @@ export class DatabaseInspector {
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE v.table_schema = ANY($1::text[])
         AND d.objid IS NULL  -- Exclude extension-owned views
-      ORDER BY v.table_name
+      ORDER BY v.table_schema, v.table_name
     `, [schemas]);
 
     for (const row of viewsResult.rows) {
@@ -584,7 +580,7 @@ export class DatabaseInspector {
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE m.schemaname = ANY($1::text[])
         AND d.objid IS NULL  -- Exclude extension-owned materialized views
-      ORDER BY m.matviewname
+      ORDER BY m.schemaname, m.matviewname
     `, [schemas]);
 
     for (const row of matViewsResult.rows) {
@@ -679,7 +675,7 @@ export class DatabaseInspector {
       WHERE n.nspname = ANY($1::text[])
         AND p.prokind = 'f'
         AND d.objid IS NULL
-      ORDER BY p.proname
+      ORDER BY n.nspname, p.proname
     `, [schemas]);
 
     return result.rows.map((row: any) => ({
@@ -715,7 +711,7 @@ export class DatabaseInspector {
       WHERE n.nspname = ANY($1::text[])
         AND p.prokind = 'p'
         AND d.objid IS NULL
-      ORDER BY p.proname
+      ORDER BY n.nspname, p.proname
     `, [schemas]);
 
     return result.rows.map((row: any) => ({
@@ -749,11 +745,13 @@ export class DatabaseInspector {
         CASE WHEN t.tgtype & 16 = 16 THEN true ELSE false END as on_update,
         CASE WHEN t.tgtype & 32 = 32 THEN true ELSE false END as on_truncate,
         p.proname as function_name,
+        fn.nspname as function_schema,
         pg_get_triggerdef(t.oid) as trigger_def
       FROM pg_trigger t
       JOIN pg_class c ON t.tgrelid = c.oid
       JOIN pg_namespace n ON c.relnamespace = n.oid
       JOIN pg_proc p ON t.tgfoid = p.oid
+      JOIN pg_namespace fn ON p.pronamespace = fn.oid
       WHERE n.nspname = ANY($1::text[])
         AND NOT t.tgisinternal
       ORDER BY c.relname, t.tgname
@@ -773,9 +771,109 @@ export class DatabaseInspector {
         timing: row.timing,
         events,
         forEach: row.for_each,
+        when: this.parseTriggerWhenClause(row.trigger_def),
         functionName: row.function_name,
+        functionSchema: row.function_schema,
+        functionArgs: this.parseTriggerFunctionArgs(row.trigger_def),
       };
     });
+  }
+
+  private parseTriggerWhenClause(triggerDef: string | null): string | undefined {
+    if (!triggerDef) {
+      return undefined;
+    }
+
+    const whenMatch = triggerDef.match(/\sWHEN\s\((.+)\)\sEXECUTE FUNCTION\s/i);
+    if (!whenMatch || !whenMatch[1]) {
+      return undefined;
+    }
+
+    return this.stripOuterParentheses(whenMatch[1]);
+  }
+
+  private parseTriggerFunctionArgs(triggerDef: string | null): string[] | undefined {
+    if (!triggerDef) {
+      return undefined;
+    }
+
+    const argsMatch = triggerDef.match(/\sEXECUTE FUNCTION\s+[^()]+\((.*)\)\s*$/i);
+    if (!argsMatch || argsMatch[1] === undefined) {
+      return undefined;
+    }
+
+    const argsText = argsMatch[1].trim();
+    if (argsText.length === 0) {
+      return undefined;
+    }
+
+    const args = this.splitTriggerArgs(argsText);
+    return args.length > 0 ? args : undefined;
+  }
+
+  private splitTriggerArgs(argsText: string): string[] {
+    const args: string[] = [];
+    let current = "";
+    let inQuote = false;
+
+    for (let i = 0; i < argsText.length; i++) {
+      const char = argsText[i];
+
+      if (char === "'") {
+        current += char;
+        if (inQuote && argsText[i + 1] === "'") {
+          current += "'";
+          i++;
+          continue;
+        }
+        inQuote = !inQuote;
+        continue;
+      }
+
+      if (char === "," && !inQuote) {
+        const value = current.trim();
+        if (value) {
+          args.push(value);
+        }
+        current = "";
+        continue;
+      }
+
+      current += char;
+    }
+
+    const finalValue = current.trim();
+    if (finalValue) {
+      args.push(finalValue);
+    }
+
+    return args;
+  }
+
+  private stripOuterParentheses(value: string): string {
+    let normalized = value.trim();
+
+    while (this.hasBalancedOuterParentheses(normalized)) {
+      normalized = normalized.slice(1, -1).trim();
+    }
+
+    return normalized;
+  }
+
+  private hasBalancedOuterParentheses(value: string): boolean {
+    if (!value.startsWith("(") || !value.endsWith(")")) {
+      return false;
+    }
+
+    let depth = 0;
+    for (let i = 0; i < value.length - 1; i++) {
+      const char = value[i];
+      if (char === "(") depth++;
+      if (char === ")") depth--;
+      if (depth === 0) return false;
+    }
+
+    return depth === 1;
   }
 
   // Get all sequences from the database
@@ -807,7 +905,7 @@ export class DatabaseInspector {
       WHERE c.relkind = 'S'
         AND n.nspname = ANY($1::text[])
         AND de.objid IS NULL  -- Exclude extension-owned sequences
-      ORDER BY c.relname
+      ORDER BY n.nspname, c.relname
     `, [schemas]);
 
     return result.rows.map((row: any) => {
@@ -871,7 +969,7 @@ export class DatabaseInspector {
       JOIN pg_namespace n ON e.extnamespace = n.oid
       WHERE n.nspname = ANY($1::text[])
         AND e.extname != 'plpgsql'  -- Exclude built-in extensions
-      ORDER BY e.extname
+      ORDER BY n.nspname, e.extname
     `, [schemas]);
 
     return result.rows.map((row: any) => ({
@@ -965,7 +1063,7 @@ export class DatabaseInspector {
   }
 
   // Helper method to analyze view dependencies
-  async getViewDependencies(client: Client, viewName: string): Promise<string[]> {
+  async getViewDependencies(client: Client, viewName: string, viewSchema: string = "public"): Promise<string[]> {
     try {
       const result = await client.query(`
         SELECT DISTINCT
@@ -974,13 +1072,41 @@ export class DatabaseInspector {
             ELSE referenced_table_schema || '.' || referenced_table_name
           END as dependency
         FROM information_schema.view_table_usage
-        WHERE view_schema = 'public' AND view_name = $1
+        WHERE view_schema = $1 AND view_name = $2
         ORDER BY dependency
-      `, [viewName]);
+      `, [viewSchema, viewName]);
 
       return result.rows.map(row => row.dependency);
     } catch (error) {
       // If the query fails (e.g., permissions), return empty array
+      return [];
+    }
+  }
+
+  async getFunctionDependencies(
+    client: Client,
+    functionName: string,
+    functionSchema: string = "public"
+  ): Promise<string[]> {
+    try {
+      const result = await client.query(`
+        SELECT DISTINCT
+          CASE
+            WHEN ref_ns.nspname = 'public' THEN ref_class.relname
+            ELSE ref_ns.nspname || '.' || ref_class.relname
+          END as dependency
+        FROM pg_proc p
+        JOIN pg_namespace proc_ns ON proc_ns.oid = p.pronamespace
+        JOIN pg_depend d ON d.objid = p.oid AND d.classid = 'pg_proc'::regclass
+        JOIN pg_class ref_class ON ref_class.oid = d.refobjid AND d.refclassid = 'pg_class'::regclass
+        JOIN pg_namespace ref_ns ON ref_ns.oid = ref_class.relnamespace
+        WHERE proc_ns.nspname = $1
+          AND p.proname = $2
+        ORDER BY dependency
+      `, [functionSchema, functionName]);
+
+      return result.rows.map(row => row.dependency);
+    } catch (error) {
       return [];
     }
   }

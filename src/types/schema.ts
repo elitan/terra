@@ -119,7 +119,9 @@ export interface Trigger {
   forEach?: 'ROW' | 'STATEMENT';
   when?: string;
   functionName: string;
+  functionSchema?: string;
   functionArgs?: string[];
+  definition?: string;
 }
 
 export interface Sequence {

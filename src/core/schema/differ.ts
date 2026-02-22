@@ -73,19 +73,28 @@ export class SchemaDiffer {
   ): MigrationPlan {
     const statements: string[] = [];
     const deferred: string[] = [];
+    const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
+    const orderedCurrentSchema = this.getDeterministicTableOrder(currentSchema);
 
-    // Create a map of current tables for easy lookup
-    const currentTables = new Map(currentSchema.map((t) => [t.name, t]));
-    const desiredTables = new Map(desiredSchema.map((t) => [t.name, t]));
+    const currentTables = new Map(
+      orderedCurrentSchema.map((table) => [this.getTableKey(table), table])
+    );
+    const desiredTables = new Map(
+      orderedDesiredSchema.map((table) => [this.getTableKey(table), table])
+    );
 
-    // Identify new tables and tables to drop
-    const newTables = desiredSchema.filter(t => !currentTables.has(t.name));
-    const tablesToDrop = currentSchema.filter(t => !desiredTables.has(t.name));
+    const newTables = orderedDesiredSchema.filter(
+      (table) => !currentTables.has(this.getTableKey(table))
+    );
+    const tablesToDrop = orderedCurrentSchema.filter(
+      (table) => !desiredTables.has(this.getTableKey(table))
+    );
 
     // Use DependencyResolver to handle circular dependencies for new tables
     let foreignKeysToDefer: Array<{ tableName: string; foreignKey: ForeignKeyConstraint }> = [];
     if (newTables.length > 0) {
-      const resolver = new DependencyResolver(newTables);
+      const resolverTables = this.createResolverInputTables(newTables);
+      const resolver = new DependencyResolver(resolverTables);
       const result = resolver.getCreationOrderWithDetachment();
       foreignKeysToDefer = result.foreignKeysToDefer;
     }
@@ -96,20 +105,21 @@ export class SchemaDiffer {
     );
 
     // Handle new tables
-    for (const table of desiredSchema) {
-      if (!currentTables.has(table.name)) {
+    for (const table of orderedDesiredSchema) {
+      const tableKey = this.getTableKey(table);
+      if (!currentTables.has(tableKey)) {
         // Filter out deferred FKs from the table definition
         const filteredTable = {
           ...table,
           foreignKeys: table.foreignKeys?.filter(fk => {
-            const key = `${table.name}:${fk.name || fk.columns.join(',')}`;
+            const key = `${tableKey}:${fk.name || fk.columns.join(',')}`;
             return !deferredFKSet.has(key);
           })
         };
         statements.push(generateCreateTableStatement(filteredTable));
       } else {
         // Handle existing tables using batched ALTER TABLE statements
-        const currentTable = currentTables.get(table.name)!;
+        const currentTable = currentTables.get(tableKey)!;
 
         // Collect all table alterations (columns, constraints, etc.)
         const alterations = this.collectTableAlterations(table, currentTable);
@@ -132,9 +142,9 @@ export class SchemaDiffer {
     }
 
     // Handle indexes for new tables (created after table creation)
-    for (const table of desiredSchema) {
+    for (const table of orderedDesiredSchema) {
       if (
-        !currentTables.has(table.name) &&
+        !currentTables.has(this.getTableKey(table)) &&
         table.indexes &&
         table.indexes.length > 0
       ) {
@@ -147,13 +157,14 @@ export class SchemaDiffer {
 
     // Handle constraints for new tables (created after table creation)
     // Regular FKs go in statements, deferred FKs go in deferred array
-    for (const table of desiredSchema) {
-      if (!currentTables.has(table.name)) {
+    for (const table of orderedDesiredSchema) {
+      const tableKey = this.getTableKey(table);
+      if (!currentTables.has(tableKey)) {
         const qualifiedName = getQualifiedTableName(table);
 
         if (table.foreignKeys && table.foreignKeys.length > 0) {
           for (const fk of table.foreignKeys) {
-            const key = `${table.name}:${fk.name || fk.columns.join(',')}`;
+            const key = `${tableKey}:${fk.name || fk.columns.join(',')}`;
             const fkStatement = generateAddForeignKeySQL(qualifiedName, fk);
 
             if (deferredFKSet.has(key)) {
@@ -173,12 +184,16 @@ export class SchemaDiffer {
 
     // Handle dropped tables with circular dependency support
     if (tablesToDrop.length > 0) {
-      const dropResolver = new DependencyResolver(tablesToDrop);
+      const dropResolverTables = this.createResolverInputTables(tablesToDrop);
+      const dropResolver = new DependencyResolver(dropResolverTables);
       const dropResult = dropResolver.getDeletionOrderWithDetachment();
+      const tablesToDropByKey = new Map(
+        tablesToDrop.map((table) => [this.getTableKey(table), table])
+      );
 
       // Drop cycle-forming FKs first
       for (const { tableName, foreignKey } of dropResult.foreignKeysToDefer) {
-        const table = tablesToDrop.find(t => t.name === tableName);
+        const table = tablesToDropByKey.get(tableName);
         if (table && foreignKey.name) {
           // generateDropForeignKeySQL expects unqualified table name
           const dropSQL = new SQLBuilder()
@@ -194,7 +209,7 @@ export class SchemaDiffer {
 
       // Then drop tables in the correct order
       for (const tableName of dropResult.order) {
-        const table = tablesToDrop.find(t => t.name === tableName);
+        const table = tablesToDropByKey.get(tableName);
         if (table) {
           const sql = new SQLBuilder()
             .p("DROP TABLE")
@@ -224,6 +239,75 @@ export class SchemaDiffer {
       deferred,
       hasChanges: transactional.length > 0 || concurrent.length > 0 || deferred.length > 0,
     };
+  }
+
+  private getTableKey(table: Pick<Table, "name" | "schema">): string {
+    return `${table.schema || "public"}.${table.name}`;
+  }
+
+  private getDeterministicTableOrder(tables: Table[]): Table[] {
+    return [...tables].sort((a, b) => this.getTableKey(a).localeCompare(this.getTableKey(b)));
+  }
+
+  private createResolverInputTables(tables: Table[]): Table[] {
+    const tableKeys = new Set(tables.map((table) => this.getTableKey(table)));
+    const keysByName = new Map<string, string[]>();
+
+    for (const table of tables) {
+      const key = this.getTableKey(table);
+      const matches = keysByName.get(table.name) || [];
+      matches.push(key);
+      keysByName.set(table.name, matches);
+    }
+
+    return tables.map((table) => {
+      const resolverName = this.getTableKey(table);
+      const foreignKeys = (table.foreignKeys || []).map((foreignKey) => {
+        const referencedTable = this.resolveResolverReferencedTableKey(
+          foreignKey.referencedTable,
+          table.schema,
+          tableKeys,
+          keysByName
+        );
+        if (!referencedTable) {
+          return foreignKey;
+        }
+        return { ...foreignKey, referencedTable };
+      });
+
+      return {
+        ...table,
+        name: resolverName,
+        schema: undefined,
+        foreignKeys,
+      };
+    });
+  }
+
+  private resolveResolverReferencedTableKey(
+    referencedTable: string,
+    currentSchema: string | undefined,
+    tableKeys: Set<string>,
+    keysByName: Map<string, string[]>
+  ): string | undefined {
+    const [referencedName, referencedSchema] = splitSchemaTable(referencedTable);
+
+    if (referencedSchema) {
+      const directKey = `${referencedSchema}.${referencedName}`;
+      return tableKeys.has(directKey) ? directKey : undefined;
+    }
+
+    const schemaKey = `${currentSchema || "public"}.${referencedName}`;
+    if (tableKeys.has(schemaKey)) {
+      return schemaKey;
+    }
+
+    const matches = keysByName.get(referencedName) || [];
+    if (matches.length === 1) {
+      return matches[0];
+    }
+
+    return undefined;
   }
 
   private generateColumnStatements(
@@ -476,27 +560,21 @@ export class SchemaDiffer {
     currentType: string,
     desiredType: string
   ): boolean {
-    // PostgreSQL requires USING clause for these conversions that can't be done automatically
-    const currentNormalized = normalizeType(currentType).toLowerCase();
-    const desiredNormalized = normalizeType(desiredType).toLowerCase();
+    const currentNormalized = normalizeType(currentType);
+    const desiredNormalized = normalizeType(desiredType);
 
-    // VARCHAR/TEXT to numeric types needs USING
-    if (
-      currentNormalized.includes("varchar") ||
-      currentNormalized.includes("text")
-    ) {
-      if (
-        desiredNormalized.includes("decimal") ||
-        desiredNormalized.includes("numeric") ||
-        desiredNormalized.includes("integer") ||
-        desiredNormalized.includes("int") ||
-        desiredNormalized.includes("bool")
-      ) {
+    if (this.isTextLikeType(currentNormalized)) {
+      if (desiredNormalized.startsWith("NUMERIC")) {
+        return true;
+      }
+      if (this.isIntegerType(desiredNormalized)) {
+        return true;
+      }
+      if (desiredNormalized === "BOOLEAN") {
         return true;
       }
     }
 
-    // Other conversions that might need USING clause can be added here
     return false;
   }
 
@@ -505,35 +583,41 @@ export class SchemaDiffer {
     currentType: string,
     desiredType: string
   ): string {
-    const currentNormalized = normalizeType(currentType).toLowerCase();
-    const desiredNormalized = normalizeType(desiredType).toLowerCase();
+    const currentNormalized = normalizeType(currentType);
+    const desiredNormalized = normalizeType(desiredType);
     const quotedCol = `"${columnName.replace(/"/g, '""')}"`;
 
-    // For VARCHAR/TEXT to numeric, try to cast the string to the target type
-    if (
-      currentNormalized.includes("varchar") ||
-      currentNormalized.includes("text")
-    ) {
-      if (
-        desiredNormalized.includes("decimal") ||
-        desiredNormalized.includes("numeric")
-      ) {
+    if (this.isTextLikeType(currentNormalized)) {
+      if (desiredNormalized.startsWith("NUMERIC")) {
         return `${quotedCol}::${desiredType}`;
       }
-      if (
-        desiredNormalized.includes("integer") ||
-        desiredNormalized.includes("int")
-      ) {
-        // For string to integer conversion, first convert to numeric to handle decimal strings, then truncate
-        return `TRUNC(${quotedCol}::DECIMAL)::integer`;
+      if (this.isIntegerType(desiredNormalized)) {
+        return `TRUNC(${quotedCol}::DECIMAL)::${this.getIntegerCastType(desiredNormalized)}`;
       }
-      if (desiredNormalized.includes("bool")) {
+      if (desiredNormalized === "BOOLEAN") {
         return `TRIM(${quotedCol})::boolean`;
       }
     }
 
-    // Default: just cast to the desired type
     return `${quotedCol}::${desiredType}`;
+  }
+
+  private isTextLikeType(type: string): boolean {
+    return type === "TEXT" || type.startsWith("VARCHAR") || type.startsWith("CHAR");
+  }
+
+  private isIntegerType(type: string): boolean {
+    return type === "INT2" || type === "INT4" || type === "INT8";
+  }
+
+  private getIntegerCastType(type: string): string {
+    if (type === "INT2") {
+      return "smallint";
+    }
+    if (type === "INT8") {
+      return "bigint";
+    }
+    return "integer";
   }
 
   private generatePrimaryKeyStatements(
@@ -703,18 +787,28 @@ export class SchemaDiffer {
       currentTable.indexes || []
     );
 
+    const toRemove = [...indexComparison.toRemove].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    const toAdd = [...indexComparison.toAdd].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    const toModify = [...indexComparison.toModify].sort((a, b) =>
+      a.desired.name.localeCompare(b.desired.name)
+    );
+
     // Drop removed indexes first
     statements.push(
-      ...this.generateIndexDropStatements(indexComparison.toRemove)
+      ...this.generateIndexDropStatements(toRemove)
     );
 
     // Create new indexes
     statements.push(
-      ...this.generateIndexCreationStatements(indexComparison.toAdd)
+      ...this.generateIndexCreationStatements(toAdd)
     );
 
     // Handle modified indexes (drop + create) - use non-concurrent to keep in same transaction
-    for (const mod of indexComparison.toModify) {
+    for (const mod of toModify) {
       const dropBuilder = new SQLBuilder();
       dropBuilder.p("DROP INDEX").ident(mod.current.name).p(";");
       statements.push(dropBuilder.build());
@@ -822,7 +916,8 @@ export class SchemaDiffer {
   }
 
   private generateIndexCreationStatements(indexes: Index[]): string[] {
-    return indexes.map((index) =>
+    const sorted = [...indexes].sort((a, b) => a.name.localeCompare(b.name));
+    return sorted.map((index) =>
       this.generateCreateIndexSQL(
         index,
         this.options.useConcurrentIndexes ?? true
@@ -1503,7 +1598,14 @@ export class SchemaDiffer {
     };
 
     const sorted = [...alterations].sort((a, b) => {
-      return (operationPriority[a.type] ?? 99) - (operationPriority[b.type] ?? 99);
+      const priorityDiff =
+        (operationPriority[a.type] ?? 99) - (operationPriority[b.type] ?? 99);
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+      const aKey = this.getAlterationSortKey(table, a);
+      const bKey = this.getAlterationSortKey(table, b);
+      return aKey.localeCompare(bKey);
     });
 
     const builder = new SQLBuilder()
@@ -1605,6 +1707,12 @@ export class SchemaDiffer {
           if (alt.constraint.onUpdate) {
             b.p(`ON UPDATE ${alt.constraint.onUpdate}`);
           }
+          if (alt.constraint.deferrable) {
+            b.p("DEFERRABLE");
+            if (alt.constraint.initiallyDeferred) {
+              b.p("INITIALLY DEFERRED");
+            }
+          }
           break;
         }
 
@@ -1619,6 +1727,12 @@ export class SchemaDiffer {
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
             .p(`UNIQUE (${columns})`);
+          if (alt.constraint.deferrable) {
+            b.p("DEFERRABLE");
+            if (alt.constraint.initiallyDeferred) {
+              b.p("INITIALLY DEFERRED");
+            }
+          }
           break;
         }
 
@@ -1630,5 +1744,41 @@ export class SchemaDiffer {
     builder.indentOut();
 
     return builder.p(";").build();
+  }
+
+  private getAlterationSortKey(table: Table, alteration: TableAlteration): string {
+    switch (alteration.type) {
+      case "add_column":
+        return alteration.column.name;
+      case "drop_column":
+        return alteration.columnName;
+      case "alter_column_type":
+      case "alter_column_set_default":
+      case "alter_column_drop_default":
+      case "alter_column_set_not_null":
+      case "alter_column_drop_not_null":
+        return alteration.columnName;
+      case "add_primary_key":
+        return alteration.constraint.name || alteration.constraint.columns.join(",");
+      case "drop_primary_key":
+        return alteration.constraintName;
+      case "add_check":
+        return alteration.constraint.name || alteration.constraint.expression;
+      case "drop_check":
+        return alteration.constraintName;
+      case "add_foreign_key":
+        return (
+          alteration.constraint.name ||
+          `${alteration.constraint.columns.join(",")}->${alteration.constraint.referencedTable}.${alteration.constraint.referencedColumns.join(",")}`
+        );
+      case "drop_foreign_key":
+        return alteration.constraintName;
+      case "add_unique":
+        return alteration.constraint.name || alteration.constraint.columns.join(",");
+      case "drop_unique":
+        return alteration.constraintName;
+      default:
+        return "";
+    }
   }
 }

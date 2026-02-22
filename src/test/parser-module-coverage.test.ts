@@ -259,7 +259,7 @@ describe("Parser module coverage", () => {
 
       expect(fn).toEqual({
         name: "compute_total",
-        schema: undefined,
+        schema: "public",
         parameters: [
           { name: "a", type: "integer", mode: "IN" },
           { name: "b", type: "character varying", default: "'x'" },
@@ -477,7 +477,7 @@ describe("Parser module coverage", () => {
     test("parses trigger with full bitmasks", () => {
       const trigger = parseCreateTrigger({
         trigname: "trg_all",
-        relation: { relname: "orders" },
+        relation: { relname: "orders", schemaname: "tenant_a" },
         timing: 64,
         events: 4 | 8 | 16 | 32,
         row: true,
@@ -488,13 +488,14 @@ describe("Parser module coverage", () => {
       expect(trigger).toEqual({
         name: "trg_all",
         tableName: "orders",
-        schema: undefined,
+        schema: "tenant_a",
         timing: "INSTEAD OF",
         events: ["INSERT", "DELETE", "UPDATE", "TRUNCATE"],
         forEach: "ROW",
         when: undefined,
         functionName: "audit_orders",
-        functionArgs: undefined,
+        functionSchema: "public",
+        functionArgs: ["'x'"],
       });
     });
 
@@ -511,6 +512,23 @@ describe("Parser module coverage", () => {
       expect(trigger?.timing).toBe("AFTER");
       expect(trigger?.events).toEqual(["INSERT"]);
       expect(trigger?.forEach).toBe("STATEMENT");
+    });
+
+    test("parses trigger when clause and function args", async () => {
+      const ast = await parse(`
+        CREATE TRIGGER trg_with_when
+        BEFORE INSERT ON orders
+        FOR EACH ROW
+        WHEN (NEW.id > 0)
+        EXECUTE FUNCTION public.audit_orders(1, 'x');
+      `);
+
+      const stmt = ast.stmts[0]?.stmt?.CreateTrigStmt;
+      const trigger = parseCreateTrigger(stmt);
+
+      expect(trigger?.when).toBe("new.id > 0");
+      expect(trigger?.functionSchema).toBe("public");
+      expect(trigger?.functionArgs).toEqual(["'1'", "'x'"]);
     });
 
     test("returns null for missing trigger fields", () => {
@@ -576,6 +594,8 @@ describe("Parser module coverage", () => {
         pk_attrs: [{ String: { sval: "id" } }],
         fk_del_action: "a",
         fk_upd_action: "r",
+        deferrable: true,
+        initdeferred: true,
       });
 
       expect(fk).toEqual({
@@ -585,12 +605,27 @@ describe("Parser module coverage", () => {
         referencedColumns: ["id"],
         onDelete: "NO ACTION",
         onUpdate: "RESTRICT",
+        deferrable: true,
+        initiallyDeferred: true,
       });
 
       expect(parseForeignKey({ fk_attrs: [{ String: { sval: "x" } }] })).toBeNull();
       expect(parseUniqueConstraint({ conname: "uq", keys: [{ String: { sval: "email" } }] })).toEqual({
         name: "uq",
         columns: ["email"],
+      });
+      expect(
+        parseUniqueConstraint({
+          conname: "uq_deferrable",
+          keys: [{ String: { sval: "email" } }],
+          deferrable: true,
+          initdeferred: true,
+        })
+      ).toEqual({
+        name: "uq_deferrable",
+        columns: ["email"],
+        deferrable: true,
+        initiallyDeferred: true,
       });
       expect(parseTablePrimaryKey({ conname: "pk", keys: [{ String: { sval: "id" } }] })).toEqual({
         name: "pk",
@@ -615,6 +650,77 @@ describe("Parser module coverage", () => {
 
       expect(parseUniqueConstraint(badUnique)).toBeNull();
       expect(parseTablePrimaryKey(badPk)).toBeNull();
+    });
+
+    test("parses deferrable foreign key and unique constraints", async () => {
+      const ast = await parse(`
+        CREATE TABLE child (
+          id INT PRIMARY KEY,
+          parent_id INT NOT NULL,
+          external_id TEXT,
+          CONSTRAINT fk_parent FOREIGN KEY (parent_id)
+            REFERENCES parent(id)
+            DEFERRABLE INITIALLY DEFERRED,
+          CONSTRAINT uq_external UNIQUE (external_id)
+            DEFERRABLE INITIALLY DEFERRED
+        );
+      `);
+
+      const tableElts = ast.stmts[0]?.stmt?.CreateStmt?.tableElts || [];
+      const constraints = extractAllConstraints(tableElts, "child");
+
+      expect(constraints.foreignKeys).toEqual([
+        {
+          name: "fk_parent",
+          columns: ["parent_id"],
+          referencedTable: "parent",
+          referencedColumns: ["id"],
+          onDelete: "NO ACTION",
+          onUpdate: "NO ACTION",
+          deferrable: true,
+          initiallyDeferred: true,
+        },
+      ]);
+
+      expect(constraints.uniqueConstraints).toEqual([
+        {
+          name: "uq_external",
+          columns: ["external_id"],
+          deferrable: true,
+          initiallyDeferred: true,
+        },
+      ]);
+    });
+
+    test("parses complex check expression text", async () => {
+      const ast = await parse(`
+        CREATE TABLE invoices (
+          id INT PRIMARY KEY,
+          amount NUMERIC(10,2),
+          discount NUMERIC(10,2),
+          status TEXT,
+          CONSTRAINT chk_amount_logic CHECK (
+            (amount IS NULL OR amount >= 0)
+            AND (
+              discount IS NULL
+              OR (amount IS NOT NULL AND discount <= amount * 0.5)
+            )
+            AND status IN ('draft', 'sent', 'paid')
+          )
+        );
+      `);
+
+      const tableElts = ast.stmts[0]?.stmt?.CreateStmt?.tableElts || [];
+      const constraints = extractAllConstraints(tableElts, "invoices");
+
+      expect(constraints.checkConstraints).toHaveLength(1);
+      expect(constraints.checkConstraints[0]?.name).toBe("chk_amount_logic");
+      const expression = constraints.checkConstraints[0]?.expression
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+      expect(expression).toContain("(amount is null or amount >= 0)");
+      expect(expression).toContain("discount <= (amount * 0.5)");
+      expect(expression).toMatch(/status (in|= any)/);
     });
   });
 

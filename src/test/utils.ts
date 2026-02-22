@@ -75,7 +75,22 @@ export async function cleanDatabase(client: Client | undefined, schemas: string[
         DECLARE
           r RECORD;
         BEGIN
-          -- Drop all tables in the public schema
+          FOR r IN (
+            SELECT quote_ident(matviewname) as quoted_name
+            FROM pg_matviews
+            WHERE schemaname = 'public'
+          ) LOOP
+            EXECUTE 'DROP MATERIALIZED VIEW IF EXISTS ' || r.quoted_name || ' CASCADE';
+          END LOOP;
+
+          FOR r IN (
+            SELECT quote_ident(viewname) as quoted_name
+            FROM pg_views
+            WHERE schemaname = 'public'
+          ) LOOP
+            EXECUTE 'DROP VIEW IF EXISTS ' || r.quoted_name || ' CASCADE';
+          END LOOP;
+
           FOR r IN (
             SELECT quote_ident(tablename) as quoted_tablename
             FROM pg_tables
@@ -84,17 +99,48 @@ export async function cleanDatabase(client: Client | undefined, schemas: string[
             EXECUTE 'DROP TABLE IF EXISTS ' || r.quoted_tablename || ' CASCADE';
           END LOOP;
 
-          -- Drop all custom types (including ENUMs)
+          FOR r IN (
+            SELECT quote_ident(sequence_name) as quoted_name
+            FROM information_schema.sequences
+            WHERE sequence_schema = 'public'
+          ) LOOP
+            EXECUTE 'DROP SEQUENCE IF EXISTS ' || r.quoted_name || ' CASCADE';
+          END LOOP;
+
+          FOR r IN (
+            SELECT quote_ident(p.proname) as quoted_name,
+                   pg_get_function_identity_arguments(p.oid) as args
+            FROM pg_proc p
+            JOIN pg_namespace n ON p.pronamespace = n.oid
+            LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
+            WHERE n.nspname = 'public'
+              AND d.objid IS NULL
+          ) LOOP
+            EXECUTE 'DROP ROUTINE IF EXISTS ' || r.quoted_name || '(' || r.args || ') CASCADE';
+          END LOOP;
+
           FOR r IN (
             SELECT quote_ident(typname) as quoted_typename
-            FROM pg_type
+            FROM pg_type t
+            LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
             WHERE typtype = 'e'
               AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+              AND d.objid IS NULL
           ) LOOP
             EXECUTE 'DROP TYPE IF EXISTS ' || r.quoted_typename || ' CASCADE';
           END LOOP;
 
-          -- Drop all extensions in the public schema (except built-in ones like plpgsql)
+          FOR r IN (
+            SELECT quote_ident(typname) as quoted_typename
+            FROM pg_type t
+            LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
+            WHERE typtype = 'd'
+              AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+              AND d.objid IS NULL
+          ) LOOP
+            EXECUTE 'DROP DOMAIN IF EXISTS ' || r.quoted_typename || ' CASCADE';
+          END LOOP;
+
           FOR r IN (
             SELECT e.extname
             FROM pg_extension e
@@ -211,4 +257,104 @@ export function waitForDb(timeoutMs: number = 10000): Promise<void> {
 
     tryConnect();
   });
+}
+
+export interface PublicSchemaObjectSnapshot {
+  tables: string[];
+  views: string[];
+  materializedViews: string[];
+  sequences: string[];
+  routines: string[];
+  enums: string[];
+  domains: string[];
+}
+
+export async function getPublicSchemaObjectSnapshot(
+  client: Client
+): Promise<PublicSchemaObjectSnapshot> {
+  const [
+    tableResult,
+    viewResult,
+    materializedViewResult,
+    sequenceResult,
+    routineResult,
+    enumResult,
+    domainResult,
+  ] = await Promise.all([
+    client.query(`
+      SELECT tablename
+      FROM pg_tables
+      WHERE schemaname = 'public'
+      ORDER BY tablename
+    `),
+    client.query(`
+      SELECT viewname
+      FROM pg_views
+      WHERE schemaname = 'public'
+      ORDER BY viewname
+    `),
+    client.query(`
+      SELECT matviewname
+      FROM pg_matviews
+      WHERE schemaname = 'public'
+      ORDER BY matviewname
+    `),
+    client.query(`
+      SELECT sequence_name
+      FROM information_schema.sequences
+      WHERE sequence_schema = 'public'
+      ORDER BY sequence_name
+    `),
+    client.query(`
+      SELECT p.proname
+      FROM pg_proc p
+      JOIN pg_namespace n ON p.pronamespace = n.oid
+      WHERE n.nspname = 'public'
+      ORDER BY p.proname
+    `),
+    client.query(`
+      SELECT t.typname
+      FROM pg_type t
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      WHERE n.nspname = 'public'
+        AND t.typtype = 'e'
+      ORDER BY t.typname
+    `),
+    client.query(`
+      SELECT t.typname
+      FROM pg_type t
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      WHERE n.nspname = 'public'
+        AND t.typtype = 'd'
+      ORDER BY t.typname
+    `),
+  ]);
+
+  return {
+    tables: tableResult.rows.map((row) => row.tablename),
+    views: viewResult.rows.map((row) => row.viewname),
+    materializedViews: materializedViewResult.rows.map((row) => row.matviewname),
+    sequences: sequenceResult.rows.map((row) => row.sequence_name),
+    routines: routineResult.rows.map((row) => row.proname),
+    enums: enumResult.rows.map((row) => row.typname),
+    domains: domainResult.rows.map((row) => row.typname),
+  };
+}
+
+export async function assertPublicSchemaClean(
+  client: Client,
+  allowlist: Partial<PublicSchemaObjectSnapshot> = {}
+): Promise<void> {
+  const snapshot = await getPublicSchemaObjectSnapshot(client);
+  const leaked: string[] = [];
+  for (const key of Object.keys(snapshot) as (keyof PublicSchemaObjectSnapshot)[]) {
+    const allowedSet = new Set(allowlist[key] || []);
+    const extras = snapshot[key].filter((name) => !allowedSet.has(name));
+    if (extras.length > 0) {
+      leaked.push(`${key}: ${extras.join(", ")}`);
+    }
+  }
+  if (leaked.length > 0) {
+    throw new Error(`public schema not clean: ${leaked.join(" | ")}`);
+  }
 }

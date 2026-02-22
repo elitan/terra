@@ -102,6 +102,89 @@ describe("SQLite Table Recreation", () => {
     expect(result.rows[1].name).toBe("Bob");
   });
 
+  test("should recreate referenced table with existing child rows", async () => {
+    await schemaService.apply(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        age INTEGER
+      );
+
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `, ['public'], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`INSERT INTO users (id, age) VALUES (1, 10)`);
+    await seedClient.query(`INSERT INTO posts (id, user_id) VALUES (1, 1)`);
+    await seedClient.end();
+
+    await schemaService.apply(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        age TEXT
+      );
+
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `, ['public'], true);
+
+    const client = await provider.createClient(config);
+    const users = await client.query<{ id: number; age: string }>(`SELECT id, age FROM users ORDER BY id`);
+    const posts = await client.query<{ id: number; user_id: number }>(`SELECT id, user_id FROM posts ORDER BY id`);
+    const fkCheck = await client.query<{ table: string; rowid: number; parent: string; fkid: number }>(
+      `PRAGMA foreign_key_check`
+    );
+    await client.end();
+
+    expect(users.rows).toEqual([{ id: 1, age: "10" }]);
+    expect(posts.rows).toEqual([{ id: 1, user_id: 1 }]);
+    expect(fkCheck.rows).toEqual([]);
+  });
+
+  test("should enforce foreign keys after recreation migration", async () => {
+    await schemaService.apply(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        age INTEGER
+      );
+
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `, ['public'], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`INSERT INTO users (id, age) VALUES (1, 10)`);
+    await seedClient.end();
+
+    await schemaService.apply(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        age TEXT
+      );
+
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `, ['public'], true);
+
+    const client = await provider.createClient(config);
+    await expect(
+      client.query(`INSERT INTO posts (id, user_id) VALUES (2, 999)`)
+    ).rejects.toThrow("FOREIGN KEY constraint failed");
+    await client.end();
+  });
+
   test("should recreate table when primary key changes", async () => {
     await schemaService.apply(`
       CREATE TABLE items (
@@ -147,5 +230,43 @@ describe("SQLite Table Recreation", () => {
     const products = tables.find(t => t.name === "products");
     expect(products?.foreignKeys).toHaveLength(1);
     expect(products?.foreignKeys?.[0].referencedTable).toBe("categories");
+  });
+
+  test("should rollback failed recreation without leaking temp table", async () => {
+    await schemaService.apply(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        email TEXT
+      );
+    `, ['public'], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`INSERT INTO users (id, email) VALUES (1, NULL)`);
+    await seedClient.end();
+
+    await expect(
+      schemaService.apply(`
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY,
+          email TEXT NOT NULL
+        );
+      `, ['public'], true)
+    ).rejects.toThrow("NOT NULL");
+
+    const client = await provider.createClient(config);
+    const tables = await client.query<{ name: string }>(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name IN ('users', '_users_new')
+      ORDER BY name
+    `);
+    const rows = await client.query<{ id: number; email: string | null }>(
+      `SELECT id, email FROM users ORDER BY id`
+    );
+    await client.end();
+
+    expect(tables.rows).toEqual([{ name: "users" }]);
+    expect(rows.rows).toEqual([{ id: 1, email: null }]);
   });
 });

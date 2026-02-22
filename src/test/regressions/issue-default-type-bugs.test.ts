@@ -339,6 +339,56 @@ describe("Regression: Default Value and Type Normalization Bugs", () => {
     });
   });
 
+  describe("Bug 3: TEXT to BIGINT conversion cast precision", () => {
+    test("should cast through bigint and keep large values", async () => {
+      const initialSchema = `
+        CREATE TABLE bigint_cast_test (
+          id SERIAL PRIMARY KEY,
+          counter TEXT NOT NULL
+        );
+      `;
+
+      await service.apply(initialSchema, ["public"], true);
+      await client.query(`
+        INSERT INTO bigint_cast_test (counter) VALUES
+          ('2147483648'),
+          ('922337203685477580'),
+          ('-2147483649')
+      `);
+
+      const modifiedSchema = `
+        CREATE TABLE bigint_cast_test (
+          id SERIAL PRIMARY KEY,
+          counter BIGINT NOT NULL
+        );
+      `;
+
+      const plan = await service.plan(modifiedSchema);
+      expect(plan.hasChanges).toBe(true);
+      const sql = plan.transactional.join("\n");
+      expect(sql).toContain('ALTER COLUMN "counter" TYPE INT8');
+      expect(sql).toContain('TRUNC("counter"::DECIMAL)::bigint');
+      expect(sql).not.toContain("::integer");
+
+      await service.apply(modifiedSchema, ["public"], true);
+
+      const rows = await client.query(`
+        SELECT counter::text AS counter
+        FROM bigint_cast_test
+        ORDER BY id
+      `);
+
+      expect(rows.rows.map(function (row) { return row.counter; })).toEqual([
+        "2147483648",
+        "922337203685477580",
+        "-2147483649",
+      ]);
+
+      const plan2 = await service.plan(modifiedSchema);
+      expect(plan2.hasChanges).toBe(false);
+    });
+  });
+
   describe("Edge Cases That Could Regress", () => {
     test("should handle multiple type changes with various default scenarios", async () => {
       const initialSchema = `

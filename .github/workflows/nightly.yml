@@ -1,0 +1,143 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: "0"
+  NO_COLOR: "1"
+  TERRADB_TEST_SILENT: "1"
+
+jobs:
+  pg-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ["14", "15", "16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:pg:matrix
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+
+  deep-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5487:5432
+      postgres-pgvector:
+        image: pgvector/pgvector:0.8.1-pg17
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5488:5432
+      postgres-postgis:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5489:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:doctor
+      - run: bun run test:sqlite
+      - run: bun run test:pg:extensions
+      - run: bun run test:e2e
+      - run: bun run test:fuzz
+      - run: bun run test:property:nightly
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
+      - run: bun run test:flake
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
+      - run: bun run test:perf
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
+      - run: bun run test:coverage:full
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
+      - run: bun run build
+
+  open-failure-issue:
+    if: ${{ failure() }}
+    needs: [pg-matrix, deep-checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open nightly failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `nightly failure ${new Date().toISOString().slice(0, 10)}`;
+            const body = [
+              "Nightly workflow failed.",
+              "",
+              `Workflow: ${context.workflow}`,
+              `Run: ${context.runId}`,
+              `URL: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "Please triage within 24h."
+            ].join("\n");
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ["nightly", "test-failure"]
+            });

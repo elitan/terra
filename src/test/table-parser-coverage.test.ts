@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parse } from "pgsql-parser";
 import { parseCreateTable } from "../core/schema/parser/tables/table-parser";
 
 describe("Table parser coverage", () => {
@@ -30,6 +31,65 @@ describe("Table parser coverage", () => {
       checkConstraints: undefined,
       uniqueConstraints: undefined,
     });
+  });
+
+  test("parses quoted schema table and column identifiers with mixed case", async function () {
+    const ast = await parse(`
+      CREATE TABLE "TenantSchema"."UserAccounts" (
+        "UserID" SERIAL PRIMARY KEY,
+        "DisplayName" TEXT NOT NULL,
+        "OrgID" INTEGER,
+        CONSTRAINT "FK_User_Org" FOREIGN KEY ("OrgID")
+          REFERENCES "TenantSchema"."Organizations"("OrgID"),
+        CONSTRAINT "UQ_Display_Name" UNIQUE ("DisplayName")
+      );
+    `);
+
+    const stmt = ast.stmts[0]?.stmt?.CreateStmt;
+    const parsed = parseCreateTable(stmt);
+
+    expect(parsed?.name).toBe("UserAccounts");
+    expect(parsed?.schema).toBe("TenantSchema");
+    expect(parsed?.columns.map((column) => column.name)).toEqual([
+      "UserID",
+      "DisplayName",
+      "OrgID",
+    ]);
+    expect(parsed?.primaryKey?.columns).toEqual(["UserID"]);
+    expect(parsed?.foreignKeys).toEqual([
+      {
+        name: "FK_User_Org",
+        columns: ["OrgID"],
+        referencedTable: "TenantSchema.Organizations",
+        referencedColumns: ["OrgID"],
+        onDelete: "NO ACTION",
+        onUpdate: "NO ACTION",
+      },
+    ]);
+    expect(parsed?.uniqueConstraints).toEqual([
+      {
+        name: "UQ_Display_Name",
+        columns: ["DisplayName"],
+      },
+    ]);
+  });
+
+  test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
+    const ast = await parse(`
+      CREATE TABLE MixedCaseTable (
+        UserID INTEGER,
+        "ExactCase" TEXT
+      );
+    `);
+
+    const stmt = ast.stmts[0]?.stmt?.CreateStmt;
+    const parsed = parseCreateTable(stmt);
+
+    expect(parsed?.name).toBe("mixedcasetable");
+    expect(parsed?.columns.map((column) => column.name)).toEqual([
+      "userid",
+      "ExactCase",
+    ]);
   });
 
   test("returns null when parsing throws", function () {

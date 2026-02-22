@@ -11,6 +11,7 @@ describe("Issue #70 - CHECK constraint idempotency with IN/NOT IN", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 

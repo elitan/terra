@@ -34,6 +34,7 @@ describe("UNIQUE Constraints vs UNIQUE Indexes", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 

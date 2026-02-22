@@ -1,0 +1,5 @@
+CREATE TRIGGER trg_broken
+BEFORE INSERT ON users
+FOR EACH ROW
+WHEN (NEW.id >)
+EXECUTE FUNCTION audit_users(;

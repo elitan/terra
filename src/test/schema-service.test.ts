@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../core/schema/service";
+import { StrictModeError } from "../types/errors";
 import { createTestClient, cleanDatabase, createTestSchemaService } from "./utils";
 
 describe("SchemaService - MigrationPlanner Removal", () => {
@@ -255,6 +256,172 @@ describe("SchemaService - MigrationPlanner Removal", () => {
       expect(tableNames).toContain("companies");
       expect(tableNames).toContain("employees");
     });
+
+    test("should treat lowercase single-line sql as schema input", async () => {
+      const schema =
+        "create table lower_case_schema_input (id serial primary key, name text)";
+
+      await schemaService.apply(schema, ["public"], true);
+
+      const tables = await client.query(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'lower_case_schema_input'
+      `);
+
+      expect(tables.rows).toHaveLength(1);
+      expect(tables.rows[0].table_name).toBe("lower_case_schema_input");
+    });
+
+    test("should keep missing sql file as file error", async () => {
+      await expect(
+        schemaService.apply("missing-core-schema.sql", ["public"], true)
+      ).rejects.toThrow("ENOENT");
+    });
+  });
+
+  describe("Transactional rollback integration", () => {
+    test("should rollback all statements when a later statement fails", async () => {
+      await expect(
+        schemaService.apply(
+          `
+            CREATE TABLE tx_rollback_ok (
+              id SERIAL PRIMARY KEY
+            );
+
+            CREATE TABLE tx_rollback_fail (
+              id SERIAL PRIMARY KEY,
+              user_id INTEGER REFERENCES tx_rollback_missing(id)
+            );
+          `,
+          ["public"],
+          true
+        )
+      ).rejects.toThrow();
+
+      const tables = await client.query(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('tx_rollback_ok', 'tx_rollback_fail')
+      `);
+
+      expect(tables.rows).toEqual([]);
+    });
+
+    test("should not execute concurrent statements when transactional execution fails", async () => {
+      await schemaService.apply(
+        `
+          CREATE TABLE users (
+            id SERIAL PRIMARY KEY,
+            email TEXT
+          );
+        `,
+        ["public"],
+        true
+      );
+
+      await client.query(`
+        INSERT INTO users (id, email)
+        VALUES (1, 'not-a-number')
+      `);
+
+      await expect(
+        schemaService.apply(
+          `
+            CREATE TABLE users (
+              id SERIAL PRIMARY KEY,
+              email INTEGER
+            );
+
+            CREATE INDEX CONCURRENTLY idx_users_email_concurrent
+            ON users (email);
+          `,
+          ["public"],
+          true
+        )
+      ).rejects.toThrow();
+
+      const indexes = await client.query(`
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'idx_users_email_concurrent'
+      `);
+
+      const columns = await client.query(`
+        SELECT data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name = 'email'
+      `);
+
+      expect(indexes.rows).toEqual([]);
+      expect(columns.rows).toEqual([{ data_type: "text" }]);
+    });
+
+    test("should release advisory lock after mixed transactional failure before concurrent execution", async () => {
+      const lockName = "schema-service-mixed-failure-lock-release";
+
+      await schemaService.apply(
+        `
+          CREATE TABLE users (
+            id SERIAL PRIMARY KEY,
+            email TEXT
+          );
+        `,
+        ["public"],
+        true
+      );
+
+      await client.query(`
+        INSERT INTO users (id, email)
+        VALUES (1, 'not-a-number')
+      `);
+
+      await expect(
+        schemaService.apply(
+          `
+            CREATE TABLE users (
+              id SERIAL PRIMARY KEY,
+              email INTEGER
+            );
+
+            CREATE INDEX CONCURRENTLY idx_users_email_lock_release
+            ON users (email);
+          `,
+          ["public"],
+          true,
+          {
+            lockName,
+            lockTimeout: 500,
+          }
+        )
+      ).rejects.toThrow();
+
+      const probeClient = await createTestClient();
+      const probeLock = await probeClient.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked",
+        [lockName]
+      );
+      expect(probeLock.rows[0].locked).toBe(true);
+      await probeClient.query(
+        "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+        [lockName]
+      );
+      await probeClient.end();
+
+      const indexes = await client.query(`
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'idx_users_email_lock_release'
+      `);
+
+      expect(indexes.rows).toEqual([]);
+    });
   });
 
   describe("Unmanaged schema filtering", () => {
@@ -444,6 +611,483 @@ describe("SchemaService - MigrationPlanner Removal", () => {
       expect(hasBioRemoval).toBe(true);
       expect(hasEmailAddition).toBe(true);
       expect(hasIsbnAddition).toBe(true);
+    });
+
+    test("should handle same table name across managed schemas", async () => {
+      await cleanDatabase(client, ["public", "tenant_a"]);
+      await client.query("CREATE SCHEMA IF NOT EXISTS tenant_a");
+
+      const initialSchema = `
+        CREATE TABLE public.users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) NOT NULL
+        );
+
+        CREATE TABLE tenant_a.users (
+          id SERIAL PRIMARY KEY,
+          display_name VARCHAR(255) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ["public", "tenant_a"], true);
+
+      const desiredSchema = `
+        CREATE TABLE public.users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(desiredSchema, ["public", "tenant_a"], true);
+
+      const publicUsers = await client.query(`
+        SELECT COUNT(*)::text AS count
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+      `);
+      const tenantUsers = await client.query(`
+        SELECT COUNT(*)::text AS count
+        FROM information_schema.tables
+        WHERE table_schema = 'tenant_a'
+          AND table_name = 'users'
+      `);
+
+      expect(publicUsers.rows[0].count).toBe("1");
+      expect(tenantUsers.rows[0].count).toBe("0");
+
+      await cleanDatabase(client, ["public", "tenant_a"]);
+    });
+
+    test("should remove only tenant same-name sequence procedure and view across managed schemas", async () => {
+      await cleanDatabase(client, ["public", "tenant_a"]);
+      await client.query("CREATE SCHEMA IF NOT EXISTS tenant_a");
+
+      const initialSchema = `
+        CREATE TABLE public.shared_base (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE TABLE tenant_a.shared_base (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE SEQUENCE public.shared_seq START WITH 1;
+        CREATE SEQUENCE tenant_a.shared_seq START WITH 10;
+
+        CREATE PROCEDURE public.shared_proc()
+        LANGUAGE SQL
+        AS $$ SELECT 1; $$;
+
+        CREATE PROCEDURE tenant_a.shared_proc()
+        LANGUAGE SQL
+        AS $$ SELECT 2; $$;
+
+        CREATE VIEW public.shared_view AS
+        SELECT id FROM public.shared_base;
+
+        CREATE VIEW tenant_a.shared_view AS
+        SELECT id FROM tenant_a.shared_base;
+      `;
+
+      await schemaService.apply(initialSchema, ["public", "tenant_a"], true);
+
+      const desiredSchema = `
+        CREATE TABLE public.shared_base (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE TABLE tenant_a.shared_base (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE SEQUENCE public.shared_seq START WITH 1;
+
+        CREATE PROCEDURE public.shared_proc()
+        LANGUAGE SQL
+        AS $$ SELECT 1; $$;
+
+        CREATE VIEW public.shared_view AS
+        SELECT id FROM public.shared_base;
+      `;
+
+      const dryRunPlan = await schemaService.apply(
+        desiredSchema,
+        ["public", "tenant_a"],
+        true,
+        undefined,
+        true
+      );
+      const dryRunSql = dryRunPlan.transactional.join("\n");
+
+      expect(dryRunSql).toContain('DROP SEQUENCE IF EXISTS "tenant_a"."shared_seq";');
+      expect(dryRunSql).toContain('DROP PROCEDURE IF EXISTS "tenant_a"."shared_proc"();');
+      expect(dryRunSql).toContain('DROP VIEW IF EXISTS "tenant_a"."shared_view";');
+      expect(dryRunSql).not.toContain('DROP SEQUENCE IF EXISTS "public"."shared_seq";');
+      expect(dryRunSql).not.toContain('DROP PROCEDURE IF EXISTS "public"."shared_proc"();');
+      expect(dryRunSql).not.toContain('DROP VIEW IF EXISTS "public"."shared_view";');
+
+      await schemaService.apply(desiredSchema, ["public", "tenant_a"], true);
+
+      const sequences = await client.query(`
+        SELECT sequence_schema, sequence_name
+        FROM information_schema.sequences
+        WHERE sequence_name = 'shared_seq'
+          AND sequence_schema IN ('public', 'tenant_a')
+        ORDER BY sequence_schema
+      `);
+      const procedures = await client.query(`
+        SELECT routine_schema, routine_name
+        FROM information_schema.routines
+        WHERE routine_type = 'PROCEDURE'
+          AND routine_name = 'shared_proc'
+          AND routine_schema IN ('public', 'tenant_a')
+        ORDER BY routine_schema
+      `);
+      const views = await client.query(`
+        SELECT table_schema, table_name
+        FROM information_schema.views
+        WHERE table_name = 'shared_view'
+          AND table_schema IN ('public', 'tenant_a')
+        ORDER BY table_schema
+      `);
+
+      expect(sequences.rows).toEqual([{ sequence_schema: "public", sequence_name: "shared_seq" }]);
+      expect(procedures.rows).toEqual([{ routine_schema: "public", routine_name: "shared_proc" }]);
+      expect(views.rows).toEqual([{ table_schema: "public", table_name: "shared_view" }]);
+
+      const idempotentPlan = await schemaService.apply(
+        desiredSchema,
+        ["public", "tenant_a"],
+        true,
+        undefined,
+        true
+      );
+      expect(idempotentPlan.hasChanges).toBe(false);
+
+      await cleanDatabase(client, ["public", "tenant_a"]);
+    });
+
+    test("should keep quoted local-schema view references idempotent in public and tenant schemas", async () => {
+      await cleanDatabase(client, ["public", "tenant_a"]);
+      await client.query("CREATE SCHEMA IF NOT EXISTS tenant_a");
+
+      const schema = `
+        CREATE TABLE public.shared_base (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE TABLE tenant_a.shared_base (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE VIEW public.shared_view AS
+        SELECT id FROM "public"."shared_base";
+
+        CREATE VIEW tenant_a.shared_view AS
+        SELECT id FROM "tenant_a"."shared_base";
+      `;
+
+      await schemaService.apply(schema, ["public", "tenant_a"], true);
+      const idempotentPlan = await schemaService.apply(
+        schema,
+        ["public", "tenant_a"],
+        true,
+        undefined,
+        true
+      );
+
+      expect(idempotentPlan.hasChanges).toBe(false);
+      expect(idempotentPlan.transactional).toEqual([]);
+
+      await cleanDatabase(client, ["public", "tenant_a"]);
+    });
+  });
+
+  describe("Strict mode integration", () => {
+    test("should block destructive changes in strict mode even during dry run", async () => {
+      const initialSchema = `
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ["public"], true);
+
+      await expect(
+        schemaService.apply("", ["public"], true, undefined, true, true)
+      ).rejects.toBeInstanceOf(StrictModeError);
+
+      const tables = await client.query(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+      `);
+
+      expect(tables.rows).toHaveLength(1);
+    });
+
+    test("should release advisory lock when strict mode rejects destructive apply", async function () {
+      const lockName = "schema-service-strict-lock-release";
+      const initialSchema = `
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) NOT NULL
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ["public"], true);
+
+      await expect(
+        schemaService.apply(
+          "",
+          ["public"],
+          true,
+          {
+            lockName,
+            lockTimeout: 500,
+          },
+          false,
+          true
+        )
+      ).rejects.toBeInstanceOf(StrictModeError);
+
+      const probeClient = await createTestClient();
+      const probeLock = await probeClient.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked",
+        [lockName]
+      );
+      expect(probeLock.rows[0].locked).toBe(true);
+      await probeClient.query(
+        "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+        [lockName]
+      );
+      await probeClient.end();
+    });
+
+    test("should allow additive changes in strict mode", async () => {
+      const initialSchema = `
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY
+        );
+      `;
+
+      const updatedSchema = `
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255)
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ["public"], true);
+      await schemaService.apply(updatedSchema, ["public"], true, undefined, false, true);
+
+      const columns = await client.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+        ORDER BY ordinal_position
+      `);
+
+      expect(columns.rows.map(function (row) { return row.column_name; })).toEqual(["id", "email"]);
+    });
+
+    test("should allow enum create and enum value append in strict mode", async () => {
+      const initialSchema = `
+        CREATE TYPE mood AS ENUM ('sad');
+
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          state mood NOT NULL DEFAULT 'sad'
+        );
+      `;
+
+      const updatedSchema = `
+        CREATE TYPE mood AS ENUM ('sad', 'happy');
+
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          state mood NOT NULL DEFAULT 'sad'
+        );
+      `;
+
+      await schemaService.apply(initialSchema, ["public"], true, undefined, false, true);
+      await schemaService.apply(updatedSchema, ["public"], true, undefined, false, true);
+
+      const enumValues = await client.query(`
+        SELECT e.enumlabel
+        FROM pg_enum e
+        JOIN pg_type t ON t.oid = e.enumtypid
+        WHERE t.typname = 'mood'
+        ORDER BY e.enumsortorder
+      `);
+
+      expect(enumValues.rows.map(function (row) { return row.enumlabel; })).toEqual(["sad", "happy"]);
+    });
+  });
+
+  describe("Advisory lock integration", () => {
+    test("should fail on lock timeout when advisory lock is held", async () => {
+      const lockName = "schema-service-integration-lock-timeout";
+      const lockClient = await createTestClient();
+
+      try {
+        await lockClient.query(
+          "SELECT pg_advisory_lock(hashtext($1)::bigint)",
+          [lockName]
+        );
+
+        await expect(
+          schemaService.apply(
+            `
+              CREATE TABLE lock_timeout_test (
+                id SERIAL PRIMARY KEY
+              );
+            `,
+            ["public"],
+            true,
+            {
+              lockName,
+              lockTimeout: 300,
+            }
+          )
+        ).rejects.toThrow("Failed to acquire advisory lock");
+      } finally {
+        await lockClient.query(
+          "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+          [lockName]
+        );
+        await lockClient.end();
+      }
+    });
+
+    test("should apply successfully after advisory lock is released", async () => {
+      const lockName = "schema-service-integration-lock-release";
+      const lockClient = await createTestClient();
+
+      await lockClient.query(
+        "SELECT pg_advisory_lock(hashtext($1)::bigint)",
+        [lockName]
+      );
+      await lockClient.query(
+        "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+        [lockName]
+      );
+      await lockClient.end();
+
+      await schemaService.apply(
+        `
+          CREATE TABLE lock_release_test (
+            id SERIAL PRIMARY KEY
+          );
+        `,
+        ["public"],
+        true,
+        {
+          lockName,
+          lockTimeout: 1000,
+        }
+      );
+
+      const tables = await client.query(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'lock_release_test'
+      `);
+
+      expect(tables.rows).toHaveLength(1);
+    });
+
+    test("should release advisory lock after failed apply and allow retry", async () => {
+      const lockName = "schema-service-integration-lock-recovery";
+
+      await expect(
+        schemaService.apply(
+          `
+            CREATE TABLE lock_recovery_test (
+              id SERIAL PRIMARY KEY,
+              id INTEGER
+            );
+          `,
+          ["public"],
+          true,
+          {
+            lockName,
+            lockTimeout: 500,
+          }
+        )
+      ).rejects.toThrow();
+
+      const probeClient = await createTestClient();
+      const probeLock = await probeClient.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked",
+        [lockName]
+      );
+      expect(probeLock.rows[0].locked).toBe(true);
+      await probeClient.query(
+        "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+        [lockName]
+      );
+      await probeClient.end();
+
+      await schemaService.apply(
+        `
+          CREATE TABLE lock_recovery_test (
+            id SERIAL PRIMARY KEY
+          );
+        `,
+        ["public"],
+        true,
+        {
+          lockName,
+          lockTimeout: 500,
+        }
+      );
+
+      const tables = await client.query(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = 'lock_recovery_test'
+      `);
+      expect(tables.rows).toHaveLength(1);
+    });
+
+    test("should release advisory lock when schema parsing fails", async function () {
+      const lockName = "schema-service-integration-lock-parse-failure";
+
+      await expect(
+        schemaService.apply(
+          `
+            CREATE TABLE lock_parse_failure_test (
+              id SERIAL PRIMARY KEY,
+              broken ???
+            );
+          `,
+          ["public"],
+          true,
+          {
+            lockName,
+            lockTimeout: 500,
+          }
+        )
+      ).rejects.toThrow();
+
+      const probeClient = await createTestClient();
+      const probeLock = await probeClient.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked",
+        [lockName]
+      );
+      expect(probeLock.rows[0].locked).toBe(true);
+      await probeClient.query(
+        "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+        [lockName]
+      );
+      await probeClient.end();
     });
   });
 });

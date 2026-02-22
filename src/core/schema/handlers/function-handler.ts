@@ -17,9 +17,23 @@ function normalizeParallel(p: Function['parallel']): string {
   return p || 'UNSAFE';
 }
 
+function normalizeParameterType(type: string): string {
+  return type.replace(/\s+/g, " ").trim();
+}
+
+function getFunctionSignature(func: Function): string {
+  return func.parameters.map(function (param) {
+    return normalizeParameterType(param.type);
+  }).join(",");
+}
+
+function getFunctionKey(func: Function): string {
+  return `${func.schema || "public"}.${func.name}(${getFunctionSignature(func)})`;
+}
+
 const config: HandlerConfig<Function> = {
   name: "function",
-  getKey: (f) => f.name,
+  getKey: getFunctionKey,
   generateDrop: generateDropFunctionSQL,
   generateCreate: generateCreateFunctionSQL,
   needsUpdate: (desired, current) =>

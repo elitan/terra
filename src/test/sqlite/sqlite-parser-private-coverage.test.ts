@@ -108,6 +108,7 @@ describe("SQLiteParser private coverage", () => {
         timing: "AFTER",
         events: ["INSERT", "UPDATE", "DELETE"],
         functionName: "",
+        definition: "CREATE TRIGGER trg_users AFTER INSERT OR UPDATE OR DELETE ON users BEGIN SELECT 1; END",
       },
       {
         name: "trg_empty",
@@ -115,6 +116,7 @@ describe("SQLiteParser private coverage", () => {
         timing: "BEFORE",
         events: [],
         functionName: "",
+        definition: "",
       },
     ]);
   });

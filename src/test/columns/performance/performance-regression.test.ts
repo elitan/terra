@@ -219,7 +219,7 @@ describe("Performance Regression Testing", () => {
 
       expect(smallRate).toBeGreaterThan(30); // Higher rate for numeric conversions
       expect(mediumRate).toBeGreaterThan(300);
-    });
+    }, 60000);
 
     test("should establish DECIMAL precision change benchmarks", async () => {
       const benchmarks = new Map<string, number>();

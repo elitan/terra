@@ -230,6 +230,7 @@ describe("SQLiteInspector unit coverage", () => {
         timing: "INSTEAD OF",
         events: ["INSERT", "UPDATE", "DELETE"],
         functionName: "",
+        definition: "CREATE TRIGGER trg_users INSTEAD OF INSERT OR UPDATE OR DELETE ON users BEGIN SELECT 1; END",
       },
       {
         name: "trg_default",
@@ -237,6 +238,7 @@ describe("SQLiteInspector unit coverage", () => {
         timing: "BEFORE",
         events: [],
         functionName: "",
+        definition: "",
       },
     ]);
   });

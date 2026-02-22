@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaParser } from "../../core/schema/parser";
 import { DatabaseInspector } from "../../core/schema/inspector";
-import { createTestClient } from "../utils";
+import { cleanDatabase, createTestClient } from "../utils";
 import { SchemaDiffer } from "../../core/schema/differ";
 import type { Index, Table } from "../../types/schema";
 
@@ -13,16 +13,14 @@ describe("Expression Index Support", () => {
 
   beforeEach(async () => {
     client = await createTestClient();
+    await cleanDatabase(client);
 
     parser = new SchemaParser();
     inspector = new DatabaseInspector();
-
-    // Clean up any existing test tables
-    await client.query("DROP TABLE IF EXISTS expression_test CASCADE");
   });
 
   afterEach(async () => {
-    await client.query("DROP TABLE IF EXISTS expression_test CASCADE");
+    await cleanDatabase(client);
     await client?.end();
   });
 
