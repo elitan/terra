@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { deparseSync } from "pgsql-parser";
 import type { Function, FunctionParameter } from "../../../types/schema";
 
 /**
@@ -164,17 +165,16 @@ function extractDataType(dataTypeNode: any): string {
         varchar: "character varying",
       };
       const mappedType = typeMap[typeName.toLowerCase()];
-
-      if (schemaParts.length === 0) {
-        return mappedType || quoteTypeIdentifier(typeName);
-      }
-
       const normalizedSchema = schemaParts.join(".").toLowerCase();
-      if (normalizedSchema === "pg_catalog" && mappedType) {
-        return mappedType;
+      const arraySuffix = Array.isArray(dataTypeNode.arrayBounds) && dataTypeNode.arrayBounds.length > 0
+        ? "[]".repeat(dataTypeNode.arrayBounds.length)
+        : "";
+
+      if (schemaParts.length === 0 || normalizedSchema === "pg_catalog") {
+        return `${mappedType || quoteTypeIdentifier(typeName)}${arraySuffix}`;
       }
 
-      return `${schemaParts.map(quoteTypeIdentifier).join(".")}.${quoteTypeIdentifier(typeName)}`;
+      return `${schemaParts.map(quoteTypeIdentifier).join(".")}.${quoteTypeIdentifier(typeName)}${arraySuffix}`;
     }
 
     return "unknown";
@@ -196,13 +196,21 @@ function quoteTypeIdentifier(value: string): string {
  */
 function extractDefaultValue(defaultNode: any): string {
   try {
+    const deparsed = deparseSync([defaultNode]).trim();
+    if (deparsed) {
+      return deparsed;
+    }
+  } catch (error) {
+  }
+
+  try {
     if (defaultNode.expr) {
       return defaultNode.expr.text || defaultNode.expr.value || "";
     }
-    return "";
   } catch (error) {
-    return "";
   }
+
+  return "";
 }
 
 /**
