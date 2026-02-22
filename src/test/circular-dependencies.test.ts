@@ -15,6 +15,7 @@ describe("Circular Dependencies", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 

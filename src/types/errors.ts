@@ -101,3 +101,17 @@ export class ValidationError extends TerraError {
     this.name = 'ValidationError';
   }
 }
+
+export class StrictModeError extends TerraError {
+  constructor(
+    message: string,
+    public statements: string[]
+  ) {
+    super(
+      'STRICT_MODE_ERROR',
+      message,
+      { statements }
+    );
+    this.name = 'StrictModeError';
+  }
+}

@@ -13,6 +13,7 @@ import {
   generateCreateTypeSQL,
   generateCreateViewSQL,
   generateDropCheckConstraintSQL,
+  generateDropFunctionSQL,
   generateDropForeignKeySQL,
   generateDropPrimaryKeySQL,
   generateDropProcedureSQL,
@@ -106,21 +107,31 @@ describe("SQL generators coverage", () => {
       referencedColumns: ["id"],
       onDelete: "CASCADE",
       onUpdate: "SET NULL",
+      deferrable: true,
+      initiallyDeferred: true,
     });
     expect(fkSQL).toContain("FOREIGN KEY");
     expect(fkSQL).toContain("ON DELETE CASCADE");
     expect(fkSQL).toContain("ON UPDATE SET NULL");
+    expect(fkSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(generateDropForeignKeySQL("orders", "fk_orders_users")).toContain("DROP CONSTRAINT");
 
     expect(generateAddCheckConstraintSQL("users", { expression: "age > 0" })).toContain("CHECK (age > 0)");
     expect(generateDropCheckConstraintSQL("users", "users_check")).toContain("DROP CONSTRAINT");
-    expect(generateAddUniqueConstraintSQL("users", { columns: ["email"] })).toContain("UNIQUE (\"email\")");
+    const uniqueSQL = generateAddUniqueConstraintSQL("users", {
+      columns: ["email"],
+      deferrable: true,
+      initiallyDeferred: true,
+    });
+    expect(uniqueSQL).toContain("UNIQUE (\"email\")");
+    expect(uniqueSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(generateDropUniqueConstraintSQL("users", "users_email_unique")).toContain("DROP CONSTRAINT");
   });
 
   test("builds view SQL variations", () => {
     const view: View = {
       name: "active_users",
+      schema: "audit",
       definition: "SELECT * FROM users WHERE active = true",
       securityBarrier: true,
       checkOption: "LOCAL",
@@ -128,6 +139,7 @@ describe("SQL generators coverage", () => {
 
     const createView = generateCreateViewSQL(view);
     expect(createView).toContain("CREATE VIEW");
+    expect(createView).toContain('"audit"."active_users"');
     expect(createView).toContain("security_barrier = true");
     expect(createView).toContain("WITH LOCAL CHECK OPTION");
 
@@ -138,14 +150,15 @@ describe("SQL generators coverage", () => {
     };
     expect(generateCreateOrReplaceViewSQL(materialized)).toContain("DROP MATERIALIZED VIEW IF EXISTS");
     expect(generateCreateOrReplaceViewSQL(view)).toContain("CREATE OR REPLACE VIEW");
-    expect(generateDropViewSQL("v_users")).toContain("DROP VIEW IF EXISTS");
-    expect(generateDropViewSQL("mv_users", true)).toContain("DROP MATERIALIZED VIEW IF EXISTS");
+    expect(generateDropViewSQL("v_users", false, "audit")).toContain('DROP VIEW IF EXISTS "audit"."v_users"');
+    expect(generateDropViewSQL("mv_users", true, "audit")).toContain('DROP MATERIALIZED VIEW IF EXISTS "audit"."mv_users"');
     expect(generateRefreshMaterializedViewSQL("mv_users", true)).toContain("CONCURRENTLY");
   });
 
   test("builds function and procedure SQL variations", () => {
     const fn: Function = {
       name: "compute",
+      schema: "audit",
       parameters: [
         { mode: "IN", name: "a", type: "integer" },
         { name: "b", type: "text", default: "'x'" },
@@ -161,27 +174,31 @@ describe("SQL generators coverage", () => {
       rows: 5,
     };
     const fnSQL = generateCreateFunctionSQL(fn);
+    expect(fnSQL).toContain('CREATE FUNCTION "audit"."compute"');
     expect(fnSQL).toContain("STABLE");
     expect(fnSQL).toContain("PARALLEL SAFE");
     expect(fnSQL).toContain("SECURITY DEFINER");
     expect(fnSQL).toContain("STRICT");
     expect(fnSQL).toContain("COST 3");
     expect(fnSQL).toContain("ROWS 5");
+    expect(generateDropFunctionSQL(fn)).toContain('DROP FUNCTION IF EXISTS "audit"."compute"');
 
     expect(generateDropForeignKeySQL("x", "y")).toContain("ALTER TABLE");
 
     const proc: Procedure = {
       name: "sync_users",
+      schema: "audit",
       parameters: [{ mode: "INOUT", name: "p", type: "integer", default: "0" }],
       language: "sql",
       body: "SELECT 1",
       securityDefiner: true,
     };
     const procSQL = generateCreateProcedureSQL(proc);
+    expect(procSQL).toContain('CREATE PROCEDURE "audit"."sync_users"');
     expect(procSQL).toContain("INOUT");
     expect(procSQL).toContain("DEFAULT 0");
     expect(procSQL).toContain("SECURITY DEFINER");
-    expect(generateDropProcedureSQL(proc)).toContain("DROP PROCEDURE IF EXISTS");
+    expect(generateDropProcedureSQL(proc)).toContain('DROP PROCEDURE IF EXISTS "audit"."sync_users"');
   });
 
   test("builds trigger, sequence, and enum SQL", () => {
@@ -199,10 +216,19 @@ describe("SQL generators coverage", () => {
     expect(triggerSQL).toContain("FOR EACH ROW");
     expect(triggerSQL).toContain("WHEN (NEW.id IS NOT NULL)");
     expect(triggerSQL).toContain("'x', 1");
+    expect(triggerSQL).toContain("EXECUTE FUNCTION \"audit_users\"('x', 1);");
+    expect(triggerSQL).not.toContain("'x', 1 )");
     expect(generateDropTriggerSQL(trigger)).toContain("DROP TRIGGER IF EXISTS");
+
+    const noArgsTrigger: Trigger = {
+      ...trigger,
+      functionArgs: undefined,
+    };
+    expect(generateCreateTriggerSQL(noArgsTrigger)).toContain("EXECUTE FUNCTION \"audit_users\"();");
 
     const sequence: Sequence = {
       name: "user_seq",
+      schema: "audit",
       dataType: "BIGINT",
       increment: 2,
       minValue: 1,
@@ -213,10 +239,11 @@ describe("SQL generators coverage", () => {
       ownedBy: "public.users.id",
     };
     const seqSQL = generateCreateSequenceSQL(sequence);
+    expect(seqSQL).toContain('CREATE SEQUENCE "audit"."user_seq"');
     expect(seqSQL).toContain("AS BIGINT");
     expect(seqSQL).toContain("NO CYCLE");
     expect(seqSQL).toContain("OWNED BY public.users.id");
-    expect(generateDropSequenceSQL("user_seq")).toContain("DROP SEQUENCE IF EXISTS");
+    expect(generateDropSequenceSQL("user_seq", "audit")).toContain('DROP SEQUENCE IF EXISTS "audit"."user_seq"');
 
     const enumSQL = generateCreateTypeSQL({
       name: "status",

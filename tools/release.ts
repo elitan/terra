@@ -135,7 +135,7 @@ async function main() {
   }
   
   // Commit the version change
-  const commitResult = runCommand("git", ["commit", "-m", `chore: bump version to ${newVersion}`]);
+  const commitResult = runCommand("git", ["commit", "-m", `chore(release): bump version to ${newVersion}`]);
   if (!commitResult.success) {
     console.error(chalk.red("❌ Failed to commit version change"));
     process.exit(1);
@@ -161,7 +161,7 @@ async function main() {
   console.log(chalk.green("✅ Release process completed successfully!"));
   console.log(chalk.blue(`🎉 Release ${tag} has been created and pushed to GitHub`));
   console.log(chalk.gray("GitHub Actions will now handle publishing to npm automatically."));
-  console.log(chalk.gray(`Monitor the release at: https://github.com/elitan/terra/releases/tag/${tag}`));
+  console.log(chalk.gray(`Monitor the release at: https://github.com/elitan/terradb/releases/tag/${tag}`));
 }
 
 main().catch((error) => {

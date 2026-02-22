@@ -194,6 +194,96 @@ describe("View Parsing", () => {
       const view = result.views[0];
       expect(view.securityBarrier).toBe(true);
     });
+
+    test("should parse security_barrier option edge forms", async () => {
+      const cases = [
+        {
+          sql: `
+            CREATE VIEW secure_users_true
+            WITH (security_barrier = true)
+            AS SELECT id FROM users;
+          `,
+          expected: true,
+        },
+        {
+          sql: `
+            CREATE VIEW secure_users_on
+            WITH (security_barrier = on)
+            AS SELECT id FROM users;
+          `,
+          expected: true,
+        },
+        {
+          sql: `
+            CREATE VIEW secure_users_false
+            WITH (security_barrier = false)
+            AS SELECT id FROM users;
+          `,
+          expected: false,
+        },
+        {
+          sql: `
+            CREATE VIEW secure_users_off
+            WITH (security_barrier = off)
+            AS SELECT id FROM users;
+          `,
+          expected: false,
+        },
+        {
+          sql: `
+            CREATE VIEW secure_users_flag
+            WITH (security_barrier)
+            AS SELECT id FROM users;
+          `,
+          expected: true,
+        },
+      ] as const;
+
+      for (const item of cases) {
+        const result = await parser.parseSchema(item.sql);
+        expect(result.views).toHaveLength(1);
+        expect(result.views[0].securityBarrier).toBe(item.expected);
+      }
+    });
+  });
+
+  describe("Materialized View Options Parsing", () => {
+    test("should parse materialized view option edge forms", async () => {
+      const cases = [
+        {
+          sql: `
+            CREATE MATERIALIZED VIEW mv_no_data
+            AS SELECT 1 AS id
+            WITH NO DATA;
+          `,
+          name: "mv_no_data",
+        },
+        {
+          sql: `
+            CREATE MATERIALIZED VIEW mv_storage
+            WITH (fillfactor = 90)
+            TABLESPACE pg_default
+            AS SELECT 1 AS id;
+          `,
+          name: "mv_storage",
+        },
+        {
+          sql: `
+            CREATE MATERIALIZED VIEW IF NOT EXISTS mv_if_not_exists
+            AS SELECT 1 AS id;
+          `,
+          name: "mv_if_not_exists",
+        },
+      ] as const;
+
+      for (const item of cases) {
+        const result = await parser.parseSchema(item.sql);
+        expect(result.views).toHaveLength(1);
+        expect(result.views[0].name).toBe(item.name);
+        expect(result.views[0].materialized).toBe(true);
+        expect(result.views[0].definition).toContain("SELECT 1");
+      }
+    });
   });
 
   describe("Multiple Views Parsing", () => {

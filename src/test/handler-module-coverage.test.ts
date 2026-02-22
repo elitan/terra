@@ -4,7 +4,8 @@ import { ExtensionHandler } from "../core/schema/handlers/extension-handler";
 import { ProcedureHandler } from "../core/schema/handlers/procedure-handler";
 import { SequenceHandler } from "../core/schema/handlers/sequence-handler";
 import { SchemaHandler } from "../core/schema/handlers/schema-handler";
-import type { Comment, Extension, Procedure, SchemaDefinition, Sequence } from "../types/schema";
+import { TriggerHandler } from "../core/schema/handlers/trigger-handler";
+import type { Comment, Extension, Procedure, SchemaDefinition, Sequence, Trigger } from "../types/schema";
 
 function makeSequence(overrides: Partial<Sequence> = {}): Sequence {
   return {
@@ -42,6 +43,20 @@ function makeComment(overrides: Partial<Comment> = {}): Comment {
     objectName: "users",
     schemaName: "public",
     comment: "table comment",
+    ...overrides,
+  };
+}
+
+function makeTrigger(overrides: Partial<Trigger> = {}): Trigger {
+  return {
+    name: "trg_orders",
+    tableName: "orders",
+    schema: "public",
+    timing: "BEFORE",
+    events: ["INSERT"],
+    forEach: "ROW",
+    functionName: "sync_order",
+    functionSchema: "public",
     ...overrides,
   };
 }
@@ -271,6 +286,74 @@ describe("Handler module coverage", () => {
       expect(statements).toHaveLength(2);
       expect(statements[0]).toContain("DROP PROCEDURE IF EXISTS");
       expect(statements[1]).toContain("LANGUAGE plpgsql");
+    });
+  });
+
+  describe("trigger handler", () => {
+    test("creates and drops triggers", () => {
+      const handler = new TriggerHandler();
+      const statements = handler.generateStatements(
+        [makeTrigger({ name: "trg_new" })],
+        [makeTrigger({ name: "trg_old" })]
+      );
+
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain('DROP TRIGGER IF EXISTS "trg_old"');
+      expect(statements[1]).toContain('CREATE TRIGGER "trg_new"');
+    });
+
+    test("does not update for equivalent trigger arg forms", () => {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        when: "new.id > 0",
+        functionArgs: ["1", "'it''s'"],
+      });
+      const current = makeTrigger({
+        when: "(new.id > 0)",
+        functionArgs: ["'1'", "'it''s'"],
+      });
+
+      const statements = handler.generateStatements([desired], [current]);
+      expect(statements).toEqual([]);
+    });
+
+    test("uses sqlite trigger definition for create and drop statements", () => {
+      const handler = new TriggerHandler();
+      const sqliteTrigger = makeTrigger({
+        name: "trg_users_insert",
+        schema: undefined,
+        tableName: "users",
+        functionName: "",
+        definition: "CREATE TRIGGER trg_users_insert AFTER INSERT ON users BEGIN INSERT INTO audit_log(user_id) VALUES (NEW.id); END",
+      });
+
+      const createStatements = handler.generateStatements([sqliteTrigger], []);
+      expect(createStatements).toHaveLength(1);
+      expect(createStatements[0]).toContain("CREATE TRIGGER trg_users_insert");
+      expect(createStatements[0]).toContain("BEGIN INSERT INTO audit_log");
+
+      const dropStatements = handler.generateStatements([], [sqliteTrigger]);
+      expect(dropStatements).toHaveLength(1);
+      expect(dropStatements[0]).toBe('DROP TRIGGER IF EXISTS "trg_users_insert";');
+    });
+
+    test("does not update sqlite trigger for whitespace-only definition differences", () => {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        schema: undefined,
+        tableName: "users",
+        functionName: "",
+        definition: "CREATE TRIGGER trg_users_insert AFTER INSERT ON users BEGIN INSERT INTO audit_log(user_id) VALUES (NEW.id); END",
+      });
+      const current = makeTrigger({
+        schema: undefined,
+        tableName: "users",
+        functionName: "",
+        definition: "CREATE  TRIGGER   trg_users_insert AFTER INSERT ON users BEGIN  INSERT INTO audit_log(user_id) VALUES (NEW.id);  END;",
+      });
+
+      const statements = handler.generateStatements([desired], [current]);
+      expect(statements).toEqual([]);
     });
   });
 });

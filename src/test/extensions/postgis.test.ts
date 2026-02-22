@@ -5,11 +5,11 @@ import { DatabaseInspector } from "../../core/schema/inspector";
 import { PostgresProvider } from "../../providers/postgres";
 
 const POSTGIS_CONFIG = {
-  host: "localhost",
-  port: 5489,
-  database: "sql_terraform_test",
-  user: "test_user",
-  password: "test_password",
+  host: process.env.POSTGIS_HOST || "localhost",
+  port: Number.parseInt(process.env.POSTGIS_PORT || "5489", 10),
+  database: process.env.POSTGIS_DB || "sql_terraform_test",
+  user: process.env.POSTGIS_USER || "test_user",
+  password: process.env.POSTGIS_PASSWORD || "test_password",
 };
 
 async function createPostgisClient(): Promise<Client> {

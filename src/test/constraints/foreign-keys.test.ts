@@ -16,6 +16,7 @@ describe("Foreign Key Constraints", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 

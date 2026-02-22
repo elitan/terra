@@ -20,6 +20,18 @@ describe("View SQL Generation", () => {
       expect(sql).toBe('CREATE VIEW "active_users" AS SELECT id, email FROM users WHERE active = true;');
     });
 
+    test("should generate schema-qualified CREATE VIEW statement", () => {
+      const view: View = {
+        name: "active_users",
+        schema: "audit",
+        definition: "SELECT id, email FROM users WHERE active = true",
+        materialized: false
+      };
+
+      const sql = generateCreateViewSQL(view);
+      expect(sql).toBe('CREATE VIEW "audit"."active_users" AS SELECT id, email FROM users WHERE active = true;');
+    });
+
     test("should generate CREATE MATERIALIZED VIEW statement", () => {
       const view: View = {
         name: "user_stats",
@@ -77,6 +89,11 @@ describe("View SQL Generation", () => {
     test("should generate DROP MATERIALIZED VIEW statement", () => {
       const sql = generateDropViewSQL("test_mat_view", true);
       expect(sql).toBe('DROP MATERIALIZED VIEW IF EXISTS "test_mat_view";');
+    });
+
+    test("should generate schema-qualified DROP VIEW statement", () => {
+      const sql = generateDropViewSQL("test_view", false, "audit");
+      expect(sql).toBe('DROP VIEW IF EXISTS "audit"."test_view";');
     });
   });
 

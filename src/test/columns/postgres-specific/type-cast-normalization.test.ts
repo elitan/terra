@@ -244,9 +244,6 @@ describe("PostgreSQL Type Cast Normalization", () => {
     });
 
     test("should handle negative integer defaults", async () => {
-      // TODO: This test currently fails - negative integers in defaults need special handling
-      // PostgreSQL may store them differently (e.g., with parentheses or special casting)
-      // This is a known limitation that should be addressed in a future update
       const schema = `
         CREATE TABLE negatives (
           id SERIAL PRIMARY KEY,

@@ -2,15 +2,32 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+env:
+  FORCE_COLOR: "0"
+  NO_COLOR: "1"
+  TERRADB_TEST_SILENT: "1"
 
 jobs:
-  test:
+  lint:
+    name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - run: bunx tsc --noEmit
 
+  test-unit:
+    name: test:unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
     services:
       postgres:
         image: postgres:17-alpine
@@ -24,8 +41,94 @@ jobs:
           --health-timeout 5s
           --health-retries 10
         ports:
-          - 5487:5432
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:unit
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
 
+  test-sqlite:
+    name: test:sqlite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:sqlite
+
+  test-pg14:
+    name: test:pg:14
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:pg:14
+        env:
+          DATABASE_URL_PG14: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+
+  test-pg17:
+    name: test:pg:17
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:pg:17
+        env:
+          DATABASE_URL_PG17: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+
+  test-pg-extensions:
+    name: test:pg:extensions
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
       postgres-pgvector:
         image: pgvector/pgvector:0.8.1-pg17
         env:
@@ -39,7 +142,6 @@ jobs:
           --health-retries 10
         ports:
           - 5488:5432
-
       postgres-postgis:
         image: postgis/postgis:17-3.5
         env:
@@ -53,49 +155,131 @@ jobs:
           --health-retries 10
         ports:
           - 5489:5432
-
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
-      with:
-        bun-version: latest
-    
-    - name: Install dependencies
-      run: bun install
-    
-    - name: Wait for PostgreSQL services
-      run: |
-        for port in 5487 5488 5489; do
-          ready=0
-          for i in {1..30}; do
-            if pg_isready -h localhost -p $port -U test_user; then
-              echo "PostgreSQL on port $port is ready"
-              ready=1
-              break
-            fi
-            echo "Waiting for PostgreSQL on port $port... ($i/30)"
-            sleep 2
-          done
-          if [ $ready -ne 1 ]; then
-            echo "PostgreSQL on port $port did not become ready"
-            exit 1
-          fi
-        done
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:pg:extensions
 
-    - name: Run tests with coverage gate
-      run: bun run test:coverage
-      env:
-        DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
-    
-    - name: Build
-      run: bun run build
-
-  property-tests:
+  test-e2e:
+    name: test:e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:e2e
 
+  test-property-pr:
+    name: test:property:pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:property:pr
+        env:
+          FC_SEED: "20260218"
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+
+  test-flake:
+    name: test:flake
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:flake
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+
+  test-mutation-changed:
+    name: test:mutation:changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:mutation:changed:gate
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+          DATABASE_URL_PG14: ""
+          DATABASE_URL_PG15: ""
+          DATABASE_URL_PG16: ""
+          DATABASE_URL_PG17: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+          MUTATION_MAX_MUTANTS_PER_FILE: "4"
+          MUTATION_TIMEOUT_MS: "90000"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutation-reports
+          path: coverage/mutation/
+
+  coverage-build:
+    name: coverage gate + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine
@@ -110,55 +294,41 @@ jobs:
           --health-retries 10
         ports:
           - 5487:5432
-
+      postgres-pgvector:
+        image: pgvector/pgvector:0.8.1-pg17
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5488:5432
+      postgres-postgis:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5489:5432
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
-      with:
-        bun-version: latest
-
-    - name: Install dependencies
-      run: bun install
-
-    - name: Wait for PostgreSQL
-      run: |
-        ready=0
-        for i in {1..30}; do
-          if pg_isready -h localhost -p 5487 -U test_user; then
-            echo "PostgreSQL is ready"
-            ready=1
-            break
-          fi
-          echo "Waiting for PostgreSQL... ($i/30)"
-          sleep 2
-        done
-        if [ $ready -ne 1 ]; then
-          echo "PostgreSQL did not become ready"
-          exit 1
-        fi
-
-    - name: Run property tests
-      run: bun run test:properties
-      env:
-        DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
-        FC_SEED: "20260218"
-
-  lint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v1
-      with:
-        bun-version: latest
-    
-    - name: Install dependencies
-      run: bun install
-    
-    - name: Check TypeScript
-      run: bunx tsc --noEmit
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:doctor
+      - run: bun run test:coverage
+        env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
+      - run: bun run build

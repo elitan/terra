@@ -5,7 +5,7 @@ import {
   executeColumnMigration,
   DataIntegrityUtils,
 } from "../column-test-utils";
-import { getTableColumns, createTestClient } from "../../utils";
+import { cleanDatabase, getTableColumns, createTestClient } from "../../utils";
 import { BoundaryValues } from "../test-data-generators";
 import type { Column } from "../../../types/schema";
 
@@ -15,15 +15,12 @@ describe("Data Integrity Validation", () => {
 
   beforeEach(async () => {
     client = await createTestClient();
+    await cleanDatabase(client);
     services = createColumnTestServices();
   });
 
   afterEach(async () => {
-    try {
-      await client.query(`DROP TABLE IF EXISTS integrity_test CASCADE;`);
-    } catch (error) {
-      // Ignore cleanup errors
-    }
+    await cleanDatabase(client);
     await client?.end();
   });
 

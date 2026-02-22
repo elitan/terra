@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { Client } from "pg";
 import { createTestClient, cleanDatabase, getTableColumns } from "../../utils";
 import {
@@ -540,6 +541,17 @@ describe("Performance Benchmark Tracking", () => {
 
       console.log("📁 Benchmark data for historical tracking:");
       console.log(JSON.stringify(benchmarkSummary, null, 2));
+      const metrics = Object.fromEntries(
+        benchmarkSummary.benchmarks.map((benchmark) => [
+          benchmark.scenario,
+          benchmark.duration,
+        ])
+      );
+      mkdirSync("coverage", { recursive: true });
+      writeFileSync(
+        "coverage/perf-report.json",
+        JSON.stringify({ metrics }, null, 2)
+      );
 
       // Assert overall performance acceptability
       expect(allBenchmarksPassed).toBe(true);

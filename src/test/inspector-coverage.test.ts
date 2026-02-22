@@ -20,6 +20,7 @@ describe("DatabaseInspector coverage", () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql, params) => {
       if (sql.includes("FROM information_schema.views")) {
+        expect(params).toEqual([["public", "tenant_a"]]);
         return {
           rows: [
             {
@@ -31,11 +32,21 @@ describe("DatabaseInspector coverage", () => {
               is_updatable: "YES",
               is_insertable_into: "YES",
             },
+            {
+              view_name: "v_orders",
+              schema_name: "tenant_a",
+              view_definition: " SELECT id FROM orders ",
+              check_option: "NONE",
+              reloptions: null,
+              is_updatable: "YES",
+              is_insertable_into: "NO",
+            },
           ],
         };
       }
 
       if (sql.includes("FROM pg_matviews")) {
+        expect(params).toEqual([["public", "tenant_a"]]);
         return {
           rows: [
             {
@@ -44,21 +55,34 @@ describe("DatabaseInspector coverage", () => {
               definition: " SELECT id FROM users ",
               ispopulated: true,
             },
+            {
+              view_name: "mv_orders",
+              schema_name: "tenant_a",
+              definition: " SELECT id FROM orders ",
+              ispopulated: true,
+            },
           ],
         };
       }
 
       if (sql.includes("FROM pg_indexes")) {
-        expect(params).toEqual(["public", "mv_users"]);
-        return {
-          rows: [{ indexname: "mv_users_idx", indexdef: "CREATE INDEX mv_users_idx ON mv_users(id)" }],
-        };
+        if (params?.[0] === "public" && params?.[1] === "mv_users") {
+          return {
+            rows: [{ indexname: "mv_users_idx", indexdef: "CREATE INDEX mv_users_idx ON mv_users(id)" }],
+          };
+        }
+        if (params?.[0] === "tenant_a" && params?.[1] === "mv_orders") {
+          return {
+            rows: [{ indexname: "mv_orders_idx", indexdef: "CREATE INDEX mv_orders_idx ON mv_orders(id)" }],
+          };
+        }
+        throw new Error(`Unexpected pg_indexes params: ${JSON.stringify(params)}`);
       }
 
       throw new Error(`Unhandled SQL: ${sql}`);
     });
 
-    const views = await inspector.getCurrentViews(client, ["public"]);
+    const views = await inspector.getCurrentViews(client, ["public", "tenant_a"]);
     expect(views).toEqual([
       {
         name: "v_users",
@@ -69,6 +93,12 @@ describe("DatabaseInspector coverage", () => {
         securityBarrier: true,
       },
       {
+        name: "v_orders",
+        schema: "tenant_a",
+        definition: "SELECT id FROM orders",
+        materialized: false,
+      },
+      {
         name: "mv_users",
         schema: "public",
         definition: "SELECT id FROM users",
@@ -77,6 +107,20 @@ describe("DatabaseInspector coverage", () => {
           {
             name: "mv_users_idx",
             tableName: "mv_users",
+            columns: [],
+            type: "btree",
+          },
+        ],
+      },
+      {
+        name: "mv_orders",
+        schema: "tenant_a",
+        definition: "SELECT id FROM orders",
+        materialized: true,
+        indexes: [
+          {
+            name: "mv_orders_idx",
+            tableName: "mv_orders",
             columns: [],
             type: "btree",
           },
@@ -144,6 +188,240 @@ describe("DatabaseInspector coverage", () => {
     ]);
   });
 
+  test("queries routines with schema-qualified deterministic ordering", async () => {
+    const inspector = new DatabaseInspector();
+    const client = createClient((sql, params) => {
+      if (sql.includes("FROM pg_proc p") && sql.includes("p.prokind = 'f'")) {
+        expect(sql).toContain("ORDER BY n.nspname, p.proname");
+        expect(params).toEqual([["public", "tenant_a"]]);
+        return {
+          rows: [
+            {
+              function_name: "sync_users",
+              schema_name: "public",
+              arguments: "",
+              return_type: "integer",
+              language: "sql",
+              source_code: "SELECT 1",
+              volatility: "VOLATILE",
+              parallel: "UNSAFE",
+              security_definer: false,
+              is_strict: false,
+              cost: 100,
+              rows: 1000,
+            },
+          ],
+        };
+      }
+
+      if (sql.includes("FROM pg_proc p") && sql.includes("p.prokind = 'p'")) {
+        expect(sql).toContain("ORDER BY n.nspname, p.proname");
+        expect(params).toEqual([["public", "tenant_a"]]);
+        return {
+          rows: [
+            {
+              procedure_name: "refresh_cache",
+              schema_name: "tenant_a",
+              arguments: "",
+              language: "sql",
+              source_code: "SELECT 1",
+              security_definer: false,
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const functions = await inspector.getCurrentFunctions(client, ["public", "tenant_a"]);
+    expect(functions).toEqual([
+      {
+        name: "sync_users",
+        schema: "public",
+        parameters: [],
+        returnType: "integer",
+        language: "sql",
+        body: "SELECT 1",
+        volatility: "VOLATILE",
+        parallel: "UNSAFE",
+        securityDefiner: undefined,
+        strict: undefined,
+        cost: undefined,
+        rows: undefined,
+      },
+    ]);
+
+    const procedures = await inspector.getCurrentProcedures(client, ["public", "tenant_a"]);
+    expect(procedures).toEqual([
+      {
+        name: "refresh_cache",
+        schema: "tenant_a",
+        parameters: [],
+        language: "sql",
+        body: "SELECT 1",
+        securityDefiner: undefined,
+      },
+    ]);
+  });
+
+  test("parses trigger when clause and function args from trigger definition", async () => {
+    const inspector = new DatabaseInspector();
+    const client = createClient((sql, params) => {
+      if (sql.includes("FROM pg_trigger t")) {
+        expect(params).toEqual([["public"]]);
+        return {
+          rows: [
+            {
+              trigger_name: "trg_orders",
+              table_name: "orders",
+              schema_name: "public",
+              for_each: "ROW",
+              timing: "BEFORE",
+              on_insert: true,
+              on_delete: false,
+              on_update: false,
+              on_truncate: false,
+              function_name: "sync_order",
+              function_schema: "public",
+              trigger_def: "CREATE TRIGGER trg_orders BEFORE INSERT ON public.orders FOR EACH ROW WHEN ((new.id > 0 AND new.status <> 'x')) EXECUTE FUNCTION public.sync_order('1', 'a,b', 'it''s')",
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const triggers = await inspector.getCurrentTriggers(client, ["public"]);
+    expect(triggers).toEqual([
+      {
+        name: "trg_orders",
+        tableName: "orders",
+        schema: "public",
+        timing: "BEFORE",
+        events: ["INSERT"],
+        forEach: "ROW",
+        when: "new.id > 0 AND new.status <> 'x'",
+        functionName: "sync_order",
+        functionSchema: "public",
+        functionArgs: ["'1'", "'a,b'", "'it''s'"],
+      },
+    ]);
+  });
+
+  test("parses deferrable metadata for foreign keys and unique constraints", async () => {
+    const inspector = new DatabaseInspector();
+    const client = createClient((sql) => {
+      if (sql.includes("WHERE c.contype = 'f'")) {
+        return {
+          rows: [
+            {
+              constraint_name: "fk_parent",
+              columns: ["parent_id"],
+              referenced_schema: "public",
+              referenced_table: "parents",
+              referenced_columns: ["id"],
+              delete_rule: "a",
+              update_rule: "a",
+              deferrable: true,
+              initially_deferred: true,
+            },
+          ],
+        };
+      }
+
+      if (sql.includes("WHERE c.contype = 'u'")) {
+        return {
+          rows: [
+            {
+              constraint_name: "uq_external",
+              columns: ["external_id"],
+              deferrable: true,
+              initially_deferred: true,
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const foreignKeys = await inspector.getForeignKeyConstraints(client, "child", "public");
+    expect(foreignKeys).toEqual([
+      {
+        name: "fk_parent",
+        columns: ["parent_id"],
+        referencedTable: "parents",
+        referencedColumns: ["id"],
+        onDelete: "NO ACTION",
+        onUpdate: "NO ACTION",
+        deferrable: true,
+        initiallyDeferred: true,
+      },
+    ]);
+
+    const uniqueConstraints = await inspector.getUniqueConstraints(client, "child", "public");
+    expect(uniqueConstraints).toEqual([
+      {
+        name: "uq_external",
+        columns: ["external_id"],
+        deferrable: true,
+        initiallyDeferred: true,
+      },
+    ]);
+  });
+
+  test("parses table index opclass and storage metadata", async () => {
+    const inspector = new DatabaseInspector();
+    const client = createClient((sql, params) => {
+      if (sql.includes("FROM pg_indexes i")) {
+        expect(params).toEqual(["users", "public"]);
+        return {
+          rows: [
+            {
+              index_name: "idx_users_email",
+              table_name: "users",
+              table_schema: "public",
+              index_definition: "CREATE INDEX idx_users_email ON users USING btree (email DESC, created_at)",
+              is_unique: false,
+              access_method: "btree",
+              has_expressions: false,
+              tablespace_name: "fastspace",
+              storage_options: ["fillfactor=70", "note='abc'"],
+              expression_def: null,
+              column_names: ["email", "created_at"],
+              opclass_names: ["text_pattern_ops", null],
+              where_clause: "active = true",
+              sort_options: [1, 0],
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const indexes = await inspector.getTableIndexes(client, "users", "public");
+    expect(indexes).toEqual([
+      {
+        name: "idx_users_email",
+        tableName: "users",
+        schema: "public",
+        columns: ["email", "created_at"],
+        sortOrders: ["DESC", "ASC"],
+        opclasses: { email: "text_pattern_ops" },
+        type: "btree",
+        unique: false,
+        concurrent: false,
+        where: "active = true",
+        expression: undefined,
+        storageParameters: { fillfactor: "70", note: "abc" },
+        tablespace: "fastspace",
+      },
+    ]);
+  });
+
   test("builds complete schema from delegated methods", async () => {
     const inspector = new DatabaseInspector() as any;
     inspector.getCurrentSchema = async () => [{ name: "users" }];
@@ -176,7 +454,7 @@ describe("DatabaseInspector coverage", () => {
     const inspector = new DatabaseInspector();
     const okClient = createClient((sql, params) => {
       if (sql.includes("FROM information_schema.view_table_usage")) {
-        expect(params).toEqual(["v_users"]);
+        expect(params).toEqual(["public", "v_users"]);
         return {
           rows: [{ dependency: "users" }, { dependency: "audit.logs" }],
         };
@@ -189,11 +467,64 @@ describe("DatabaseInspector coverage", () => {
       "audit.logs",
     ]);
 
+    const tenantClient = createClient((sql, params) => {
+      if (sql.includes("FROM information_schema.view_table_usage")) {
+        expect(params).toEqual(["tenant_a", "v_users"]);
+        return {
+          rows: [{ dependency: "tenant_a.users" }],
+        };
+      }
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    expect(await inspector.getViewDependencies(tenantClient, "v_users", "tenant_a")).toEqual([
+      "tenant_a.users",
+    ]);
+
     const badClient = {
       query: async () => {
         throw new Error("permission denied");
       },
     } as any;
     expect(await inspector.getViewDependencies(badClient, "v_users")).toEqual([]);
+  });
+
+  test("handles function dependency success and failure", async () => {
+    const inspector = new DatabaseInspector();
+    const okClient = createClient((sql, params) => {
+      if (sql.includes("FROM pg_proc p") && sql.includes("JOIN pg_depend d")) {
+        expect(params).toEqual(["public", "sync_users"]);
+        return {
+          rows: [{ dependency: "users" }, { dependency: "audit.logs" }],
+        };
+      }
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    expect(await inspector.getFunctionDependencies(okClient, "sync_users")).toEqual([
+      "users",
+      "audit.logs",
+    ]);
+
+    const tenantClient = createClient((sql, params) => {
+      if (sql.includes("FROM pg_proc p") && sql.includes("JOIN pg_depend d")) {
+        expect(params).toEqual(["tenant_a", "sync_users"]);
+        return {
+          rows: [{ dependency: "tenant_a.users" }],
+        };
+      }
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    expect(
+      await inspector.getFunctionDependencies(tenantClient, "sync_users", "tenant_a")
+    ).toEqual(["tenant_a.users"]);
+
+    const badClient = {
+      query: async () => {
+        throw new Error("permission denied");
+      },
+    } as any;
+    expect(await inspector.getFunctionDependencies(badClient, "sync_users")).toEqual([]);
   });
 });

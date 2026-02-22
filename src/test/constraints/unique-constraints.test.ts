@@ -16,6 +16,7 @@ describe("Unique Constraints", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 
@@ -360,21 +361,26 @@ describe("Unique Constraints", () => {
 
       await schemaService.apply(schema, ['public'], true);
 
-      // Note: Our parser doesn't support DEFERRABLE syntax (sql-parser-cst limitation)
-      // So the constraint is created as non-deferrable and enforced immediately
+      const plan = await schemaService.plan(schema, ['public']);
+      expect(plan.hasChanges).toBe(false);
+
       await client.query("INSERT INTO seat_assignments (event_id, seat_number, attendee_id) VALUES (1, 'A1', 100)");
       await client.query("INSERT INTO seat_assignments (event_id, seat_number, attendee_id) VALUES (1, 'A2', 101)");
-      
-      // Immediate constraint enforcement - seat swap should fail
-      await expect(
-        client.query("UPDATE seat_assignments SET seat_number = 'A2' WHERE attendee_id = 100")
-      ).rejects.toThrow(/unique_seat_per_event/);
 
-      // Verify original assignments remain
+      await client.query("BEGIN");
+      try {
+        await client.query("UPDATE seat_assignments SET seat_number = 'A2' WHERE attendee_id = 100");
+        await client.query("UPDATE seat_assignments SET seat_number = 'A1' WHERE attendee_id = 101");
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+
       const result = await client.query("SELECT attendee_id, seat_number FROM seat_assignments ORDER BY attendee_id");
       expect(result.rows).toEqual([
-        { attendee_id: 100, seat_number: 'A1' },
-        { attendee_id: 101, seat_number: 'A2' }
+        { attendee_id: 100, seat_number: 'A2' },
+        { attendee_id: 101, seat_number: 'A1' }
       ]);
     });
 

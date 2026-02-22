@@ -8,6 +8,57 @@ import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { View } from "../../../types/schema";
 
+function parseBooleanOption(value: any): boolean | undefined {
+  if (!value) {
+    return true;
+  }
+
+  if (typeof value.Boolean?.boolval === "boolean") {
+    return value.Boolean.boolval;
+  }
+
+  if (typeof value.Integer?.ival === "number") {
+    return value.Integer.ival !== 0;
+  }
+
+  if (typeof value.String?.sval === "string") {
+    const normalized = value.String.sval.toLowerCase();
+    if (normalized === "true" || normalized === "on" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "off" || normalized === "0") {
+      return false;
+    }
+  }
+
+  if (typeof value.A_Const?.String?.sval === "string") {
+    const normalized = value.A_Const.String.sval.toLowerCase();
+    if (normalized === "true" || normalized === "on" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "off" || normalized === "0") {
+      return false;
+    }
+  }
+
+  if (typeof value.A_Const?.Integer?.ival === "number") {
+    return value.A_Const.Integer.ival !== 0;
+  }
+
+  const typeName = value.TypeName?.names?.[0]?.String?.sval;
+  if (typeof typeName === "string") {
+    const normalized = typeName.toLowerCase();
+    if (normalized === "true" || normalized === "on" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "off" || normalized === "0") {
+      return false;
+    }
+  }
+
+  return undefined;
+}
+
 /**
  * Parse CREATE VIEW statement from pgsql-parser AST
  */
@@ -40,14 +91,7 @@ export function parseCreateView(stmt: any, originalSql: string): View | null {
       for (const option of stmt.options) {
         const defElem = option.DefElem;
         if (defElem?.defname !== "security_barrier") continue;
-
-        if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
-          securityBarrier = defElem.arg.Boolean.boolval;
-        } else if (defElem.arg?.String?.sval === "true") {
-          securityBarrier = true;
-        } else if (defElem.arg?.String?.sval === "false") {
-          securityBarrier = false;
-        }
+        securityBarrier = parseBooleanOption(defElem.arg);
       }
     }
 

@@ -1,18 +1,32 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { SchemaService } from "../core/schema/service";
 import { DatabaseService } from "../core/database/client";
 import { loadConfig } from "../core/database/config";
-import { createTestSchemaService } from "./utils";
+import { cleanDatabase, createTestSchemaService } from "./utils";
 
 describe("CREATE SCHEMA", () => {
   let schemaService: SchemaService;
   let databaseService: DatabaseService;
   let config: ReturnType<typeof loadConfig>;
 
-  beforeEach(() => {
+  async function resetDatabase() {
+    const client = await databaseService.createClient();
+    try {
+      await cleanDatabase(client, ['public', 'test_schema', 'test_existing']);
+    } finally {
+      await client?.end();
+    }
+  }
+
+  beforeEach(async () => {
     config = loadConfig();
     databaseService = new DatabaseService(config);
     schemaService = createTestSchemaService();
+    await resetDatabase();
+  });
+
+  afterEach(async () => {
+    await resetDatabase();
   });
 
   test("should create a new schema and table", async () => {

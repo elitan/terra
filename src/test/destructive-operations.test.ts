@@ -16,6 +16,7 @@ describe("Destructive Operation Safety", () => {
   });
 
   afterEach(async () => {
+    await cleanDatabase(client);
     await client?.end();
   });
 

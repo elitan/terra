@@ -4,6 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { SchemaService } from "../core/schema/service";
 import type { DatabaseClient, DatabaseProvider, ParsedSchema, ValidationResult } from "../providers/types";
+import { StrictModeError } from "../types/errors";
 import type { MigrationPlan } from "../types/migration";
 
 let promptAnswer = "yes";
@@ -207,6 +208,40 @@ describe("SchemaService private coverage", function () {
     ]);
   });
 
+  test("parseSchemaInput reads sql files even when file path contains sql keywords", async function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as { parseSchemaInput: (input: string) => Promise<ParsedSchema> };
+    const filePath = join(tmpdir(), `terradb-with-view-${Date.now()}.sql`);
+    const sql = "CREATE VIEW active_users AS SELECT 1;";
+
+    await writeFile(filePath, sql, "utf-8");
+
+    try {
+      await privateService.parseSchemaInput(filePath);
+      expect(mock.state.parseCalls).toEqual([[sql, filePath]]);
+    } finally {
+      await unlink(filePath);
+    }
+  });
+
+  test("parseSchemaInput reads keyworded file paths without sql extension", async function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as { parseSchemaInput: (input: string) => Promise<ParsedSchema> };
+    const filePath = join(tmpdir(), `terradb-select-keyword-${Date.now()}`);
+    const sql = "CREATE TABLE users (id INT);";
+
+    await writeFile(filePath, sql, "utf-8");
+
+    try {
+      await privateService.parseSchemaInput(filePath);
+      expect(mock.state.parseCalls).toEqual([[sql, filePath]]);
+    } finally {
+      await unlink(filePath);
+    }
+  });
+
   test("filterUnmanagedSchemas and countObjects filter by managed schemas", function () {
     const mock = createMockProvider();
     const service = createService(mock.provider);
@@ -271,6 +306,14 @@ describe("SchemaService private coverage", function () {
     expect(await privateService.promptForConfirmation()).toBe(false);
   });
 
+  test("canPromptForConfirmation runs tty gate", function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as { canPromptForConfirmation: () => boolean };
+
+    expect(typeof privateService.canPromptForConfirmation()).toBe("boolean");
+  });
+
   test("executePlan runs transaction and throws on concurrent query error", async function () {
     const mock = createMockProvider();
     const service = createService(mock.provider);
@@ -307,6 +350,41 @@ describe("SchemaService private coverage", function () {
     await expect(privateService.executePlan(badClient, createPlan({ concurrent: ["BAD"], hasChanges: true }), true)).rejects.toThrow("boom");
   });
 
+  test("executePlan skips concurrent statements when transactional execution fails", async function () {
+    const mock = createMockProvider();
+    const service = createService({
+      ...mock.provider,
+      executeInTransaction: async function (_client, statements) {
+        mock.state.executeInTransactionCalls.push([...statements]);
+        throw new Error("tx-failed");
+      },
+    });
+    const privateService = service as unknown as {
+      executePlan: (client: DatabaseClient, plan: MigrationPlan, autoApprove: boolean) => Promise<void>;
+    };
+
+    const client: DatabaseClient = {
+      query: async function (sql: string) {
+        mock.state.clientQueries.push(sql);
+        return { rows: [] };
+      },
+      end: async function () {
+        mock.state.clientEndCalls += 1;
+      },
+    };
+
+    await expect(
+      privateService.executePlan(
+        client,
+        createPlan({ transactional: ["TX1"], concurrent: ["C1"], hasChanges: true }),
+        true
+      )
+    ).rejects.toThrow("tx-failed");
+
+    expect(mock.state.executeInTransactionCalls).toEqual([["TX1"]]);
+    expect(mock.state.clientQueries).toEqual([]);
+  });
+
   test("apply cancels after prompt and still releases advisory lock", async function () {
     const mock = createMockProvider({
       parsedSchema: createParsedSchema({ tables: [{ name: "users", columns: [] }] }),
@@ -314,6 +392,9 @@ describe("SchemaService private coverage", function () {
     });
 
     const service = createService(mock.provider);
+    (service as unknown as { canPromptForConfirmation: () => boolean }).canPromptForConfirmation = function () {
+      return true;
+    };
     (service as unknown as { promptForConfirmation: () => Promise<boolean> }).promptForConfirmation = async function () {
       return false;
     };
@@ -322,6 +403,24 @@ describe("SchemaService private coverage", function () {
 
     expect(mock.state.acquireCalls).toEqual(["schema-lock"]);
     expect(mock.state.releaseCalls).toEqual(["schema-lock"]);
+    expect(mock.state.executeInTransactionCalls).toHaveLength(0);
+    expect(mock.state.clientEndCalls).toBe(1);
+  });
+
+  test("apply fails in non-interactive mode without auto approve", async function () {
+    const mock = createMockProvider({
+      parsedSchema: createParsedSchema({ tables: [{ name: "users", columns: [] }] }),
+      plan: createPlan({ transactional: ["CREATE TABLE users (id INT);"], hasChanges: true }),
+    });
+
+    const service = createService(mock.provider);
+    (service as unknown as { canPromptForConfirmation: () => boolean }).canPromptForConfirmation = function () {
+      return false;
+    };
+
+    await expect(
+      service.apply("CREATE TABLE users (id INT);", ["public"], false)
+    ).rejects.toThrow("Confirmation prompt requires interactive terminal");
     expect(mock.state.executeInTransactionCalls).toHaveLength(0);
     expect(mock.state.clientEndCalls).toBe(1);
   });
@@ -373,6 +472,24 @@ describe("SchemaService private coverage", function () {
     const service = createService(mock.provider);
 
     await expect(service.plan("CREATE TABLE users (id INT);")).rejects.toThrow("Schema validation failed for target database");
+    expect(mock.state.clientEndCalls).toBe(1);
+  });
+
+  test("apply throws strict mode error on destructive statements", async function () {
+    const mock = createMockProvider({
+      parsedSchema: createParsedSchema(),
+      plan: createPlan({
+        transactional: ['DROP TABLE "users";'],
+        hasChanges: true,
+      }),
+    });
+
+    const service = createService(mock.provider);
+
+    await expect(
+      service.apply("", ["public"], true, undefined, false, true)
+    ).rejects.toBeInstanceOf(StrictModeError);
+    expect(mock.state.executeInTransactionCalls).toHaveLength(0);
     expect(mock.state.clientEndCalls).toBe(1);
   });
 });

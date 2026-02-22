@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { deparseSync } from "pgsql-parser";
 import type { Trigger } from "../../../types/schema";
 
 /**
@@ -36,8 +37,8 @@ export function parseCreateTrigger(node: any): Trigger | null {
       return null;
     }
 
-    const functionName = extractFunctionName(node);
-    if (!functionName) {
+    const functionRef = extractFunctionRef(node);
+    if (!functionRef) {
       Logger.warning(`Trigger '${name}' missing function name`);
       return null;
     }
@@ -49,12 +50,13 @@ export function parseCreateTrigger(node: any): Trigger | null {
     return {
       name,
       tableName,
-      schema: undefined, // TODO: Extract schema if specified
+      schema: extractTriggerSchema(node),
       timing,
       events,
       forEach,
       when,
-      functionName,
+      functionName: functionRef.name,
+      functionSchema: functionRef.schema,
       functionArgs,
     };
   } catch (error) {
@@ -62,6 +64,14 @@ export function parseCreateTrigger(node: any): Trigger | null {
       `Failed to parse CREATE TRIGGER: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
+  }
+}
+
+function extractTriggerSchema(node: any): string | undefined {
+  try {
+    return node.relation?.schemaname;
+  } catch (error) {
+    return undefined;
   }
 }
 
@@ -139,10 +149,11 @@ function extractForEach(node: any): Trigger['forEach'] | undefined {
  */
 function extractWhen(node: any): string | undefined {
   try {
-    // whenClause would contain the condition expression
-    // For now, return undefined as complex expression parsing is needed
-    // TODO: Implement expression parsing if needed
-    return undefined;
+    if (!node.whenClause) {
+      return undefined;
+    }
+    const whenExpression = deparseSync([node.whenClause]).trim();
+    return whenExpression.replace(/\s+/g, " ").trim();
   } catch (error) {
     return undefined;
   }
@@ -152,13 +163,20 @@ function extractWhen(node: any): string | undefined {
  * Extract function name from pgsql-parser AST
  * funcname is an array of String nodes
  */
-function extractFunctionName(node: any): string | null {
+function extractFunctionRef(node: any): { name: string; schema?: string } | null {
   try {
     if (!node.funcname || !Array.isArray(node.funcname)) return null;
 
-    // Extract the last element which is the function name
     const names = node.funcname.map((n: any) => n.String?.sval).filter(Boolean);
-    return names.length > 0 ? names[names.length - 1] : null;
+    if (names.length === 0) {
+      return null;
+    }
+    const name = names[names.length - 1];
+    const schema = names.length > 1 ? names[names.length - 2] : undefined;
+    return {
+      name,
+      schema,
+    };
   } catch (error) {
     return null;
   }
@@ -169,12 +187,26 @@ function extractFunctionName(node: any): string | null {
  */
 function extractFunctionArgs(node: any): string[] | undefined {
   try {
-    if (node.args && Array.isArray(node.args) && node.args.length > 0) {
-      // TODO: Parse argument expressions
-      // For now return undefined as expression parsing is complex
+    if (!node.args || !Array.isArray(node.args) || node.args.length === 0) {
       return undefined;
     }
-    return undefined;
+
+    const functionArgs: string[] = [];
+
+    for (const arg of node.args) {
+      const stringValue = arg?.String?.sval;
+      if (stringValue !== undefined && stringValue !== null) {
+        functionArgs.push(`'${String(stringValue).replace(/'/g, "''")}'`);
+        continue;
+      }
+
+      const parsedArg = deparseSync([arg]).trim();
+      if (parsedArg) {
+        functionArgs.push(parsedArg);
+      }
+    }
+
+    return functionArgs.length > 0 ? functionArgs : undefined;
   } catch (error) {
     return undefined;
   }

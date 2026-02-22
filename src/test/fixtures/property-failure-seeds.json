@@ -1,0 +1,22 @@
+[
+  {
+    "id": "destructive-diff-classification-safe-enum-type",
+    "testFile": "src/test/properties/destructive-diff-classification.property.test.ts",
+    "seed": 1545116801,
+    "path": "3:1:1:1",
+    "counterexample": [
+      "ALTER TYPE mood ADD VALUE 'happy'",
+      {
+        "leading": "",
+        "trailing": "",
+        "mode": "original",
+        "bitPattern": [
+          false
+        ]
+      }
+    ],
+    "status": "fixed",
+    "fixedIn": "type(strict): avoid false destructive classification for safe enum statements",
+    "notes": "isDestructiveStatement matched all statements containing TYPE token"
+  }
+]

@@ -1,4 +1,5 @@
 import type { MigrationPlan } from "../../types/migration";
+import { StrictModeError, ValidationError } from "../../types/errors";
 import type {
   DatabaseProvider,
   DatabaseClient,
@@ -7,6 +8,7 @@ import type {
   ParsedSchema,
 } from "../../providers/types";
 import { Logger } from "../../utils/logger";
+import { isDestructiveStatement } from "../../utils/statement-classifier";
 import {
   CommentHandler,
   EnumHandler,
@@ -48,7 +50,10 @@ export class SchemaService {
     this.triggerHandler = new TriggerHandler();
   }
 
-  async plan(schemaFile: string): Promise<MigrationPlan> {
+  async plan(
+    schemaFile: string,
+    schemas: string[] = ['public']
+  ): Promise<MigrationPlan> {
     const client = await this.provider.createClient(this.config);
 
     try {
@@ -61,11 +66,16 @@ export class SchemaService {
             Logger.info(`  Suggestion: ${error.suggestion}`);
           }
         }
-        throw new Error("Schema validation failed for target database");
+        throw new ValidationError("Schema validation failed for target database");
       }
 
-      const desiredSchema = parsedSchema.tables;
-      const currentSchema = await this.provider.getCurrentSchema(client);
+      let filtered = parsedSchema;
+      if (this.provider.supportsFeature("schemas")) {
+        filtered = this.filterUnmanagedSchemas(schemas, parsedSchema);
+      }
+
+      const desiredSchema = filtered.tables;
+      const currentSchema = await this.provider.getCurrentSchema(client, schemas);
       const plan = this.provider.generateMigrationPlan(desiredSchema, currentSchema);
 
       if (!plan.hasChanges) {
@@ -108,8 +118,9 @@ export class SchemaService {
     schemas: string[] = ['public'],
     autoApprove: boolean = false,
     lockOptions?: AdvisoryLockOptions,
-    dryRun: boolean = false
-  ): Promise<void> {
+    dryRun: boolean = false,
+    strict: boolean = false
+  ): Promise<MigrationPlan> {
     const client = await this.provider.createClient(this.config);
 
     try {
@@ -126,7 +137,7 @@ export class SchemaService {
             Logger.info(`  Suggestion: ${error.suggestion}`);
           }
         }
-        throw new Error("Schema validation failed for target database");
+        throw new ValidationError("Schema validation failed for target database");
       }
 
       let filtered = parsedSchema;
@@ -215,14 +226,56 @@ export class SchemaService {
 
       commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
 
+      let enumRemovalStatements: string[] = [];
+      if (this.provider.supportsFeature("enums")) {
+        enumRemovalStatements = this.enumHandler.generateRemovalStatements(
+          desiredEnums,
+          currentEnums
+        );
+      }
+
+      const combinedPlan: MigrationPlan = {
+        transactional: [
+          ...sequenceStatements,
+          ...plan.transactional,
+          ...plan.deferred,
+          ...enumRemovalStatements,
+          ...functionStatements,
+          ...procedureStatements,
+          ...viewStatements,
+          ...triggerStatements,
+          ...commentStatements,
+          ...extensionDropStatements
+        ],
+        concurrent: plan.concurrent,
+        deferred: [],
+        hasChanges: true
+      };
+
       const totalChanges = plan.transactional.length + plan.concurrent.length + plan.deferred.length +
                           sequenceStatements.length + functionStatements.length +
                           procedureStatements.length + viewStatements.length +
-                          triggerStatements.length + commentStatements.length + extensionDropStatements.length;
+                          triggerStatements.length + commentStatements.length + extensionDropStatements.length +
+                          enumRemovalStatements.length;
 
       if (totalChanges === 0) {
         Logger.success("No changes needed - database is up to date");
-        return;
+        return {
+          transactional: [],
+          concurrent: [],
+          deferred: [],
+          hasChanges: false
+        };
+      }
+
+      if (strict) {
+        const destructiveStatements = this.getDestructiveStatements(combinedPlan);
+        if (destructiveStatements.length > 0) {
+          throw new StrictModeError(
+            "Strict mode blocked destructive migration statements",
+            destructiveStatements
+          );
+        }
       }
 
       const { OutputFormatter } = await import("../../utils/output-formatter");
@@ -257,43 +310,27 @@ export class SchemaService {
 
       if (dryRun) {
         Logger.info("Dry run complete - no changes were made");
-        return;
+        return combinedPlan;
       }
 
       if (!autoApprove) {
+        if (!this.canPromptForConfirmation()) {
+          throw new ValidationError(
+            "Confirmation prompt requires interactive terminal. Use --auto-approve to continue",
+            "apply",
+            "auto-approve",
+            autoApprove
+          );
+        }
         const confirmed = await this.promptForConfirmation();
         if (!confirmed) {
           Logger.info("Apply cancelled");
-          return;
+          return combinedPlan;
         }
       }
 
-      let enumRemovalStatements: string[] = [];
-      if (this.provider.supportsFeature("enums")) {
-        enumRemovalStatements = this.enumHandler.generateRemovalStatements(
-          desiredEnums, currentEnums
-        );
-      }
-
-      const combinedPlan: MigrationPlan = {
-        transactional: [
-          ...sequenceStatements,
-          ...plan.transactional,
-          ...plan.deferred,
-          ...enumRemovalStatements,
-          ...functionStatements,
-          ...procedureStatements,
-          ...viewStatements,
-          ...triggerStatements,
-          ...commentStatements,
-          ...extensionDropStatements
-        ],
-        concurrent: plan.concurrent,
-        deferred: [],
-        hasChanges: true
-      };
-
       await this.executePlan(client, combinedPlan, autoApprove);
+      return combinedPlan;
     } finally {
       if (lockOptions && !dryRun && this.provider.releaseAdvisoryLock) {
         await this.provider.releaseAdvisoryLock(client, lockOptions.lockName);
@@ -340,23 +377,66 @@ export class SchemaService {
     });
   }
 
+  private canPromptForConfirmation(): boolean {
+    return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  }
+
   private async parseSchemaInput(input: string): Promise<ParsedSchema> {
-    if (input === "") {
+    const trimmed = input.trim();
+
+    if (trimmed === "") {
+      return await this.provider.parseSchema(trimmed);
+    }
+
+    const looksLikeSql =
+      input.includes(";") ||
+      input.includes("\n") ||
+      input.length > 500 ||
+      /^\s*(create|alter|drop|comment|grant|revoke|insert|update|delete|with|select)\s/i.test(
+        input
+      );
+
+    const looksLikePath =
+      input.includes("/") || input.includes("\\") || /\.sql$/i.test(input);
+
+    const fs = await import("fs/promises");
+
+    if (looksLikePath && !looksLikeSql) {
+      const content = await fs.readFile(input, "utf-8");
+      return await this.provider.parseSchema(content, input);
+    }
+
+    if (looksLikeSql) {
       return await this.provider.parseSchema(input);
     }
 
-    if (
-      input.includes('CREATE') ||
-      input.includes(';') ||
-      input.includes('\n') ||
-      input.length > 500
-    ) {
-      return await this.provider.parseSchema(input);
-    } else {
-      const fs = await import('fs/promises');
+    try {
       const content = await fs.readFile(input, 'utf-8');
       return await this.provider.parseSchema(content, input);
+    } catch (error) {
+      const code =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof (error as { code?: unknown }).code === "string"
+          ? ((error as { code: string }).code as string)
+          : undefined;
+
+      if (code === "ENOENT" || code === "ENOTDIR" || code === "ENAMETOOLONG") {
+        return await this.provider.parseSchema(input);
+      }
+
+      throw error;
     }
+  }
+
+  private getDestructiveStatements(plan: MigrationPlan): string[] {
+    const statements = [
+      ...plan.transactional,
+      ...plan.deferred,
+      ...plan.concurrent,
+    ];
+    return statements.filter((statement) => isDestructiveStatement(statement));
   }
 
   private filterUnmanagedSchemas(

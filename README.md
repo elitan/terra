@@ -22,8 +22,8 @@ CREATE TABLE users (
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
-terradb plan   # preview changes
-terradb apply  # apply changes
+terradb plan -f schema.sql   # preview changes
+terradb apply -f schema.sql  # apply changes
 ```
 
 ### SQLite
@@ -38,8 +38,8 @@ CREATE TABLE users (
 
 ```bash
 export DATABASE_URL="sqlite:///path/to/database.db"
-terradb plan
-terradb apply
+terradb plan -f schema.sql
+terradb apply -f schema.sql
 ```
 
 ## How It Works
@@ -103,10 +103,13 @@ SQLite uses table recreation for schema changes that ALTER TABLE doesn't support
 ## Commands
 
 ```bash
-terradb plan                    # Preview changes
+terradb plan -f schema.sql      # Preview changes
 terradb plan -f custom.sql      # Use custom schema file
-terradb apply                   # Apply changes
+terradb apply -f schema.sql     # Apply changes
 terradb apply -f custom.sql     # Apply from custom file
+terradb plan -f schema.sql --format json
+terradb apply -f schema.sql --dry-run --format json
+terradb apply -f schema.sql --no-color
 ```
 
 ## Examples
@@ -162,13 +165,34 @@ git clone https://github.com/elitan/terradb.git
 cd terradb
 bun install
 
+# check local test env
+bun run test:doctor
+
 # PostgreSQL tests
 docker compose up -d
-bun test
+bun run test:pg:17
+
+# PostgreSQL matrix
+bun run test:pg:14
+bun run test:pg:15
+bun run test:pg:16
+bun run test:pg:17
+
+# Extension tests
+bun run test:pg:extensions
 
 # SQLite tests (no docker needed)
-bun test src/test/sqlite/
+bun run test:sqlite
+
+# full PR matrix
+bun run test:matrix:pr
 ```
+
+Testing docs:
+
+- `docs/testing-roadmap.md`
+- `docs/test-matrix.md`
+- `docs/pg-version-variance.md`
 
 ## License
 

@@ -12,12 +12,12 @@ import type { Function, FunctionParameter } from "../../../types/schema";
  */
 export function parseCreateFunction(node: any): Function | null {
   try {
-    // Extract function name from funcname array
     const name = extractFunctionName(node);
     if (!name) {
       Logger.warning("Function missing name");
       return null;
     }
+    const schema = extractFunctionSchema(node);
 
     const parameters = extractFunctionParameters(node);
     const returnType = extractReturnType(node);
@@ -47,7 +47,7 @@ export function parseCreateFunction(node: any): Function | null {
 
     return {
       name,
-      schema: undefined, // TODO: Extract schema if specified
+      schema,
       parameters,
       returnType,
       language,
@@ -64,6 +64,17 @@ export function parseCreateFunction(node: any): Function | null {
       `Failed to parse CREATE FUNCTION: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
+  }
+}
+
+function extractFunctionSchema(node: any): string | undefined {
+  try {
+    if (!node.funcname || !Array.isArray(node.funcname)) return undefined;
+    const names = node.funcname.map((n: any) => n.String?.sval).filter(Boolean);
+    if (names.length <= 1) return undefined;
+    return names[names.length - 2];
+  } catch (error) {
+    return undefined;
   }
 }
 
@@ -137,28 +148,47 @@ function extractDataType(dataTypeNode: any): string {
   try {
     if (dataTypeNode.names && Array.isArray(dataTypeNode.names)) {
       const typeNames = dataTypeNode.names.map((n: any) => n.String?.sval).filter(Boolean);
+      if (typeNames.length === 0) {
+        return "unknown";
+      }
 
-      // Use the last name (skip schema like pg_catalog)
-      const typeName = typeNames.length > 0 ? typeNames[typeNames.length - 1] : "unknown";
-
-      // Map PostgreSQL internal type names to standard names
+      const typeName = typeNames[typeNames.length - 1] as string;
+      const schemaParts = typeNames.slice(0, -1) as string[];
       const typeMap: Record<string, string> = {
-        'int4': 'integer',
-        'int2': 'smallint',
-        'int8': 'bigint',
-        'float4': 'real',
-        'float8': 'double precision',
-        'bool': 'boolean',
-        'varchar': 'character varying'
+        int4: "integer",
+        int2: "smallint",
+        int8: "bigint",
+        float4: "real",
+        float8: "double precision",
+        bool: "boolean",
+        varchar: "character varying",
       };
+      const mappedType = typeMap[typeName.toLowerCase()];
 
-      return typeMap[typeName] || typeName;
+      if (schemaParts.length === 0) {
+        return mappedType || quoteTypeIdentifier(typeName);
+      }
+
+      const normalizedSchema = schemaParts.join(".").toLowerCase();
+      if (normalizedSchema === "pg_catalog" && mappedType) {
+        return mappedType;
+      }
+
+      return `${schemaParts.map(quoteTypeIdentifier).join(".")}.${quoteTypeIdentifier(typeName)}`;
     }
 
     return "unknown";
   } catch (error) {
     return "unknown";
   }
+}
+
+function quoteTypeIdentifier(value: string): string {
+  if (/^[a-z_][a-z0-9_]*$/.test(value)) {
+    return value;
+  }
+
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 /**

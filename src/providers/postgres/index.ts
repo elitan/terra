@@ -196,8 +196,11 @@ export class PostgresProvider implements DatabaseProvider {
     statements: string[]
   ): Promise<void> {
     const pgClient = (client as PostgresClient).raw;
-    const ora = (await import("ora")).default;
-    const spinner = ora({ text: "Applying changes...", color: "white" }).start();
+    const useSpinner = !Logger.isSilent();
+    const ora = useSpinner ? (await import("ora")).default : undefined;
+    const spinner = useSpinner
+      ? ora!({ text: "Applying changes...", color: "white" }).start()
+      : undefined;
     const startTime = Date.now();
 
     await pgClient.query("BEGIN");
@@ -215,10 +218,14 @@ export class PostgresProvider implements DatabaseProvider {
       await pgClient.query("COMMIT");
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
+      if (spinner) {
+        spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
+      }
     } catch (error) {
       await pgClient.query("ROLLBACK");
-      spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply changes" });
+      if (spinner) {
+        spinner.stopAndPersist({ symbol: "✗", text: "Failed to apply changes" });
+      }
 
       if (error && typeof error === "object" && "code" in error) {
         const pgError = error as Record<string, unknown>;

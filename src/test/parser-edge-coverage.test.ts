@@ -120,6 +120,44 @@ describe("Parser edge coverage", () => {
       expect(parsed?.forEach).toBeUndefined();
     });
 
+    test("continues when schema extraction throws", () => {
+      const trigger = parseCreateTrigger({
+        trigname: "trg_schema_throw",
+        relation: {
+          relname: "users",
+          get schemaname() {
+            throw new Error("bad schema");
+          },
+        },
+        timing: 2,
+        events: 4,
+        funcname: [{ String: { sval: "fn" } }],
+      });
+
+      expect(trigger?.name).toBe("trg_schema_throw");
+      expect(trigger?.schema).toBeUndefined();
+    });
+
+    test("continues when when clause extraction throws", () => {
+      const trigger: any = {
+        trigname: "trg_when_throw",
+        relation: { relname: "users" },
+        timing: 2,
+        events: 4,
+        funcname: [{ String: { sval: "fn" } }],
+      };
+
+      Object.defineProperty(trigger, "whenClause", {
+        get() {
+          throw new Error("bad when");
+        },
+      });
+
+      const parsed = parseCreateTrigger(trigger);
+      expect(parsed?.name).toBe("trg_when_throw");
+      expect(parsed?.when).toBeUndefined();
+    });
+
     test("continues when args extraction throws", () => {
       const trigger: any = {
         trigname: "trg_args_throw",
@@ -220,6 +258,19 @@ describe("Parser edge coverage", () => {
       expect(parsed?.increment).toBeUndefined();
       expect(parsed?.cycle).toBeUndefined();
       expect(parsed?.ownedBy).toBeUndefined();
+    });
+
+    test("parses float numeric option and integer cycle one", function () {
+      const parsed = parseCreateSequence({
+        sequence: { relname: "seq_float_cycle" },
+        options: [
+          { DefElem: { defname: "increment", arg: { Float: { fval: 1.5 } } } },
+          { DefElem: { defname: "cycle", arg: { Integer: { ival: 1 } } } },
+        ],
+      });
+
+      expect(parsed?.increment).toBe(1.5);
+      expect(parsed?.cycle).toBe(true);
     });
   });
 
@@ -535,6 +586,19 @@ describe("Parser edge coverage", () => {
       expect(falseView?.securityBarrier).toBe(false);
     });
 
+    test("parses security_barrier boolean argument", function () {
+      const view = parseCreateView(
+        {
+          view: { relname: "v_bool_barrier" },
+          query: { SelectStmt: { targetList: [{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } }] } },
+          options: [{ DefElem: { defname: "security_barrier", arg: { Boolean: { boolval: true } } } }],
+        },
+        ""
+      );
+
+      expect(view?.securityBarrier).toBe(true);
+    });
+
     test("returns null when view parsing throws", () => {
       const stmt: any = {};
       Object.defineProperty(stmt, "view", {
@@ -600,6 +664,25 @@ describe("Parser edge coverage", () => {
       expect(index?.expression?.toLowerCase()).toContain("lower");
       expect(index?.storageParameters).toBeUndefined();
       expect(index?.sortOrders).toEqual(["DESC"]);
+    });
+
+    test("parses lowercase tablespace string and deparse fallback", function () {
+      const simple = parseCreateIndex({
+        idxname: "idx_simple_ts",
+        relation: { relname: "users" },
+        indexParams: [{ IndexElem: { name: "email" } }],
+        tableSpace: { String: { sval: "fastspace" } },
+      });
+
+      const fallback = parseCreateIndex({
+        idxname: "idx_fallback_ts",
+        relation: { relname: "users" },
+        indexParams: [{ IndexElem: { name: "email" } }],
+        tableSpace: { A_Const: { String: { sval: "fallback_space" } } },
+      });
+
+      expect(simple?.tablespace).toBe("fastspace");
+      expect(fallback?.tablespace).toBe("'fallback_space'");
     });
 
     test("returns null when index parsing throws", () => {

@@ -1,0 +1,1330 @@
+{
+  "pg14": {
+    "tables": [
+      {
+        "schema": "public",
+        "name": "audit_log",
+        "columns": [
+          {
+            "name": "id",
+            "type": "bigint",
+            "nullable": false
+          },
+          {
+            "name": "payload",
+            "type": "jsonb",
+            "nullable": false,
+            "default": "'{}'::jsonb"
+          },
+          {
+            "name": "user_id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "audit_log_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "name": "audit_log_user_fk",
+            "columns": [
+              "user_id"
+            ],
+            "referencedTable": "users",
+            "referencedColumns": [
+              "id"
+            ],
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      },
+      {
+        "schema": "public",
+        "name": "users",
+        "columns": [
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          },
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "score",
+            "type": "integer",
+            "nullable": false,
+            "default": "0"
+          },
+          {
+            "name": "status",
+            "type": "user_status",
+            "nullable": false,
+            "default": "'active'::user_status"
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [
+          {
+            "name": "users_score_check",
+            "expression": "(score >= 0)"
+          }
+        ],
+        "uniqueConstraints": [
+          {
+            "name": "users_email_unique",
+            "columns": [
+              "email"
+            ],
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "indexes": [
+          {
+            "name": "users_email_pattern_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "email"
+            ],
+            "opclasses": {
+              "email": "text_pattern_ops"
+            }
+          },
+          {
+            "name": "users_expr_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [],
+            "expression": "lower(email)"
+          },
+          {
+            "name": "users_score_partial_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "score"
+            ],
+            "sortOrders": [
+              "DESC"
+            ],
+            "where": "score > 0"
+          }
+        ]
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users",
+        "columns": [
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      }
+    ],
+    "views": [
+      {
+        "schema": "public",
+        "name": "active_users",
+        "materialized": false,
+        "definition": "SELECT users.id, users.email FROM users WHERE (users.status = 'active'::user_status);",
+        "indexes": []
+      }
+    ],
+    "enumTypes": [
+      {
+        "schema": "public",
+        "name": "user_status",
+        "values": [
+          "active",
+          "disabled"
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "schema": "public",
+        "name": "touch_user",
+        "parameters": [
+          {
+            "name": "p_id",
+            "type": "integer"
+          }
+        ],
+        "returnType": "integer",
+        "language": "sql",
+        "body": "SELECT p_id",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      },
+      {
+        "schema": "public",
+        "name": "users_guard_fn",
+        "parameters": [],
+        "returnType": "trigger",
+        "language": "plpgsql",
+        "body": "BEGIN NEW.score := COALESCE(NEW.score, 0); RETURN NEW; END",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      }
+    ],
+    "procedures": [
+      {
+        "schema": "public",
+        "name": "touch_user_proc",
+        "parameters": [
+          {
+            "name": "p_id",
+            "mode": "IN",
+            "type": "integer"
+          }
+        ],
+        "language": "sql",
+        "body": "SELECT p_id"
+      }
+    ],
+    "triggers": [
+      {
+        "schema": "public",
+        "name": "users_guard",
+        "tableName": "users",
+        "timing": "BEFORE",
+        "events": [
+          "INSERT",
+          "UPDATE"
+        ],
+        "forEach": "ROW",
+        "when": "new.score >= 0",
+        "functionSchema": "public",
+        "functionName": "users_guard_fn",
+        "functionArgs": [
+          "'arg1'",
+          "'2'"
+        ]
+      }
+    ],
+    "sequences": [
+      {
+        "schema": "public",
+        "name": "audit_log_id_seq",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "9223372036854775807",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "public",
+        "name": "audit_seq",
+        "dataType": "INTEGER",
+        "increment": "2",
+        "minValue": "1",
+        "maxValue": "200",
+        "start": "10",
+        "cache": "5",
+        "cycle": true
+      },
+      {
+        "schema": "public",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      }
+    ],
+    "extensions": [],
+    "schemas": [
+      {
+        "name": "public"
+      },
+      {
+        "name": "tenant_a"
+      }
+    ],
+    "comments": [
+      {
+        "objectType": "COLUMN",
+        "objectName": "users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "email column"
+      },
+      {
+        "objectType": "INDEX",
+        "objectName": "users_email_pattern_idx",
+        "schemaName": "public",
+        "comment": "users email pattern"
+      },
+      {
+        "objectType": "SCHEMA",
+        "objectName": "public",
+        "comment": "public schema"
+      },
+      {
+        "objectType": "TABLE",
+        "objectName": "users",
+        "schemaName": "public",
+        "comment": "users table"
+      },
+      {
+        "objectType": "VIEW",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "comment": "active users"
+      }
+    ]
+  },
+  "pg15": {
+    "tables": [
+      {
+        "schema": "public",
+        "name": "audit_log",
+        "columns": [
+          {
+            "name": "id",
+            "type": "bigint",
+            "nullable": false
+          },
+          {
+            "name": "payload",
+            "type": "jsonb",
+            "nullable": false,
+            "default": "'{}'::jsonb"
+          },
+          {
+            "name": "user_id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "audit_log_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "name": "audit_log_user_fk",
+            "columns": [
+              "user_id"
+            ],
+            "referencedTable": "users",
+            "referencedColumns": [
+              "id"
+            ],
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      },
+      {
+        "schema": "public",
+        "name": "users",
+        "columns": [
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          },
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "score",
+            "type": "integer",
+            "nullable": false,
+            "default": "0"
+          },
+          {
+            "name": "status",
+            "type": "user_status",
+            "nullable": false,
+            "default": "'active'::user_status"
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [
+          {
+            "name": "users_score_check",
+            "expression": "(score >= 0)"
+          }
+        ],
+        "uniqueConstraints": [
+          {
+            "name": "users_email_unique",
+            "columns": [
+              "email"
+            ],
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "indexes": [
+          {
+            "name": "users_email_pattern_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "email"
+            ],
+            "opclasses": {
+              "email": "text_pattern_ops"
+            }
+          },
+          {
+            "name": "users_expr_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [],
+            "expression": "lower(email)"
+          },
+          {
+            "name": "users_score_partial_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "score"
+            ],
+            "sortOrders": [
+              "DESC"
+            ],
+            "where": "score > 0"
+          }
+        ]
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users",
+        "columns": [
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      }
+    ],
+    "views": [
+      {
+        "schema": "public",
+        "name": "active_users",
+        "materialized": false,
+        "definition": "SELECT users.id, users.email FROM users WHERE (users.status = 'active'::user_status);",
+        "indexes": []
+      }
+    ],
+    "enumTypes": [
+      {
+        "schema": "public",
+        "name": "user_status",
+        "values": [
+          "active",
+          "disabled"
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "schema": "public",
+        "name": "touch_user",
+        "parameters": [
+          {
+            "name": "p_id",
+            "type": "integer"
+          }
+        ],
+        "returnType": "integer",
+        "language": "sql",
+        "body": "SELECT p_id",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      },
+      {
+        "schema": "public",
+        "name": "users_guard_fn",
+        "parameters": [],
+        "returnType": "trigger",
+        "language": "plpgsql",
+        "body": "BEGIN NEW.score := COALESCE(NEW.score, 0); RETURN NEW; END",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      }
+    ],
+    "procedures": [
+      {
+        "schema": "public",
+        "name": "touch_user_proc",
+        "parameters": [
+          {
+            "name": "p_id",
+            "mode": "IN",
+            "type": "integer"
+          }
+        ],
+        "language": "sql",
+        "body": "SELECT p_id"
+      }
+    ],
+    "triggers": [
+      {
+        "schema": "public",
+        "name": "users_guard",
+        "tableName": "users",
+        "timing": "BEFORE",
+        "events": [
+          "INSERT",
+          "UPDATE"
+        ],
+        "forEach": "ROW",
+        "when": "new.score >= 0",
+        "functionSchema": "public",
+        "functionName": "users_guard_fn",
+        "functionArgs": [
+          "'arg1'",
+          "'2'"
+        ]
+      }
+    ],
+    "sequences": [
+      {
+        "schema": "public",
+        "name": "audit_log_id_seq",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "9223372036854775807",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "public",
+        "name": "audit_seq",
+        "dataType": "INTEGER",
+        "increment": "2",
+        "minValue": "1",
+        "maxValue": "200",
+        "start": "10",
+        "cache": "5",
+        "cycle": true
+      },
+      {
+        "schema": "public",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      }
+    ],
+    "extensions": [],
+    "schemas": [
+      {
+        "name": "public"
+      },
+      {
+        "name": "tenant_a"
+      }
+    ],
+    "comments": [
+      {
+        "objectType": "COLUMN",
+        "objectName": "users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "email column"
+      },
+      {
+        "objectType": "INDEX",
+        "objectName": "users_email_pattern_idx",
+        "schemaName": "public",
+        "comment": "users email pattern"
+      },
+      {
+        "objectType": "SCHEMA",
+        "objectName": "public",
+        "comment": "public schema"
+      },
+      {
+        "objectType": "TABLE",
+        "objectName": "users",
+        "schemaName": "public",
+        "comment": "users table"
+      },
+      {
+        "objectType": "VIEW",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "comment": "active users"
+      }
+    ]
+  },
+  "pg16": {
+    "tables": [
+      {
+        "schema": "public",
+        "name": "audit_log",
+        "columns": [
+          {
+            "name": "id",
+            "type": "bigint",
+            "nullable": false
+          },
+          {
+            "name": "payload",
+            "type": "jsonb",
+            "nullable": false,
+            "default": "'{}'::jsonb"
+          },
+          {
+            "name": "user_id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "audit_log_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "name": "audit_log_user_fk",
+            "columns": [
+              "user_id"
+            ],
+            "referencedTable": "users",
+            "referencedColumns": [
+              "id"
+            ],
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      },
+      {
+        "schema": "public",
+        "name": "users",
+        "columns": [
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          },
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "score",
+            "type": "integer",
+            "nullable": false,
+            "default": "0"
+          },
+          {
+            "name": "status",
+            "type": "user_status",
+            "nullable": false,
+            "default": "'active'::user_status"
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [
+          {
+            "name": "users_score_check",
+            "expression": "(score >= 0)"
+          }
+        ],
+        "uniqueConstraints": [
+          {
+            "name": "users_email_unique",
+            "columns": [
+              "email"
+            ],
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "indexes": [
+          {
+            "name": "users_email_pattern_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "email"
+            ],
+            "opclasses": {
+              "email": "text_pattern_ops"
+            }
+          },
+          {
+            "name": "users_expr_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [],
+            "expression": "lower(email)"
+          },
+          {
+            "name": "users_score_partial_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "score"
+            ],
+            "sortOrders": [
+              "DESC"
+            ],
+            "where": "score > 0"
+          }
+        ]
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users",
+        "columns": [
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      }
+    ],
+    "views": [
+      {
+        "schema": "public",
+        "name": "active_users",
+        "materialized": false,
+        "definition": "SELECT id, email FROM users WHERE (status = 'active'::user_status);",
+        "indexes": []
+      }
+    ],
+    "enumTypes": [
+      {
+        "schema": "public",
+        "name": "user_status",
+        "values": [
+          "active",
+          "disabled"
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "schema": "public",
+        "name": "touch_user",
+        "parameters": [
+          {
+            "name": "p_id",
+            "type": "integer"
+          }
+        ],
+        "returnType": "integer",
+        "language": "sql",
+        "body": "SELECT p_id",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      },
+      {
+        "schema": "public",
+        "name": "users_guard_fn",
+        "parameters": [],
+        "returnType": "trigger",
+        "language": "plpgsql",
+        "body": "BEGIN NEW.score := COALESCE(NEW.score, 0); RETURN NEW; END",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      }
+    ],
+    "procedures": [
+      {
+        "schema": "public",
+        "name": "touch_user_proc",
+        "parameters": [
+          {
+            "name": "p_id",
+            "mode": "IN",
+            "type": "integer"
+          }
+        ],
+        "language": "sql",
+        "body": "SELECT p_id"
+      }
+    ],
+    "triggers": [
+      {
+        "schema": "public",
+        "name": "users_guard",
+        "tableName": "users",
+        "timing": "BEFORE",
+        "events": [
+          "INSERT",
+          "UPDATE"
+        ],
+        "forEach": "ROW",
+        "when": "new.score >= 0",
+        "functionSchema": "public",
+        "functionName": "users_guard_fn",
+        "functionArgs": [
+          "'arg1'",
+          "'2'"
+        ]
+      }
+    ],
+    "sequences": [
+      {
+        "schema": "public",
+        "name": "audit_log_id_seq",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "9223372036854775807",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "public",
+        "name": "audit_seq",
+        "dataType": "INTEGER",
+        "increment": "2",
+        "minValue": "1",
+        "maxValue": "200",
+        "start": "10",
+        "cache": "5",
+        "cycle": true
+      },
+      {
+        "schema": "public",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      }
+    ],
+    "extensions": [],
+    "schemas": [
+      {
+        "name": "public"
+      },
+      {
+        "name": "tenant_a"
+      }
+    ],
+    "comments": [
+      {
+        "objectType": "COLUMN",
+        "objectName": "users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "email column"
+      },
+      {
+        "objectType": "INDEX",
+        "objectName": "users_email_pattern_idx",
+        "schemaName": "public",
+        "comment": "users email pattern"
+      },
+      {
+        "objectType": "SCHEMA",
+        "objectName": "public",
+        "comment": "public schema"
+      },
+      {
+        "objectType": "TABLE",
+        "objectName": "users",
+        "schemaName": "public",
+        "comment": "users table"
+      },
+      {
+        "objectType": "VIEW",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "comment": "active users"
+      }
+    ]
+  },
+  "pg17": {
+    "tables": [
+      {
+        "schema": "public",
+        "name": "audit_log",
+        "columns": [
+          {
+            "name": "id",
+            "type": "bigint",
+            "nullable": false
+          },
+          {
+            "name": "payload",
+            "type": "jsonb",
+            "nullable": false,
+            "default": "'{}'::jsonb"
+          },
+          {
+            "name": "user_id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "audit_log_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "name": "audit_log_user_fk",
+            "columns": [
+              "user_id"
+            ],
+            "referencedTable": "users",
+            "referencedColumns": [
+              "id"
+            ],
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      },
+      {
+        "schema": "public",
+        "name": "users",
+        "columns": [
+          {
+            "name": "created_at",
+            "type": "timestamp without time zone",
+            "nullable": true,
+            "default": "now()"
+          },
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "score",
+            "type": "integer",
+            "nullable": false,
+            "default": "0"
+          },
+          {
+            "name": "status",
+            "type": "user_status",
+            "nullable": false,
+            "default": "'active'::user_status"
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [
+          {
+            "name": "users_score_check",
+            "expression": "(score >= 0)"
+          }
+        ],
+        "uniqueConstraints": [
+          {
+            "name": "users_email_unique",
+            "columns": [
+              "email"
+            ],
+            "deferrable": true,
+            "initiallyDeferred": true
+          }
+        ],
+        "indexes": [
+          {
+            "name": "users_email_pattern_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "email"
+            ],
+            "opclasses": {
+              "email": "text_pattern_ops"
+            }
+          },
+          {
+            "name": "users_expr_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [],
+            "expression": "lower(email)"
+          },
+          {
+            "name": "users_score_partial_idx",
+            "type": "btree",
+            "unique": false,
+            "columns": [
+              "score"
+            ],
+            "sortOrders": [
+              "DESC"
+            ],
+            "where": "score > 0"
+          }
+        ]
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users",
+        "columns": [
+          {
+            "name": "email",
+            "type": "text",
+            "nullable": false
+          },
+          {
+            "name": "id",
+            "type": "integer",
+            "nullable": false
+          }
+        ],
+        "primaryKey": {
+          "name": "users_pkey",
+          "columns": [
+            "id"
+          ]
+        },
+        "foreignKeys": [],
+        "checkConstraints": [],
+        "uniqueConstraints": [],
+        "indexes": []
+      }
+    ],
+    "views": [
+      {
+        "schema": "public",
+        "name": "active_users",
+        "materialized": false,
+        "definition": "SELECT id, email FROM users WHERE (status = 'active'::user_status);",
+        "indexes": []
+      }
+    ],
+    "enumTypes": [
+      {
+        "schema": "public",
+        "name": "user_status",
+        "values": [
+          "active",
+          "disabled"
+        ]
+      }
+    ],
+    "functions": [
+      {
+        "schema": "public",
+        "name": "touch_user",
+        "parameters": [
+          {
+            "name": "p_id",
+            "type": "integer"
+          }
+        ],
+        "returnType": "integer",
+        "language": "sql",
+        "body": "SELECT p_id",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      },
+      {
+        "schema": "public",
+        "name": "users_guard_fn",
+        "parameters": [],
+        "returnType": "trigger",
+        "language": "plpgsql",
+        "body": "BEGIN NEW.score := COALESCE(NEW.score, 0); RETURN NEW; END",
+        "volatility": "VOLATILE",
+        "parallel": "UNSAFE",
+        "rows": 0
+      }
+    ],
+    "procedures": [
+      {
+        "schema": "public",
+        "name": "touch_user_proc",
+        "parameters": [
+          {
+            "name": "p_id",
+            "mode": "IN",
+            "type": "integer"
+          }
+        ],
+        "language": "sql",
+        "body": "SELECT p_id"
+      }
+    ],
+    "triggers": [
+      {
+        "schema": "public",
+        "name": "users_guard",
+        "tableName": "users",
+        "timing": "BEFORE",
+        "events": [
+          "INSERT",
+          "UPDATE"
+        ],
+        "forEach": "ROW",
+        "when": "new.score >= 0",
+        "functionSchema": "public",
+        "functionName": "users_guard_fn",
+        "functionArgs": [
+          "'arg1'",
+          "'2'"
+        ]
+      }
+    ],
+    "sequences": [
+      {
+        "schema": "public",
+        "name": "audit_log_id_seq",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "9223372036854775807",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "public",
+        "name": "audit_seq",
+        "dataType": "INTEGER",
+        "increment": "2",
+        "minValue": "1",
+        "maxValue": "200",
+        "start": "10",
+        "cache": "5",
+        "cycle": true
+      },
+      {
+        "schema": "public",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      },
+      {
+        "schema": "tenant_a",
+        "name": "users_id_seq",
+        "dataType": "INTEGER",
+        "increment": "1",
+        "minValue": "1",
+        "maxValue": "2147483647",
+        "start": "1",
+        "cache": "1"
+      }
+    ],
+    "extensions": [],
+    "schemas": [
+      {
+        "name": "public"
+      },
+      {
+        "name": "tenant_a"
+      }
+    ],
+    "comments": [
+      {
+        "objectType": "COLUMN",
+        "objectName": "users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "email column"
+      },
+      {
+        "objectType": "INDEX",
+        "objectName": "users_email_pattern_idx",
+        "schemaName": "public",
+        "comment": "users email pattern"
+      },
+      {
+        "objectType": "SCHEMA",
+        "objectName": "public",
+        "comment": "public schema"
+      },
+      {
+        "objectType": "TABLE",
+        "objectName": "users",
+        "schemaName": "public",
+        "comment": "users table"
+      },
+      {
+        "objectType": "VIEW",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "comment": "active users"
+      }
+    ]
+  }
+}

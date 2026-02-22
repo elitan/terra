@@ -4,21 +4,63 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g., 0.2.3, 0.3.0, 1.0.0)'
+        description: "Version to publish (e.g., 0.2.3, 0.3.0, 1.0.0)"
         required: true
         type: string
 
+env:
+  FORCE_COLOR: "0"
+  NO_COLOR: "1"
+  TERRADB_TEST_SILENT: "1"
+
 jobs:
   release:
-    name: Release
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 120
     permissions:
       contents: write
       id-token: write
-
     services:
-      postgres:
+      postgres14:
+        image: postgres:14-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5486:5432
+      postgres15:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5485:5432
+      postgres16:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5484:5432
+      postgres17:
         image: postgres:17-alpine
         env:
           POSTGRES_PASSWORD: test_password
@@ -31,7 +73,6 @@ jobs:
           --health-retries 10
         ports:
           - 5487:5432
-
       postgres-pgvector:
         image: pgvector/pgvector:0.8.1-pg17
         env:
@@ -45,7 +86,6 @@ jobs:
           --health-retries 10
         ports:
           - 5488:5432
-
       postgres-postgis:
         image: postgis/postgis:17-3.5
         env:
@@ -59,166 +99,56 @@ jobs:
           --health-retries 10
         ports:
           - 5489:5432
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Update npm
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Wait for PostgreSQL services
-        run: |
-          for port in 5487 5488 5489; do
-            ready=0
-            for i in {1..30}; do
-              if pg_isready -h localhost -p $port -U test_user; then
-                echo "PostgreSQL on port $port is ready"
-                ready=1
-                break
-              fi
-              echo "Waiting for PostgreSQL on port $port... ($i/30)"
-              sleep 2
-            done
-            if [ $ready -ne 1 ]; then
-              echo "PostgreSQL on port $port did not become ready"
-              exit 1
-            fi
-          done
-
-      - name: Setup test database
-        run: bun run test:setup
-        env:
-          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
-
-      - name: Run tests
-        run: bun run test
-        env:
-          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
-
-      - name: Build
-        run: bun run build
-
-      - name: Dry-run publish check
-        run: npm pack --dry-run
-
-      - name: Update package.json version
-        run: npm version ${{ github.event.inputs.version }} --no-git-tag-version
-
-      - name: Configure Git
-        run: |
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - run: cp .env.example .env
+      - run: bun install
+      - run: bun run test:matrix:pr
+      - run: bun run test:matrix:nightly
+      - run: npm pack --dry-run
+      - run: npm version ${{ github.event.inputs.version }} --no-git-tag-version
+      - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Commit version bump
-        run: |
+      - run: |
           git add package.json
-          git commit -m "chore: release v${{ github.event.inputs.version }}"
-
-      - name: Create tag
-        run: git tag v${{ github.event.inputs.version }}
-
-      - name: Push changes
-        run: |
+          git commit -m "chore(release): bump to v${{ github.event.inputs.version }}"
+      - run: git tag v${{ github.event.inputs.version }}
+      - run: |
           git push origin main
           git push origin v${{ github.event.inputs.version }}
-
-      - name: Publish to npm
-        run: npm publish --provenance --access public
-
+      - run: npm publish --provenance --access public
       - name: Create GitHub Release
         uses: actions/github-script@v7
         with:
           script: |
             const version = '${{ github.event.inputs.version }}';
-
-            // Get the previous tag
             const { data: tags } = await github.rest.repos.listTags({
               owner: context.repo.owner,
               repo: context.repo.repo,
               per_page: 10
             });
-
             const currentTag = `v${version}`;
-            const previousTag = tags.find(t => t.name !== currentTag)?.name;
-
-            // Get commits between tags
-            let commits = [];
+            const previousTag = tags.find((t) => t.name !== currentTag)?.name;
+            let body = "";
             if (previousTag) {
-              const { data: comparison } = await github.rest.repos.compareCommits({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                base: previousTag,
-                head: currentTag
-              });
-              commits = comparison.commits;
+              body = `Full Changelog: https://github.com/${context.repo.owner}/${context.repo.repo}/compare/${previousTag}...${currentTag}`;
+            } else {
+              body = "First tagged release.";
             }
-
-            // Categorize commits
-            const features = [];
-            const fixes = [];
-            const other = [];
-
-            for (const commit of commits) {
-              const msg = commit.commit.message.split('\n')[0];
-              const sha = commit.sha.substring(0, 7);
-              const author = commit.author?.login || commit.commit.author.name;
-
-              // Skip release commits
-              if (msg.startsWith('chore: release') || msg.startsWith('chore: Release')) continue;
-
-              const entry = `- ${msg} (${sha}) @${author}`;
-
-              if (msg.startsWith('feat:') || msg.startsWith('feat(')) {
-                features.push(entry);
-              } else if (msg.startsWith('fix:') || msg.startsWith('fix(')) {
-                fixes.push(entry);
-              } else {
-                other.push(entry);
-              }
-            }
-
-            // Build release body
-            let body = '';
-
-            if (features.length > 0) {
-              body += '## Features\n\n' + features.join('\n') + '\n\n';
-            }
-
-            if (fixes.length > 0) {
-              body += '## Bug Fixes\n\n' + fixes.join('\n') + '\n\n';
-            }
-
-            if (other.length > 0) {
-              body += '## Other Changes\n\n' + other.join('\n') + '\n\n';
-            }
-
-            if (previousTag) {
-              body += `**Full Changelog**: https://github.com/${context.repo.owner}/${context.repo.repo}/compare/${previousTag}...${currentTag}`;
-            }
-
-            const { data: release } = await github.rest.repos.createRelease({
+            await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: currentTag,
               name: currentTag,
-              body: body || 'No changes recorded.'
+              body
             });
-
-            console.log('Created release:', release.html_url);

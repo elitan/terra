@@ -104,8 +104,12 @@ function extractDataType(dataTypeNode: any): string {
   try {
     if (dataTypeNode.names && Array.isArray(dataTypeNode.names)) {
       const typeNames = dataTypeNode.names.map((n: any) => n.String?.sval).filter(Boolean);
-      const typeName = typeNames.length > 0 ? typeNames[typeNames.length - 1] : "unknown";
+      if (typeNames.length === 0) {
+        return "unknown";
+      }
 
+      const typeName = typeNames[typeNames.length - 1] as string;
+      const schemaParts = typeNames.slice(0, -1) as string[];
       const typeMap: Record<string, string> = {
         int4: "integer",
         int2: "smallint",
@@ -115,14 +119,32 @@ function extractDataType(dataTypeNode: any): string {
         bool: "boolean",
         varchar: "character varying",
       };
+      const mappedType = typeMap[typeName.toLowerCase()];
 
-      return typeMap[typeName] || typeName;
+      if (schemaParts.length === 0) {
+        return mappedType || quoteTypeIdentifier(typeName);
+      }
+
+      const normalizedSchema = schemaParts.join(".").toLowerCase();
+      if (normalizedSchema === "pg_catalog" && mappedType) {
+        return mappedType;
+      }
+
+      return `${schemaParts.map(quoteTypeIdentifier).join(".")}.${quoteTypeIdentifier(typeName)}`;
     }
 
     return "unknown";
   } catch {
     return "unknown";
   }
+}
+
+function quoteTypeIdentifier(value: string): string {
+  if (/^[a-z_][a-z0-9_]*$/.test(value)) {
+    return value;
+  }
+
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function extractDefaultValue(defaultNode: any): string | undefined {

@@ -50,9 +50,14 @@ export function extractAllConstraints(
               const check = parseCheckConstraintFromNode(c.Constraint);
               if (check) checkConstraints.push(check);
             } else if (contype === "CONSTR_UNIQUE") {
+              const options = getDeferrableOptions(c.Constraint);
               uniqueConstraints.push({
                 name: c.Constraint.conname,
                 columns: [colName],
+                ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
+                ...(options.initiallyDeferred === undefined
+                  ? {}
+                  : { initiallyDeferred: options.initiallyDeferred }),
               });
             } else if (contype === "CONSTR_FOREIGN") {
               const fk = parseForeignKeyFromNode(c.Constraint, [colName]);
@@ -75,9 +80,14 @@ export function extractAllConstraints(
           const check = parseCheckConstraintFromNode(elt.Constraint);
           if (check) checkConstraints.push(check);
         } else if (contype === "CONSTR_UNIQUE") {
+          const options = getDeferrableOptions(elt.Constraint);
           uniqueConstraints.push({
             name: elt.Constraint.conname,
             columns: extractColumnNames(elt.Constraint.keys || []),
+            ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
+            ...(options.initiallyDeferred === undefined
+              ? {}
+              : { initiallyDeferred: options.initiallyDeferred }),
           });
         }
       }
@@ -103,6 +113,26 @@ export function extractAllConstraints(
  */
 function extractColumnNames(keys: any[]): string[] {
   return keys.map(k => k.String?.sval || '').filter(Boolean);
+}
+
+function getDeferrableOptions(constraint: any): {
+  deferrable?: boolean;
+  initiallyDeferred?: boolean;
+} {
+  const options: {
+    deferrable?: boolean;
+    initiallyDeferred?: boolean;
+  } = {};
+
+  if (constraint?.deferrable === true) {
+    options.deferrable = true;
+  }
+
+  if (constraint?.initdeferred === true) {
+    options.initiallyDeferred = true;
+  }
+
+  return options;
 }
 
 /**
@@ -151,6 +181,8 @@ function parseForeignKeyFromNode(constraint: any, columns: string[]): ForeignKey
     const onDelete = constraint.fk_del_action ? fk_action_map[constraint.fk_del_action] : undefined;
     const onUpdate = constraint.fk_upd_action ? fk_action_map[constraint.fk_upd_action] : undefined;
 
+    const options = getDeferrableOptions(constraint);
+
     return {
       name: constraint.conname,
       columns,
@@ -158,6 +190,10 @@ function parseForeignKeyFromNode(constraint: any, columns: string[]): ForeignKey
       referencedColumns,
       onDelete,
       onUpdate,
+      ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
+      ...(options.initiallyDeferred === undefined
+        ? {}
+        : { initiallyDeferred: options.initiallyDeferred }),
     };
   } catch (error) {
     Logger.warning(
@@ -178,9 +214,14 @@ export function parseForeignKey(node: any): ForeignKeyConstraint | null {
 
 export function parseUniqueConstraint(node: any): UniqueConstraint | null {
   try {
+    const options = getDeferrableOptions(node);
     return {
       name: node.conname,
       columns: extractColumnNames(node.keys || []),
+      ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
+      ...(options.initiallyDeferred === undefined
+        ? {}
+        : { initiallyDeferred: options.initiallyDeferred }),
     };
   } catch (error) {
     return null;

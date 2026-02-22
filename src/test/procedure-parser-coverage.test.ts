@@ -88,6 +88,92 @@ describe("Procedure parser coverage", () => {
     ).toBeNull();
   });
 
+  test("extracts default value from deparsed select and integer security true", function () {
+    const parsed = parseCreateProcedure({
+      funcname: [{ String: { sval: "p_select_default" } }],
+      parameters: [
+        {
+          FunctionParameter: {
+            name: "a",
+            argType: { names: [{ String: { sval: "int4" } }] },
+            defexpr: { A_Const: { ival: { ival: 5 } } },
+          },
+        },
+      ],
+      options: [
+        { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+        { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "BEGIN END" } }] } } } },
+        { DefElem: { defname: "security", arg: { Integer: { ival: 1 } } } },
+      ],
+    });
+
+    expect(parsed?.parameters).toEqual([{ name: "a", type: "integer", default: "5" }]);
+    expect(parsed?.securityDefiner).toBe(true);
+  });
+
+  test("keeps schema-qualified and quoted custom parameter types", function () {
+    const parsed = parseCreateProcedure({
+      funcname: [{ String: { sval: "tenant_a" } }, { String: { sval: "p_custom" } }],
+      parameters: [
+        {
+          FunctionParameter: {
+            name: "a",
+            argType: {
+              names: [{ String: { sval: "tenant_a" } }, { String: { sval: "StateType" } }],
+            },
+          },
+        },
+      ],
+      options: [
+        { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+        { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+      ],
+    });
+
+    expect(parsed?.parameters).toEqual([{ name: "a", type: 'tenant_a."StateType"' }]);
+  });
+
+  test("keeps non-pg-catalog schema-qualified builtin aliases as qualified types", function () {
+    const parsed = parseCreateProcedure({
+      funcname: [{ String: { sval: "tenant_a" } }, { String: { sval: "p_builtin_alias" } }],
+      parameters: [
+        {
+          FunctionParameter: {
+            name: "a",
+            argType: {
+              names: [{ String: { sval: "tenant_a" } }, { String: { sval: "int4" } }],
+            },
+          },
+        },
+      ],
+      options: [
+        { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+        { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },
+      ],
+    });
+
+    expect(parsed?.parameters).toEqual([{ name: "a", type: "tenant_a.int4" }]);
+  });
+
+  test("handles throw while scanning procedure body options", function () {
+    const badOption: any = {};
+    Object.defineProperty(badOption, "DefElem", {
+      get: function () {
+        throw new Error("bad option");
+      },
+    });
+
+    const parsed = parseCreateProcedure({
+      funcname: [{ String: { sval: "p_throw_body" } }],
+      options: [
+        { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+        badOption,
+      ],
+    });
+
+    expect(parsed).toBeNull();
+  });
+
   test("falls back through outer catch when warning logger throws", () => {
     const original = Logger.warning;
     let callCount = 0;

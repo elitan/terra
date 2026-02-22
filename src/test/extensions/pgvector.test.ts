@@ -13,11 +13,11 @@ import { PostgresProvider } from "../../providers/postgres";
  */
 
 const PGVECTOR_CONFIG = {
-  host: "localhost",
-  port: 5488,
-  database: "sql_terraform_test",
-  user: "test_user",
-  password: "test_password",
+  host: process.env.PGVECTOR_HOST || "localhost",
+  port: Number.parseInt(process.env.PGVECTOR_PORT || "5488", 10),
+  database: process.env.PGVECTOR_DB || "sql_terraform_test",
+  user: process.env.PGVECTOR_USER || "test_user",
+  password: process.env.PGVECTOR_PASSWORD || "test_password",
 };
 
 async function createPgvectorClient(): Promise<Client> {

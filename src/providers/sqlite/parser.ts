@@ -1,5 +1,6 @@
 import initSqlJs, { Database as SqlJsDatabase, SqlValue } from "sql.js";
 import type { ParsedSchema } from "../types";
+import { ParserError } from "../../types/errors";
 import type {
   Table,
   Column,
@@ -55,7 +56,7 @@ interface IndexColumnInfo {
 }
 
 export class SQLiteParser {
-  async parseSchema(sql: string, _filePath?: string): Promise<ParsedSchema> {
+  async parseSchema(sql: string, filePath?: string): Promise<ParsedSchema> {
     const SqlJs = await getSQL();
     const db = new SqlJs.Database();
 
@@ -78,6 +79,12 @@ export class SQLiteParser {
         schemas: [],
         comments: [],
       };
+    } catch (error) {
+      if (error instanceof ParserError) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ParserError(message, filePath);
     } finally {
       db.close();
     }
@@ -324,6 +331,7 @@ export class SQLiteParser {
         timing: timing === 'INSTEAD OF' ? 'INSTEAD OF' : timing as 'BEFORE' | 'AFTER',
         events,
         functionName: '',
+        definition: sql.trim().replace(/;+\s*$/g, ''),
       };
     });
   }

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { loadModule } from "pgsql-parser";
 import { SchemaDiffer } from "../core/schema/differ";
 import type { Column, PrimaryKeyConstraint, Table } from "../types/schema";
 
@@ -24,7 +25,15 @@ function makePrimaryKey(columns: string[], name?: string): PrimaryKeyConstraint 
   return { columns, name };
 }
 
+function reverseCopy<T>(items: T[]): T[] {
+  return [...items].reverse();
+}
+
 describe("SchemaDiffer private coverage", () => {
+  beforeAll(async function () {
+    await loadModule();
+  });
+
   test("checks constraint-backed index helper", () => {
     const differ = new SchemaDiffer();
     expect(
@@ -136,6 +145,136 @@ describe("SchemaDiffer private coverage", () => {
 
     expect((differ as any).requiresUsingClause("INTEGER", "BIGINT")).toBe(false);
     expect((differ as any).requiresUsingClause("TEXT", "INTEGER")).toBe(true);
+  });
+
+  test("type conversion helpers handle bigint and interval without integer fallback", () => {
+    const differ = new SchemaDiffer();
+
+    const bigintSQL = (differ as any).generateTypeConversionSQL(
+      "\"public\".\"metrics\"",
+      "counter",
+      "BIGINT",
+      "TEXT"
+    ) as string;
+    expect(bigintSQL).toContain("TYPE BIGINT");
+    expect(bigintSQL).toContain("USING TRUNC(\"counter\"::DECIMAL)::bigint");
+    expect(bigintSQL).not.toContain("::integer");
+
+    expect((differ as any).requiresUsingClause("TEXT", "INTERVAL")).toBe(false);
+    const intervalExpr = (differ as any).generateUsingExpression(
+      "elapsed",
+      "TEXT",
+      "INTERVAL"
+    ) as string;
+    expect(intervalExpr).toBe("\"elapsed\"::INTERVAL");
+  });
+
+  test("type conversion helpers cover widen and narrow matrix decisions", () => {
+    const differ = new SchemaDiffer();
+
+    expect((differ as any).requiresUsingClause("INT4", "INT8")).toBe(false);
+    expect((differ as any).requiresUsingClause("VARCHAR(100)", "TEXT")).toBe(false);
+    expect((differ as any).requiresUsingClause("TEXT", "NUMERIC(12,2)")).toBe(true);
+    expect((differ as any).requiresUsingClause("TEXT", "SMALLINT")).toBe(true);
+    expect((differ as any).requiresUsingClause("TEXT", "BOOLEAN")).toBe(true);
+
+    const textToSmallintExpr = (differ as any).generateUsingExpression(
+      "score",
+      "TEXT",
+      "SMALLINT"
+    ) as string;
+    expect(textToSmallintExpr).toBe("TRUNC(\"score\"::DECIMAL)::smallint");
+
+    const textToNumericExpr = (differ as any).generateUsingExpression(
+      "amount",
+      "TEXT",
+      "NUMERIC(12,2)"
+    ) as string;
+    expect(textToNumericExpr).toBe("\"amount\"::NUMERIC(12,2)");
+  });
+
+  test("generateMigrationPlan treats equivalent default expressions as no-op", () => {
+    const differ = new SchemaDiffer();
+    const desired = [
+      makeTable({
+        columns: [
+          makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+          makeColumn({
+            name: "created_at",
+            type: "TIMESTAMP",
+            nullable: false,
+            default: "CURRENT_TIMESTAMP",
+          }),
+        ],
+      }),
+    ];
+    const current = [
+      makeTable({
+        columns: [
+          makeColumn({ name: "id", type: "INT4", nullable: false }),
+          makeColumn({
+            name: "created_at",
+            type: "timestamp without time zone",
+            nullable: false,
+            default: "now()",
+          }),
+        ],
+      }),
+    ];
+
+    const plan = differ.generateMigrationPlan(desired, current);
+    expect(plan.hasChanges).toBe(false);
+    expect(plan.transactional).toHaveLength(0);
+    expect(plan.concurrent).toHaveLength(0);
+    expect(plan.deferred).toHaveLength(0);
+  });
+
+  test("generateMigrationPlan treats equivalent generated expressions as no-op", () => {
+    const differ = new SchemaDiffer();
+    const desired = [
+      makeTable({
+        columns: [
+          makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+          makeColumn({ name: "first_name", type: "TEXT", nullable: true }),
+          makeColumn({ name: "last_name", type: "TEXT", nullable: true }),
+          makeColumn({
+            name: "full_name",
+            type: "TEXT",
+            nullable: true,
+            generated: {
+              always: true,
+              expression: "lower(first_name) || ' ' || lower(last_name)",
+              stored: true,
+            },
+          }),
+        ],
+      }),
+    ];
+    const current = [
+      makeTable({
+        columns: [
+          makeColumn({ name: "id", type: "INT4", nullable: false }),
+          makeColumn({ name: "first_name", type: "TEXT", nullable: true }),
+          makeColumn({ name: "last_name", type: "TEXT", nullable: true }),
+          makeColumn({
+            name: "full_name",
+            type: "TEXT",
+            nullable: true,
+            generated: {
+              always: true,
+              expression: "lower(first_name) || ' '::text || lower(last_name)",
+              stored: true,
+            },
+          }),
+        ],
+      }),
+    ];
+
+    const plan = differ.generateMigrationPlan(desired, current);
+    expect(plan.hasChanges).toBe(false);
+    expect(plan.transactional).toHaveLength(0);
+    expect(plan.concurrent).toHaveLength(0);
+    expect(plan.deferred).toHaveLength(0);
   });
 
   test("primary key helpers cover add drop modify and none", () => {
@@ -278,5 +417,374 @@ describe("SchemaDiffer private coverage", () => {
     expect(sql).toContain("REFERENCES \"teams\" (\"id\")");
     expect(sql).toContain("DROP CONSTRAINT \"uq_old_email\"");
     expect(sql).toContain("ADD CONSTRAINT \"uq_email\" UNIQUE");
+  });
+
+  test("generateMigrationPlan keeps stable order for mixed object kinds", () => {
+    const differ = new SchemaDiffer();
+
+    const current = makeTable({
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "legacy", type: "TEXT", nullable: true }),
+        makeColumn({ name: "account_id", type: "INTEGER", nullable: true }),
+        makeColumn({ name: "status", type: "TEXT", nullable: true, default: "'new'" }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "users_pkey"),
+      checkConstraints: [
+        { name: "users_status_check", expression: "status <> ''" },
+        { name: "users_legacy_check", expression: "legacy <> ''" },
+      ],
+      foreignKeys: [
+        {
+          name: "fk_users_account",
+          columns: ["account_id"],
+          referencedTable: "accounts",
+          referencedColumns: ["id"],
+          onDelete: "SET NULL",
+        },
+        {
+          name: "fk_users_legacy_owner",
+          columns: ["legacy"],
+          referencedTable: "owners",
+          referencedColumns: ["code"],
+        },
+      ],
+      uniqueConstraints: [
+        { name: "uq_users_legacy", columns: ["legacy"] },
+        { name: "uq_users_status_account", columns: ["status", "account_id"] },
+      ],
+      indexes: [
+        {
+          name: "idx_users_legacy",
+          tableName: "users",
+          schema: "public",
+          columns: ["legacy"],
+          type: "btree",
+        },
+        {
+          name: "idx_users_status",
+          tableName: "users",
+          schema: "public",
+          columns: ["status"],
+          where: "status <> 'archived'",
+          type: "btree",
+        },
+        {
+          name: "idx_users_account",
+          tableName: "users",
+          schema: "public",
+          columns: ["account_id"],
+          type: "btree",
+        },
+      ],
+    });
+
+    const desired = makeTable({
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "account_id", type: "BIGINT", nullable: false }),
+        makeColumn({ name: "status", type: "TEXT", nullable: false, default: "'active'" }),
+        makeColumn({ name: "email", type: "TEXT", nullable: false }),
+      ],
+      primaryKey: makePrimaryKey(["id", "account_id"], "users_pkey"),
+      checkConstraints: [
+        {
+          name: "users_status_check_v2",
+          expression: "status IN ('active', 'paused')",
+        },
+      ],
+      foreignKeys: [
+        {
+          name: "fk_users_account",
+          columns: ["account_id"],
+          referencedTable: "accounts",
+          referencedColumns: ["id"],
+          onDelete: "RESTRICT",
+        },
+        {
+          name: "fk_users_manager",
+          columns: ["id"],
+          referencedTable: "managers",
+          referencedColumns: ["user_id"],
+        },
+      ],
+      uniqueConstraints: [{ name: "uq_users_email", columns: ["email"] }],
+      indexes: [
+        {
+          name: "idx_users_status",
+          tableName: "users",
+          schema: "public",
+          columns: ["status"],
+          where: "status IN ('active', 'paused')",
+          type: "btree",
+        },
+        {
+          name: "idx_users_email",
+          tableName: "users",
+          schema: "public",
+          columns: ["email"],
+          type: "btree",
+        },
+      ],
+    });
+
+    const currentReordered = makeTable({
+      ...current,
+      checkConstraints: reverseCopy(current.checkConstraints || []),
+      foreignKeys: reverseCopy(current.foreignKeys || []),
+      uniqueConstraints: reverseCopy(current.uniqueConstraints || []),
+      indexes: reverseCopy(current.indexes || []),
+    });
+
+    const desiredReordered = makeTable({
+      ...desired,
+      checkConstraints: reverseCopy(desired.checkConstraints || []),
+      foreignKeys: reverseCopy(desired.foreignKeys || []),
+      uniqueConstraints: reverseCopy(desired.uniqueConstraints || []),
+      indexes: reverseCopy(desired.indexes || []),
+    });
+
+    const plan1 = differ.generateMigrationPlan([desired], [current]);
+    const plan2 = differ.generateMigrationPlan([desiredReordered], [currentReordered]);
+
+    expect(plan1.transactional).toEqual(plan2.transactional);
+    expect(plan1.concurrent).toEqual(plan2.concurrent);
+    expect(plan1.deferred).toEqual(plan2.deferred);
+  });
+
+  test("generateMigrationPlan keeps stable order for mixed multi-table operations", () => {
+    const differ = new SchemaDiffer();
+
+    const currentAccounts = makeTable({
+      name: "accounts",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "legacy", type: "TEXT", nullable: true }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "accounts_pkey"),
+      indexes: [
+        {
+          name: "idx_accounts_legacy",
+          tableName: "accounts",
+          schema: "public",
+          columns: ["legacy"],
+          type: "btree",
+        },
+      ],
+    });
+    const currentUsers = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "account_id", type: "INTEGER", nullable: true }),
+        makeColumn({ name: "status", type: "TEXT", nullable: true, default: "'new'" }),
+        makeColumn({ name: "old_col", type: "TEXT", nullable: true }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "users_pkey"),
+      foreignKeys: [
+        {
+          name: "fk_users_account",
+          columns: ["account_id"],
+          referencedTable: "accounts",
+          referencedColumns: ["id"],
+          onDelete: "SET NULL",
+        },
+      ],
+      uniqueConstraints: [{ name: "uq_users_old_col", columns: ["old_col"] }],
+      indexes: [
+        {
+          name: "idx_users_status",
+          tableName: "users",
+          schema: "public",
+          columns: ["status"],
+          type: "btree",
+        },
+      ],
+    });
+    const currentAuditLogs = makeTable({
+      name: "audit_logs",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "message", type: "TEXT", nullable: true }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "audit_logs_pkey"),
+    });
+
+    const desiredAccounts = makeTable({
+      name: "accounts",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "status", type: "TEXT", nullable: false, default: "'active'" }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "accounts_pkey"),
+      indexes: [
+        {
+          name: "idx_accounts_status",
+          tableName: "accounts",
+          schema: "public",
+          columns: ["status"],
+          type: "btree",
+        },
+      ],
+    });
+    const desiredUsers = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "account_id", type: "BIGINT", nullable: false }),
+        makeColumn({ name: "status", type: "TEXT", nullable: false, default: "'active'" }),
+        makeColumn({ name: "email", type: "TEXT", nullable: false }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "users_pkey"),
+      foreignKeys: [
+        {
+          name: "fk_users_account",
+          columns: ["account_id"],
+          referencedTable: "accounts",
+          referencedColumns: ["id"],
+          onDelete: "CASCADE",
+        },
+      ],
+      uniqueConstraints: [{ name: "uq_users_email", columns: ["email"] }],
+      indexes: [
+        {
+          name: "idx_users_email",
+          tableName: "users",
+          schema: "public",
+          columns: ["email"],
+          type: "btree",
+        },
+      ],
+    });
+    const desiredTeams = makeTable({
+      name: "teams",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "name", type: "TEXT", nullable: false }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "teams_pkey"),
+      uniqueConstraints: [{ name: "uq_teams_name", columns: ["name"] }],
+    });
+    const desiredProfiles = makeTable({
+      name: "profiles",
+      schema: "public",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "user_id", type: "INTEGER", nullable: false }),
+      ],
+      primaryKey: makePrimaryKey(["id"], "profiles_pkey"),
+      foreignKeys: [
+        {
+          name: "fk_profiles_user",
+          columns: ["user_id"],
+          referencedTable: "users",
+          referencedColumns: ["id"],
+          onDelete: "CASCADE",
+        },
+      ],
+    });
+
+    const current = [currentAuditLogs, currentUsers, currentAccounts];
+    const desired = [desiredProfiles, desiredTeams, desiredUsers, desiredAccounts];
+
+    const plan1 = differ.generateMigrationPlan(desired, current);
+    const plan2 = differ.generateMigrationPlan(reverseCopy(desired), reverseCopy(current));
+
+    expect(plan1.transactional).toEqual(plan2.transactional);
+    expect(plan1.concurrent).toEqual(plan2.concurrent);
+    expect(plan1.deferred).toEqual(plan2.deferred);
+  });
+
+  test("generateMigrationPlan handles same table name across schemas without collisions", () => {
+    const differ = new SchemaDiffer();
+
+    const currentPublic = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+    const currentTenant = makeTable({
+      name: "users",
+      schema: "tenant_a",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+
+    const desiredPublic = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+    const desiredTenant = makeTable({
+      name: "users",
+      schema: "tenant_a",
+      columns: [
+        makeColumn({ name: "id", type: "INTEGER", nullable: false }),
+        makeColumn({ name: "email", type: "TEXT", nullable: true }),
+      ],
+    });
+
+    const plan = differ.generateMigrationPlan(
+      [desiredPublic, desiredTenant],
+      [currentPublic, currentTenant]
+    );
+
+    const sql = plan.transactional.join("\n");
+    expect(sql).toContain('ALTER TABLE "tenant_a"."users"');
+    expect(sql).toContain('ADD COLUMN "email" TEXT');
+    expect(sql).not.toContain('ALTER TABLE "public"."users"');
+  });
+
+  test("generateMigrationPlan drops only removed schema table when names match", () => {
+    const differ = new SchemaDiffer();
+
+    const currentPublic = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+    const currentTenant = makeTable({
+      name: "users",
+      schema: "tenant_a",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+
+    const desiredPublic = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+
+    const plan = differ.generateMigrationPlan([desiredPublic], [currentPublic, currentTenant]);
+    const sql = plan.transactional.join("\n");
+
+    expect(sql).toContain('DROP TABLE "tenant_a"."users" CASCADE;');
+    expect(sql).not.toContain('DROP TABLE "public"."users" CASCADE;');
+  });
+
+  test("generateMigrationPlan drops all removed same-name tables across schemas", () => {
+    const differ = new SchemaDiffer();
+
+    const currentPublic = makeTable({
+      name: "users",
+      schema: "public",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+    const currentTenant = makeTable({
+      name: "users",
+      schema: "tenant_a",
+      columns: [makeColumn({ name: "id", type: "INTEGER", nullable: false })],
+    });
+
+    const plan = differ.generateMigrationPlan([], [currentPublic, currentTenant]);
+    const sql = plan.transactional.join("\n");
+
+    expect(sql).toContain('DROP TABLE "public"."users" CASCADE;');
+    expect(sql).toContain('DROP TABLE "tenant_a"."users" CASCADE;');
   });
 });
