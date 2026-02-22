@@ -13,6 +13,7 @@ type NormalizedSequence = {
   start: string;
   cache: string;
   cycle: boolean;
+  ownedBy?: string;
 };
 
 function normalizeSequenceNumericValue(
@@ -53,6 +54,20 @@ function normalizeSequenceDataType(sequence: Sequence): "SMALLINT" | "INTEGER" |
   return sequence.dataType ?? "BIGINT";
 }
 
+function normalizeOwnedBy(ownedBy: string | undefined): string | undefined {
+  if (!ownedBy) {
+    return undefined;
+  }
+
+  return ownedBy
+    .split(".")
+    .map(function (part) {
+      return part.replace(/^"|"$/g, "");
+    })
+    .join(".")
+    .trim();
+}
+
 function normalizeSequence(sequence: Sequence): NormalizedSequence {
   const dataType = normalizeSequenceDataType(sequence);
   const incrementRaw = Number(sequence.increment ?? 1);
@@ -66,6 +81,7 @@ function normalizeSequence(sequence: Sequence): NormalizedSequence {
   const start = normalizeSequenceNumericValue(sequence.start, defaultStart);
   const cache = normalizeSequenceNumericValue(sequence.cache, "1");
   const cycle = sequence.cycle ?? false;
+  const ownedBy = normalizeOwnedBy(sequence.ownedBy);
 
   return {
     dataType,
@@ -75,6 +91,7 @@ function normalizeSequence(sequence: Sequence): NormalizedSequence {
     start,
     cache,
     cycle,
+    ownedBy,
   };
 }
 
@@ -89,7 +106,8 @@ function sequencesNeedUpdate(desired: Sequence, current: Sequence): boolean {
     normalizedDesired.maxValue !== normalizedCurrent.maxValue ||
     normalizedDesired.start !== normalizedCurrent.start ||
     normalizedDesired.cache !== normalizedCurrent.cache ||
-    normalizedDesired.cycle !== normalizedCurrent.cycle
+    normalizedDesired.cycle !== normalizedCurrent.cycle ||
+    normalizedDesired.ownedBy !== normalizedCurrent.ownedBy
   );
 }
 
