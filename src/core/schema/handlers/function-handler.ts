@@ -25,6 +25,10 @@ function normalizeStrict(value: Function['strict']): boolean {
   return Boolean(value);
 }
 
+function normalizeCost(value: Function['cost']): number {
+  return value ?? 100;
+}
+
 function normalizeType(type: string): string {
   const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
   const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
@@ -83,7 +87,8 @@ const config: HandlerConfig<Function> = {
     normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel) ||
     normalizeSecurityDefiner(desired.securityDefiner) !==
       normalizeSecurityDefiner(current.securityDefiner) ||
-    normalizeStrict(desired.strict) !== normalizeStrict(current.strict),
+    normalizeStrict(desired.strict) !== normalizeStrict(current.strict) ||
+    normalizeCost(desired.cost) !== normalizeCost(current.cost),
 };
 
 export class FunctionHandler {
