@@ -10,7 +10,25 @@ function normalizeBody(body: string): string {
 }
 
 function normalizeParameterType(type: string): string {
-  return type.replace(/\s+/g, " ").trim();
+  const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
+  const arraySuffixMatch = normalized.match(/(\[\])+$/);
+  const arraySuffix = arraySuffixMatch ? arraySuffixMatch[0] : "";
+  const baseType = arraySuffix ? normalized.slice(0, -arraySuffix.length).trim() : normalized;
+  const lowerType = baseType.toLowerCase();
+
+  const aliases: Record<string, string> = {
+    "timestamp with time zone": "timestamptz",
+    timestamptz: "timestamptz",
+    "timestamp without time zone": "timestamp",
+    timestamp: "timestamp",
+    "time with time zone": "timetz",
+    timetz: "timetz",
+    "time without time zone": "time",
+    time: "time",
+  };
+
+  const canonical = aliases[lowerType] || baseType;
+  return `${canonical}${arraySuffix}`;
 }
 
 function getProcedureSignature(proc: Procedure): string {
