@@ -348,7 +348,13 @@ function extractStrict(node: any): boolean | undefined {
     for (const option of node.options) {
       const defElem = option.DefElem;
       if (defElem && defElem.defname === 'strict') {
-        return defElem.arg?.Integer?.ival === 1;
+        if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
+          return defElem.arg.Boolean.boolval;
+        }
+        if (typeof defElem.arg?.Integer?.ival === "number") {
+          return defElem.arg.Integer.ival === 1;
+        }
+        return true;
       }
     }
     return undefined;

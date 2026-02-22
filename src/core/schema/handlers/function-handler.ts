@@ -21,6 +21,10 @@ function normalizeSecurityDefiner(value: Function['securityDefiner']): boolean {
   return Boolean(value);
 }
 
+function normalizeStrict(value: Function['strict']): boolean {
+  return Boolean(value);
+}
+
 function normalizeType(type: string): string {
   const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
   const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
@@ -78,7 +82,8 @@ const config: HandlerConfig<Function> = {
     normalizeVolatility(desired.volatility) !== normalizeVolatility(current.volatility) ||
     normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel) ||
     normalizeSecurityDefiner(desired.securityDefiner) !==
-      normalizeSecurityDefiner(current.securityDefiner),
+      normalizeSecurityDefiner(current.securityDefiner) ||
+    normalizeStrict(desired.strict) !== normalizeStrict(current.strict),
 };
 
 export class FunctionHandler {
