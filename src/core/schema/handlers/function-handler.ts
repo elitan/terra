@@ -106,7 +106,7 @@ function normalizeParameterDefault(value: string | undefined): string | undefine
 
   return value
     .replace(
-      /::\s*(?:"[^"]+"|[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)(?:\[\])?/gi,
+      /::\s*(?:"[^"]+"|[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)(?:\s+[a-z_][a-z0-9_]*)*(?:\s*\(\s*\d+\s*(?:,\s*\d+\s*)?\))?(?:\[\])*/gi,
       ""
     )
     .replace(/\s+/g, " ")
