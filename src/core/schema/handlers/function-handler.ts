@@ -29,6 +29,14 @@ function normalizeCost(value: Function['cost']): number {
   return value ?? 100;
 }
 
+function normalizeRows(value: Function['rows'], returnType: string): number | undefined {
+  if (!normalizeReturnType(returnType).toUpperCase().startsWith("SETOF ")) {
+    return undefined;
+  }
+
+  return value ?? 1000;
+}
+
 function normalizeType(type: string): string {
   const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
   const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
@@ -88,7 +96,9 @@ const config: HandlerConfig<Function> = {
     normalizeSecurityDefiner(desired.securityDefiner) !==
       normalizeSecurityDefiner(current.securityDefiner) ||
     normalizeStrict(desired.strict) !== normalizeStrict(current.strict) ||
-    normalizeCost(desired.cost) !== normalizeCost(current.cost),
+    normalizeCost(desired.cost) !== normalizeCost(current.cost) ||
+    normalizeRows(desired.rows, desired.returnType) !==
+      normalizeRows(current.rows, current.returnType),
 };
 
 export class FunctionHandler {
