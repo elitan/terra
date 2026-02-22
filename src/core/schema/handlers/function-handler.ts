@@ -17,8 +17,13 @@ function normalizeParallel(p: Function['parallel']): string {
   return p || 'UNSAFE';
 }
 
-function normalizeParameterType(type: string): string {
+function normalizeType(type: string): string {
   const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
+  const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
+  if (setOfMatch) {
+    return `SETOF ${normalizeType(setOfMatch[1])}`;
+  }
+
   const arraySuffixMatch = normalized.match(/(\[\])+$/);
   const arraySuffix = arraySuffixMatch ? arraySuffixMatch[0] : "";
   const baseType = arraySuffix ? normalized.slice(0, -arraySuffix.length).trim() : normalized;
@@ -39,6 +44,14 @@ function normalizeParameterType(type: string): string {
   return `${canonical}${arraySuffix}`;
 }
 
+function normalizeParameterType(type: string): string {
+  return normalizeType(type);
+}
+
+function normalizeReturnType(type: string): string {
+  return normalizeType(type);
+}
+
 function getFunctionSignature(func: Function): string {
   return func.parameters.map(function (param) {
     return normalizeParameterType(param.type);
@@ -56,7 +69,7 @@ const config: HandlerConfig<Function> = {
   generateCreate: generateCreateFunctionSQL,
   needsUpdate: (desired, current) =>
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
-    desired.returnType !== current.returnType ||
+    normalizeReturnType(desired.returnType) !== normalizeReturnType(current.returnType) ||
     desired.language !== current.language ||
     normalizeVolatility(desired.volatility) !== normalizeVolatility(current.volatility) ||
     normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel),
