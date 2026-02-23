@@ -96,17 +96,15 @@ export class SchemaParser {
       const createTablePattern = new RegExp(`(\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?)${keyword}(\\b)`, 'gi');
       sql = sql.replace(createTablePattern, `$1"${keyword}"$2`);
 
-      // Match keyword preceded by whitespace/comma and followed by a type
-      // Make sure it's not already quoted and not preceded by CREATE/ALTER
-      const pattern = new RegExp(`(?<![CREATE|ALTER]\\s{1,20})(?<=\\s|,)\\b${keyword}\\b(?=\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON))`, 'gi');
-      sql = sql.replace(pattern, `"${keyword}"`);
+      const pattern = new RegExp(`([,(]\\s*)(?<!")\\b${keyword}\\b(?!")(\\s+(INTEGER|INT|INT2|INT4|INT8|SMALLINT|BIGINT|VARCHAR|TEXT|BOOLEAN|BOOL|TIMESTAMP|DATE|TIME|NUMERIC|DECIMAL|REAL|DOUBLE|SERIAL|BIGSERIAL|UUID|JSONB|JSON|MONEY|BIT|VARBIT|INET|CIDR|MACADDR|XML|OID|TSVECTOR|TSQUERY|TSRANGE|BYTEA|POINT|LINE|LSEG|BOX|PATH|POLYGON|CIRCLE|(?!DEFAULT\\b|NOT\\b|NULL\\b|PRIMARY\\b|UNIQUE\\b|CHECK\\b|REFERENCES\\b|CONSTRAINT\\b|COLLATE\\b|GENERATED\\b|AS\\b|BY\\b|ON\\b|WITH\\b|USING\\b|WHERE\\b|GROUP\\b|ORDER\\b|LIMIT\\b|OFFSET\\b)[a-z_][a-z0-9_]*(?:\\.[a-z_][a-z0-9_]*)?)(?:\\s*\\[\\s*\\])*)`, 'gi');
+      sql = sql.replace(pattern, `$1"${keyword}"$2`);
 
       // Also match in UNIQUE constraints: UNIQUE (column1, keyword, column3)
-      const uniquePattern = new RegExp(`(UNIQUE\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      const uniquePattern = new RegExp(`(UNIQUE\\s*\\([^)]*?)(?<!")\\b${keyword}\\b(?!")`, 'gi');
       sql = sql.replace(uniquePattern, `$1"${keyword}"`);
 
       // Also match in PRIMARY KEY and FOREIGN KEY constraints
-      const keyPattern = new RegExp(`((?:PRIMARY|FOREIGN)\\s+KEY\\s*\\([^)]*?)\\b${keyword}\\b`, 'gi');
+      const keyPattern = new RegExp(`((?:PRIMARY|FOREIGN)\\s+KEY\\s*\\([^)]*?)(?<!")\\b${keyword}\\b(?!")`, 'gi');
       sql = sql.replace(keyPattern, `$1"${keyword}"`);
     }
 

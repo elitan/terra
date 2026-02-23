@@ -8,6 +8,18 @@ export class CommentHandler {
     const currentCommentMap = new Map(
       currentComments.map(c => [this.getCommentKey(c), c])
     );
+    const desiredCommentMap = new Map(
+      desiredComments.map(c => [this.getCommentKey(c), c])
+    );
+
+    for (const currentComment of currentComments) {
+      const key = this.getCommentKey(currentComment);
+      if (!desiredCommentMap.has(key)) {
+        const sql = this.generateDropCommentSQL(currentComment);
+        statements.push(sql);
+        Logger.info(`Dropping comment on ${currentComment.objectType} '${currentComment.objectName}'`);
+      }
+    }
 
     for (const desiredComment of desiredComments) {
       const key = this.getCommentKey(desiredComment);
@@ -35,6 +47,18 @@ export class CommentHandler {
 
   private generateCommentSQL(comment: Comment): string {
     const escapedComment = comment.comment.replace(/'/g, "''");
+    const builder = this.buildCommentStatement(comment);
+    builder.p(`IS '${escapedComment}'`);
+    return builder.build() + ';';
+  }
+
+  private generateDropCommentSQL(comment: Comment): string {
+    const builder = this.buildCommentStatement(comment);
+    builder.p("IS NULL");
+    return builder.build() + ';';
+  }
+
+  private buildCommentStatement(comment: Comment): SQLBuilder {
     const builder = new SQLBuilder().p("COMMENT ON");
 
     if (comment.objectType === 'SCHEMA') {
@@ -47,7 +71,6 @@ export class CommentHandler {
       builder.p(comment.objectType).table(comment.objectName, comment.schemaName);
     }
 
-    builder.p(`IS '${escapedComment}'`);
-    return builder.build() + ';';
+    return builder;
   }
 }

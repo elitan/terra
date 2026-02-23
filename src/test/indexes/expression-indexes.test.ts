@@ -354,6 +354,27 @@ describe("Schema Differ Support", () => {
     expect(areEqual).toBe(false);
   });
 
+  test("should treat casted column expressions as equivalent to column indexes", async () => {
+    const castExpressionIndex: Index = {
+      name: "idx_email_cast",
+      tableName: "users",
+      columns: [],
+      expression: "email::text",
+      type: "btree",
+    };
+
+    const columnIndex: Index = {
+      name: "idx_email_cast",
+      tableName: "users",
+      columns: ["email"],
+      type: "btree",
+    };
+
+    const differ = new SchemaDiffer();
+    const areEqual = (differ as any).indexesAreEqual(castExpressionIndex, columnIndex);
+    expect(areEqual).toBe(true);
+  });
+
   test("should handle expression indexes with WHERE clauses", async () => {
     const index1: Index = {
       name: "idx_active_email_lower",
@@ -469,6 +490,23 @@ describe("Schema Differ Support", () => {
 
     expect(sql).toBe(
       'CREATE UNIQUE INDEX CONCURRENTLY "idx_email_lower_unique" ON "users" (LOWER(email));'
+    );
+  });
+
+  test("should generate valid SQL for cast expression indexes", async () => {
+    const castExpressionIndex: Index = {
+      name: "idx_email_cast",
+      tableName: "users",
+      columns: [],
+      expression: "email::text",
+      type: "btree",
+    };
+
+    const differ = new SchemaDiffer();
+    const sql = (differ as any).generateCreateIndexSQL(castExpressionIndex);
+
+    expect(sql).toBe(
+      'CREATE INDEX CONCURRENTLY "idx_email_cast" ON "users" ((email::text));'
     );
   });
 });

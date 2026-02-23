@@ -123,7 +123,14 @@ function extractOwnedBy(options: any[]): string | undefined {
       }
 
       if (names.length >= 2) {
-        return names.join(".");
+        return names
+          .map(function (name: string) {
+            if (/^[a-z_][a-z0-9_]*$/.test(name)) {
+              return name;
+            }
+            return `"${name.replace(/"/g, '""')}"`;
+          })
+          .join(".");
       }
     }
     return undefined;

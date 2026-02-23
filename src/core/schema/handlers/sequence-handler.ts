@@ -3,7 +3,8 @@ import {
   generateCreateSequenceSQL,
   generateDropSequenceSQL,
 } from "../../../utils/sql";
-import { generateStatements, type HandlerConfig } from "./base-handler";
+import { Logger } from "../../../utils/logger";
+import { SQLBuilder } from "../../../utils/sql-builder";
 
 type NormalizedSequence = {
   dataType: "SMALLINT" | "INTEGER" | "BIGINT";
@@ -13,6 +14,7 @@ type NormalizedSequence = {
   start: string;
   cache: string;
   cycle: boolean;
+  ownedBy?: string;
 };
 
 function normalizeSequenceNumericValue(
@@ -53,6 +55,20 @@ function normalizeSequenceDataType(sequence: Sequence): "SMALLINT" | "INTEGER" |
   return sequence.dataType ?? "BIGINT";
 }
 
+function normalizeOwnedBy(ownedBy: string | undefined): string | undefined {
+  if (!ownedBy) {
+    return undefined;
+  }
+
+  return ownedBy
+    .split(".")
+    .map(function (part) {
+      return part.replace(/^"|"$/g, "");
+    })
+    .join(".")
+    .trim();
+}
+
 function normalizeSequence(sequence: Sequence): NormalizedSequence {
   const dataType = normalizeSequenceDataType(sequence);
   const incrementRaw = Number(sequence.increment ?? 1);
@@ -66,6 +82,7 @@ function normalizeSequence(sequence: Sequence): NormalizedSequence {
   const start = normalizeSequenceNumericValue(sequence.start, defaultStart);
   const cache = normalizeSequenceNumericValue(sequence.cache, "1");
   const cycle = sequence.cycle ?? false;
+  const ownedBy = normalizeOwnedBy(sequence.ownedBy);
 
   return {
     dataType,
@@ -75,6 +92,7 @@ function normalizeSequence(sequence: Sequence): NormalizedSequence {
     start,
     cache,
     cycle,
+    ownedBy,
   };
 }
 
@@ -89,7 +107,8 @@ function sequencesNeedUpdate(desired: Sequence, current: Sequence): boolean {
     normalizedDesired.maxValue !== normalizedCurrent.maxValue ||
     normalizedDesired.start !== normalizedCurrent.start ||
     normalizedDesired.cache !== normalizedCurrent.cache ||
-    normalizedDesired.cycle !== normalizedCurrent.cycle
+    normalizedDesired.cycle !== normalizedCurrent.cycle ||
+    normalizedDesired.ownedBy !== normalizedCurrent.ownedBy
   );
 }
 
@@ -97,17 +116,114 @@ function getSequenceKey(sequence: Sequence): string {
   return `${sequence.schema || "public"}.${sequence.name}`;
 }
 
-const config: HandlerConfig<Sequence> = {
-  name: "sequence",
-  getKey: getSequenceKey,
-  generateDrop: (sequence) => generateDropSequenceSQL(sequence.name, sequence.schema),
-  generateCreate: generateCreateSequenceSQL,
-  shouldManage: (s) => !s.ownedBy,
-  needsUpdate: sequencesNeedUpdate,
-};
+function generateOwnedByStatement(sequence: Sequence): string | null {
+  if (!sequence.ownedBy) {
+    return null;
+  }
+
+  const ownedByTarget = splitOwnedByTarget(sequence.ownedBy)
+    .map(function (part) {
+      const identifier = part.replace(/^"|"$/g, "");
+      if (/^[a-z_][a-z0-9_]*$/.test(identifier)) {
+        return identifier;
+      }
+      return `"${identifier.replace(/"/g, '""')}"`;
+    })
+    .join(".");
+
+  const builder = new SQLBuilder();
+  builder.p("ALTER SEQUENCE").table(sequence.name, sequence.schema);
+  builder.p(`OWNED BY ${ownedByTarget}`);
+  return builder.build() + ";";
+}
+
+function splitOwnedByTarget(target: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let inQuote = false;
+
+  for (let i = 0; i < target.length; i++) {
+    const char = target[i];
+
+    if (char === '"') {
+      current += char;
+      if (inQuote && target[i + 1] === '"') {
+        current += '"';
+        i++;
+        continue;
+      }
+      inQuote = !inQuote;
+      continue;
+    }
+
+    if (char === "." && !inQuote) {
+      if (current) {
+        segments.push(current);
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function generateCreateSequenceStatements(sequence: Sequence): string[] {
+  const createSequence = sequence.ownedBy
+    ? { ...sequence, ownedBy: undefined }
+    : sequence;
+  const statements = [generateCreateSequenceSQL(createSequence)];
+  const ownedByStatement = generateOwnedByStatement(sequence);
+  if (ownedByStatement) {
+    statements.push(ownedByStatement);
+  }
+  return statements;
+}
 
 export class SequenceHandler {
   generateStatements(desiredSequences: Sequence[], currentSequences: Sequence[]): string[] {
-    return generateStatements(desiredSequences, currentSequences, config);
+    const statements: string[] = [];
+    const currentMap = new Map(currentSequences.map(sequence => [getSequenceKey(sequence), sequence]));
+    const desiredKeys = new Set(desiredSequences.map(getSequenceKey));
+
+    for (const currentSequence of currentSequences) {
+      const key = getSequenceKey(currentSequence);
+      if (!desiredKeys.has(key)) {
+        if (currentSequence.ownedBy) {
+          Logger.info(`sequence '${key}' is owned by a table column, skipping`);
+          continue;
+        }
+
+        statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
+        Logger.info(`Dropping sequence '${key}'`);
+      }
+    }
+
+    for (const desiredSequence of desiredSequences) {
+      const key = getSequenceKey(desiredSequence);
+      const currentSequence = currentMap.get(key);
+
+      if (!currentSequence) {
+        statements.push(...generateCreateSequenceStatements(desiredSequence));
+        Logger.info(`Creating sequence '${key}'`);
+        continue;
+      }
+
+      if (sequencesNeedUpdate(desiredSequence, currentSequence)) {
+        statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
+        statements.push(...generateCreateSequenceStatements(desiredSequence));
+        Logger.info(`Updating sequence '${key}'`);
+      } else {
+        Logger.info(`sequence '${key}' is up to date, skipping`);
+      }
+    }
+
+    return statements;
   }
 }

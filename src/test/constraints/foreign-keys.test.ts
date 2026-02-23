@@ -10,13 +10,13 @@ describe("Foreign Key Constraints", () => {
 
   beforeEach(async () => {
     client = await createTestClient();
-    await cleanDatabase(client);
+    await cleanDatabase(client, ['public', 'app']);
     
     schemaService = createTestSchemaService();
   });
 
   afterEach(async () => {
-    await cleanDatabase(client);
+    await cleanDatabase(client, ['public', 'app']);
     await client?.end();
   });
 
@@ -151,6 +151,27 @@ describe("Foreign Key Constraints", () => {
       `);
 
       expect(result.rows[0].column_count).toBe('2');
+    });
+
+    test("should create and keep idempotent same-schema foreign keys in non-public schemas", async () => {
+      const schema = `
+        CREATE SCHEMA app;
+
+        CREATE TABLE app.parent (
+          id SERIAL PRIMARY KEY
+        );
+
+        CREATE TABLE app.child (
+          id SERIAL PRIMARY KEY,
+          parent_id INTEGER NOT NULL,
+          CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent(id)
+        );
+      `;
+
+      await schemaService.apply(schema, ['public', 'app'], true);
+
+      const plan = await schemaService.plan(schema, ['public', 'app']);
+      expect(plan.hasChanges).toBe(false);
     });
   });
 

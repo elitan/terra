@@ -17,14 +17,110 @@ function normalizeParallel(p: Function['parallel']): string {
   return p || 'UNSAFE';
 }
 
+function normalizeSecurityDefiner(value: Function['securityDefiner']): boolean {
+  return Boolean(value);
+}
+
+function normalizeStrict(value: Function['strict']): boolean {
+  return Boolean(value);
+}
+
+function normalizeCost(value: Function['cost']): number {
+  return value ?? 100;
+}
+
+function normalizeRows(value: Function['rows'], returnType: string): number | undefined {
+  if (!normalizeReturnType(returnType).toUpperCase().startsWith("SETOF ")) {
+    return undefined;
+  }
+
+  return value ?? 1000;
+}
+
+function normalizeType(type: string): string {
+  const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
+  const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
+  const setOfType = setOfMatch?.[1];
+  if (setOfType) {
+    return `SETOF ${normalizeType(setOfType)}`;
+  }
+
+  const arraySuffixMatch = normalized.match(/(\[\])+$/);
+  const arraySuffix = arraySuffixMatch ? arraySuffixMatch[0] : "";
+  const baseType = arraySuffix ? normalized.slice(0, -arraySuffix.length).trim() : normalized;
+  const lowerType = baseType.toLowerCase();
+
+  const aliases: Record<string, string> = {
+    "timestamp with time zone": "timestamptz",
+    timestamptz: "timestamptz",
+    "timestamp without time zone": "timestamp",
+    timestamp: "timestamp",
+    "time with time zone": "timetz",
+    timetz: "timetz",
+    "time without time zone": "time",
+    time: "time",
+  };
+
+  const canonical = aliases[lowerType] || baseType;
+  return `${canonical}${arraySuffix}`;
+}
+
 function normalizeParameterType(type: string): string {
-  return type.replace(/\s+/g, " ").trim();
+  return normalizeType(type);
+}
+
+function normalizeReturnType(type: string): string {
+  return normalizeType(type);
+}
+
+function normalizeParameterMode(mode: Function["parameters"][number]["mode"]): string {
+  if (!mode || mode === "IN") {
+    return "IN";
+  }
+
+  return mode;
+}
+
+function isIdentityParameterMode(mode: Function["parameters"][number]["mode"]): boolean {
+  return normalizeParameterMode(mode) !== "OUT";
 }
 
 function getFunctionSignature(func: Function): string {
+  return func.parameters
+    .filter(function (param) {
+      return isIdentityParameterMode(param.mode);
+    })
+    .map(function (param) {
+      return normalizeParameterType(param.type);
+    })
+    .join(",");
+}
+
+function normalizeFunctionParameters(
+  func: Function
+): Array<{ name?: string; mode: string; type: string; default?: string }> {
   return func.parameters.map(function (param) {
-    return normalizeParameterType(param.type);
-  }).join(",");
+    return {
+      name: param.name || undefined,
+      mode: normalizeParameterMode(param.mode),
+      type: normalizeParameterType(param.type),
+      default: normalizeParameterDefault(param.default),
+    };
+  });
+}
+
+function normalizeParameterDefault(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value
+    .replace(
+      /::\s*(?:"[^"]+"|[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)(?:\s+[a-z_][a-z0-9_]*)*(?:\s*\(\s*\d+\s*(?:,\s*\d+\s*)?\))?(?:\[\])*/gi,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getFunctionKey(func: Function): string {
@@ -37,11 +133,19 @@ const config: HandlerConfig<Function> = {
   generateDrop: generateDropFunctionSQL,
   generateCreate: generateCreateFunctionSQL,
   needsUpdate: (desired, current) =>
+    JSON.stringify(normalizeFunctionParameters(desired)) !==
+      JSON.stringify(normalizeFunctionParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
-    desired.returnType !== current.returnType ||
+    normalizeReturnType(desired.returnType) !== normalizeReturnType(current.returnType) ||
     desired.language !== current.language ||
     normalizeVolatility(desired.volatility) !== normalizeVolatility(current.volatility) ||
-    normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel),
+    normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel) ||
+    normalizeSecurityDefiner(desired.securityDefiner) !==
+      normalizeSecurityDefiner(current.securityDefiner) ||
+    normalizeStrict(desired.strict) !== normalizeStrict(current.strict) ||
+    normalizeCost(desired.cost) !== normalizeCost(current.cost) ||
+    normalizeRows(desired.rows, desired.returnType) !==
+      normalizeRows(current.rows, current.returnType),
 };
 
 export class FunctionHandler {
