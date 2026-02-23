@@ -527,4 +527,59 @@ describe("DatabaseInspector coverage", () => {
     } as any;
     expect(await inspector.getFunctionDependencies(badClient, "sync_users")).toEqual([]);
   });
+
+  test("covers trigger and function argument parser edge branches", function () {
+    const inspector = new DatabaseInspector() as any;
+
+    expect(inspector.parseTriggerWhenClause(null)).toBeUndefined();
+    expect(inspector.parseTriggerFunctionArgs(null)).toBeUndefined();
+    expect(
+      inspector.parseTriggerFunctionArgs(
+        "CREATE TRIGGER trg BEFORE INSERT ON public.users EXECUTE FUNCTION public.fn"
+      )
+    ).toBeUndefined();
+
+    expect(inspector.parseFunctionArgument("   ")).toBeNull();
+    const noTypeInspector = new DatabaseInspector() as any;
+    noTypeInspector.extractArgumentNameAndType = function () {
+      return { name: undefined, type: "" };
+    };
+    expect(noTypeInspector.parseFunctionArgument("IN p integer")).toBeNull();
+
+    expect(inspector.extractArgumentDefault("a text DEFAULT 'it''s'")).toEqual({
+      signaturePart: "a text",
+      defaultValue: "'it''s'",
+    });
+    expect(inspector.extractArgumentDefault('"na""me" text DEFAULT 1')).toEqual({
+      signaturePart: '"na""me" text',
+      defaultValue: "1",
+    });
+
+    expect(inspector.extractArgumentNameAndType("   ")).toEqual({
+      name: undefined,
+      type: "",
+    });
+    expect(inspector.extractArgumentNameAndType('"OnlyName"')).toEqual({
+      name: undefined,
+      type: '"OnlyName"',
+    });
+    expect(inspector.extractArgumentNameAndType("integer")).toEqual({
+      name: undefined,
+      type: "integer",
+    });
+
+    expect(inspector.readQuotedIdentifier("plain")).toBeNull();
+    expect(inspector.readQuotedIdentifier('"a""b"')).toBe('"a""b"');
+    expect(inspector.readQuotedIdentifier('"unterminated')).toBeNull();
+
+    expect(inspector.unquoteIdentifier("plain")).toBe("plain");
+
+    expect(
+      inspector.splitFunctionArguments(`a text DEFAULT 'it''s', "na""me" text, c integer`)
+    ).toEqual([
+      `a text DEFAULT 'it''s'`,
+      `"na""me" text`,
+      "c integer",
+    ]);
+  });
 });
