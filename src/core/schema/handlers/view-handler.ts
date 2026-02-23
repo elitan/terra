@@ -17,6 +17,26 @@ function normalizeSimpleIdentifierQuotes(definition: string): string {
   );
 }
 
+function isClauseKeyword(value: string): boolean {
+  return new Set([
+    "where",
+    "group",
+    "having",
+    "order",
+    "limit",
+    "offset",
+    "union",
+    "intersect",
+    "except",
+    "join",
+    "left",
+    "right",
+    "full",
+    "inner",
+    "cross",
+  ]).has(value.toLowerCase());
+}
+
 function normalizeSingleSourceColumnQualification(definition: string): string {
   if (!/^\s*select\b/i.test(definition)) {
     return definition;
@@ -46,7 +66,8 @@ function normalizeSingleSourceColumnQualification(definition: string): string {
     return definition;
   }
 
-  const sourceName = fromMatch[3] || fromMatch[2];
+  const aliasName = fromMatch[3];
+  const sourceName = aliasName && !isClauseKeyword(aliasName) ? aliasName : fromMatch[2];
   if (!sourceName) {
     return definition;
   }
