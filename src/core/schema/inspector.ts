@@ -956,7 +956,8 @@ export class DatabaseInspector {
     let mode: string | undefined;
     const modeMatch = content.match(/^(INOUT|IN|OUT|VARIADIC)\s+/i);
     if (modeMatch) {
-      mode = modeMatch[1].toUpperCase();
+      const modeToken = modeMatch[1];
+      mode = modeToken ? modeToken.toUpperCase() : undefined;
       content = content.slice(modeMatch[0].length).trim();
     }
 
@@ -1014,7 +1015,8 @@ export class DatabaseInspector {
         continue;
       }
 
-      if (i > 0 && /\s/.test(value[i - 1]) && value.slice(i).toUpperCase().startsWith("DEFAULT ")) {
+      const previousChar = i > 0 ? value.charAt(i - 1) : "";
+      if (i > 0 && /\s/.test(previousChar) && value.slice(i).toUpperCase().startsWith("DEFAULT ")) {
         return {
           signaturePart: value.slice(0, i).trim(),
           defaultValue: value.slice(i + 8).trim() || undefined,
@@ -1053,14 +1055,18 @@ export class DatabaseInspector {
     }
 
     const candidateName = match[1];
-    const candidateType = match[2].trim();
+    const candidateType = match[2];
+    if (!candidateName || !candidateType) {
+      return { name: undefined, type: trimmed };
+    }
+    const normalizedCandidateType = candidateType.trim();
     if (this.isLikelyTypeToken(candidateName)) {
       return { name: undefined, type: trimmed };
     }
 
     return {
       name: candidateName,
-      type: candidateType,
+      type: normalizedCandidateType,
     };
   }
 

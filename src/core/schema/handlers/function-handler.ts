@@ -40,8 +40,9 @@ function normalizeRows(value: Function['rows'], returnType: string): number | un
 function normalizeType(type: string): string {
   const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
   const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
-  if (setOfMatch) {
-    return `SETOF ${normalizeType(setOfMatch[1])}`;
+  const setOfType = setOfMatch?.[1];
+  if (setOfType) {
+    return `SETOF ${normalizeType(setOfType)}`;
   }
 
   const arraySuffixMatch = normalized.match(/(\[\])+$/);
