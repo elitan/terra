@@ -635,4 +635,35 @@ describe("DatabaseInspector coverage", () => {
       "c integer",
     ]);
   });
+
+  test("covers sql object inspector helper branches", function () {
+    const inspector = new DatabaseInspector() as any;
+
+    expect(
+      inspector.buildColumnDefinition({
+        column_name: "slug",
+        pg_type: "text",
+        is_nullable: false,
+        column_default: null,
+        attgenerated: "s",
+        generation_expression: "lower(name)",
+      })
+    ).toBe('"slug" text GENERATED ALWAYS AS (lower(name)) STORED');
+
+    expect(
+      inspector.buildColumnDefinition({
+        column_name: "count",
+        pg_type: "integer",
+        is_nullable: false,
+        column_default: "0",
+        attgenerated: "",
+        generation_expression: null,
+      })
+    ).toBe('"count" integer NOT NULL DEFAULT 0');
+
+    expect(inspector.formatGrantTarget("SCHEMA", "public", "public")).toBe('"public"');
+    expect(inspector.formatGrantTarget("FOREIGN SERVER", "analytics_server")).toBe('"analytics_server"');
+    expect(inspector.formatOptions(null)).toBe("");
+    expect(inspector.formatOptions(["just_flag", "host=127.0.0.1"])).toBe("just_flag, host '127.0.0.1'");
+  });
 });

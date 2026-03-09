@@ -26,6 +26,11 @@ describe("Advanced SQL object parsing", function () {
         FOR SELECT
         USING (tenant_id = current_setting('app.tenant_id')::integer);
 
+      ALTER POLICY tenant_policy
+        ON public.users
+        USING (tenant_id = current_setting('app.tenant_id')::integer)
+        WITH CHECK (tenant_id = current_setting('app.tenant_id')::integer);
+
       CREATE DOMAIN public.email_address AS text
         CHECK (POSITION('@' IN VALUE) > 1);
 
@@ -43,6 +48,14 @@ describe("Advanced SQL object parsing", function () {
       AS $$
       BEGIN
         RETURN NEW;
+      END;
+      $$;
+
+      CREATE PROCEDURE public.touch_users()
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        NULL;
       END;
       $$;
 
@@ -68,6 +81,7 @@ describe("Advanced SQL object parsing", function () {
       CREATE ROLE app_reader NOLOGIN;
       CREATE USER app_user WITH LOGIN PASSWORD 'secret';
       GRANT SELECT ON TABLE public.users TO app_reader;
+      ALTER DEFAULT PRIVILEGES IN SCHEMA audit GRANT SELECT ON TABLES TO app_reader;
     `;
 
     const parsed = await parser.parseSchema(sql);
@@ -78,14 +92,19 @@ describe("Advanced SQL object parsing", function () {
     expect(parsed.tables.map(function (table) {
       return table.name;
     })).toEqual(["users"]);
+    expect(parsed.procedures?.map(function (item) {
+      return item.name;
+    })).toEqual(["touch_users"]);
     expect(sqlObjects.sort()).toEqual([
       "constraint-trigger",
       "domain-type",
       "event-trigger",
       "foreign-server",
       "grant",
+      "grant",
       "partition",
       "partition",
+      "policy",
       "policy",
       "range-type",
       "role",

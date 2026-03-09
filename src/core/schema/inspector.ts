@@ -1874,8 +1874,10 @@ export class DatabaseInspector {
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN LATERAL aclexplode(c.relacl) as privilege ON c.relacl IS NOT NULL
         LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
+        LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
         WHERE n.nspname = ANY($1::text[])
           AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+          AND d.objid IS NULL
         ORDER BY n.nspname, c.relname, grantee_name, privilege.privilege_type
       `, [schemas]),
       client.query(`

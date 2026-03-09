@@ -588,11 +588,7 @@ export class SchemaService {
     }
 
     const currentViewKeys = new Set(
-      currentViews
-        .filter(function isRegularView(view) {
-          return !view.materialized;
-        })
-        .map(this.getViewKey)
+      currentViews.map(this.getViewKey)
     );
 
     if (currentViewKeys.size === 0) {
@@ -602,7 +598,7 @@ export class SchemaService {
     const normalizedViews: View[] = [];
 
     for (const view of desiredViews) {
-      if (view.materialized || !currentViewKeys.has(this.getViewKey(view))) {
+      if (!currentViewKeys.has(this.getViewKey(view))) {
         normalizedViews.push(view);
         continue;
       }

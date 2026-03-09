@@ -85,7 +85,7 @@ describe("Advanced SQL object inspector", function () {
               table_name: "users",
               schema_name: "public",
               row_security_enabled: true,
-              row_security_forced: false,
+              row_security_forced: true,
             },
           ],
         };
@@ -102,7 +102,7 @@ describe("Advanced SQL object inspector", function () {
               policy_command: "r",
               is_permissive: true,
               using_expression: "(tenant_id = current_setting('app.tenant_id'::text)::integer)",
-              with_check_expression: null,
+              with_check_expression: "(tenant_id > 0)",
               policy_roles: ["app_reader"],
             },
           ],
@@ -118,8 +118,8 @@ describe("Advanced SQL object inspector", function () {
               type_name: "email_address",
               schema_name: "public",
               base_type: "text",
-              is_not_null: false,
-              default_value: null,
+              is_not_null: true,
+              default_value: "'n/a'::text",
             },
           ],
         };
@@ -145,10 +145,10 @@ describe("Advanced SQL object inspector", function () {
               type_name: "price_window",
               schema_name: "public",
               subtype_name: "numeric",
-              subtype_opclass_name: null,
-              collation_name: null,
-              canonical_name: null,
-              diff_name: null,
+              subtype_opclass_name: "numeric_ops",
+              collation_name: "\"C\"",
+              canonical_name: "public.price_window_canonical",
+              diff_name: "public.price_window_diff",
             },
           ],
         };
@@ -203,10 +203,10 @@ describe("Advanced SQL object inspector", function () {
               is_superuser: false,
               can_create_db: false,
               can_create_role: false,
-              can_inherit: true,
+              can_inherit: false,
               can_replicate: false,
               can_bypass_rls: false,
-              connection_limit: -1,
+              connection_limit: 5,
             },
             {
               role_name: "app_user",
@@ -241,11 +241,29 @@ describe("Advanced SQL object inspector", function () {
 
       if (sql.includes("aclexplode(n.nspacl)")) {
         expect(params).toEqual([["public"]]);
-        return { rows: [] };
+        return {
+          rows: [
+            {
+              schema_name: "public",
+              grantee_name: "app_reader",
+              privilege_type: "USAGE",
+              is_grantable: false,
+            },
+          ],
+        };
       }
 
       if (sql.includes("aclexplode(s.srvacl)")) {
-        return { rows: [] };
+        return {
+          rows: [
+            {
+              server_name: "analytics_server",
+              grantee_name: "app_reader",
+              privilege_type: "USAGE",
+              is_grantable: true,
+            },
+          ],
+        };
       }
 
       throw new Error(`Unhandled SQL: ${sql}`);
@@ -262,11 +280,14 @@ describe("Advanced SQL object inspector", function () {
       "event-trigger",
       "foreign-server",
       "grant",
+      "grant",
+      "grant",
       "partition",
       "partition",
       "policy",
       "range-type",
       "role",
+      "row-level-security",
       "row-level-security",
       "user",
     ]);
@@ -292,5 +313,108 @@ describe("Advanced SQL object inspector", function () {
       createStatement: 'GRANT SELECT ON TABLE "public"."users" TO "app_reader";',
       dropStatement: 'REVOKE SELECT ON TABLE "public"."users" FROM "app_reader";',
     });
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "row-level-security:public.users:force";
+    })).toEqual({
+      kind: "row-level-security",
+      key: "row-level-security:public.users:force",
+      name: "users",
+      schema: "public",
+      createStatement: 'ALTER TABLE "public"."users" FORCE ROW LEVEL SECURITY;',
+      dropStatement: 'ALTER TABLE "public"."users" NO FORCE ROW LEVEL SECURITY;',
+    });
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "policy:public.users.tenant_policy";
+    })?.createStatement).toContain("WITH CHECK ((tenant_id > 0))");
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "domain-type:public.email_address";
+    })?.createStatement).toContain('DEFAULT \'n/a\'::text NOT NULL');
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "range-type:public.price_window";
+    })?.createStatement).toBe(
+      'CREATE TYPE "public"."price_window" AS RANGE (subtype = numeric, subtype_opclass = numeric_ops, collation = "C", canonical = public.price_window_canonical, subtype_diff = public.price_window_diff);'
+    );
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "role:app_reader";
+    })?.createStatement).toBe('CREATE ROLE "app_reader" WITH NOLOGIN NOINHERIT CONNECTION LIMIT 5;');
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "grant:GRANT USAGE ON SCHEMA \"public\" TO \"app_reader\";";
+    })?.dropStatement).toBe('REVOKE USAGE ON SCHEMA "public" FROM "app_reader";');
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "grant:GRANT USAGE ON FOREIGN SERVER \"analytics_server\" TO \"app_reader\" WITH GRANT OPTION;";
+    })?.dropStatement).toBe('REVOKE USAGE ON FOREIGN SERVER "analytics_server" FROM "app_reader";');
+  });
+
+  test("skips extension-owned relation grants", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function (sql, params) {
+      if (sql.includes("aclexplode(c.relacl)")) {
+        expect(params).toEqual([["public"]]);
+        expect(sql).toContain("LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'");
+        expect(sql).toContain("AND d.objid IS NULL");
+        return { rows: [] };
+      }
+
+      if (sql.includes("aclexplode(n.nspacl)")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("aclexplode(s.srvacl)")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("pg_get_partkeydef")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("c.relispartition")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("relrowsecurity")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("FROM pg_policy")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("t.typtype = 'd'")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("FROM pg_range")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("srvoptions as server_options")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("t.tgconstraint <> 0")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("FROM pg_event_trigger")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("FROM pg_roles")) {
+        return { rows: [] };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const sqlObjects = await inspector.getCurrentSqlObjects(client, ["public"]);
+
+    expect(sqlObjects).toEqual([]);
   });
 });
