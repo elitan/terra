@@ -416,7 +416,7 @@ describe("View Parsing", () => {
         SELEECT * FROM users;  -- Typo in SELECT
       `;
 
-      await expect(parser.parseSchema(sql)).rejects.toThrow();
+      await expect(parser.parseSchema(sql)).rejects.toThrow(/SELEECT|syntax error/i);
     });
 
     test("should handle empty view definitions gracefully", async () => {
@@ -424,7 +424,7 @@ describe("View Parsing", () => {
         CREATE VIEW empty_view AS;
       `;
 
-      await expect(parser.parseSchema(sql)).rejects.toThrow();
+      await expect(parser.parseSchema(sql)).rejects.toThrow(/syntax error|view/i);
     });
 
     test("should parse views with comments and whitespace", async () => {

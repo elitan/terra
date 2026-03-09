@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getTableColumnDetails,
+} from "../utils";
 
 describe("Edge case: bit/varbit column types", () => {
   let client: Client;
@@ -35,8 +40,22 @@ describe("Edge case: bit/varbit column types", () => {
     );
   `;
 
+  async function expectBitColumnTypes(expectedTypes: string[]) {
+    const columns = await getTableColumnDetails(client, "t");
+    expect(columns.map(function (column) {
+      return column.type;
+    })).toEqual(expectedTypes);
+  }
+
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    await expectBitColumnTypes([
+      "bit(1)",
+      "bit(2)",
+      "bit varying",
+      "bit varying(1)",
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
@@ -46,10 +65,16 @@ describe("Edge case: bit/varbit column types", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    await expectBitColumnTypes([
+      "bit(1)",
+      "bit(1)",
+      "bit varying(4)",
+      "bit varying(64)",
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);

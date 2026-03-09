@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { SchemaParser } from "../../core/schema/parser";
 import { DatabaseInspector } from "../../core/schema/inspector";
 import { SchemaDiffer } from "../../core/schema/differ";
-import { createTestClient, cleanDatabase } from "../utils";
+import { createTestClient, cleanDatabase, getIndexDefinitions } from "../utils";
 import type { Client } from "pg";
 
 describe("Index Integration Tests", () => {
@@ -196,9 +196,8 @@ describe("Index Integration Tests", () => {
     });
   });
 
-  describe("Performance Verification", () => {
-    test("should verify that created indexes actually improve query performance", async () => {
-      // Create table with test data
+  describe("Database Verification", () => {
+    test("should create and inspect a standard index after bulk data load", async () => {
       await client.query(`
         CREATE TABLE performance_test (
           id SERIAL PRIMARY KEY,
@@ -219,21 +218,10 @@ describe("Index Integration Tests", () => {
         );
       }
 
-      // Analyze query performance without index
-      let result = await client.query(`
-        EXPLAIN (FORMAT JSON, ANALYZE) 
-        SELECT * FROM performance_test WHERE email = 'user500@test.com';
-      `);
-
-      // Instead of comparing execution times (which can be flaky in tests),
-      // just verify the index can be created and used
-
-      // Create index
       await client.query(`
         CREATE INDEX idx_performance_test_email ON performance_test (email);
       `);
 
-      // Verify index was created by checking it exists
       const indexes = await inspector.getTableIndexes(
         client,
         "performance_test",
@@ -241,22 +229,17 @@ describe("Index Integration Tests", () => {
       );
       expect(indexes).toHaveLength(1);
       expect(indexes[0]!.name).toBe("idx_performance_test_email");
+      expect(indexes[0]!.columns).toEqual(["email"]);
 
-      // Verify index can be used in a query
-      result = await client.query(`
-        EXPLAIN (FORMAT JSON) 
-        SELECT * FROM performance_test WHERE email = 'user500@test.com';
-      `);
-
-      const planText = JSON.stringify(result.rows[0]);
-
-      // Check that the query plan exists (the exact structure may vary)
-      expect(planText).toContain("performance_test");
-
-      console.log("Index performance test completed successfully");
+      const definitions = await getIndexDefinitions(client, "performance_test");
+      expect(definitions.find((index) => index.name === "idx_performance_test_email")).toEqual({
+        name: "idx_performance_test_email",
+        definition:
+          "CREATE INDEX idx_performance_test_email ON public.performance_test USING btree (email)",
+      });
     });
 
-    test("should verify partial indexes work correctly", async () => {
+    test("should create and inspect a partial index definition", async () => {
       await client.query(`
         CREATE TABLE partial_test (
           id SERIAL PRIMARY KEY,
@@ -276,25 +259,11 @@ describe("Index Integration Tests", () => {
         );
       }
 
-      // Create partial index
       await client.query(`
         CREATE INDEX idx_partial_active ON partial_test (created_at) 
         WHERE status = 'active';
       `);
 
-      // Query that should use the partial index
-      const result = await client.query(`
-        EXPLAIN (FORMAT JSON) 
-        SELECT * FROM partial_test 
-        WHERE status = 'active' AND created_at > NOW() - INTERVAL '1 hour';
-      `);
-
-      const plan = JSON.stringify(result.rows[0]);
-
-      // Should mention filtering or the table - PostgreSQL may not use index for small data sets
-      expect(plan).toContain("partial_test");
-
-      // Verify index exists in schema
       const schema = await inspector.getCurrentSchema(client);
       const table = schema.find((t) => t.name === "partial_test");
       const partialIndex = table?.indexes?.find(
@@ -304,6 +273,13 @@ describe("Index Integration Tests", () => {
       expect(partialIndex).toBeDefined();
       expect(partialIndex!.where).toContain("status");
       expect(partialIndex!.where).toContain("active");
+
+      const definitions = await getIndexDefinitions(client, "partial_test");
+      expect(definitions.find((index) => index.name === "idx_partial_active")).toEqual({
+        name: "idx_partial_active",
+        definition:
+          "CREATE INDEX idx_partial_active ON public.partial_test USING btree (created_at) WHERE ((status)::text = 'active'::text)",
+      });
     });
   });
 
@@ -326,7 +302,7 @@ describe("Index Integration Tests", () => {
         client.query(`
         CREATE INDEX idx_duplicate_name ON duplicate_test (id);
       `)
-      ).rejects.toThrow();
+      ).rejects.toThrow(/already exists|relation .* already exists/i);
 
       // But the first index should still exist
       const schema = await inspector.getCurrentSchema(client);
@@ -349,7 +325,7 @@ describe("Index Integration Tests", () => {
         client.query(`
         CREATE INDEX idx_nonexistent ON column_test (nonexistent_column);
       `)
-      ).rejects.toThrow();
+      ).rejects.toThrow(/does not exist|undefined column/i);
 
       // Table should still exist without any indexes
       const schema = await inspector.getCurrentSchema(client);

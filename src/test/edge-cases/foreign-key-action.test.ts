@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getConstraintDefinitions,
+} from "../utils";
 
 describe("Edge case: foreign key on delete/update actions", () => {
   let client: Client;
@@ -38,6 +43,32 @@ describe("Edge case: foreign key on delete/update actions", () => {
 
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    expect(await getConstraintDefinitions(client, "table_b")).toEqual([
+      {
+        name: "table_a_fk",
+        type: "f",
+        definition:
+          "FOREIGN KEY (table_a_id) REFERENCES table_a(id) ON UPDATE CASCADE ON DELETE CASCADE",
+      },
+      {
+        name: "table_b_pkey",
+        type: "p",
+        definition: "PRIMARY KEY (id)",
+      },
+    ]);
+    expect(await getConstraintDefinitions(client, "table_c")).toEqual([
+      {
+        name: "table_a_fk",
+        type: "f",
+        definition: "FOREIGN KEY (table_a_id) REFERENCES table_a(id)",
+      },
+      {
+        name: "table_c_pkey",
+        type: "p",
+        definition: "PRIMARY KEY (id)",
+      },
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);

@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getTableColumnDetails,
+} from "../utils";
 
 describe("Edge case: float/real/double precision types", () => {
   let client: Client;
@@ -35,8 +40,22 @@ describe("Edge case: float/real/double precision types", () => {
     );
   `;
 
+  async function expectFloatColumnTypes(expectedTypes: string[]) {
+    const columns = await getTableColumnDetails(client, "users");
+    expect(columns.map(function (column) {
+      return column.type;
+    })).toEqual(expectedTypes);
+  }
+
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    await expectFloatColumnTypes([
+      "real",
+      "double precision",
+      "real",
+      "double precision",
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
@@ -46,10 +65,16 @@ describe("Edge case: float/real/double precision types", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    await expectFloatColumnTypes([
+      "double precision",
+      "real",
+      "double precision",
+      "real",
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);

@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getIndexDefinitions,
+} from "../utils";
 
 describe("Edge case: BRIN indexes", () => {
   let client: Client;
@@ -41,6 +46,13 @@ describe("Edge case: BRIN indexes", () => {
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
+    expect(await getIndexDefinitions(client, "users")).toEqual([
+      {
+        name: "users_c",
+        definition: "CREATE INDEX users_c ON public.users USING brin (c)",
+      },
+    ]);
+
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
   });
@@ -49,10 +61,17 @@ describe("Edge case: BRIN indexes", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan v1->v2:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    expect(await getIndexDefinitions(client, "users")).toEqual([
+      {
+        name: "users_c",
+        definition:
+          "CREATE INDEX users_c ON public.users USING brin (c) WITH (pages_per_range='2')",
+      },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -62,10 +81,17 @@ describe("Edge case: BRIN indexes", () => {
     await schemaService.apply(schemaV2, ["public"], true);
 
     const plan = await schemaService.plan(schemaV3, ["public"]);
-    console.log("Plan v2->v3:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV3, ["public"], true);
+
+    expect(await getIndexDefinitions(client, "users")).toEqual([
+      {
+        name: "users_c",
+        definition:
+          "CREATE INDEX users_c ON public.users USING brin (c) WITH (pages_per_range='3')",
+      },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV3, ["public"]);
     expect(plan2.hasChanges).toBe(false);
