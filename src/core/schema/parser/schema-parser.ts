@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { parse, loadModule } from "pgsql-parser";
+import { deparseSync, parse, loadModule } from "pgsql-parser";
 import { Logger } from "../../../utils/logger";
 import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
@@ -20,7 +20,7 @@ import { parseCreateSequence } from "./sequence-parser";
 import { parseCreateExtension } from "./extension-parser";
 import { parseCreateSchema } from "./schema-definition-parser";
 import { parseForeignKey } from "./tables/constraint-parser";
-import type { Table, Index, EnumType, CompositeType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../../types/schema";
+import type { Table, Index, EnumType, CompositeType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment, SqlObject } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
 let wasmInitialized = false;
@@ -134,6 +134,7 @@ export class SchemaParser {
     extensions: Extension[];
     schemas: SchemaDefinition[];
     comments: Comment[];
+    sqlObjects: SqlObject[];
   }> {
     if (!existsSync(filePath)) {
       throw new ParserError(
@@ -164,10 +165,11 @@ export class SchemaParser {
     extensions: Extension[];
     schemas: SchemaDefinition[];
     comments: Comment[];
+    sqlObjects: SqlObject[];
   }> {
     await this.ensureWasmLoaded();
 
-    const { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments } = await this.parseWithPgsql(sql, filePath);
+    const { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects } = await this.parseWithPgsql(sql, filePath);
 
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map((t) => [t.name, t]));
@@ -194,6 +196,7 @@ export class SchemaParser {
       extensions,
       schemas,
       comments,
+      sqlObjects,
     };
   }
 
@@ -243,6 +246,7 @@ export class SchemaParser {
     extensions: Extension[];
     schemas: SchemaDefinition[];
     comments: Comment[];
+    sqlObjects: SqlObject[];
   }> {
     const tables: Table[] = [];
     const indexes: Index[] = [];
@@ -256,6 +260,7 @@ export class SchemaParser {
     const extensions: Extension[] = [];
     const schemas: SchemaDefinition[] = [];
     const comments: Comment[] = [];
+    const sqlObjects: SqlObject[] = [];
     const pendingForeignKeys: PendingForeignKey[] = [];
 
     // Auto-quote reserved keywords that are commonly used as column names
@@ -263,20 +268,25 @@ export class SchemaParser {
 
     // Handle empty SQL (after keyword quoting to preserve empty checks correctly)
     if (!sql || sql.trim() === '') {
-      return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+      return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects };
     }
 
     try {
       const ast = await parse(sql);
 
       if (!ast.stmts) {
-        return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+        return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects };
       }
 
       for (const stmtWrapper of ast.stmts) {
         const stmt = stmtWrapper.stmt;
 
-        if (stmt.CreateStmt) {
+        if (stmt.CreateStmt && this.isPartitionCreateStatement(stmt.CreateStmt)) {
+          const sqlObject = this.parsePartitionSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.CreateStmt) {
           const table = parseCreateTable(stmt.CreateStmt);
           if (table) {
             tables.push(table);
@@ -323,10 +333,20 @@ export class SchemaParser {
           if (proc) {
             procedures.push(proc);
           }
+        } else if (stmt.CreateTrigStmt && stmt.CreateTrigStmt.isconstraint) {
+          const sqlObject = this.parseConstraintTriggerSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
         } else if (stmt.CreateTrigStmt) {
           const trigger = parseCreateTrigger(stmt.CreateTrigStmt);
           if (trigger) {
             triggers.push(trigger);
+          }
+        } else if (stmt.CreateEventTrigStmt) {
+          const sqlObject = this.parseEventTriggerSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
           }
         } else if (stmt.CreateSeqStmt) {
           const sequence = parseCreateSequence(stmt.CreateSeqStmt);
@@ -348,8 +368,53 @@ export class SchemaParser {
           if (comment) {
             comments.push(comment);
           }
+        } else if (stmt.CreatePolicyStmt) {
+          const sqlObject = this.parsePolicySqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.AlterPolicyStmt) {
+          const sqlObject = this.parsePolicySqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.CreateDomainStmt) {
+          const sqlObject = this.parseDomainSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.CreateRangeStmt) {
+          const sqlObject = this.parseRangeSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.CreateForeignServerStmt) {
+          const sqlObject = this.parseForeignServerSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.CreateRoleStmt) {
+          const sqlObject = this.parseRoleSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.GrantStmt) {
+          const sqlObject = this.parseGrantSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
+        } else if (stmt.AlterDefaultPrivilegesStmt) {
+          const sqlObject = this.parseGrantSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          }
         } else if (stmt.AlterTableStmt) {
-          pendingForeignKeys.push(...this.parseAlterTableForeignKeys(stmt.AlterTableStmt, filePath));
+          const sqlObject = this.parseAlterTableSqlObject(stmt);
+          if (sqlObject) {
+            sqlObjects.push(sqlObject);
+          } else {
+            pendingForeignKeys.push(...this.parseAlterTableForeignKeys(stmt.AlterTableStmt, filePath));
+          }
         } else if (stmt.DropStmt) {
           throw new ParserError(
             "DROP statements are not supported in schema definitions. " +
@@ -385,7 +450,7 @@ export class SchemaParser {
 
     this.mergePendingForeignKeys(tables, pendingForeignKeys, filePath);
 
-    return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+    return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects };
   }
 
   private parseAlterTableForeignKeys(stmt: any, filePath?: string): PendingForeignKey[] {
@@ -471,6 +536,243 @@ export class SchemaParser {
 
   private static tableKey(name: string, schema?: string): string {
     return `${schema || "public"}.${name}`;
+  }
+
+  private statementToSql(stmt: any): string {
+    const sql = deparseSync([stmt]).trim();
+    return sql.endsWith(";") ? sql : `${sql};`;
+  }
+
+  private buildSqlObject(
+    kind: SqlObject["kind"],
+    stmt: any,
+    name: string,
+    schema?: string,
+    key?: string,
+    dependencies?: string[]
+  ): SqlObject {
+    return {
+      kind,
+      key: key || `${kind}:${schema || "public"}.${name}`,
+      name,
+      schema,
+      createStatement: this.statementToSql(stmt),
+      ...(dependencies && dependencies.length > 0 ? { dependencies } : {}),
+    };
+  }
+
+  private isPartitionCreateStatement(stmt: any): boolean {
+    return Boolean(stmt?.partspec || stmt?.partbound);
+  }
+
+  private parsePartitionSqlObject(stmt: any): SqlObject | null {
+    const relation = stmt?.CreateStmt?.relation;
+    const name = relation?.relname;
+    if (!name) {
+      return null;
+    }
+
+    const schema = relation?.schemaname;
+    const dependencies = (stmt?.CreateStmt?.inhRelations || []).map(function (item: any) {
+      const parent = item?.RangeVar;
+      const parentName = parent?.relname;
+      if (!parentName) {
+        return null;
+      }
+      return `partition:${parent?.schemaname || schema || "public"}.${parentName}`;
+    }).filter(Boolean);
+
+    return this.buildSqlObject(
+      "partition",
+      stmt,
+      name,
+      schema,
+      `partition:${schema || "public"}.${name}`,
+      dependencies
+    );
+  }
+
+  private parseAlterTableSqlObject(stmt: any): SqlObject | null {
+    const commands = stmt?.AlterTableStmt?.cmds || [];
+    const relation = stmt?.AlterTableStmt?.relation;
+    const tableName = relation?.relname;
+    if (!tableName || commands.length === 0) {
+      return null;
+    }
+
+    const subtypes = commands.map(function (item: any) {
+      return item?.AlterTableCmd?.subtype;
+    }).filter(Boolean);
+
+    if (subtypes.length === 0) {
+      return null;
+    }
+
+    const hasOnlyRowSecurity = subtypes.every(function (subtype: string) {
+      return [
+        "AT_EnableRowSecurity",
+        "AT_DisableRowSecurity",
+        "AT_ForceRowSecurity",
+        "AT_NoForceRowSecurity",
+      ].includes(subtype);
+    });
+
+    if (hasOnlyRowSecurity) {
+      const schema = relation?.schemaname;
+      const suffix = subtypes.some(function (subtype: string) {
+        return subtype === "AT_ForceRowSecurity" || subtype === "AT_NoForceRowSecurity";
+      }) ? "force" : "enabled";
+
+      return this.buildSqlObject(
+        "row-level-security",
+        stmt,
+        tableName,
+        schema,
+        `row-level-security:${schema || "public"}.${tableName}:${suffix}`
+      );
+    }
+
+    const hasOnlyPartitionCommands = subtypes.every(function (subtype: string) {
+      return [
+        "AT_AttachPartition",
+        "AT_DetachPartition",
+        "AT_DetachPartitionFinalize",
+      ].includes(subtype);
+    });
+
+    if (hasOnlyPartitionCommands) {
+      const schema = relation?.schemaname;
+      return this.buildSqlObject(
+        "partition",
+        stmt,
+        tableName,
+        schema,
+        `partition:${schema || "public"}.${tableName}:alter`
+      );
+    }
+
+    return null;
+  }
+
+  private parsePolicySqlObject(stmt: any): SqlObject | null {
+    const node = stmt?.CreatePolicyStmt || stmt?.AlterPolicyStmt;
+    const name = node?.policy_name;
+    const relation = node?.table;
+    const tableName = relation?.relname;
+    if (!name || !tableName) {
+      return null;
+    }
+
+    const schema = relation?.schemaname;
+    return this.buildSqlObject(
+      "policy",
+      stmt,
+      name,
+      schema,
+      `policy:${schema || "public"}.${tableName}.${name}`
+    );
+  }
+
+  private parseDomainSqlObject(stmt: any): SqlObject | null {
+    const typeName = stmt?.CreateDomainStmt?.domainname || [];
+    const names = typeName.map(function (item: any) {
+      return item?.String?.sval;
+    }).filter(Boolean);
+    const name = names[names.length - 1];
+    if (!name) {
+      return null;
+    }
+    const schema = names.length > 1 ? names[names.length - 2] : undefined;
+    return this.buildSqlObject("domain-type", stmt, name, schema);
+  }
+
+  private parseRangeSqlObject(stmt: any): SqlObject | null {
+    const typeName = stmt?.CreateRangeStmt?.typeName || [];
+    const names = typeName.map(function (item: any) {
+      return item?.String?.sval;
+    }).filter(Boolean);
+    const name = names[names.length - 1];
+    if (!name) {
+      return null;
+    }
+    const schema = names.length > 1 ? names[names.length - 2] : undefined;
+    return this.buildSqlObject("range-type", stmt, name, schema);
+  }
+
+  private parseForeignServerSqlObject(stmt: any): SqlObject | null {
+    const name = stmt?.CreateForeignServerStmt?.servername;
+    if (!name) {
+      return null;
+    }
+    return this.buildSqlObject("foreign-server", stmt, name, undefined, `foreign-server:${name}`);
+  }
+
+  private parseConstraintTriggerSqlObject(stmt: any): SqlObject | null {
+    const node = stmt?.CreateTrigStmt;
+    const name = node?.trigname;
+    const relation = node?.relation;
+    const tableName = relation?.relname;
+    if (!name || !tableName) {
+      return null;
+    }
+
+    const schema = relation?.schemaname;
+    return this.buildSqlObject(
+      "constraint-trigger",
+      stmt,
+      name,
+      schema,
+      `constraint-trigger:${schema || "public"}.${tableName}.${name}`
+    );
+  }
+
+  private parseEventTriggerSqlObject(stmt: any): SqlObject | null {
+    const name = stmt?.CreateEventTrigStmt?.trigname;
+    if (!name) {
+      return null;
+    }
+    return this.buildSqlObject("event-trigger", stmt, name, undefined, `event-trigger:${name}`);
+  }
+
+  private parseRoleSqlObject(stmt: any): SqlObject | null {
+    const node = stmt?.CreateRoleStmt;
+    const name = node?.role;
+    if (!name) {
+      return null;
+    }
+
+    const kind = node?.stmt_type === "ROLESTMT_USER" ? "user" : "role";
+    return this.buildSqlObject(kind, stmt, name, undefined, `${kind}:${name}`);
+  }
+
+  private parseGrantSqlObject(stmt: any): SqlObject | null {
+    const sql = this.statementToSql(stmt);
+    const schema = this.extractGrantSchema(stmt);
+    return {
+      kind: "grant",
+      key: `grant:${sql.replace(/\s+/g, " ").trim()}`,
+      name: sql.replace(/\s+/g, " ").trim(),
+      schema,
+      createStatement: sql,
+    };
+  }
+
+  private extractGrantSchema(stmt: any): string | undefined {
+    const objects = stmt?.GrantStmt?.objects || stmt?.AlterDefaultPrivilegesStmt?.action?.GrantStmt?.objects || [];
+    for (const object of objects) {
+      const rangeVar = object?.RangeVar;
+      if (rangeVar?.schemaname) {
+        return rangeVar.schemaname;
+      }
+      const list = object?.List?.items || [];
+      for (const item of list) {
+        const stringValue = item?.String?.sval;
+        if (stringValue) {
+          return stringValue;
+        }
+      }
+    }
+    return undefined;
   }
 
   /**

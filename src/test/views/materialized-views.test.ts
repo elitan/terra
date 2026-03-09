@@ -55,6 +55,24 @@ describe("Materialized View Operations", () => {
       expect(queryResult.rows).toHaveLength(0);
     });
 
+    test("should keep simple materialized views idempotent", async () => {
+      const schema = `
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          name TEXT
+        );
+
+        CREATE MATERIALIZED VIEW user_summary AS
+        SELECT * FROM users;
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const plan = await schemaService.plan(schema);
+      expect(plan.hasChanges).toBe(false);
+      expect(plan.transactional).toHaveLength(0);
+    });
+
     test("should handle materialized view with data and refresh", async () => {
       const schema = `
         CREATE TABLE products (

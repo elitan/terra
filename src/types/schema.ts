@@ -156,6 +156,29 @@ export interface Extension {
   cascade?: boolean; // If true, install dependencies
 }
 
+export type SqlObjectKind =
+  | "constraint-trigger"
+  | "domain-type"
+  | "event-trigger"
+  | "foreign-server"
+  | "grant"
+  | "partition"
+  | "policy"
+  | "range-type"
+  | "role"
+  | "row-level-security"
+  | "user";
+
+export interface SqlObject {
+  kind: SqlObjectKind;
+  key: string;
+  name: string;
+  schema?: string;
+  createStatement: string;
+  dropStatement?: string;
+  dependencies?: string[];
+}
+
 export interface SchemaDefinition {
   name: string;
   owner?: string;
@@ -195,4 +218,5 @@ export interface Schema {
   extensions?: Extension[];
   schemas?: SchemaDefinition[];
   comments?: Comment[];
+  sqlObjects?: SqlObject[];
 }

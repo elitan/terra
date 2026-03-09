@@ -11,6 +11,7 @@ import {
   extractColumns,
   parseColumn,
 } from "../core/schema/parser/tables/column-parser";
+import { SchemaParser } from "../core/schema/parser";
 
 describe("Parser edge coverage", () => {
   describe("trigger parser edge paths", () => {
@@ -694,6 +695,150 @@ describe("Parser edge coverage", () => {
       });
 
       expect(parseCreateIndex(stmt)).toBeNull();
+    });
+  });
+
+  describe("schema parser sql object edge paths", function () {
+    test("covers advanced sql object helper branches", function () {
+      const parser = new SchemaParser() as any;
+
+      expect(parser.parsePartitionSqlObject({ CreateStmt: { relation: {} } })).toBeNull();
+      expect(
+        parser.parsePartitionSqlObject({
+          CreateStmt: {
+            relation: { relname: "accounts_eu", schemaname: "public" },
+            inhRelations: [
+              { RangeVar: {} },
+              { RangeVar: { relname: "accounts", schemaname: "audit" } },
+            ],
+          },
+        })
+      ).toMatchObject({
+        key: "partition:public.accounts_eu",
+        dependencies: ["partition:audit.accounts"],
+      });
+
+      expect(
+        parser.parseAlterTableSqlObject({
+          AlterTableStmt: {
+            relation: null,
+            cmds: [{ AlterTableCmd: { subtype: "AT_EnableRowSecurity" } }],
+          },
+        })
+      ).toBeNull();
+
+      expect(
+        parser.parseAlterTableSqlObject({
+          AlterTableStmt: {
+            relation: { relname: "users" },
+            cmds: [{ AlterTableCmd: {} }],
+          },
+        })
+      ).toBeNull();
+
+      expect(
+        parser.parseAlterTableSqlObject({
+          AlterTableStmt: {
+            relation: { relname: "accounts", schemaname: "public" },
+            cmds: [{ AlterTableCmd: { subtype: "AT_AttachPartition" } }],
+          },
+        })
+      ).toMatchObject({
+        kind: "partition",
+        key: "partition:public.accounts:alter",
+      });
+
+      expect(parser.parsePolicySqlObject({ CreatePolicyStmt: { policy_name: "tenant_policy" } })).toBeNull();
+      expect(parser.parseDomainSqlObject({ CreateDomainStmt: { domainname: [] } })).toBeNull();
+      expect(parser.parseRangeSqlObject({ CreateRangeStmt: { typeName: [] } })).toBeNull();
+      expect(parser.parseForeignServerSqlObject({ CreateForeignServerStmt: {} })).toBeNull();
+      expect(parser.parseConstraintTriggerSqlObject({ CreateTrigStmt: { trigname: "trg" } })).toBeNull();
+      expect(parser.parseEventTriggerSqlObject({ CreateEventTrigStmt: {} })).toBeNull();
+      expect(parser.parseRoleSqlObject({ CreateRoleStmt: {} })).toBeNull();
+
+      expect(
+        parser.extractGrantSchema({
+          AlterDefaultPrivilegesStmt: {
+            action: {
+              GrantStmt: {
+                objects: [
+                  {
+                    List: {
+                      items: [{ String: { sval: "audit" } }],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        })
+      ).toBe("audit");
+    });
+
+    test("covers alter table foreign key error branches", function () {
+      const parser = new SchemaParser() as any;
+
+      expect(function () {
+        parser.parseAlterTableForeignKeys(
+          {
+            relation: { relname: "users" },
+            cmds: [],
+          },
+          "schema.sql"
+        );
+      }).toThrow("ALTER TABLE statements are not supported");
+
+      expect(function () {
+        parser.parseAlterTableForeignKeys(
+          {
+            relation: { relname: "users" },
+            cmds: [
+              {
+                AlterTableCmd: {
+                  subtype: "AT_AddConstraint",
+                  def: { Constraint: { contype: "CONSTR_CHECK" } },
+                },
+              },
+            ],
+          },
+          "schema.sql"
+        );
+      }).toThrow("ALTER TABLE statements are not supported");
+
+      expect(function () {
+        parser.parseAlterTableForeignKeys(
+          {
+            relation: { relname: "users" },
+            cmds: [
+              {
+                AlterTableCmd: {
+                  subtype: "AT_AddConstraint",
+                  def: { Constraint: { contype: "CONSTR_FOREIGN" } },
+                },
+              },
+            ],
+          },
+          "schema.sql"
+        );
+      }).toThrow("ALTER TABLE statements are not supported");
+
+      expect(function () {
+        parser.mergePendingForeignKeys(
+          [],
+          [
+            {
+              tableName: "users",
+              schemaName: "public",
+              foreignKey: {
+                columns: ["account_id"],
+                referencedTable: "accounts",
+                referencedColumns: ["id"],
+              },
+            },
+          ],
+          "schema.sql"
+        );
+      }).toThrow("ALTER TABLE target not found in schema definitions: public.users");
     });
   });
 });
