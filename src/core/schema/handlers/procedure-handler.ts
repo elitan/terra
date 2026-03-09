@@ -10,17 +10,83 @@ function normalizeBody(body: string): string {
 }
 
 function normalizeParameterType(type: string): string {
-  return type.replace(/\s+/g, " ").trim();
+  const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
+  const arraySuffixMatch = normalized.match(/(\[\])+$/);
+  const arraySuffix = arraySuffixMatch ? arraySuffixMatch[0] : "";
+  const baseType = arraySuffix ? normalized.slice(0, -arraySuffix.length).trim() : normalized;
+  const lowerType = baseType.toLowerCase();
+
+  const aliases: Record<string, string> = {
+    "timestamp with time zone": "timestamptz",
+    timestamptz: "timestamptz",
+    "timestamp without time zone": "timestamp",
+    timestamp: "timestamp",
+    "time with time zone": "timetz",
+    timetz: "timetz",
+    "time without time zone": "time",
+    time: "time",
+  };
+
+  const canonical = aliases[lowerType] || baseType;
+  return `${canonical}${arraySuffix}`;
+}
+
+function normalizeParameterMode(mode: Procedure["parameters"][number]["mode"]): string {
+  if (!mode || mode === "IN") {
+    return "IN";
+  }
+
+  return mode;
+}
+
+function isIdentityParameterMode(mode: Procedure["parameters"][number]["mode"]): boolean {
+  return normalizeParameterMode(mode) !== "OUT";
 }
 
 function getProcedureSignature(proc: Procedure): string {
+  return proc.parameters
+    .filter(function (param) {
+      return isIdentityParameterMode(param.mode);
+    })
+    .map(function (param) {
+      return normalizeParameterType(param.type);
+    })
+    .join(",");
+}
+
+function normalizeProcedureParameters(
+  proc: Procedure
+): Array<{ name?: string; mode: string; type: string; default?: string }> {
   return proc.parameters.map(function (param) {
-    return normalizeParameterType(param.type);
-  }).join(",");
+    return {
+      name: param.name || undefined,
+      mode: normalizeParameterMode(param.mode),
+      type: normalizeParameterType(param.type),
+      default: normalizeParameterDefault(param.default),
+    };
+  });
+}
+
+function normalizeParameterDefault(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  return value
+    .replace(
+      /::\s*(?:"[^"]+"|[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)(?:\s+[a-z_][a-z0-9_]*)*(?:\s*\(\s*\d+\s*(?:,\s*\d+\s*)?\))?(?:\[\])*/gi,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function getProcedureKey(proc: Procedure): string {
   return `${proc.schema || "public"}.${proc.name}(${getProcedureSignature(proc)})`;
+}
+
+function normalizeSecurityDefiner(value: Procedure['securityDefiner']): boolean {
+  return Boolean(value);
 }
 
 const config: HandlerConfig<Procedure> = {
@@ -29,8 +95,12 @@ const config: HandlerConfig<Procedure> = {
   generateDrop: generateDropProcedureSQL,
   generateCreate: generateCreateProcedureSQL,
   needsUpdate: (desired, current) =>
+    JSON.stringify(normalizeProcedureParameters(desired)) !==
+      JSON.stringify(normalizeProcedureParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
-    desired.language !== current.language,
+    desired.language !== current.language ||
+    normalizeSecurityDefiner(desired.securityDefiner) !==
+      normalizeSecurityDefiner(current.securityDefiner),
 };
 
 export class ProcedureHandler {

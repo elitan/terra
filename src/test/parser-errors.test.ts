@@ -241,5 +241,132 @@ describe("Parser Error Handling", () => {
       const result = await parser.parseSchema(sqlWithKeywords);
       expect(result.tables[0].columns).toHaveLength(5);
     });
+
+    test("should keep quoted reserved keyword in unique constraint", async function () {
+      const sql = `
+        CREATE TABLE test_table (
+          "status" TEXT,
+          UNIQUE ("status")
+        );
+      `;
+
+      await expect(parser.parseSchema(sql)).resolves.toBeDefined();
+    });
+
+    test("should keep quoted reserved keyword in primary key constraint", async function () {
+      const sql = `
+        CREATE TABLE test_table (
+          "order" INT,
+          PRIMARY KEY ("order")
+        );
+      `;
+
+      await expect(parser.parseSchema(sql)).resolves.toBeDefined();
+    });
+
+    test("should automatically quote reserved keyword in inline first-column definitions", async function () {
+      const sql = "CREATE TABLE intervals (user INT);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("INT4");
+    });
+
+    test("should automatically quote reserved keyword for money columns", async function () {
+      const sql = "CREATE TABLE intervals (user MONEY);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("MONEY");
+    });
+
+    test("should automatically quote reserved keyword for bit columns", async function () {
+      const sql = "CREATE TABLE flags (user BIT(8));";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("BIT(8)");
+    });
+
+    test("should automatically quote reserved keyword for network columns", async function () {
+      const sql = "CREATE TABLE networks (user INET);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("INET");
+    });
+
+    test("should automatically quote reserved keyword for xml columns", async function () {
+      const sql = "CREATE TABLE docs (user XML);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("XML");
+    });
+
+    test("should automatically quote reserved keyword for oid columns", async function () {
+      const sql = "CREATE TABLE objects (user OID);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("OID");
+    });
+
+    test("should automatically quote reserved keyword for text search columns", async function () {
+      const sql = "CREATE TABLE search_docs (user TSVECTOR);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("TSVECTOR");
+    });
+
+    test("should automatically quote reserved keyword for bytea columns", async function () {
+      const sql = "CREATE TABLE blobs (user BYTEA);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("BYTEA");
+    });
+
+    test("should automatically quote reserved keyword for geometric columns", async function () {
+      const sql = "CREATE TABLE geometry (user POINT);";
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("POINT");
+    });
+
+    test("should automatically quote reserved keyword for user-defined types", async function () {
+      const sql = `
+        CREATE TYPE mood AS ENUM ('sad', 'ok');
+        CREATE TABLE users (
+          user mood
+        );
+      `;
+
+      const result = await parser.parseSchema(sql);
+      expect(result.tables).toHaveLength(1);
+      const userColumn = result.tables[0].columns.find(c => c.name === "user");
+      expect(userColumn).toBeDefined();
+      expect(userColumn?.type).toBe("MOOD");
+    });
   });
 });

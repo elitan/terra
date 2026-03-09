@@ -104,6 +104,12 @@ describe("SQLBuilder", () => {
       builder.table("users", "explicit_schema");
       expect(builder.build()).toBe('"explicit_schema"."users"');
     });
+
+    test("should split qualified table name when schema arg is omitted", () => {
+      const builder = new SQLBuilder();
+      builder.table("app.users");
+      expect(builder.build()).toBe('"app"."users"');
+    });
   });
 
   describe("Column References", () => {

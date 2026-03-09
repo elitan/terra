@@ -95,6 +95,21 @@ function normalizeTriggerArg(arg: string): string {
   return `'${trimmed.replace(/'/g, "''")}'`;
 }
 
+function normalizeTriggerEvents(events: Trigger["events"]): Trigger["events"] {
+  const order: Record<string, number> = {
+    INSERT: 0,
+    DELETE: 1,
+    UPDATE: 2,
+    TRUNCATE: 3,
+  };
+
+  return [...events].sort((a, b) => {
+    const left = order[a] ?? Number.MAX_SAFE_INTEGER;
+    const right = order[b] ?? Number.MAX_SAFE_INTEGER;
+    return left - right || a.localeCompare(b);
+  });
+}
+
 export class TriggerHandler {
   generateStatements(desiredTriggers: Trigger[], currentTriggers: Trigger[]): string[] {
     return generateStatements(desiredTriggers, currentTriggers, config);

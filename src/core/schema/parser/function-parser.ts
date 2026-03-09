@@ -21,7 +21,7 @@ export function parseCreateFunction(node: any): Function | null {
     const schema = extractFunctionSchema(node);
 
     const parameters = extractFunctionParameters(node);
-    const returnType = extractReturnType(node);
+    const returnType = extractReturnType(node, parameters);
     if (!returnType) {
       Logger.warning(`Function '${name}' missing return type`);
       return null;
@@ -119,7 +119,9 @@ function extractFunctionParameters(node: any): FunctionParameter[] {
       // Mode is stored as FUNC_PARAM_IN, FUNC_PARAM_OUT, etc.
       if (fpNode.mode) {
         const modeStr = fpNode.mode.replace('FUNC_PARAM_', '');
-        if (modeStr !== 'DEFAULT') {
+        if (modeStr === 'TABLE') {
+          param.mode = "OUT";
+        } else if (modeStr !== 'DEFAULT') {
           param.mode = modeStr as 'IN' | 'OUT' | 'INOUT' | 'VARIADIC';
         }
       }
@@ -165,17 +167,16 @@ function extractDataType(dataTypeNode: any): string {
         varchar: "character varying",
       };
       const mappedType = typeMap[typeName.toLowerCase()];
-
-      if (schemaParts.length === 0) {
-        return mappedType || quoteTypeIdentifier(typeName);
-      }
-
       const normalizedSchema = schemaParts.join(".").toLowerCase();
-      if (normalizedSchema === "pg_catalog" && mappedType) {
-        return mappedType;
+      const arraySuffix = Array.isArray(dataTypeNode.arrayBounds) && dataTypeNode.arrayBounds.length > 0
+        ? "[]".repeat(dataTypeNode.arrayBounds.length)
+        : "";
+
+      if (schemaParts.length === 0 || normalizedSchema === "pg_catalog") {
+        return `${mappedType || quoteTypeIdentifier(typeName)}${arraySuffix}`;
       }
 
-      return `${schemaParts.map(quoteTypeIdentifier).join(".")}.${quoteTypeIdentifier(typeName)}`;
+      return `${schemaParts.map(quoteTypeIdentifier).join(".")}.${quoteTypeIdentifier(typeName)}${arraySuffix}`;
     }
 
     return "unknown";
@@ -219,26 +220,57 @@ function extractDefaultValue(defaultNode: any): string {
 
     return sql || "";
   } catch (error) {
-    try {
-      if (defaultNode?.expr) {
-        return defaultNode.expr.text || defaultNode.expr.value || "";
-      }
-    } catch (fallbackError) {
-    }
-
-    return "";
   }
+
+  try {
+    const deparsed = deparseSync([defaultNode]).trim();
+    if (deparsed) {
+      return deparsed;
+    }
+  } catch (error) {
+  }
+
+  try {
+    if (defaultNode?.expr) {
+      return defaultNode.expr.text || defaultNode.expr.value || "";
+    }
+  } catch (error) {
+  }
+
+  return "";
 }
 
 /**
  * Extract return type from pgsql-parser AST
  */
-function extractReturnType(node: any): string | null {
+function extractReturnType(node: any, parameters: FunctionParameter[]): string | null {
   try {
     if (node.returnType) {
-      return extractDataType(node.returnType);
+      const type = extractDataType(node.returnType);
+      if (!type) {
+        return null;
+      }
+
+      if (node.returnType.setof === true) {
+        return `SETOF ${type}`;
+      }
+
+      return type;
     }
-    return null;
+
+    const outputParams = parameters.filter(function (parameter) {
+      return parameter.mode === "OUT" || parameter.mode === "INOUT";
+    });
+
+    if (outputParams.length === 0) {
+      return null;
+    }
+
+    if (outputParams.length === 1) {
+      return outputParams[0]?.type || null;
+    }
+
+    return "record";
   } catch (error) {
     return null;
   }
@@ -365,7 +397,13 @@ function extractStrict(node: any): boolean | undefined {
     for (const option of node.options) {
       const defElem = option.DefElem;
       if (defElem && defElem.defname === 'strict') {
-        return defElem.arg?.Integer?.ival === 1;
+        if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
+          return defElem.arg.Boolean.boolval;
+        }
+        if (typeof defElem.arg?.Integer?.ival === "number") {
+          return defElem.arg.Integer.ival === 1;
+        }
+        return true;
       }
     }
     return undefined;

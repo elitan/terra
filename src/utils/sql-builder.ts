@@ -78,14 +78,29 @@ export class SQLBuilder {
    * table('users', 'myschema') // "myschema"."users"
    */
   table(name: string, schema?: string): this {
-    const schemaName = schema ?? this.schema;
+    let tableName = name;
+    let schemaName = schema ?? this.schema;
+
+    if (!schemaName && !name.includes('"')) {
+      const split = name.split('.');
+      if (
+        split.length === 2 &&
+        split[0] &&
+        split[1] &&
+        this.isSimpleUnquotedIdentifier(split[0]) &&
+        this.isSimpleUnquotedIdentifier(split[1])
+      ) {
+        schemaName = split[0];
+        tableName = split[1];
+      }
+    }
 
     if (schemaName) {
       this.ident(schemaName);
       this.rewriteLastChar('.');
     }
 
-    this.ident(name);
+    this.ident(tableName);
     return this;
   }
 
@@ -182,6 +197,10 @@ export class SQLBuilder {
     this.buffer[this.buffer.length - 1] = last.slice(0, -1) + char;
 
     return this;
+  }
+
+  private isSimpleUnquotedIdentifier(value: string): boolean {
+    return /^[a-z_][a-z0-9_]*$/.test(value);
   }
 
   /**

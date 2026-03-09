@@ -103,7 +103,10 @@ describe("Handler module coverage", () => {
         [makeExtension({ name: "pgcrypto", version: "1.4" })],
         [makeExtension({ name: "pgcrypto", version: "1.3" })]
       );
-      expect(drift).toEqual({ create: [], drop: [] });
+      expect(drift).toEqual({
+        create: [`ALTER EXTENSION "pgcrypto" UPDATE TO '1.4';`],
+        drop: [],
+      });
     });
   });
 
@@ -186,14 +189,19 @@ describe("Handler module coverage", () => {
       expect(statements[0]).toContain("\"orders_seq\"");
     });
 
-    test("skips owned sequences", () => {
+    test("creates explicitly declared owned sequences", () => {
       const handler = new SequenceHandler();
       const statements = handler.generateStatements(
         [makeSequence({ name: "owned_seq", ownedBy: "public.users.id" })],
         []
       );
 
-      expect(statements).toEqual([]);
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain("CREATE SEQUENCE");
+      expect(statements[0]).toContain("\"owned_seq\"");
+      expect(statements[1]).toContain("ALTER SEQUENCE");
+      expect(statements[1]).toContain("\"owned_seq\"");
+      expect(statements[1]).toContain("OWNED BY public.users.id");
     });
 
     test("drops removed unmanaged sequences", () => {

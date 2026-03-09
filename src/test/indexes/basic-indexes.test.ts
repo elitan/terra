@@ -318,6 +318,51 @@ describe("PostgreSQL Basic Index Support", () => {
       );
     });
 
+    test("should schema-qualify dropped indexes for non-public schemas", async () => {
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+
+      const currentSchema: Table[] = [
+        {
+          name: "users",
+          schema: "app",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "email", type: "VARCHAR(255)", nullable: true },
+          ],
+          indexes: [
+            {
+              name: "idx_users_email",
+              tableName: "users",
+              schema: "app",
+              columns: ["email"],
+              type: "btree",
+              unique: false,
+              concurrent: false,
+            },
+          ],
+        },
+      ];
+
+      const desiredSchema: Table[] = [
+        {
+          name: "users",
+          schema: "app",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "email", type: "VARCHAR(255)", nullable: true },
+          ],
+          indexes: [],
+        },
+      ];
+
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
+      const allStatements = [...plan.transactional, ...plan.concurrent];
+      expect(allStatements).toContain(
+        'DROP INDEX CONCURRENTLY "app"."idx_users_email";'
+      );
+    });
+
     test("should treat modified indexes as drop + create", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
@@ -370,6 +415,63 @@ describe("PostgreSQL Basic Index Support", () => {
       expect(plan.transactional).toContain('DROP INDEX "idx_users_email";');
       expect(plan.transactional).toContain(
         'CREATE INDEX "idx_users_email" ON "users" ("email", "name");'
+      );
+    });
+
+    test("should schema-qualify modified index drops for non-public schemas", async () => {
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+
+      const currentSchema: Table[] = [
+        {
+          name: "users",
+          schema: "app",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "email", type: "VARCHAR(255)", nullable: true },
+            { name: "name", type: "VARCHAR(100)", nullable: true },
+          ],
+          indexes: [
+            {
+              name: "idx_users_email",
+              tableName: "users",
+              schema: "app",
+              columns: ["email"],
+              type: "btree",
+              unique: false,
+              concurrent: false,
+            },
+          ],
+        },
+      ];
+
+      const desiredSchema: Table[] = [
+        {
+          name: "users",
+          schema: "app",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "email", type: "VARCHAR(255)", nullable: true },
+            { name: "name", type: "VARCHAR(100)", nullable: true },
+          ],
+          indexes: [
+            {
+              name: "idx_users_email",
+              tableName: "users",
+              schema: "app",
+              columns: ["email", "name"],
+              type: "btree",
+              unique: false,
+              concurrent: false,
+            },
+          ],
+        },
+      ];
+
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
+      expect(plan.transactional).toContain('DROP INDEX "app"."idx_users_email";');
+      expect(plan.transactional).toContain(
+        'CREATE INDEX "idx_users_email" ON "app"."users" ("email", "name");'
       );
     });
   });

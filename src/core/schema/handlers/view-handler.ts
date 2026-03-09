@@ -17,6 +17,26 @@ function normalizeSimpleIdentifierQuotes(definition: string): string {
   );
 }
 
+function isClauseKeyword(value: string): boolean {
+  return new Set([
+    "where",
+    "group",
+    "having",
+    "order",
+    "limit",
+    "offset",
+    "union",
+    "intersect",
+    "except",
+    "join",
+    "left",
+    "right",
+    "full",
+    "inner",
+    "cross",
+  ]).has(value.toLowerCase());
+}
+
 function normalizeSingleSourceColumnQualification(definition: string): string {
   if (!/^\s*select\b/i.test(definition)) {
     return definition;
@@ -46,12 +66,44 @@ function normalizeSingleSourceColumnQualification(definition: string): string {
     return definition;
   }
 
-  const sourceName = fromMatch[3] || fromMatch[2];
+  const aliasName = fromMatch[3];
+  const sourceName = aliasName && !isClauseKeyword(aliasName) ? aliasName : fromMatch[2];
   if (!sourceName) {
     return definition;
   }
 
   return definition.replace(new RegExp(`\\b${escapeRegExp(sourceName)}\\.`, "gi"), "");
+}
+
+function hasBalancedOuterParentheses(value: string): boolean {
+  if (!value.startsWith("(") || !value.endsWith(")")) {
+    return false;
+  }
+
+  let depth = 0;
+  for (let i = 0; i < value.length - 1; i++) {
+    const char = value[i];
+    if (char === "(") depth++;
+    if (char === ")") depth--;
+    if (depth === 0) return false;
+  }
+
+  return depth === 1;
+}
+
+function stripOuterParentheses(value: string): string {
+  let normalized = value.trim();
+  while (hasBalancedOuterParentheses(normalized)) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized;
+}
+
+function normalizeWhereParentheses(definition: string): string {
+  return definition.replace(
+    /\bWHERE\s+(.+?)(?=\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|$)/i,
+    (_match, clause: string) => `WHERE ${stripOuterParentheses(clause)}`
+  );
 }
 
 function normalizeDefinition(def: string, schema?: string): string {
@@ -63,6 +115,7 @@ function normalizeDefinition(def: string, schema?: string): string {
   normalized = normalized.replace(new RegExp(`\\b${escapedSchema}\\.`, "gi"), "");
   normalized = normalizeSimpleIdentifierQuotes(normalized);
   normalized = normalizeSingleSourceColumnQualification(normalized);
+  normalized = normalizeWhereParentheses(normalized);
 
   return normalized;
 }

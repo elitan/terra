@@ -824,8 +824,23 @@ export function generateCreateFunctionSQL(func: Function): string {
   return builder.build() + ';';
 }
 
+function isIdentityRoutineParameterMode(mode: string | undefined): boolean {
+  return !mode || mode.toUpperCase() !== "OUT";
+}
+
+function getIdentityRoutineParamTypes(parameters: Array<{ type: string; mode?: string }>): string {
+  return parameters
+    .filter(function (parameter) {
+      return isIdentityRoutineParameterMode(parameter.mode);
+    })
+    .map(function (parameter) {
+      return parameter.type;
+    })
+    .join(", ");
+}
+
 export function generateDropFunctionSQL(func: Function): string {
-  const paramTypes = func.parameters.map(p => p.type).join(", ");
+  const paramTypes = getIdentityRoutineParamTypes(func.parameters);
   // Use CASCADE to automatically drop dependent triggers
   const builder = new SQLBuilder();
   builder.p('DROP FUNCTION IF EXISTS').table(func.name, func.schema);
@@ -866,7 +881,7 @@ export function generateCreateProcedureSQL(proc: Procedure): string {
 }
 
 export function generateDropProcedureSQL(proc: Procedure): string {
-  const paramTypes = proc.parameters.map(p => p.type).join(", ");
+  const paramTypes = getIdentityRoutineParamTypes(proc.parameters);
   const builder = new SQLBuilder();
   builder.p('DROP PROCEDURE IF EXISTS').table(proc.name, proc.schema);
   builder.rewriteLastChar('(');
@@ -945,10 +960,59 @@ export function generateCreateSequenceSQL(seq: Sequence): string {
   }
 
   if (seq.ownedBy) {
-    builder.p(`OWNED BY ${seq.ownedBy}`);
+    builder.p(`OWNED BY ${quoteOwnedByTarget(seq.ownedBy)}`);
   }
 
   return builder.build() + ';';
+}
+
+function quoteOwnedByTarget(target: string): string {
+  return splitOwnedByTarget(target)
+    .map(function (part) {
+      const identifier = part.replace(/^"|"$/g, "");
+      if (/^[a-z_][a-z0-9_]*$/.test(identifier)) {
+        return identifier;
+      }
+      return `"${identifier.replace(/"/g, '""')}"`;
+    })
+    .join(".");
+}
+
+function splitOwnedByTarget(target: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let inQuote = false;
+
+  for (let i = 0; i < target.length; i++) {
+    const char = target[i];
+
+    if (char === '"') {
+      current += char;
+      if (inQuote && target[i + 1] === '"') {
+        current += '"';
+        i++;
+        continue;
+      }
+      inQuote = !inQuote;
+      continue;
+    }
+
+    if (char === "." && !inQuote) {
+      if (current) {
+        segments.push(current);
+      }
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    segments.push(current);
+  }
+
+  return segments;
 }
 
 export function generateDropSequenceSQL(sequenceName: string, schema?: string): string {

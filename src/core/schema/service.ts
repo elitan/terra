@@ -224,6 +224,13 @@ export class SchemaService {
         sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
       }
 
+      const preSequenceStatements = sequenceStatements.filter(
+        statement => !/\bOWNED\s+BY\b/i.test(statement)
+      );
+      const postSequenceStatements = sequenceStatements.filter(
+        statement => /\bOWNED\s+BY\b/i.test(statement)
+      );
+
       if (this.provider.supportsFeature("stored_functions")) {
         functionStatements = this.functionHandler.generateStatements(desiredFunctions, currentFunctions);
       }
@@ -267,13 +274,14 @@ export class SchemaService {
           ...extensionCreateStatements,
           ...enumCreateStatements,
           ...compositeTypeCreateStatements,
-          ...sequenceStatements,
-          ...functionStatements,
-          ...procedureStatements,
+          ...preSequenceStatements,
           ...tableStatements,
           ...deferredTableStatements,
           ...enumRemovalStatements,
           ...compositeTypeRemovalStatements,
+          ...postSequenceStatements,
+          ...functionStatements,
+          ...procedureStatements,
           ...viewStatements,
           ...triggerStatements,
           ...commentStatements,

@@ -27,9 +27,25 @@ export class ExtensionHandler {
         createStatements.push(this.generateCreateExtensionSQL(desiredExt));
         Logger.info(`Creating extension '${desiredExt.name}'`);
       } else {
+        let changed = false;
+
         if (desiredExt.version && currentExt.version !== desiredExt.version) {
-          Logger.warning(`Extension '${desiredExt.name}' version differs (current: ${currentExt.version}, desired: ${desiredExt.version}). Manual update may be required.`);
-        } else {
+          createStatements.push(this.generateUpdateExtensionVersionSQL(desiredExt.name, desiredExt.version));
+          Logger.info(
+            `Updating extension '${desiredExt.name}' version (current: ${currentExt.version}, desired: ${desiredExt.version})`
+          );
+          changed = true;
+        }
+
+        if (desiredExt.schema && currentExt.schema !== desiredExt.schema) {
+          createStatements.push(this.generateSetExtensionSchemaSQL(desiredExt.name, desiredExt.schema));
+          Logger.info(
+            `Updating extension '${desiredExt.name}' schema (current: ${currentExt.schema}, desired: ${desiredExt.schema})`
+          );
+          changed = true;
+        }
+
+        if (!changed) {
           Logger.info(`Extension '${desiredExt.name}' already exists, skipping`);
         }
       }
@@ -53,6 +69,16 @@ export class ExtensionHandler {
       builder.p("CASCADE");
     }
 
+    return builder.build() + ';';
+  }
+
+  private generateUpdateExtensionVersionSQL(name: string, version: string): string {
+    const builder = new SQLBuilder().p("ALTER EXTENSION").ident(name).p(`UPDATE TO '${version}'`);
+    return builder.build() + ';';
+  }
+
+  private generateSetExtensionSchemaSQL(name: string, schema: string): string {
+    const builder = new SQLBuilder().p("ALTER EXTENSION").ident(name).p("SET SCHEMA").ident(schema);
     return builder.build() + ';';
   }
 }

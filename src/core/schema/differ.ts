@@ -811,7 +811,13 @@ export class SchemaDiffer {
     // Handle modified indexes (drop + create) - use non-concurrent to keep in same transaction
     for (const mod of toModify) {
       const dropBuilder = new SQLBuilder();
-      dropBuilder.p("DROP INDEX").ident(mod.current.name).p(";");
+      dropBuilder.p("DROP INDEX");
+      if (mod.current.schema) {
+        dropBuilder.table(mod.current.name, mod.current.schema);
+      } else {
+        dropBuilder.ident(mod.current.name);
+      }
+      dropBuilder.p(";");
       statements.push(dropBuilder.build());
       statements.push(this.generateCreateIndexSQL(mod.desired, false));
     }
@@ -866,16 +872,39 @@ export class SchemaDiffer {
     if (index1.type !== index2.type) return false;
     if (index1.unique !== index2.unique) return false;
 
-    if (index1.columns.length !== index2.columns.length) return false;
-    for (let i = 0; i < index1.columns.length; i++) {
-      if (index1.columns[i] !== index2.columns[i]) return false;
-    }
+    const expr1 = index1.expression;
+    const expr2 = index2.expression;
 
-    const sortOrders1 = index1.sortOrders || index1.columns.map(() => 'ASC');
-    const sortOrders2 = index2.sortOrders || index2.columns.map(() => 'ASC');
-    if (sortOrders1.length !== sortOrders2.length) return false;
-    for (let i = 0; i < sortOrders1.length; i++) {
-      if (sortOrders1[i] !== sortOrders2[i]) return false;
+    if (expr1 && expr2) {
+      if (!expressionsEqual(expr1, expr2)) return false;
+      const sort1 = index1.sortOrders?.[0] || 'ASC';
+      const sort2 = index2.sortOrders?.[0] || 'ASC';
+      if (sort1 !== sort2) return false;
+    } else if (expr1 || expr2) {
+      const expressionIndex = expr1 ? index1 : index2;
+      const columnIndex = expr1 ? index2 : index1;
+      const expression = expr1 || expr2;
+
+      if (!expression || columnIndex.columns.length !== 1) return false;
+      if (!this.expressionMatchesColumn(expression, columnIndex.columns[0] || "")) {
+        return false;
+      }
+
+      const expressionSort = expressionIndex.sortOrders?.[0] || 'ASC';
+      const columnSort = columnIndex.sortOrders?.[0] || 'ASC';
+      if (expressionSort !== columnSort) return false;
+    } else {
+      if (index1.columns.length !== index2.columns.length) return false;
+      for (let i = 0; i < index1.columns.length; i++) {
+        if (index1.columns[i] !== index2.columns[i]) return false;
+      }
+
+      const sortOrders1 = index1.sortOrders || index1.columns.map(() => 'ASC');
+      const sortOrders2 = index2.sortOrders || index2.columns.map(() => 'ASC');
+      if (sortOrders1.length !== sortOrders2.length) return false;
+      for (let i = 0; i < sortOrders1.length; i++) {
+        if (sortOrders1[i] !== sortOrders2[i]) return false;
+      }
     }
 
     const where1 = index1.where;
@@ -883,13 +912,6 @@ export class SchemaDiffer {
     if (where1 && where2) {
       if (!expressionsEqual(where1, where2)) return false;
     } else if (where1 !== where2) {
-      return false;
-    }
-    const expr1 = index1.expression;
-    const expr2 = index2.expression;
-    if (expr1 && expr2) {
-      if (!expressionsEqual(expr1, expr2)) return false;
-    } else if (expr1 !== expr2) {
       return false;
     }
     if (index1.expressionOpclass !== index2.expressionOpclass) return false;
@@ -917,6 +939,14 @@ export class SchemaDiffer {
     return true;
   }
 
+  private expressionMatchesColumn(expression: string, columnName: string): boolean {
+    const normalizedExpression = normalizeExpression(expression)
+      .replace(/"/g, "")
+      .toLowerCase();
+    const normalizedColumn = columnName.replace(/"/g, "").toLowerCase();
+    return normalizedExpression === normalizedColumn;
+  }
+
   private generateIndexCreationStatements(indexes: Index[]): string[] {
     const sorted = [...indexes].sort((a, b) => a.name.localeCompare(b.name));
     return sorted.map((index) =>
@@ -936,7 +966,12 @@ export class SchemaDiffer {
       } else {
         builder.p("DROP INDEX");
       }
-      return builder.ident(index.name).p(";").build();
+      if (index.schema) {
+        builder.table(index.name, index.schema);
+      } else {
+        builder.ident(index.name);
+      }
+      return builder.p(";").build();
     });
   }
 
@@ -968,7 +1003,7 @@ export class SchemaDiffer {
 
     if (index.expression) {
       let expr = index.expression;
-      const hasOperators = /[+\-*/%^&|<>=!]/.test(expr);
+      const hasOperators = /[+\-*/%^&|<>=!:]/.test(expr);
       if (hasOperators) {
         expr = `(${expr})`;
       }
