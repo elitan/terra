@@ -27,14 +27,27 @@ export function parseCreateIndex(stmt: any): Index | null {
     const sortOrders: ('ASC' | 'DESC')[] = [];
     let opclasses: Record<string, string> | undefined;
     let expression: string | undefined;
+    let expressionOpclass: string | undefined;
 
     function parseOrdering(ordering: string | number | undefined): 'ASC' | 'DESC' {
       if (ordering === 'SORTBY_DESC' || ordering === 2) return 'DESC';
       return 'ASC';
     }
 
+    function parseOpclass(opclass: any[] | undefined): string | undefined {
+      if (!opclass || opclass.length === 0) {
+        return undefined;
+      }
+
+      return opclass
+        .map((node: any) => node.String?.sval)
+        .filter(Boolean)
+        .join('.') || undefined;
+    }
+
     if (indexParams.length === 1 && indexParams[0].IndexElem?.expr) {
       expression = deparseSync([indexParams[0].IndexElem.expr]).trim();
+      expressionOpclass = parseOpclass(indexParams[0].IndexElem.opclass);
       const ordering = indexParams[0].IndexElem.ordering;
       sortOrders.push(parseOrdering(ordering));
     } else {
@@ -45,18 +58,14 @@ export function parseCreateIndex(stmt: any): Index | null {
           if (colName) {
             columns.push(colName);
             sortOrders.push(parseOrdering(ordering));
-            if (param.IndexElem.opclass && param.IndexElem.opclass.length > 0) {
-              const opclassName = param.IndexElem.opclass
-                .map((node: any) => node.String?.sval)
-                .filter(Boolean)
-                .join('.');
-              if (opclassName) {
-                if (!opclasses) opclasses = {};
-                opclasses[colName] = opclassName;
-              }
+            const opclassName = parseOpclass(param.IndexElem.opclass);
+            if (opclassName) {
+              if (!opclasses) opclasses = {};
+              opclasses[colName] = opclassName;
             }
           } else if (param.IndexElem.expr) {
             expression = deparseSync([param.IndexElem.expr]).trim();
+            expressionOpclass = parseOpclass(param.IndexElem.opclass);
             sortOrders.push(parseOrdering(ordering));
             break;
           }
@@ -136,6 +145,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       columns,
       sortOrders: hasNonDefaultSort ? sortOrders : undefined,
       opclasses,
+      ...(expressionOpclass ? { expressionOpclass } : {}),
       type,
       unique,
       concurrent,

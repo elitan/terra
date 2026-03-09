@@ -122,8 +122,14 @@ export async function cleanDatabase(client: Client | undefined, schemas: string[
           FOR r IN (
             SELECT quote_ident(typname) as quoted_typename
             FROM pg_type t
+            LEFT JOIN pg_class c ON c.oid = t.typrelid
             LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
-            WHERE typtype = 'e'
+            WHERE (
+                typtype = 'e'
+                OR (
+                typtype = 'c'
+                AND c.relkind = 'c'
+              ))
               AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
               AND d.objid IS NULL
           ) LOOP

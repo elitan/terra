@@ -7,10 +7,12 @@ import type {
   AdvisoryLockOptions,
   ParsedSchema,
 } from "../../providers/types";
+import type { View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import { isDestructiveStatement } from "../../utils/statement-classifier";
 import {
   CommentHandler,
+  CompositeTypeHandler,
   EnumHandler,
   ExtensionHandler,
   FunctionHandler,
@@ -28,6 +30,7 @@ export class SchemaService {
   private schemaHandler: SchemaHandler;
   private commentHandler: CommentHandler;
   private extensionHandler: ExtensionHandler;
+  private compositeTypeHandler: CompositeTypeHandler;
   private enumHandler: EnumHandler;
   private sequenceHandler: SequenceHandler;
   private functionHandler: FunctionHandler;
@@ -42,6 +45,7 @@ export class SchemaService {
     this.schemaHandler = new SchemaHandler();
     this.commentHandler = new CommentHandler();
     this.extensionHandler = new ExtensionHandler();
+    this.compositeTypeHandler = new CompositeTypeHandler();
     this.enumHandler = new EnumHandler();
     this.sequenceHandler = new SequenceHandler();
     this.functionHandler = new FunctionHandler();
@@ -153,6 +157,7 @@ export class SchemaService {
 
       const desiredSchema = filtered.tables;
       const desiredEnums = filtered.enums;
+      const desiredCompositeTypes = filtered.compositeTypes || [];
       const desiredViews = filtered.views;
       const desiredFunctions = filtered.functions;
       const desiredProcedures = filtered.procedures;
@@ -164,6 +169,7 @@ export class SchemaService {
 
       const currentSchema = await this.provider.getCurrentSchema(client, schemas);
       const currentEnums = await this.provider.getCurrentEnums(client, schemas);
+      const currentCompositeTypes = await this.provider.getCurrentCompositeTypes?.(client, schemas) || [];
       const currentViews = await this.provider.getCurrentViews(client, schemas);
       const currentFunctions = await this.provider.getCurrentFunctions(client, schemas);
       const currentProcedures = await this.provider.getCurrentProcedures(client, schemas);
@@ -178,6 +184,7 @@ export class SchemaService {
       let extensionDropStatements: string[] = [];
       let enumCreateStatements: string[] = [];
       let enumAddValueStatements: string[] = [];
+      let compositeTypeCreateStatements: string[] = [];
       let sequenceStatements: string[] = [];
       let functionStatements: string[] = [];
       let procedureStatements: string[] = [];
@@ -200,11 +207,18 @@ export class SchemaService {
         enumAddValueStatements = enumResult.concurrent;
       }
 
-      const plan = this.provider.generateMigrationPlan(desiredSchema, currentSchema);
+      if (this.provider.supportsFeature("composite_types")) {
+        const compositeTypeResult = this.compositeTypeHandler.generateStatements(
+          desiredCompositeTypes,
+          currentCompositeTypes
+        );
+        compositeTypeCreateStatements = compositeTypeResult.transactional;
+      }
 
-      plan.transactional = [...schemaStatements, ...extensionCreateStatements, ...enumCreateStatements, ...plan.transactional];
-      plan.concurrent = [...enumAddValueStatements, ...plan.concurrent];
-      plan.hasChanges = plan.transactional.length > 0 || plan.concurrent.length > 0;
+      const plan = this.provider.generateMigrationPlan(desiredSchema, currentSchema);
+      const tableStatements = plan.transactional;
+      const deferredTableStatements = plan.deferred;
+      const concurrentStatements = [...enumAddValueStatements, ...plan.concurrent];
 
       if (this.provider.supportsFeature("sequences")) {
         sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
@@ -218,7 +232,12 @@ export class SchemaService {
         procedureStatements = this.procedureHandler.generateStatements(desiredProcedures, currentProcedures);
       }
 
-      const viewStatements = this.viewHandler.generateStatements(desiredViews, currentViews);
+      const normalizedDesiredViews = await this.canonicalizeDesiredViews(
+        client,
+        desiredViews,
+        currentViews
+      );
+      const viewStatements = this.viewHandler.generateStatements(normalizedDesiredViews, currentViews);
 
       if (this.provider.supportsFeature("triggers")) {
         triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
@@ -227,6 +246,7 @@ export class SchemaService {
       commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
 
       let enumRemovalStatements: string[] = [];
+      let compositeTypeRemovalStatements: string[] = [];
       if (this.provider.supportsFeature("enums")) {
         enumRemovalStatements = this.enumHandler.generateRemovalStatements(
           desiredEnums,
@@ -234,29 +254,43 @@ export class SchemaService {
         );
       }
 
+      if (this.provider.supportsFeature("composite_types")) {
+        compositeTypeRemovalStatements = this.compositeTypeHandler.generateRemovalStatements(
+          desiredCompositeTypes,
+          currentCompositeTypes
+        );
+      }
+
       const combinedPlan: MigrationPlan = {
         transactional: [
+          ...schemaStatements,
+          ...extensionCreateStatements,
+          ...enumCreateStatements,
+          ...compositeTypeCreateStatements,
           ...sequenceStatements,
-          ...plan.transactional,
-          ...plan.deferred,
-          ...enumRemovalStatements,
           ...functionStatements,
           ...procedureStatements,
+          ...tableStatements,
+          ...deferredTableStatements,
+          ...enumRemovalStatements,
+          ...compositeTypeRemovalStatements,
           ...viewStatements,
           ...triggerStatements,
           ...commentStatements,
           ...extensionDropStatements
         ],
-        concurrent: plan.concurrent,
+        concurrent: concurrentStatements,
         deferred: [],
         hasChanges: true
       };
 
-      const totalChanges = plan.transactional.length + plan.concurrent.length + plan.deferred.length +
+      const totalChanges = tableStatements.length + concurrentStatements.length + deferredTableStatements.length +
                           sequenceStatements.length + functionStatements.length +
                           procedureStatements.length + viewStatements.length +
+                          schemaStatements.length + extensionCreateStatements.length +
+                          enumCreateStatements.length + compositeTypeCreateStatements.length +
                           triggerStatements.length + commentStatements.length + extensionDropStatements.length +
-                          enumRemovalStatements.length;
+                          enumRemovalStatements.length + compositeTypeRemovalStatements.length;
 
       if (totalChanges === 0) {
         Logger.success("No changes needed - database is up to date");
@@ -283,10 +317,15 @@ export class SchemaService {
       Logger.print(OutputFormatter.summary(`${totalChanges} changes`));
 
       const allTransactional = [
-        ...plan.transactional,
+        ...schemaStatements,
+        ...extensionCreateStatements,
+        ...enumCreateStatements,
+        ...compositeTypeCreateStatements,
         ...sequenceStatements,
         ...functionStatements,
         ...procedureStatements,
+        ...tableStatements,
+        ...compositeTypeRemovalStatements,
         ...viewStatements,
         ...triggerStatements
       ];
@@ -296,14 +335,14 @@ export class SchemaService {
         Logger.print(OutputFormatter.box(allTransactional));
       }
 
-      if (plan.deferred.length > 0) {
+      if (deferredTableStatements.length > 0) {
         Logger.print(OutputFormatter.section("Deferred (circular FK dependencies)"));
-        Logger.print(OutputFormatter.box(plan.deferred));
+        Logger.print(OutputFormatter.box(deferredTableStatements));
       }
 
-      if (plan.concurrent.length > 0) {
+      if (concurrentStatements.length > 0) {
         Logger.print(OutputFormatter.warningSection("Concurrent (non-transactional)"));
-        Logger.print(OutputFormatter.box(plan.concurrent));
+        Logger.print(OutputFormatter.box(concurrentStatements));
       }
 
       console.log();
@@ -449,6 +488,7 @@ export class SchemaService {
     return {
       tables: parsed.tables.filter(t => isManaged(t.schema)),
       enums: parsed.enums.filter(e => isManaged(e.schema)),
+      compositeTypes: (parsed.compositeTypes || []).filter(t => isManaged(t.schema)),
       views: parsed.views.filter(v => isManaged(v.schema)),
       functions: parsed.functions.filter(f => isManaged(f.schema)),
       procedures: parsed.procedures.filter(p => isManaged(p.schema)),
@@ -461,8 +501,90 @@ export class SchemaService {
   }
 
   private countObjects(parsed: ParsedSchema): number {
-    return parsed.tables.length + parsed.enums.length + parsed.views.length +
+    return parsed.tables.length + parsed.enums.length + (parsed.compositeTypes || []).length + parsed.views.length +
       parsed.functions.length + parsed.procedures.length + parsed.triggers.length +
       parsed.sequences.length;
+  }
+
+  private async canonicalizeDesiredViews(
+    client: DatabaseClient,
+    desiredViews: View[],
+    currentViews: View[]
+  ): Promise<View[]> {
+    if (this.provider.dialect !== "postgres") {
+      return desiredViews;
+    }
+
+    const currentViewKeys = new Set(
+      currentViews
+        .filter(function isRegularView(view) {
+          return !view.materialized;
+        })
+        .map(this.getViewKey)
+    );
+
+    if (currentViewKeys.size === 0) {
+      return desiredViews;
+    }
+
+    const normalizedViews: View[] = [];
+
+    for (const view of desiredViews) {
+      if (view.materialized || !currentViewKeys.has(this.getViewKey(view))) {
+        normalizedViews.push(view);
+        continue;
+      }
+
+      const definition = await this.canonicalizeViewDefinition(client, view);
+      normalizedViews.push(definition ? { ...view, definition } : view);
+    }
+
+    return normalizedViews;
+  }
+
+  private async canonicalizeViewDefinition(
+    client: DatabaseClient,
+    view: View
+  ): Promise<string | undefined> {
+    const schemaName = view.schema || "public";
+    const tempViewName = `terradb_view_compare_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+
+    try {
+      await client.query("BEGIN");
+      await client.query(`SET LOCAL search_path TO ${this.buildViewSearchPath(schemaName)}`);
+      await client.query(
+        `CREATE TEMP VIEW ${this.quoteIdentifier(tempViewName)} AS ${view.definition}`
+      );
+
+      const result = await client.query<{ definition: string }>(
+        "SELECT pg_get_viewdef($1::regclass, false) AS definition",
+        [`pg_temp.${tempViewName}`]
+      );
+
+      return result.rows[0]?.definition?.trim();
+    } catch {
+      return undefined;
+    } finally {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+      }
+    }
+  }
+
+  private buildViewSearchPath(schemaName: string): string {
+    if (schemaName === "public") {
+      return "pg_temp, public";
+    }
+
+    return `pg_temp, ${this.quoteIdentifier(schemaName)}, public`;
+  }
+
+  private getViewKey(view: View): string {
+    return `${view.schema || "public"}.${view.name}`;
+  }
+
+  private quoteIdentifier(value: string): string {
+    return `"${value.replace(/"/g, '""')}"`;
   }
 }

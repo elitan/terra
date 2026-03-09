@@ -45,6 +45,7 @@ export interface Index {
   columns: string[];
   sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
   opclasses?: Record<string, string>; // Maps column name to operator class (e.g., gin_trgm_ops)
+  expressionOpclass?: string;
   type?: "btree" | "hash" | "gist" | "spgist" | "gin" | "brin" | (string & {});
   unique?: boolean;
   concurrent?: boolean;
@@ -65,6 +66,17 @@ export interface EnumType {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   values: string[];
+}
+
+export interface CompositeTypeAttribute {
+  name: string;
+  type: string;
+}
+
+export interface CompositeType {
+  name: string;
+  schema?: string; // PostgreSQL schema name, defaults to 'public'
+  attributes: CompositeTypeAttribute[];
 }
 
 export interface View {
@@ -175,6 +187,7 @@ export interface Schema {
   tables: Table[];
   views: View[];
   enumTypes: EnumType[];
+  compositeTypes?: CompositeType[];
   functions?: Function[];
   procedures?: Procedure[];
   triggers?: Trigger[];

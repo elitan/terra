@@ -152,6 +152,36 @@ describe("Foreign Key Constraints", () => {
 
       expect(result.rows[0].column_count).toBe('2');
     });
+
+    test("should create distinct names for unnamed foreign keys to the same table", async () => {
+      const schema = `
+        CREATE TABLE users (
+          id SERIAL PRIMARY KEY,
+          email VARCHAR(255) NOT NULL
+        );
+
+        CREATE TABLE application_replies (
+          id SERIAL PRIMARY KEY,
+          created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          deleted_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const result = await client.query(`
+        SELECT constraint_name
+        FROM information_schema.table_constraints
+        WHERE table_name = 'application_replies'
+          AND constraint_type = 'FOREIGN KEY'
+        ORDER BY constraint_name
+      `);
+
+      expect(result.rows).toEqual([
+        { constraint_name: 'fk_application_replies_created_by_user_id_users' },
+        { constraint_name: 'fk_application_replies_deleted_by_user_id_users' },
+      ]);
+    });
   });
 
   describe("Foreign Key Modifications", () => {

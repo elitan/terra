@@ -11,6 +11,7 @@ import type {
 import type {
   Table,
   EnumType,
+  CompositeType,
   View,
   Function,
   Procedure,
@@ -32,6 +33,7 @@ const UNSUPPORTED_FEATURES: DatabaseFeature[] = [
   "schemas",
   "sequences",
   "enums",
+  "composite_types",
   "extensions",
   "concurrent_indexes",
   "advisory_locks",
@@ -76,6 +78,13 @@ export class SQLiteProvider implements DatabaseProvider {
     _client: DatabaseClient,
     _schemas?: string[]
   ): Promise<EnumType[]> {
+    return [];
+  }
+
+  async getCurrentCompositeTypes(
+    _client: DatabaseClient,
+    _schemas?: string[]
+  ): Promise<CompositeType[]> {
     return [];
   }
 
@@ -159,6 +168,14 @@ export class SQLiteProvider implements DatabaseProvider {
         code: "SQLITE_NO_ENUMS",
         message: "SQLite does not support ENUM types",
         suggestion: "Use TEXT with CHECK constraints instead",
+      });
+    }
+
+    if (schema.compositeTypes && schema.compositeTypes.length > 0) {
+      errors.push({
+        code: "SQLITE_NO_COMPOSITE_TYPES",
+        message: "SQLite does not support composite types",
+        suggestion: "Remove CREATE TYPE ... AS (...) statements",
       });
     }
 

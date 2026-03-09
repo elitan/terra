@@ -5,6 +5,7 @@
  */
 
 import { Logger } from "../../../utils/logger";
+import { deparseSync } from "pgsql-parser";
 import type { Function, FunctionParameter } from "../../../types/schema";
 
 /**
@@ -196,11 +197,35 @@ function quoteTypeIdentifier(value: string): string {
  */
 function extractDefaultValue(defaultNode: any): string {
   try {
-    if (defaultNode.expr) {
-      return defaultNode.expr.text || defaultNode.expr.value || "";
+    const sql = deparseSync([
+      {
+        SelectStmt: {
+          targetList: [
+            {
+              ResTarget: {
+                val: defaultNode,
+              },
+            },
+          ],
+          op: "SETOP_NONE",
+          limitOption: "LIMIT_OPTION_DEFAULT",
+        },
+      },
+    ]).trim();
+
+    if (sql.startsWith("SELECT ")) {
+      return sql.slice(7).trim();
     }
-    return "";
+
+    return sql || "";
   } catch (error) {
+    try {
+      if (defaultNode?.expr) {
+        return defaultNode.expr.text || defaultNode.expr.value || "";
+      }
+    } catch (fallbackError) {
+    }
+
     return "";
   }
 }

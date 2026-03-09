@@ -1,5 +1,94 @@
 import { parseSync } from "pgsql-parser";
 
+function getTypeCastName(typeCast: Record<string, unknown>): string | undefined {
+  const typeName = typeCast.typeName as Record<string, unknown> | undefined;
+  const names = typeName?.names as Array<Record<string, unknown>> | undefined;
+  const parts = names
+    ?.map((item) => item.String as { sval?: string } | undefined)
+    .map((item) => item?.sval)
+    .filter((item): item is string => Boolean(item));
+
+  if (!parts || parts.length === 0) {
+    return undefined;
+  }
+
+  return parts[parts.length - 1]?.toLowerCase();
+}
+
+function isNumericType(typeName: string | undefined): boolean {
+  if (!typeName) {
+    return false;
+  }
+
+  return [
+    "int",
+    "int2",
+    "int4",
+    "int8",
+    "integer",
+    "smallint",
+    "bigint",
+    "numeric",
+    "decimal",
+    "real",
+    "float4",
+    "float8",
+    "double precision",
+  ].includes(typeName);
+}
+
+function flattenBoolExprArgs(
+  boolop: string,
+  args: unknown[]
+): unknown[] {
+  return args.flatMap((arg) => {
+    const boolExpr = (arg as Record<string, unknown> | undefined)?.BoolExpr as
+      | Record<string, unknown>
+      | undefined;
+
+    if (boolExpr?.boolop === boolop && Array.isArray(boolExpr.args)) {
+      return flattenBoolExprArgs(boolop, boolExpr.args);
+    }
+
+    return [arg];
+  });
+}
+
+function getFunctionName(funcCall: Record<string, unknown>): string | undefined {
+  const names = funcCall.funcname as Array<Record<string, unknown>> | undefined;
+  const parts = names
+    ?.map((item) => item.String as { sval?: string } | undefined)
+    .map((item) => item?.sval)
+    .filter((item): item is string => Boolean(item));
+
+  if (!parts || parts.length === 0) {
+    return undefined;
+  }
+
+  return parts[parts.length - 1]?.toLowerCase();
+}
+
+function normalizeFunctionNameParts(funcCall: Record<string, unknown>): unknown[] | undefined {
+  const names = funcCall.funcname as unknown[] | undefined;
+
+  if (!Array.isArray(names) || names.length === 0) {
+    return names;
+  }
+
+  if (names.length === 2) {
+    const schemaName = (names[0] as { String?: { sval?: string } } | undefined)?.String?.sval?.toLowerCase();
+    if (schemaName === "pg_catalog") {
+      return [names[1]];
+    }
+  }
+
+  return names;
+}
+
+function normalizeRegexPattern(value: string): string {
+  return value.replace(/\\([.^$|?*+(){}\[\]])/g, "$1");
+}
+
 function normalizeAstNode(node: unknown): unknown {
   if (node === null || node === undefined) return node;
   if (typeof node !== "object") return node;
@@ -14,7 +103,7 @@ function normalizeAstNode(node: unknown): unknown {
   if (obj.TypeCast) {
     const typeCast = obj.TypeCast as Record<string, unknown>;
     const innerValue = normalizeAstNode(typeCast.arg) as Record<string, unknown>;
-    if (innerValue?.A_Const) {
+    if (innerValue?.A_Const && isNumericType(getTypeCastName(typeCast))) {
       const aConst = innerValue.A_Const as Record<string, unknown>;
       if (aConst.sval) {
         const sval = aConst.sval as Record<string, string | undefined>;
@@ -117,12 +206,51 @@ function normalizeAstNode(node: unknown): unknown {
       const elements = arrayExpr?.elements;
       if (elements) {
         const normalizedItems = elements.map(e => normalizeAstNode(e));
+        const operator = aExpr.name?.[0] as { String?: { sval?: string } } | undefined;
+        if (operator?.String?.sval === "<>") {
+          return {
+            BoolExpr: {
+              boolop: "AND_EXPR",
+              args: normalizedItems.map((item) => ({
+                A_Expr: {
+                  kind: "AEXPR_OP",
+                  name: [{ String: { sval: "<>" } }],
+                  lexpr: col,
+                  rexpr: item,
+                },
+              })),
+            },
+          };
+        }
         return {
           A_Expr: {
             kind: "AEXPR_IN",
             name: aExpr.name,
             lexpr: col,
             rexpr: { List: { items: normalizedItems } },
+          },
+        };
+      }
+    }
+
+    if (aExpr.kind === "AEXPR_IN" && aExpr.name?.[0]?.String?.sval === "<>") {
+      const col = normalizeAstNode(aExpr.lexpr);
+      const rexpr = aExpr.rexpr as Record<string, unknown>;
+      const list = rexpr?.List as Record<string, unknown[]>;
+      const items = list?.items;
+      if (items) {
+        const normalizedItems = items.map(e => normalizeAstNode(e));
+        return {
+          BoolExpr: {
+            boolop: "AND_EXPR",
+            args: normalizedItems.map((item) => ({
+              A_Expr: {
+                kind: "AEXPR_OP",
+                name: [{ String: { sval: "<>" } }],
+                lexpr: col,
+                rexpr: item,
+              },
+            })),
           },
         };
       }
@@ -146,14 +274,42 @@ function normalizeAstNode(node: unknown): unknown {
     if (key === "location") continue;
     result[key] = normalizeAstNode(value);
   }
+  if (result.FuncCall) {
+    const funcCall = result.FuncCall as Record<string, unknown>;
+    funcCall.funcname = normalizeFunctionNameParts(funcCall);
+    if (getFunctionName(funcCall) === "regexp_replace" && Array.isArray(funcCall.args)) {
+      const patternArg = funcCall.args[1] as Record<string, unknown> | undefined;
+      const stringValue = patternArg?.A_Const as Record<string, unknown> | undefined;
+      const sval = stringValue?.sval as { sval?: string } | undefined;
+      if (typeof sval?.sval === "string") {
+        sval.sval = normalizeRegexPattern(sval.sval);
+      }
+    }
+  }
+  if (result.BoolExpr) {
+    const boolExpr = result.BoolExpr as Record<string, unknown>;
+    if (typeof boolExpr.boolop === "string" && Array.isArray(boolExpr.args)) {
+      boolExpr.args = flattenBoolExprArgs(boolExpr.boolop, boolExpr.args);
+    }
+  }
   return result;
 }
 
 function parseExpression(expr: string): unknown {
-  const ast = parseSync(`SELECT * FROM t WHERE ${expr}`) as {
-    stmts?: Array<{ stmt?: { SelectStmt?: { whereClause?: unknown } } }>;
+  const ast = parseSync(`SELECT ${expr} AS terradb_expression`) as {
+    stmts?: Array<{
+      stmt?: {
+        SelectStmt?: {
+          targetList?: Array<{
+            ResTarget?: {
+              val?: unknown;
+            };
+          }>;
+        };
+      };
+    }>;
   };
-  return ast.stmts?.[0]?.stmt?.SelectStmt?.whereClause;
+  return ast.stmts?.[0]?.stmt?.SelectStmt?.targetList?.[0]?.ResTarget?.val;
 }
 
 export function expressionsEqual(expr1: string, expr2: string): boolean {

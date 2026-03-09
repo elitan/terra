@@ -70,6 +70,7 @@ export class SQLiteParser {
       return {
         tables,
         enums: [],
+        compositeTypes: [],
         views,
         functions: [],
         procedures: [],

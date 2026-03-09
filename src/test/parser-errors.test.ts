@@ -64,6 +64,36 @@ describe("Parser Error Handling", () => {
   });
 
   describe("Declarative constraint violations", () => {
+    test("should allow ALTER TABLE ADD CONSTRAINT FOREIGN KEY statements", async () => {
+      const sql = `
+        CREATE TABLE users (id SERIAL PRIMARY KEY);
+        CREATE TABLE posts (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER
+        );
+        ALTER TABLE posts
+        ADD CONSTRAINT posts_user_id_fkey
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+      `;
+
+      const result = await parser.parseSchema(sql);
+
+      expect(result.tables).toHaveLength(2);
+      const posts = result.tables.find(function (table) {
+        return table.name === "posts";
+      });
+      expect(posts?.foreignKeys).toEqual([
+        {
+          name: "posts_user_id_fkey",
+          columns: ["user_id"],
+          referencedTable: "users",
+          referencedColumns: ["id"],
+          onDelete: "CASCADE",
+          onUpdate: "NO ACTION",
+        },
+      ]);
+    });
+
     test("should throw ParserError for ALTER TABLE statements", async () => {
       const sqlWithAlter = `
         CREATE TABLE users (id SERIAL PRIMARY KEY);

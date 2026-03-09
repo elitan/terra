@@ -580,5 +580,20 @@ describe("Check Constraints", () => {
       const plan = await schemaService.plan(desiredSchema);
       expect(plan.hasChanges).toBe(false);
     });
+
+    test("should be idempotent with multiple unnamed check constraints on one table", async () => {
+      const schema = `
+        CREATE TABLE adchase_job_posts (
+          id SERIAL PRIMARY KEY,
+          type text check (type in ('permanent', 'interim')),
+          posting_type text check (posting_type in ('job', 'tender'))
+        );
+      `;
+
+      await schemaService.apply(schema, ['public'], true);
+
+      const plan = await schemaService.plan(schema);
+      expect(plan.hasChanges).toBe(false);
+    });
   });
 });

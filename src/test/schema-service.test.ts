@@ -802,6 +802,51 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
       await cleanDatabase(client, ["public", "tenant_a"]);
     });
+
+    test("should keep postgres-canonicalized views idempotent on reapply", async () => {
+      await cleanDatabase(client, ["public"]);
+
+      const schema = `
+        CREATE TABLE people (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          changes JSONB NOT NULL DEFAULT '[]'::jsonb
+        );
+
+        CREATE VIEW people_all AS
+        SELECT
+          people.*,
+          lower(name) AS normalized_name
+        FROM people;
+
+        CREATE VIEW people_updates AS
+        SELECT
+          p.id,
+          EXISTS (
+            SELECT
+              1
+            FROM
+              jsonb_array_elements(p.changes) AS change
+            WHERE
+              change ->> 'fieldName' = 'email'
+          ) AS has_email_change
+        FROM people AS p;
+      `;
+
+      await schemaService.apply(schema, ["public"], true);
+      const idempotentPlan = await schemaService.apply(
+        schema,
+        ["public"],
+        true,
+        undefined,
+        true
+      );
+
+      expect(idempotentPlan.hasChanges).toBe(false);
+      expect(idempotentPlan.transactional).toEqual([]);
+
+      await cleanDatabase(client, ["public"]);
+    });
   });
 
   describe("Strict mode integration", () => {

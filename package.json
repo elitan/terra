@@ -61,6 +61,7 @@
     "test:pg:16": "DATABASE_URL=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:17": "DATABASE_URL=${DATABASE_URL_PG17:-postgres://test_user:test_password@localhost:5487/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:extensions": "bun --env-file=.env test src/test/extensions",
+    "test:pg:real-world": "REAL_WORLD_SCHEMA_DATABASE_URL=${REAL_WORLD_SCHEMA_DATABASE_URL:-postgres://test_user:test_password@localhost:5490/postgres} bun --env-file=.env test src/test/cli/real-world-schema-idempotency.test.ts",
     "test:e2e": "bun --env-file=.env test src/test/cli",
     "test:property:pr": "TERRADB_TEST_SILENT=${TERRADB_TEST_SILENT:-1} FC_SEED=${FC_SEED:-20260218} bun --env-file=.env test src/test/properties/",
     "test:property:nightly": "for seed in 20260218 20260219 20260220; do echo \"FC_SEED=$seed\"; TERRADB_TEST_SILENT=${TERRADB_TEST_SILENT:-1} FC_SEED=$seed bun --env-file=.env test src/test/properties/ || exit 1; done",

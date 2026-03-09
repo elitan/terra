@@ -1,6 +1,7 @@
 import type {
   Table,
   EnumType,
+  CompositeType,
   View,
   Function,
   Procedure,
@@ -46,6 +47,7 @@ export interface DatabaseClient {
 export interface ParsedSchema {
   tables: Table[];
   enums: EnumType[];
+  compositeTypes?: CompositeType[];
   views: View[];
   functions: Function[];
   procedures: Procedure[];
@@ -60,6 +62,7 @@ export type DatabaseFeature =
   | "schemas"
   | "sequences"
   | "enums"
+  | "composite_types"
   | "extensions"
   | "concurrent_indexes"
   | "advisory_locks"
@@ -104,6 +107,7 @@ export interface DatabaseProvider {
 
   getCurrentSchema(client: DatabaseClient, schemas?: string[]): Promise<Table[]>;
   getCurrentEnums(client: DatabaseClient, schemas?: string[]): Promise<EnumType[]>;
+  getCurrentCompositeTypes?(client: DatabaseClient, schemas?: string[]): Promise<CompositeType[]>;
   getCurrentViews(client: DatabaseClient, schemas?: string[]): Promise<View[]>;
   getCurrentFunctions(client: DatabaseClient, schemas?: string[]): Promise<Function[]>;
   getCurrentProcedures(client: DatabaseClient, schemas?: string[]): Promise<Procedure[]>;

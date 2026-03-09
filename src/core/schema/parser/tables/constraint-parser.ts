@@ -99,12 +99,25 @@ export function extractAllConstraints(
   }
 
   const primaryKey = tableLevelPrimaryKey || (columnPrimaryKeys.length > 0 ? { columns: columnPrimaryKeys } : undefined);
+  const filteredUniqueConstraints = uniqueConstraints.filter(function (constraint) {
+    if (!primaryKey) {
+      return true;
+    }
+
+    if (constraint.columns.length !== primaryKey.columns.length) {
+      return true;
+    }
+
+    return !constraint.columns.every(function (columnName, index) {
+      return primaryKey.columns[index] === columnName;
+    });
+  });
 
   return {
     primaryKey,
     foreignKeys,
     checkConstraints,
-    uniqueConstraints,
+    uniqueConstraints: filteredUniqueConstraints,
   };
 }
 

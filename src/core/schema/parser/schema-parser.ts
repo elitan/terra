@@ -11,6 +11,7 @@ import { Logger } from "../../../utils/logger";
 import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
 import { parseCreateType } from "./enum-parser";
+import { parseCreateCompositeType } from "./composite-type-parser";
 import { parseCreateView, parseCreateMaterializedView } from "./view-parser";
 import { parseCreateFunction } from "./function-parser";
 import { parseCreateProcedure } from "./procedure-parser";
@@ -18,10 +19,17 @@ import { parseCreateTrigger } from "./trigger-parser";
 import { parseCreateSequence } from "./sequence-parser";
 import { parseCreateExtension } from "./extension-parser";
 import { parseCreateSchema } from "./schema-definition-parser";
-import type { Table, Index, EnumType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../../types/schema";
+import { parseForeignKey } from "./tables/constraint-parser";
+import type { Table, Index, EnumType, CompositeType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
 let wasmInitialized = false;
+
+type PendingForeignKey = {
+  tableName: string;
+  schemaName?: string;
+  foreignKey: NonNullable<Table["foreignKeys"]>[number];
+};
 
 export class SchemaParser {
   private async ensureWasmLoaded() {
@@ -119,6 +127,7 @@ export class SchemaParser {
   async parseSchemaFile(filePath: string): Promise<{
     tables: Table[];
     enums: EnumType[];
+    compositeTypes?: CompositeType[];
     views: View[];
     functions: Function[];
     procedures: Procedure[];
@@ -148,6 +157,7 @@ export class SchemaParser {
   ): Promise<{
     tables: Table[];
     enums: EnumType[];
+    compositeTypes?: CompositeType[];
     views: View[];
     functions: Function[];
     procedures: Procedure[];
@@ -159,7 +169,7 @@ export class SchemaParser {
   }> {
     await this.ensureWasmLoaded();
 
-    const { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments } = await this.parseWithPgsql(sql, filePath);
+    const { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments } = await this.parseWithPgsql(sql, filePath);
 
     // Associate standalone indexes with their tables
     const tableMap = new Map(tables.map((t) => [t.name, t]));
@@ -174,7 +184,19 @@ export class SchemaParser {
       }
     }
 
-    return { tables, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+    return {
+      tables,
+      enums,
+      ...(compositeTypes.length > 0 ? { compositeTypes } : {}),
+      views,
+      functions,
+      procedures,
+      triggers,
+      sequences,
+      extensions,
+      schemas,
+      comments,
+    };
   }
 
   /**
@@ -214,6 +236,7 @@ export class SchemaParser {
     tables: Table[];
     indexes: Index[];
     enums: EnumType[];
+    compositeTypes: CompositeType[];
     views: View[];
     functions: Function[];
     procedures: Procedure[];
@@ -226,6 +249,7 @@ export class SchemaParser {
     const tables: Table[] = [];
     const indexes: Index[] = [];
     const enums: EnumType[] = [];
+    const compositeTypes: CompositeType[] = [];
     const views: View[] = [];
     const functions: Function[] = [];
     const procedures: Procedure[] = [];
@@ -234,20 +258,21 @@ export class SchemaParser {
     const extensions: Extension[] = [];
     const schemas: SchemaDefinition[] = [];
     const comments: Comment[] = [];
+    const pendingForeignKeys: PendingForeignKey[] = [];
 
     // Auto-quote reserved keywords that are commonly used as column names
     sql = this.autoQuoteReservedKeywords(sql);
 
     // Handle empty SQL (after keyword quoting to preserve empty checks correctly)
     if (!sql || sql.trim() === '') {
-      return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+      return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
     }
 
     try {
       const ast = await parse(sql);
 
       if (!ast.stmts) {
-        return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+        return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
       }
 
       for (const stmtWrapper of ast.stmts) {
@@ -267,6 +292,11 @@ export class SchemaParser {
           const enumType = parseCreateType(stmt.CreateEnumStmt);
           if (enumType) {
             enums.push(enumType);
+          }
+        } else if (stmt.CompositeTypeStmt) {
+          const compositeType = parseCreateCompositeType(stmt.CompositeTypeStmt);
+          if (compositeType) {
+            compositeTypes.push(compositeType);
           }
         } else if (stmt.ViewStmt) {
           const view = parseCreateView(stmt.ViewStmt, sql);
@@ -321,13 +351,7 @@ export class SchemaParser {
             comments.push(comment);
           }
         } else if (stmt.AlterTableStmt) {
-          throw new ParserError(
-            "ALTER TABLE statements are not supported in schema definitions. " +
-              "Terra is a declarative schema tool - please define your complete desired schema " +
-              "using CREATE TABLE statements with inline constraints. " +
-              "For circular foreign keys, use inline CONSTRAINT syntax.",
-            filePath
-          );
+          pendingForeignKeys.push(...this.parseAlterTableForeignKeys(stmt.AlterTableStmt, filePath));
         } else if (stmt.DropStmt) {
           throw new ParserError(
             "DROP statements are not supported in schema definitions. " +
@@ -361,7 +385,94 @@ export class SchemaParser {
       );
     }
 
-    return { tables, indexes, enums, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+    this.mergePendingForeignKeys(tables, pendingForeignKeys, filePath);
+
+    return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments };
+  }
+
+  private parseAlterTableForeignKeys(stmt: any, filePath?: string): PendingForeignKey[] {
+    const relation = stmt?.relation;
+    const tableName = relation?.relname;
+    const schemaName = relation?.schemaname;
+    const commands = Array.isArray(stmt?.cmds) ? stmt.cmds : [];
+
+    if (!tableName || commands.length === 0) {
+      throw this.unsupportedAlterTableError(filePath);
+    }
+
+    const pending: PendingForeignKey[] = [];
+
+    for (const commandWrapper of commands) {
+      const command = commandWrapper?.AlterTableCmd;
+      if (!command || command.subtype !== "AT_AddConstraint" || !command.def?.Constraint) {
+        throw this.unsupportedAlterTableError(filePath);
+      }
+
+      const constraint = command.def.Constraint;
+      if (constraint.contype !== "CONSTR_FOREIGN") {
+        throw this.unsupportedAlterTableError(filePath);
+      }
+
+      const foreignKey = parseForeignKey(constraint);
+      if (!foreignKey) {
+        throw this.unsupportedAlterTableError(filePath);
+      }
+
+      pending.push({
+        tableName,
+        schemaName,
+        foreignKey,
+      });
+    }
+
+    return pending;
+  }
+
+  private mergePendingForeignKeys(
+    tables: Table[],
+    pendingForeignKeys: PendingForeignKey[],
+    filePath?: string
+  ): void {
+    if (pendingForeignKeys.length === 0) {
+      return;
+    }
+
+    const tableMap = new Map(
+      tables.map(function (table) {
+        return [SchemaParser.tableKey(table.name, table.schema), table] as const;
+      })
+    );
+
+    for (const pending of pendingForeignKeys) {
+      const table = tableMap.get(SchemaParser.tableKey(pending.tableName, pending.schemaName));
+
+      if (!table) {
+        throw new ParserError(
+          `ALTER TABLE target not found in schema definitions: ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}`,
+          filePath
+        );
+      }
+
+      if (!table.foreignKeys) {
+        table.foreignKeys = [];
+      }
+
+      table.foreignKeys.push(pending.foreignKey);
+    }
+  }
+
+  private unsupportedAlterTableError(filePath?: string): ParserError {
+    return new ParserError(
+      "ALTER TABLE statements are not supported in schema definitions. " +
+        "Terra is a declarative schema tool - please define your complete desired schema " +
+        "using CREATE TABLE statements with inline constraints. " +
+        "For circular foreign keys, use inline CONSTRAINT syntax.",
+      filePath
+    );
+  }
+
+  private static tableKey(name: string, schema?: string): string {
+    return `${schema || "public"}.${name}`;
   }
 
   /**
@@ -440,6 +551,14 @@ export class SchemaParser {
   private extractObjectParts(obj: any): string[] {
     if (obj.String?.sval) {
       return [obj.String.sval];
+    }
+
+    if (obj.TypeName?.names) {
+      return obj.TypeName.names
+        .map(function (item: any) {
+          return item.String?.sval;
+        })
+        .filter(Boolean);
     }
 
     if (obj.List?.items) {

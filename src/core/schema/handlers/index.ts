@@ -1,4 +1,5 @@
 export { CommentHandler } from "./comment-handler";
+export { CompositeTypeHandler } from "./composite-type-handler";
 export { EnumHandler } from "./enum-handler";
 export { ExtensionHandler } from "./extension-handler";
 export { FunctionHandler } from "./function-handler";

@@ -76,6 +76,23 @@ describe("PostgreSQL Index Operator Class Support", () => {
         body: "gin_trgm_ops",
       });
     });
+
+    test("should parse expression index with operator class", async () => {
+      const sql = `
+        CREATE TABLE docs (
+          id SERIAL PRIMARY KEY,
+          title TEXT
+        );
+        CREATE INDEX idx_docs_title_lower ON docs USING GIN (LOWER(title) gin_trgm_ops);
+      `;
+
+      const indexes = await parser.parseCreateIndexStatements(sql);
+
+      expect(indexes).toHaveLength(1);
+      expect(indexes[0].expression).toBe("lower(title)");
+      expect(indexes[0].expressionOpclass).toBe("gin_trgm_ops");
+      expect(indexes[0].columns).toEqual([]);
+    });
   });
 
   describe("Inspector - Operator Class Detection", () => {
@@ -115,6 +132,26 @@ describe("PostgreSQL Index Operator Class Support", () => {
 
       expect(indexes).toHaveLength(1);
       expect(indexes[0].opclasses).toBeUndefined();
+    });
+
+    test("should detect expression operator class from database", async () => {
+      await client.query(`
+        CREATE TABLE test_docs (
+          id SERIAL PRIMARY KEY,
+          title TEXT
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX idx_test_docs_title_lower ON test_docs USING GIN (LOWER(title) gin_trgm_ops);
+      `);
+
+      const indexes = await inspector.getTableIndexes(client, "test_docs", "public");
+
+      expect(indexes).toHaveLength(1);
+      expect(indexes[0].expression).toBe("lower(title)");
+      expect(indexes[0].expressionOpclass).toBe("gin_trgm_ops");
+      expect(indexes[0].columns).toEqual([]);
     });
   });
 
@@ -216,6 +253,51 @@ describe("PostgreSQL Index Operator Class Support", () => {
         'CREATE INDEX "idx_docs_title" ON "docs" USING GIN ("title" gin_trgm_ops);'
       );
     });
+
+    test("should generate SQL with expression operator class", async () => {
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+
+      const currentSchema: Table[] = [
+        {
+          name: "docs",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "title", type: "TEXT", nullable: true },
+          ],
+          indexes: [],
+        },
+      ];
+
+      const desiredSchema: Table[] = [
+        {
+          name: "docs",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "title", type: "TEXT", nullable: true },
+          ],
+          indexes: [
+            {
+              name: "idx_docs_title_lower",
+              tableName: "docs",
+              columns: [],
+              expression: "LOWER(title)",
+              expressionOpclass: "gin_trgm_ops",
+              type: "gin",
+              unique: false,
+              concurrent: false,
+            },
+          ],
+        },
+      ];
+
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
+
+      const allStatements = [...plan.transactional, ...plan.concurrent];
+      expect(allStatements).toContain(
+        'CREATE INDEX "idx_docs_title_lower" ON "docs" USING GIN (LOWER(title) gin_trgm_ops);'
+      );
+    });
   });
 
   describe("Integration - Full Roundtrip", () => {
@@ -246,6 +328,34 @@ describe("PostgreSQL Index Operator Class Support", () => {
       expect(dbIndexes[0].opclasses).toEqual({ title: "gin_trgm_ops" });
 
       expect(parsedIndexes[0].opclasses).toEqual(dbIndexes[0].opclasses);
+    });
+
+    test("should apply and detect expression operator class correctly", async () => {
+      await client.query(`
+        CREATE TABLE test_articles (
+          id SERIAL PRIMARY KEY,
+          title TEXT
+        );
+      `);
+
+      await client.query(`
+        CREATE INDEX idx_articles_title_lower ON test_articles USING GIN (LOWER(title) gin_trgm_ops);
+      `);
+
+      const schema = `
+        CREATE TABLE test_articles (
+          id SERIAL PRIMARY KEY,
+          title TEXT
+        );
+        CREATE INDEX idx_articles_title_lower ON test_articles USING GIN (LOWER(title) gin_trgm_ops);
+      `;
+
+      const parsedIndexes = await parser.parseCreateIndexStatements(schema);
+      const dbIndexes = await inspector.getTableIndexes(client, "test_articles", "public");
+
+      expect(parsedIndexes[0].expressionOpclass).toBe("gin_trgm_ops");
+      expect(dbIndexes[0].expressionOpclass).toBe("gin_trgm_ops");
+      expect(parsedIndexes[0].expression).toBe(dbIndexes[0].expression);
     });
   });
 });

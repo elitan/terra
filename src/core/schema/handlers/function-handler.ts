@@ -31,6 +31,20 @@ function getFunctionKey(func: Function): string {
   return `${func.schema || "public"}.${func.name}(${getFunctionSignature(func)})`;
 }
 
+function dedupeFunctions(functions: Function[]): Function[] {
+  const deduped = new Map<string, Function>();
+
+  for (const func of functions) {
+    const key = getFunctionKey(func);
+    if (deduped.has(key)) {
+      deduped.delete(key);
+    }
+    deduped.set(key, func);
+  }
+
+  return Array.from(deduped.values());
+}
+
 const config: HandlerConfig<Function> = {
   name: "function",
   getKey: getFunctionKey,
@@ -46,6 +60,6 @@ const config: HandlerConfig<Function> = {
 
 export class FunctionHandler {
   generateStatements(desiredFunctions: Function[], currentFunctions: Function[]): string[] {
-    return generateStatements(desiredFunctions, currentFunctions, config);
+    return generateStatements(dedupeFunctions(desiredFunctions), currentFunctions, config);
   }
 }

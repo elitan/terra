@@ -21,6 +21,8 @@ const config: HandlerConfig<Trigger> = {
 
     const desiredWhen = desired.when ? normalizeExpression(desired.when) : undefined;
     const currentWhen = current.when ? normalizeExpression(current.when) : undefined;
+    const desiredEvents = normalizeTriggerEvents(desired.events);
+    const currentEvents = normalizeTriggerEvents(current.events);
     const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
     const currentArgs = normalizeTriggerArgs(current.functionArgs);
 
@@ -29,7 +31,7 @@ const config: HandlerConfig<Trigger> = {
       desired.forEach !== current.forEach ||
       desired.functionName !== current.functionName ||
       (desired.functionSchema || "public") !== (current.functionSchema || "public") ||
-      JSON.stringify(desired.events) !== JSON.stringify(current.events) ||
+      JSON.stringify(desiredEvents) !== JSON.stringify(currentEvents) ||
       desiredWhen !== currentWhen ||
       JSON.stringify(desiredArgs) !== JSON.stringify(currentArgs)
     );
@@ -66,6 +68,19 @@ function normalizeTriggerArgs(args: string[] | undefined): string[] {
   }
 
   return args.map(normalizeTriggerArg);
+}
+
+function normalizeTriggerEvents(events: Trigger["events"]): Trigger["events"] {
+  const eventOrder: Record<Trigger["events"][number], number> = {
+    INSERT: 0,
+    UPDATE: 1,
+    DELETE: 2,
+    TRUNCATE: 3,
+  };
+
+  return [...events].sort(function sortEvents(a, b) {
+    return eventOrder[a] - eventOrder[b];
+  });
 }
 
 function normalizeTriggerArg(arg: string): string {
