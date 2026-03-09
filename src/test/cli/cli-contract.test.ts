@@ -103,13 +103,7 @@ async function getReachablePostgresUrls(): Promise<string[]> {
   return urls;
 }
 
-function hasPostgresUrlHints(): boolean {
-  return Boolean(
-    process.env.DATABASE_URL_PG14 ||
-      process.env.DATABASE_URL_PG17 ||
-      process.env.DATABASE_URL
-  );
-}
+const reachablePostgresUrls = await getReachablePostgresUrls();
 
 describe("CLI Contract", () => {
   test("should show root help with expected commands and options", async function () {
@@ -1479,15 +1473,12 @@ describe("CLI Contract", () => {
     }
   });
 
-  test.skipIf(!hasPostgresUrlHints())(
+  test.skipIf(reachablePostgresUrls.length === 0)(
     "should release advisory lock after strict mode failure in postgres apply path",
     async function () {
-      const postgresUrls = await getReachablePostgresUrls();
-      expect(postgresUrls.length).toBeGreaterThan(0);
-
       const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
       try {
-        for (const postgresUrl of postgresUrls) {
+        for (const postgresUrl of reachablePostgresUrls) {
           const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
           const tableName = `cli_strict_lock_${suffix}`;
           const lockName = `cli-strict-lock-${suffix}`;
@@ -1588,15 +1579,12 @@ describe("CLI Contract", () => {
     }
   );
 
-  test.skipIf(!hasPostgresUrlHints())(
+  test.skipIf(reachablePostgresUrls.length === 0)(
     "should release advisory lock after parser failure in postgres apply path",
     async function () {
-    const postgresUrls = await getReachablePostgresUrls();
-    expect(postgresUrls.length).toBeGreaterThan(0);
-
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {
-      for (const postgresUrl of postgresUrls) {
+      for (const postgresUrl of reachablePostgresUrls) {
         const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         const tableName = `cli_parser_lock_${suffix}`;
         const lockName = `cli-parser-lock-${suffix}`;
@@ -1690,15 +1678,12 @@ describe("CLI Contract", () => {
     }
   });
 
-  test.skipIf(!hasPostgresUrlHints())(
+  test.skipIf(reachablePostgresUrls.length === 0)(
     "should not require advisory lock in dry-run apply path",
     async function () {
-    const postgresUrls = await getReachablePostgresUrls();
-    expect(postgresUrls.length).toBeGreaterThan(0);
-
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {
-      for (const postgresUrl of postgresUrls) {
+      for (const postgresUrl of reachablePostgresUrls) {
         const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         const tableName = `cli_dry_run_lock_${suffix}`;
         const lockName = `cli-dry-run-lock-${suffix}`;

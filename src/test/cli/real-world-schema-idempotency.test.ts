@@ -50,18 +50,6 @@ function candidateUrls(): string[] {
   return urls;
 }
 
-function hasSyntheticSchemaConnectionHints(): boolean {
-  return Boolean(
-    process.env.REAL_WORLD_SCHEMA_DATABASE_URL ||
-      process.env.EXTENSIONS_DATABASE_URL ||
-      process.env.DATABASE_URL ||
-      process.env.DATABASE_URL_PG17 ||
-      process.env.DATABASE_URL_PG16 ||
-      process.env.DATABASE_URL_PG15 ||
-      process.env.DATABASE_URL_PG14
-  );
-}
-
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) {
     return "";
@@ -177,6 +165,8 @@ async function findSyntheticSchemaDatabaseUrl(): Promise<string | undefined> {
   return undefined;
 }
 
+const syntheticSchemaDatabaseUrl = await findSyntheticSchemaDatabaseUrl();
+
 function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
@@ -210,21 +200,18 @@ async function dropDatabase(connectionString: string, databaseName: string): Pro
 }
 
 describe("CLI synthetic schema idempotency", () => {
-  test.skipIf(!hasSyntheticSchemaConnectionHints())(
+  test.skipIf(!syntheticSchemaDatabaseUrl)(
     "should apply the synthetic schema twice with no changes on second run",
     async function () {
-    const baseUrl = await findSyntheticSchemaDatabaseUrl();
-    expect(baseUrl).toBeDefined();
-
     const databaseName = `synthetic_schema_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-    const databaseUrl = buildDatabaseUrl(baseUrl!, databaseName);
+    const databaseUrl = buildDatabaseUrl(syntheticSchemaDatabaseUrl!, databaseName);
     const file = schemaPath();
     const schemas = managedSchemas(file);
     const schemaArgs = schemas.flatMap(function (schemaName) {
       return ["--schema", schemaName];
     });
 
-    await createDatabase(baseUrl!, databaseName);
+    await createDatabase(syntheticSchemaDatabaseUrl!, databaseName);
 
     try {
       const firstRun = await runCli(
@@ -287,7 +274,7 @@ describe("CLI synthetic schema idempotency", () => {
       });
       expect(secondPayload.statementMetadata).toEqual([]);
     } finally {
-      await dropDatabase(baseUrl!, databaseName);
+      await dropDatabase(syntheticSchemaDatabaseUrl!, databaseName);
     }
   }, 180000);
 });
