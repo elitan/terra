@@ -165,6 +165,8 @@ async function findSyntheticSchemaDatabaseUrl(): Promise<string | undefined> {
   return undefined;
 }
 
+const syntheticSchemaDatabaseUrl = await findSyntheticSchemaDatabaseUrl();
+
 function quoteIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
@@ -198,21 +200,18 @@ async function dropDatabase(connectionString: string, databaseName: string): Pro
 }
 
 describe("CLI synthetic schema idempotency", () => {
-  test("should apply the synthetic schema twice with no changes on second run", async function () {
-    const baseUrl = await findSyntheticSchemaDatabaseUrl();
-    if (!baseUrl) {
-      return;
-    }
-
+  test.skipIf(!syntheticSchemaDatabaseUrl)(
+    "should apply the synthetic schema twice with no changes on second run",
+    async function () {
     const databaseName = `synthetic_schema_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-    const databaseUrl = buildDatabaseUrl(baseUrl, databaseName);
+    const databaseUrl = buildDatabaseUrl(syntheticSchemaDatabaseUrl!, databaseName);
     const file = schemaPath();
     const schemas = managedSchemas(file);
     const schemaArgs = schemas.flatMap(function (schemaName) {
       return ["--schema", schemaName];
     });
 
-    await createDatabase(baseUrl, databaseName);
+    await createDatabase(syntheticSchemaDatabaseUrl!, databaseName);
 
     try {
       const firstRun = await runCli(
@@ -275,7 +274,7 @@ describe("CLI synthetic schema idempotency", () => {
       });
       expect(secondPayload.statementMetadata).toEqual([]);
     } finally {
-      await dropDatabase(baseUrl, databaseName);
+      await dropDatabase(syntheticSchemaDatabaseUrl!, databaseName);
     }
   }, 180000);
 });

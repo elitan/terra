@@ -210,6 +210,62 @@ export async function getTableNames(client: Client): Promise<string[]> {
   return result.rows.map((row) => row.tablename);
 }
 
+export async function getIndexDefinitions(
+  client: Client,
+  tableName: string,
+  schemaName: string = "public"
+): Promise<Array<{ name: string; definition: string }>> {
+  const result = await client.query(
+    `
+    SELECT
+      indexname,
+      indexdef
+    FROM pg_indexes
+    WHERE schemaname = $1
+      AND tablename = $2
+    ORDER BY indexname
+  `,
+    [schemaName, tableName]
+  );
+
+  return result.rows.map(function (row) {
+    return {
+      name: row.indexname,
+      definition: row.indexdef,
+    };
+  });
+}
+
+export async function getConstraintDefinitions(
+  client: Client,
+  tableName: string,
+  schemaName: string = "public"
+): Promise<Array<{ name: string; type: string; definition: string }>> {
+  const result = await client.query(
+    `
+    SELECT
+      c.conname,
+      c.contype,
+      pg_get_constraintdef(c.oid) AS definition
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = $1
+      AND t.relname = $2
+    ORDER BY c.conname
+  `,
+    [schemaName, tableName]
+  );
+
+  return result.rows.map(function (row) {
+    return {
+      name: row.conname,
+      type: row.contype,
+      definition: row.definition,
+    };
+  });
+}
+
 export async function getTableColumns(client: Client, tableName: string) {
   const result = await client.query(
     `
@@ -240,6 +296,66 @@ export async function getTableColumns(client: Client, tableName: string) {
       nullable: row.is_nullable,
       default: row.column_default,
     };
+  });
+}
+
+export async function getTableColumnDetails(
+  client: Client,
+  tableName: string,
+  schemaName: string = "public"
+) {
+  const result = await client.query(
+    `
+    SELECT
+      a.attname AS column_name,
+      format_type(a.atttypid, a.atttypmod) AS data_type,
+      NOT a.attnotnull AS is_nullable,
+      pg_get_expr(ad.adbin, ad.adrelid) AS column_default,
+      col_description(c.oid, a.attnum) AS column_comment
+    FROM pg_attribute a
+    LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relname = $1
+      AND n.nspname = $2
+      AND a.attnum > 0
+      AND NOT a.attisdropped
+    ORDER BY a.attnum
+  `,
+    [tableName, schemaName]
+  );
+
+  return result.rows.map(function (row) {
+    return {
+      name: row.column_name,
+      type: row.data_type,
+      nullable: row.is_nullable,
+      default: row.column_default,
+      comment: row.column_comment,
+    };
+  });
+}
+
+export async function getEnumValues(
+  client: Client,
+  typeName: string,
+  schemaName: string = "public"
+): Promise<string[]> {
+  const result = await client.query(
+    `
+    SELECT e.enumlabel
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    JOIN pg_enum e ON e.enumtypid = t.oid
+    WHERE n.nspname = $1
+      AND t.typname = $2
+    ORDER BY e.enumsortorder
+  `,
+    [schemaName, typeName]
+  );
+
+  return result.rows.map(function (row) {
+    return row.enumlabel;
   });
 }
 

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { SchemaParser } from "../../core/schema/parser";
 import { DatabaseInspector } from "../../core/schema/inspector";
-import { createTestClient, cleanDatabase } from "../utils";
+import { createTestClient, cleanDatabase, getIndexDefinitions } from "../utils";
 import type { Client } from "pg";
 import type { Table } from "../../types/schema";
 
@@ -228,7 +228,6 @@ describe("Concurrent Index Operations", () => {
 
   describe("Database Operations", () => {
     test("should handle concurrent index creation in real database", async () => {
-      // Create table first
       await client.query(`
         CREATE TABLE concurrent_test (
           id SERIAL PRIMARY KEY,
@@ -237,13 +236,11 @@ describe("Concurrent Index Operations", () => {
         );
       `);
 
-      // Insert some test data to make the concurrent operation more realistic
       await client.query(`
         INSERT INTO concurrent_test (email, name) 
         VALUES ('user1@test.com', 'User One'), ('user2@test.com', 'User Two');
       `);
 
-      // Create index concurrently
       await client.query(`
         CREATE INDEX CONCURRENTLY idx_concurrent_test_email 
         ON concurrent_test (email);
@@ -263,15 +260,12 @@ describe("Concurrent Index Operations", () => {
       expect(emailIndex!.columns).toEqual(["email"]);
       expect(emailIndex!.type).toBe("btree");
 
-      // Verify index is actually usable
-      const result = await client.query(`
-        EXPLAIN (FORMAT JSON) 
-        SELECT * FROM concurrent_test WHERE email = 'user1@test.com';
-      `);
-
-      // The query plan should reference our index (though exact format may vary)
-      const plan = JSON.stringify(result.rows[0]);
-      expect(plan).toContain("concurrent_test");
+      const definitions = await getIndexDefinitions(client, "concurrent_test");
+      expect(definitions.find((index) => index.name === "idx_concurrent_test_email")).toEqual({
+        name: "idx_concurrent_test_email",
+        definition:
+          "CREATE INDEX idx_concurrent_test_email ON public.concurrent_test USING btree (email)",
+      });
     });
 
     test("should handle dropping indexes concurrently", async () => {
@@ -302,48 +296,64 @@ describe("Concurrent Index Operations", () => {
     });
   });
 
-  describe("Performance and Safety", () => {
-    test("should not block concurrent operations", async () => {
-      // This test verifies that concurrent operations don't block other database activity
-      await client.query(`
-        CREATE TABLE performance_test (
-          id SERIAL PRIMARY KEY,
-          data VARCHAR(255)
-        );
-      `);
+  describe("Concurrency Safety", () => {
+    test("should allow a concurrent read while building a concurrent index", async () => {
+      const reader = await createTestClient();
 
-      // Insert test data
-      for (let i = 0; i < 100; i++) {
-        await client.query(
-          `
-          INSERT INTO performance_test (data) VALUES ($1);
-        `,
-          [`test-data-${i}`]
+      try {
+        await client.query(`
+          CREATE TABLE performance_test (
+            id SERIAL PRIMARY KEY,
+            data VARCHAR(255)
+          );
+        `);
+
+        for (let i = 0; i < 100; i++) {
+          await client.query(
+            `
+            INSERT INTO performance_test (data) VALUES ($1);
+          `,
+            [`test-data-${i}`]
+          );
+        }
+
+        const initialReadResult = await reader.query(`
+          SELECT COUNT(*)::int AS count
+          FROM performance_test
+        `);
+        expect(initialReadResult.rows[0]?.count).toBe(100);
+
+        const createIndexPromise = client.query(`
+          CREATE INDEX CONCURRENTLY idx_performance_test_data 
+          ON performance_test (data);
+        `);
+
+        const readPromise = reader.query(`
+          SELECT COUNT(*)::int AS count
+          FROM performance_test
+        `);
+
+        const [, readResult] = await Promise.all([createIndexPromise, readPromise]);
+
+        expect(readResult.rows[0]?.count).toBe(100);
+
+        const indexes = await inspector.getTableIndexes(
+          client,
+          "performance_test",
+          "public"
         );
+        expect(indexes).toHaveLength(1);
+
+        const definitions = await getIndexDefinitions(client, "performance_test");
+        expect(definitions.find((index) => index.name === "idx_performance_test_data")).toEqual({
+          name: "idx_performance_test_data",
+          definition:
+            "CREATE INDEX idx_performance_test_data ON public.performance_test USING btree (data)",
+        });
+      } finally {
+        await cleanDatabase(reader);
+        await reader.end();
       }
-
-      // Start concurrent index creation (this would normally not block in a real scenario)
-      const startTime = Date.now();
-
-      await client.query(`
-        CREATE INDEX CONCURRENTLY idx_performance_test_data 
-        ON performance_test (data);
-      `);
-
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-
-      // Verify index was created
-      const indexes = await inspector.getTableIndexes(
-        client,
-        "performance_test",
-        "public"
-      );
-      expect(indexes).toHaveLength(1);
-
-      // In a real scenario with more data, this would test that other operations
-      // can continue while the index is being built
-      console.log(`Concurrent index creation took ${duration}ms`);
     });
   });
 });

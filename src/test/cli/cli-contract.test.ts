@@ -103,6 +103,8 @@ async function getReachablePostgresUrls(): Promise<string[]> {
   return urls;
 }
 
+const reachablePostgresUrls = await getReachablePostgresUrls();
+
 describe("CLI Contract", () => {
   test("should show root help with expected commands and options", async function () {
     const result = await runCli(["run", "src/index.ts", "--help"], {
@@ -1471,130 +1473,118 @@ describe("CLI Contract", () => {
     }
   });
 
-  test("should release advisory lock after strict mode failure in postgres apply path", async function () {
-    const postgresUrls = await getReachablePostgresUrls();
-    if (postgresUrls.length === 0) {
-      return;
-    }
-
-    const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
-    try {
-      for (const postgresUrl of postgresUrls) {
-        const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-        const tableName = `cli_strict_lock_${suffix}`;
-        const lockName = `cli-strict-lock-${suffix}`;
-        const seedSchemaPath = join(dir, `strict-lock-seed-${suffix}.sql`);
-        const strictSchemaPath = join(dir, `strict-lock-drop-${suffix}.sql`);
-        try {
-          await writeFile(
-            seedSchemaPath,
-            `
-            CREATE TABLE ${tableName} (
-              id SERIAL PRIMARY KEY,
-              email TEXT NOT NULL
-            );
-            `.trim() + "\n"
-          );
-          await writeFile(strictSchemaPath, "\n");
-
-          const seedResult = await runCli(
-            [
-              "run",
-              "src/index.ts",
-              "apply",
-              "-f",
-              seedSchemaPath,
-              "-u",
-              postgresUrl,
-              "--auto-approve",
-              "--no-color",
-            ],
-            { DATABASE_URL: "" }
-          );
-          expect(seedResult.exitCode).toBe(0);
-
-          const strictResult = await runCli(
-            [
-              "run",
-              "src/index.ts",
-              "apply",
-              "-f",
-              strictSchemaPath,
-              "-u",
-              postgresUrl,
-              "--auto-approve",
-              "--strict",
-              "--lock-name",
-              lockName,
-              "--lock-timeout",
-              "1",
-              "--format",
-              "json",
-              "--no-color",
-            ],
-            { DATABASE_URL: "" }
-          );
-
-          expect(strictResult.exitCode).toBe(1);
-          const strictPayload = parseJsonOutput(strictResult.output);
-          expect(strictPayload.schemaVersion).toBe(1);
-          expect(strictPayload.error.code).toBe("STRICT_MODE_ERROR");
-
-          const retryResult = await runCli(
-            [
-              "run",
-              "src/index.ts",
-              "apply",
-              "-f",
-              seedSchemaPath,
-              "-u",
-              postgresUrl,
-              "--auto-approve",
-              "--lock-name",
-              lockName,
-              "--lock-timeout",
-              "1",
-              "--format",
-              "json",
-              "--no-color",
-            ],
-            { DATABASE_URL: "" }
-          );
-          expect(retryResult.exitCode).toBe(0);
-          const retryPayload = parseJsonOutput(retryResult.output);
-          expect(retryPayload.schemaVersion).toBe(1);
-          expect(retryPayload.command).toBe("apply");
-          expect(retryPayload.hasChanges).toBe(false);
-        } finally {
-          const cleanupClient = new Client({
-            connectionString: postgresUrl,
-            connectionTimeoutMillis: 1500,
-          });
+  test.skipIf(reachablePostgresUrls.length === 0)(
+    "should release advisory lock after strict mode failure in postgres apply path",
+    async function () {
+      const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+      try {
+        for (const postgresUrl of reachablePostgresUrls) {
+          const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+          const tableName = `cli_strict_lock_${suffix}`;
+          const lockName = `cli-strict-lock-${suffix}`;
+          const seedSchemaPath = join(dir, `strict-lock-seed-${suffix}.sql`);
+          const strictSchemaPath = join(dir, `strict-lock-drop-${suffix}.sql`);
           try {
-            await cleanupClient.connect();
-            await cleanupClient.query(`DROP TABLE IF EXISTS "public"."${tableName}" CASCADE`);
-          } finally {
+            await writeFile(
+              seedSchemaPath,
+              `
+              CREATE TABLE ${tableName} (
+                id SERIAL PRIMARY KEY,
+                email TEXT NOT NULL
+              );
+              `.trim() + "\n"
+            );
+            await writeFile(strictSchemaPath, "\n");
+
+            const seedResult = await runCli(
+              [
+                "run",
+                "src/index.ts",
+                "apply",
+                "-f",
+                seedSchemaPath,
+                "-u",
+                postgresUrl,
+                "--auto-approve",
+                "--no-color",
+              ],
+              { DATABASE_URL: "" }
+            );
+            expect(seedResult.exitCode).toBe(0);
+
+            const strictResult = await runCli(
+              [
+                "run",
+                "src/index.ts",
+                "apply",
+                "-f",
+                strictSchemaPath,
+                "-u",
+                postgresUrl,
+                "--auto-approve",
+                "--strict",
+                "--lock-name",
+                lockName,
+                "--lock-timeout",
+                "1",
+                "--format",
+                "json",
+                "--no-color",
+              ],
+              { DATABASE_URL: "" }
+            );
+
+            expect(strictResult.exitCode).toBe(1);
+            const strictPayload = parseJsonOutput(strictResult.output);
+            expect(strictPayload.schemaVersion).toBe(1);
+            expect(strictPayload.error.code).toBe("STRICT_MODE_ERROR");
+
+            const lockProbeClient = new Client({
+              connectionString: postgresUrl,
+              connectionTimeoutMillis: 1500,
+            });
             try {
-              await cleanupClient.end();
-            } catch {
+              await lockProbeClient.connect();
+              const probeResult = await lockProbeClient.query<{ acquired: boolean }>(
+                "SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS acquired",
+                [lockName]
+              );
+              expect(probeResult.rows[0]?.acquired).toBe(true);
+              await lockProbeClient.query(
+                "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+                [lockName]
+              );
+            } finally {
+              await lockProbeClient.end();
+            }
+          } finally {
+            const cleanupClient = new Client({
+              connectionString: postgresUrl,
+              connectionTimeoutMillis: 1500,
+            });
+            try {
+              await cleanupClient.connect();
+              await cleanupClient.query(`DROP TABLE IF EXISTS "public"."${tableName}" CASCADE`);
+            } finally {
+              try {
+                await cleanupClient.end();
+              } catch {
+              }
             }
           }
         }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
       }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
     }
-  });
+  );
 
-  test("should release advisory lock after parser failure in postgres apply path", async function () {
-    const postgresUrls = await getReachablePostgresUrls();
-    if (postgresUrls.length === 0) {
-      return;
-    }
-
+  test.skipIf(reachablePostgresUrls.length === 0)(
+    "should release advisory lock after parser failure in postgres apply path",
+    async function () {
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {
-      for (const postgresUrl of postgresUrls) {
+      for (const postgresUrl of reachablePostgresUrls) {
         const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         const tableName = `cli_parser_lock_${suffix}`;
         const lockName = `cli-parser-lock-${suffix}`;
@@ -1646,32 +1636,27 @@ describe("CLI Contract", () => {
           expect(parserPayload.schemaVersion).toBe(1);
           expect(parserPayload.error.code).toBe("PARSER_ERROR");
 
-          const retryResult = await runCli(
-            [
-              "run",
-              "src/index.ts",
-              "apply",
-              "-f",
-              validSchemaPath,
-              "-u",
-              postgresUrl,
-              "--auto-approve",
-              "--lock-name",
-              lockName,
-              "--lock-timeout",
-              "1",
-              "--format",
-              "json",
-              "--no-color",
-            ],
-            { DATABASE_URL: "" }
-          );
-
-          expect(retryResult.exitCode).toBe(0);
-          const retryPayload = parseJsonOutput(retryResult.output);
-          expect(retryPayload.schemaVersion).toBe(1);
-          expect(retryPayload.command).toBe("apply");
-          expect(retryPayload.hasChanges).toBe(true);
+          const lockProbeClient = new Client({
+            connectionString: postgresUrl,
+            connectionTimeoutMillis: 1500,
+          });
+          try {
+            await lockProbeClient.connect();
+            const lockResult = await lockProbeClient.query(
+              "SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS acquired",
+              [lockName]
+            );
+            expect(lockResult.rows[0]?.acquired).toBe(true);
+            await lockProbeClient.query(
+              "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+              [lockName]
+            );
+          } finally {
+            try {
+              await lockProbeClient.end();
+            } catch {
+            }
+          }
         } finally {
           const cleanupClient = new Client({
             connectionString: postgresUrl,
@@ -1693,15 +1678,12 @@ describe("CLI Contract", () => {
     }
   });
 
-  test("should not require advisory lock in dry-run apply path", async function () {
-    const postgresUrls = await getReachablePostgresUrls();
-    if (postgresUrls.length === 0) {
-      return;
-    }
-
+  test.skipIf(reachablePostgresUrls.length === 0)(
+    "should not require advisory lock in dry-run apply path",
+    async function () {
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {
-      for (const postgresUrl of postgresUrls) {
+      for (const postgresUrl of reachablePostgresUrls) {
         const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
         const tableName = `cli_dry_run_lock_${suffix}`;
         const lockName = `cli-dry-run-lock-${suffix}`;

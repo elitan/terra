@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getTableColumnDetails,
+} from "../utils";
 
 describe("Edge case: time/timestamp precision", () => {
   let client: Client;
@@ -40,8 +45,24 @@ describe("Edge case: time/timestamp precision", () => {
     );
   `;
 
+  async function expectTimeColumns(expectedColumns: Array<{ name: string; type: string }>) {
+    const columns = await getTableColumnDetails(client, "tbl");
+    expect(columns.map(function (column) {
+      return {
+        name: column.name,
+        type: column.type,
+      };
+    })).toEqual(expectedColumns);
+  }
+
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    await expectTimeColumns([
+      { name: "precision_default", type: "timestamp without time zone" },
+      { name: "timestamp_4", type: "timestamp(4) without time zone" },
+      { name: "timestamptz_4", type: "timestamp(4) with time zone" },
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
@@ -51,10 +72,22 @@ describe("Edge case: time/timestamp precision", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    await expectTimeColumns([
+      { name: "c1", type: "timestamp(1) with time zone" },
+      { name: "c10", type: "time(6) with time zone" },
+      { name: "c2", type: "timestamp with time zone" },
+      { name: "c3", type: "timestamp with time zone" },
+      { name: "c4", type: "time without time zone" },
+      { name: "c5", type: "time(1) without time zone" },
+      { name: "c6", type: "timestamp without time zone" },
+      { name: "c7", type: "timestamp(5) without time zone" },
+      { name: "c8", type: "time with time zone" },
+      { name: "c9", type: "time with time zone" },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);

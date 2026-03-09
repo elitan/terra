@@ -71,9 +71,6 @@ describe("Function idempotency", () => {
 
     const currentFunctions = await inspector.getCurrentFunctions(client, ['public']);
 
-    console.log("Current (from DB):", JSON.stringify(currentFunctions[0], null, 2));
-    console.log("Desired (from parser):", JSON.stringify(desiredFunctions[0], null, 2));
-
     const statements = functionHandler.generateStatements(desiredFunctions, currentFunctions);
     expect(statements).toHaveLength(0);
   });
@@ -104,9 +101,6 @@ describe("Function idempotency", () => {
     await client.query(createSQL);
 
     const currentFunctions = await inspector.getCurrentFunctions(client, ['public']);
-
-    console.log("Current (from DB):", JSON.stringify(currentFunctions[0], null, 2));
-    console.log("Desired (from parser):", JSON.stringify(desiredFunctions[0], null, 2));
 
     const statements = functionHandler.generateStatements(desiredFunctions, currentFunctions);
     expect(statements).toHaveLength(0);

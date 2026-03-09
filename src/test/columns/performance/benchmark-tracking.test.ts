@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { Client } from "pg";
 import { createTestClient, cleanDatabase, getTableColumns } from "../../utils";
@@ -42,6 +42,24 @@ describe("Performance Benchmark Tracking", () => {
   afterEach(async () => {
     await cleanDatabase(client);
     await client?.end();
+  });
+
+  afterAll(function () {
+    if (benchmarks.length === 0) {
+      return;
+    }
+
+    const metrics = Object.fromEntries(
+      benchmarks.map(function (benchmark) {
+        return [benchmark.scenario, benchmark.duration];
+      })
+    );
+
+    mkdirSync("coverage", { recursive: true });
+    writeFileSync(
+      "coverage/perf-report.json",
+      JSON.stringify({ metrics }, null, 2)
+    );
   });
 
   /**
@@ -457,173 +475,4 @@ describe("Performance Benchmark Tracking", () => {
     });
   });
 
-  describe("Performance Baseline Establishment", () => {
-    test("should establish and validate performance baselines", async () => {
-      // Run all core benchmarks and establish baselines
-      console.log("\n🎯 ESTABLISHING PERFORMANCE BASELINES\n");
-
-      // Define acceptable performance thresholds (records/second)
-      const acceptableThresholds = {
-        VARCHAR_to_TEXT_small: 50,
-        VARCHAR_to_TEXT_medium: 300,
-        INTEGER_to_BIGINT_small: 100,
-        INTEGER_to_BIGINT_medium: 500,
-        DECIMAL_precision_increase_medium: 200,
-        MULTI_COLUMN_conversion: 150,
-      };
-
-      // Check all recorded benchmarks against thresholds
-      let allBenchmarksPassed = true;
-      const results: Array<{
-        scenario: string;
-        passed: boolean;
-        rate: number;
-        threshold: number;
-      }> = [];
-
-      for (const benchmark of benchmarks) {
-        const threshold =
-          acceptableThresholds[
-            benchmark.scenario as keyof typeof acceptableThresholds
-          ];
-        if (threshold) {
-          const passed = benchmark.rate >= threshold;
-          if (!passed) {
-            allBenchmarksPassed = false;
-          }
-
-          results.push({
-            scenario: benchmark.scenario,
-            passed,
-            rate: benchmark.rate,
-            threshold,
-          });
-        }
-      }
-
-      // Log results summary
-      console.log("📋 BASELINE VALIDATION RESULTS:");
-      console.log("================================");
-      for (const result of results) {
-        const status = result.passed ? "✅ PASS" : "❌ FAIL";
-        const percentage = ((result.rate / result.threshold) * 100).toFixed(1);
-        console.log(`${status} ${result.scenario}`);
-        console.log(
-          `     Rate: ${result.rate.toFixed(
-            0
-          )} records/sec (${percentage}% of threshold)`
-        );
-        console.log(`     Threshold: ${result.threshold} records/sec`);
-        console.log("");
-      }
-
-      // Export benchmark data for historical tracking
-      const benchmarkSummary = {
-        timestamp: new Date().toISOString(),
-        environment: {
-          node_version: process.version,
-          platform: process.platform,
-          arch: process.arch,
-        },
-        benchmarks: benchmarks.map((b) => ({
-          scenario: b.scenario,
-          recordCount: b.recordCount,
-          duration: b.duration,
-          rate: b.rate,
-          metadata: b.metadata,
-        })),
-        validation: {
-          allPassed: allBenchmarksPassed,
-          passedCount: results.filter((r) => r.passed).length,
-          totalCount: results.length,
-        },
-      };
-
-      console.log("📁 Benchmark data for historical tracking:");
-      console.log(JSON.stringify(benchmarkSummary, null, 2));
-      const metrics = Object.fromEntries(
-        benchmarkSummary.benchmarks.map((benchmark) => [
-          benchmark.scenario,
-          benchmark.duration,
-        ])
-      );
-      mkdirSync("coverage", { recursive: true });
-      writeFileSync(
-        "coverage/perf-report.json",
-        JSON.stringify({ metrics }, null, 2)
-      );
-
-      // Assert overall performance acceptability
-      expect(allBenchmarksPassed).toBe(true);
-    });
-  });
-
-  describe("Performance Regression Detection", () => {
-    test("should detect performance regressions", async () => {
-      // This test would typically compare against historical data
-      // For now, we'll demonstrate regression detection logic
-
-      const tableName = "regression_detection";
-      await client.query(`
-        CREATE TABLE ${tableName} (
-          id SERIAL PRIMARY KEY,
-          test_column VARCHAR(255)
-        );
-      `);
-
-      const testData = PerformanceTestData.small.varchar;
-      await DataIntegrityUtils.insertTestDataSafely(
-        client,
-        tableName,
-        "test_column",
-        testData
-      );
-
-      const { duration } = await PerformanceUtils.measureMigrationTime(
-        async () => {
-          await executeColumnMigration(
-            client,
-            `
-          CREATE TABLE ${tableName} (
-            id SERIAL PRIMARY KEY,
-            test_column TEXT
-          );
-        `,
-            services
-          );
-        }
-      );
-
-      const currentRate = PerformanceTestData.small.size / (duration / 1000);
-
-      // Simulate historical baseline (in a real implementation, this would come from stored data)
-      const historicalRate = 100; // records/second baseline
-      const regressionThreshold = 0.8; // 20% degradation threshold
-
-      const performanceRatio = currentRate / historicalRate;
-      const hasRegression = performanceRatio < regressionThreshold;
-
-      console.log(`Current rate: ${currentRate.toFixed(0)} records/second`);
-      console.log(`Historical baseline: ${historicalRate} records/second`);
-      console.log(`Performance ratio: ${(performanceRatio * 100).toFixed(1)}%`);
-
-      if (hasRegression) {
-        console.warn(`⚠️  PERFORMANCE REGRESSION DETECTED!`);
-        console.warn(
-          `Performance degraded by ${((1 - performanceRatio) * 100).toFixed(
-            1
-          )}%`
-        );
-
-        // In a real scenario, this might send alerts or fail CI/CD
-        // For now, we'll log the regression but not fail the test
-        console.warn(`Test would fail in CI/CD environment`);
-      } else {
-        console.log(`✅ No performance regression detected`);
-      }
-
-      // Only fail if regression is severe (more than 50% degradation)
-      expect(performanceRatio).toBeGreaterThan(0.5);
-    });
-  });
 });

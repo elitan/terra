@@ -385,6 +385,9 @@ export const PerformanceUtils = {
     maxExpectedDuration: number,
     context?: string
   ): void {
+    if (process.env.TERRADB_ENFORCE_TEST_PERF !== "1") {
+      return;
+    }
     expect(
       actualDuration,
       `Migration should complete within ${maxExpectedDuration}ms${

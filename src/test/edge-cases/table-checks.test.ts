@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getConstraintDefinitions,
+} from "../utils";
 
 describe("Edge case: check constraints and expression changes", () => {
   let client: Client;
@@ -58,8 +63,26 @@ describe("Edge case: check constraints and expression changes", () => {
     );
   `;
 
+  async function getTableCheckDefinitions(tableName: string) {
+    const constraints = await getConstraintDefinitions(client, tableName);
+    return constraints.filter(function (constraint) {
+      return constraint.type === "c";
+    });
+  }
+
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    expect(await getTableCheckDefinitions("t1")).toEqual([
+      { name: "c1", type: "c", definition: "CHECK ((a > 0))" },
+      { name: "c2", type: "c", definition: "CHECK ((b > 0))" },
+      { name: "c3", type: "c", definition: "CHECK ((a < b))" },
+    ]);
+    expect(await getTableCheckDefinitions("t2")).toEqual([
+      { name: "c1", type: "c", definition: "CHECK ((a > 0))" },
+      { name: "c4", type: "c", definition: "CHECK ((c > 0))" },
+      { name: "c5", type: "c", definition: "CHECK ((a < c))" },
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
@@ -69,10 +92,20 @@ describe("Edge case: check constraints and expression changes", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    expect(await getTableCheckDefinitions("t1")).toEqual([
+      { name: "c1", type: "c", definition: "CHECK ((a > 1))" },
+      { name: "c2", type: "c", definition: "CHECK ((b > 1))" },
+      { name: "c3", type: "c", definition: "CHECK ((a < b))" },
+    ]);
+    expect(await getTableCheckDefinitions("t2")).toEqual([
+      { name: "c1", type: "c", definition: "CHECK ((a > 1))" },
+      { name: "c4", type: "c", definition: "CHECK ((c > 1))" },
+      { name: "c5", type: "c", definition: "CHECK ((a < c))" },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -82,10 +115,20 @@ describe("Edge case: check constraints and expression changes", () => {
     await schemaService.apply(schemaV2, ["public"], true);
 
     const plan = await schemaService.plan(schemaV3, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV3, ["public"], true);
+
+    expect(await getTableCheckDefinitions("t1")).toEqual([
+      { name: "c1", type: "c", definition: "CHECK ((a > 1))" },
+      { name: "c2", type: "c", definition: "CHECK ((b > 1))" },
+      { name: "c4", type: "c", definition: "CHECK ((a < b))" },
+    ]);
+    expect(await getTableCheckDefinitions("t2")).toEqual([
+      { name: "c1", type: "c", definition: "CHECK ((a > 1))" },
+      { name: "c4", type: "c", definition: "CHECK ((c > 1))" },
+      { name: "c6", type: "c", definition: "CHECK ((a < c))" },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV3, ["public"]);
     expect(plan2.hasChanges).toBe(false);

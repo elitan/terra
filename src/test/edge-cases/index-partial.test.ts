@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getIndexDefinitions,
+} from "../utils";
 
 describe("Edge case: partial indexes with where clause", () => {
   let client: Client;
@@ -36,6 +41,13 @@ describe("Edge case: partial indexes with where clause", () => {
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
+    expect(await getIndexDefinitions(client, "users")).toEqual([
+      {
+        name: "users_name",
+        definition: "CREATE INDEX users_name ON public.users USING btree (name) WHERE active",
+      },
+    ]);
+
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
   });
@@ -44,10 +56,17 @@ describe("Edge case: partial indexes with where clause", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    expect(await getIndexDefinitions(client, "users")).toEqual([
+      {
+        name: "users_name",
+        definition:
+          "CREATE INDEX users_name ON public.users USING btree (name) WHERE (active AND (name <> ''::text))",
+      },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);

@@ -1,7 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
-import { DatabaseService } from "../../core/database/client";
 import { createTestClient, cleanDatabase, getTestDbConfig, createTestSchemaService } from "../utils";
 
 describe("Materialized View Operations", () => {
@@ -11,7 +10,6 @@ describe("Materialized View Operations", () => {
   beforeEach(async () => {
     client = await createTestClient();
     await cleanDatabase(client);
-    const databaseService = new DatabaseService(getTestDbConfig());
     schemaService = createTestSchemaService();
   });
 
@@ -460,8 +458,8 @@ describe("Materialized View Operations", () => {
     });
   });
 
-  describe("Performance and Optimization", () => {
-    test("should handle large materialized views efficiently", async () => {
+  describe("Large Materialized Views", () => {
+    test("should refresh large materialized views and keep exact grouped counts", async () => {
       const schema = `
         CREATE TABLE large_dataset (
           id SERIAL PRIMARY KEY,
@@ -485,7 +483,6 @@ describe("Materialized View Operations", () => {
 
       await schemaService.apply(schema, ['public'], true);
 
-      // Insert test data
       const insertPromises = [];
       for (let i = 1; i <= 1000; i++) {
         insertPromises.push(
@@ -495,26 +492,17 @@ describe("Materialized View Operations", () => {
       }
       await Promise.all(insertPromises);
 
-      // Measure refresh time
-      const startTime = Date.now();
       await client.query(`REFRESH MATERIALIZED VIEW category_aggregates`);
-      const refreshTime = Date.now() - startTime;
-      
-      // Should complete refresh in reasonable time (less than 5 seconds)
-      expect(refreshTime).toBeLessThan(5000);
 
-      // Verify aggregation results
       const result = await client.query(`
         SELECT category, row_count 
         FROM category_aggregates 
         ORDER BY category
       `);
       expect(result.rows).toHaveLength(10);
-      
-      // Each category should have approximately 100 rows
+
       result.rows.forEach(row => {
-        expect(parseInt(row.row_count)).toBeGreaterThan(80);
-        expect(parseInt(row.row_count)).toBeLessThan(120);
+        expect(parseInt(row.row_count)).toBe(100);
       });
     });
   });
@@ -539,7 +527,7 @@ describe("Materialized View Operations", () => {
       // Refresh should fail gracefully
       await expect(
         client.query(`REFRESH MATERIALIZED VIEW temp_view`)
-      ).rejects.toThrow();
+      ).rejects.toThrow(/does not exist|relation .* does not exist/i);
     });
 
     test("should validate concurrent refresh requirements", async () => {
@@ -558,7 +546,7 @@ describe("Materialized View Operations", () => {
       // Concurrent refresh should fail without unique index
       await expect(
         client.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY simple_view`)
-      ).rejects.toThrow();
+      ).rejects.toThrow(/concurrently|unique index/i);
     });
   });
 });

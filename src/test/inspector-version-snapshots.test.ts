@@ -478,17 +478,17 @@ function writeExpectedSnapshot(snapshot: SnapshotMap): void {
   writeFileSync(SNAPSHOT_PATH, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
 }
 
+const hasConfiguredVersionTargets = getVersionTargets().some(function hasConfiguredUrl(version) {
+  return Boolean(version.url);
+});
+
 describe("inspector version snapshots", function () {
-  test(
+  test.skipIf(!hasConfiguredVersionTargets)(
     "captures deterministic normalized snapshots for configured postgres versions",
     async function () {
       const versions = getVersionTargets().filter(function hasUrl(version) {
         return Boolean(version.url);
       });
-
-      if (versions.length === 0) {
-        return;
-      }
 
       const snapshots: SnapshotMap = {};
       for (const version of versions) {
@@ -509,23 +509,19 @@ describe("inspector version snapshots", function () {
         }
       }
 
-      if (Object.keys(snapshots).length === 0) {
-        return;
-      }
+      expect(Object.keys(snapshots).length).toBeGreaterThan(0);
 
       if (process.env.TERRADB_WRITE_INSPECTOR_SNAPSHOTS === "1") {
         writeExpectedSnapshot(snapshots);
-        expect(true).toBe(true);
-        return;
-      }
+      } else {
+        const expected = readExpectedSnapshot();
+        const expectedSubset: SnapshotMap = {};
+        for (const version of Object.keys(snapshots)) {
+          expectedSubset[version] = expected[version];
+        }
 
-      const expected = readExpectedSnapshot();
-      const expectedSubset: SnapshotMap = {};
-      for (const version of Object.keys(snapshots)) {
-        expectedSubset[version] = expected[version];
+        expect(snapshots).toEqual(expectedSubset);
       }
-
-      expect(snapshots).toEqual(expectedSubset);
 
       const keys = Object.keys(snapshots).sort();
       if (keys.length > 1) {

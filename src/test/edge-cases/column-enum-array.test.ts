@@ -1,6 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getEnumValues,
+  getTableColumnDetails,
+} from "../utils";
 
 describe("Edge case: array of enum types", () => {
   let client: Client;
@@ -59,6 +65,17 @@ describe("Edge case: array of enum types", () => {
   test("v1: create enum array and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
+    expect(await getEnumValues(client, "status")).toEqual(["active", "inactive"]);
+    expect(await getTableColumnDetails(client, "enums")).toEqual([
+      {
+        name: "statuses",
+        type: "status[]",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+    ]);
+
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
   });
@@ -67,10 +84,20 @@ describe("Edge case: array of enum types", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan v1->v2:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    expect(await getTableColumnDetails(client, "enums")).toEqual([
+      {
+        name: "a",
+        type: "integer",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+    ]);
+    expect(await getEnumValues(client, "status")).toEqual([]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -80,10 +107,27 @@ describe("Edge case: array of enum types", () => {
     await schemaService.apply(schemaV2, ["public"], true);
 
     const plan = await schemaService.plan(schemaV3, ["public"]);
-    console.log("Plan v2->v3:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV3, ["public"], true);
+
+    expect(await getEnumValues(client, "status")).toEqual(["active", "inactive"]);
+    expect(await getTableColumnDetails(client, "enums")).toEqual([
+      {
+        name: "a",
+        type: "integer",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+      {
+        name: "statuses",
+        type: "status[]",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV3, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -93,10 +137,34 @@ describe("Edge case: array of enum types", () => {
     await schemaService.apply(schemaV3, ["public"], true);
 
     const plan = await schemaService.plan(schemaV4, ["public"]);
-    console.log("Plan v3->v4:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV4, ["public"], true);
+
+    expect(await getEnumValues(client, "status")).toEqual(["active", "inactive"]);
+    expect(await getTableColumnDetails(client, "enums")).toEqual([
+      {
+        name: "a",
+        type: "integer",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+      {
+        name: "statuses",
+        type: "status[]",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+      {
+        name: "status",
+        type: "status",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV4, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -105,6 +173,35 @@ describe("Edge case: array of enum types", () => {
   test("v4->v5: add enum value and verify idempotency", async () => {
     await schemaService.apply(schemaV4, ["public"], true);
     await schemaService.apply(schemaV5, ["public"], true);
+
+    expect(await getEnumValues(client, "status")).toEqual([
+      "active",
+      "inactive",
+      "unknown",
+    ]);
+    expect(await getTableColumnDetails(client, "enums")).toEqual([
+      {
+        name: "a",
+        type: "integer",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+      {
+        name: "statuses",
+        type: "status[]",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+      {
+        name: "status",
+        type: "status",
+        nullable: true,
+        default: null,
+        comment: null,
+      },
+    ]);
 
     const plan = await schemaService.plan(schemaV5, ["public"]);
     expect(plan.hasChanges).toBe(false);

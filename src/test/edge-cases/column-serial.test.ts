@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getTableColumnDetails,
+} from "../utils";
 
 describe("Edge case: serial/bigserial columns", () => {
   let client: Client;
@@ -40,8 +45,24 @@ describe("Edge case: serial/bigserial columns", () => {
     );
   `;
 
+  async function getSerialColumns() {
+    return getTableColumnDetails(client, "t");
+  }
+
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    const columns = await getSerialColumns();
+    expect(columns.map(function (column) {
+      return column.type;
+    })).toEqual(["smallint", "integer", "bigint"]);
+    expect(columns.map(function (column) {
+      return column.default;
+    })).toEqual([
+      expect.stringMatching(/^nextval/),
+      expect.stringMatching(/^nextval/),
+      expect.stringMatching(/^nextval/),
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
@@ -51,10 +72,17 @@ describe("Edge case: serial/bigserial columns", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    const columns = await getSerialColumns();
+    expect(columns.map(function (column) {
+      return column.type;
+    })).toEqual(["smallint", "bigint", "integer"]);
+    expect(columns[0]?.default).toBeNull();
+    expect(columns[1]?.default).toBeNull();
+    expect(columns[2]?.default).toBeNull();
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -64,10 +92,20 @@ describe("Edge case: serial/bigserial columns", () => {
     await schemaService.apply(schemaV2, ["public"], true);
 
     const plan = await schemaService.plan(schemaV3, ["public"]);
-    console.log("Plan:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV3, ["public"], true);
+
+    const columns = await getSerialColumns();
+    expect(columns.map(function (column) {
+      return column.type;
+    })).toEqual(["smallint", "integer"]);
+    expect(columns.map(function (column) {
+      return column.default;
+    })).toEqual([
+      null,
+      null,
+    ]);
 
     const plan2 = await schemaService.plan(schemaV3, ["public"]);
     expect(plan2.hasChanges).toBe(false);

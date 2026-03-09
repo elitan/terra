@@ -1,6 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getConstraintDefinitions,
+  getIndexDefinitions,
+} from "../utils";
 
 describe("Edge case: foreign key constraints", () => {
   let client: Client;
@@ -36,6 +42,34 @@ describe("Edge case: foreign key constraints", () => {
 
   test("v1: create and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
+
+    expect(await getIndexDefinitions(client, "t1")).toEqual([
+      {
+        name: "t1_c2_c3_idx",
+        definition: "CREATE UNIQUE INDEX t1_c2_c3_idx ON public.t1 USING btree (c2, c3)",
+      },
+      {
+        name: "t1_pkey",
+        definition: "CREATE UNIQUE INDEX t1_pkey ON public.t1 USING btree (c1)",
+      },
+    ]);
+    expect(await getConstraintDefinitions(client, "t2")).toEqual([
+      {
+        name: "c2_c3_1",
+        type: "f",
+        definition: "FOREIGN KEY (c2, c3) REFERENCES t1(c2, c3)",
+      },
+      {
+        name: "c2_c3_2",
+        type: "f",
+        definition: "FOREIGN KEY (c2, c3) REFERENCES t1(c2, c3)",
+      },
+      {
+        name: "t2_pkey",
+        type: "p",
+        definition: "PRIMARY KEY (c1)",
+      },
+    ]);
 
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);

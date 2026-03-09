@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
-import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
+import {
+  createTestClient,
+  cleanDatabase,
+  createTestSchemaService,
+  getIndexDefinitions,
+} from "../utils";
 
 describe("Edge case: index operator classes", () => {
   let client: Client;
@@ -41,6 +46,14 @@ describe("Edge case: index operator classes", () => {
   test("v1: create non-default opclass and verify idempotency", async () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
+    expect(await getIndexDefinitions(client, "pets")).toEqual([
+      {
+        name: "name_idx",
+        definition:
+          "CREATE INDEX name_idx ON public.pets USING btree (name text_pattern_ops)",
+      },
+    ]);
+
     const plan = await schemaService.plan(schemaV1, ["public"]);
     expect(plan.hasChanges).toBe(false);
   });
@@ -49,10 +62,16 @@ describe("Edge case: index operator classes", () => {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
-    console.log("Plan v1->v2:", JSON.stringify(plan, null, 2));
     expect(plan.hasChanges).toBe(true);
 
     await schemaService.apply(schemaV2, ["public"], true);
+
+    expect(await getIndexDefinitions(client, "pets")).toEqual([
+      {
+        name: "name_idx",
+        definition: "CREATE INDEX name_idx ON public.pets USING btree (name)",
+      },
+    ]);
 
     const plan2 = await schemaService.plan(schemaV2, ["public"]);
     expect(plan2.hasChanges).toBe(false);
@@ -60,6 +79,13 @@ describe("Edge case: index operator classes", () => {
 
   test("v3: GIN index with jsonb_path_ops idempotency", async () => {
     await schemaService.apply(schemaV3, ["public"], true);
+
+    expect(await getIndexDefinitions(client, "logs")).toEqual([
+      {
+        name: "j_idx",
+        definition: "CREATE INDEX j_idx ON public.logs USING gin (j jsonb_path_ops)",
+      },
+    ]);
 
     const plan = await schemaService.plan(schemaV3, ["public"]);
     expect(plan.hasChanges).toBe(false);
