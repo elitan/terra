@@ -9,7 +9,7 @@ function getPostgisConfig() {
     process.env.POSTGIS_DATABASE_URL ||
     process.env.EXTENSIONS_DATABASE_URL ||
     process.env.REAL_WORLD_SCHEMA_DATABASE_URL ||
-    "postgres://test_user:test_password@localhost:5490/postgres";
+    "postgres://test_user:test_password@localhost:5489/sql_terraform_test";
   const url = new URL(connectionString);
 
   return {

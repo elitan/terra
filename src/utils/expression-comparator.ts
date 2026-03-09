@@ -89,6 +89,13 @@ function normalizeRegexPattern(value: string): string {
   return value.replace(/\\([.^$|?*+(){}\[\]])/g, "$1");
 }
 
+function getOperatorName(aExpr: Record<string, unknown>): string | undefined {
+  const names = aExpr.name as Array<Record<string, unknown>> | undefined;
+  const firstName = names?.[0];
+  const stringNode = firstName?.String as { sval?: string } | undefined;
+  return stringNode?.sval;
+}
+
 function normalizeAstNode(node: unknown): unknown {
   if (node === null || node === undefined) return node;
   if (typeof node !== "object") return node;
@@ -205,9 +212,10 @@ function normalizeAstNode(node: unknown): unknown {
       const arrayExpr = rexpr?.A_ArrayExpr as Record<string, unknown[]>;
       const elements = arrayExpr?.elements;
       if (elements) {
-        const normalizedItems = elements.map(e => normalizeAstNode(e));
-        const operator = aExpr.name?.[0] as { String?: { sval?: string } } | undefined;
-        if (operator?.String?.sval === "<>") {
+        const normalizedItems = elements.map(function normalizeItem(element) {
+          return normalizeAstNode(element);
+        });
+        if (getOperatorName(aExpr) === "<>") {
           return {
             BoolExpr: {
               boolop: "AND_EXPR",
@@ -233,13 +241,15 @@ function normalizeAstNode(node: unknown): unknown {
       }
     }
 
-    if (aExpr.kind === "AEXPR_IN" && aExpr.name?.[0]?.String?.sval === "<>") {
+    if (aExpr.kind === "AEXPR_IN" && getOperatorName(aExpr) === "<>") {
       const col = normalizeAstNode(aExpr.lexpr);
       const rexpr = aExpr.rexpr as Record<string, unknown>;
       const list = rexpr?.List as Record<string, unknown[]>;
       const items = list?.items;
       if (items) {
-        const normalizedItems = items.map(e => normalizeAstNode(e));
+        const normalizedItems = items.map(function normalizeItem(item) {
+          return normalizeAstNode(item);
+        });
         return {
           BoolExpr: {
             boolop: "AND_EXPR",
