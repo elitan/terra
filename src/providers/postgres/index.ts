@@ -22,6 +22,7 @@ import type {
   Extension,
   SchemaDefinition,
   Comment,
+  SqlObject,
 } from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
 import { SchemaParser } from "../../core/schema/parser";
@@ -98,6 +99,7 @@ export class PostgresProvider implements DatabaseProvider {
       extensions: result.extensions || [],
       schemas: result.schemas || [],
       comments: result.comments || [],
+      sqlObjects: result.sqlObjects || [],
     };
   }
 
@@ -187,6 +189,14 @@ export class PostgresProvider implements DatabaseProvider {
   ): Promise<Comment[]> {
     const pgClient = (client as PostgresClient).raw;
     return this.inspector.getCurrentComments(pgClient, schemas);
+  }
+
+  async getCurrentSqlObjects(
+    client: DatabaseClient,
+    schemas?: string[]
+  ): Promise<SqlObject[]> {
+    const pgClient = (client as PostgresClient).raw;
+    return this.inspector.getCurrentSqlObjects(pgClient, schemas);
   }
 
   generateMigrationPlan(desired: Table[], current: Table[]): MigrationPlan {

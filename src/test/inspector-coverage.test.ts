@@ -486,6 +486,7 @@ describe("DatabaseInspector coverage", () => {
     inspector.getCurrentExtensions = async () => [{ name: "x" }];
     inspector.getCurrentSchemas = async () => [{ name: "public" }];
     inspector.getCurrentComments = async () => [{ comment: "c" }];
+    inspector.getCurrentSqlObjects = async () => [];
 
     const complete = await inspector.getCompleteSchema({} as any, ["public"]);
     expect(complete).toEqual({

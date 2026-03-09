@@ -10,6 +10,7 @@ import type {
   Extension,
   SchemaDefinition,
   Comment,
+  SqlObject,
 } from "../types/schema";
 import type { MigrationPlan } from "../types/migration";
 
@@ -56,6 +57,7 @@ export interface ParsedSchema {
   extensions: Extension[];
   schemas: SchemaDefinition[];
   comments: Comment[];
+  sqlObjects?: SqlObject[];
 }
 
 export type DatabaseFeature =
@@ -116,6 +118,7 @@ export interface DatabaseProvider {
   getCurrentExtensions(client: DatabaseClient, schemas?: string[]): Promise<Extension[]>;
   getCurrentSchemas(client: DatabaseClient, schemas?: string[]): Promise<SchemaDefinition[]>;
   getCurrentComments(client: DatabaseClient, schemas?: string[]): Promise<Comment[]>;
+  getCurrentSqlObjects?(client: DatabaseClient, schemas?: string[]): Promise<SqlObject[]>;
 
   generateMigrationPlan(desired: Table[], current: Table[]): MigrationPlan;
 

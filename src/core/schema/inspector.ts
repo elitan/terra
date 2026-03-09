@@ -18,6 +18,7 @@ import type {
   Extension,
   SchemaDefinition,
   Comment,
+  SqlObject,
 } from "../../types/schema";
 
 export class DatabaseInspector {
@@ -33,6 +34,8 @@ export class DatabaseInspector {
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
         AND t.table_type = 'BASE TABLE'
+        AND c.relkind = 'r'
+        AND NOT c.relispartition
         AND d.objid IS NULL
     `, [schemas]);
 
@@ -673,9 +676,30 @@ export class DatabaseInspector {
     return views;
   }
 
+  async getCurrentSqlObjects(client: Client, schemas: string[] = ['public']): Promise<SqlObject[]> {
+    const groups = await Promise.all([
+      this.getCurrentPartitionObjects(client, schemas),
+      this.getCurrentRowSecurityObjects(client, schemas),
+      this.getCurrentPolicyObjects(client, schemas),
+      this.getCurrentDomainObjects(client, schemas),
+      this.getCurrentRangeObjects(client, schemas),
+      this.getCurrentForeignServerObjects(client),
+      this.getCurrentConstraintTriggerObjects(client, schemas),
+      this.getCurrentEventTriggerObjects(client),
+      this.getCurrentRoleObjects(client),
+      this.getCurrentGrantObjects(client, schemas),
+    ]);
+
+    return groups
+      .flat()
+      .sort(function sortSqlObjects(a, b) {
+        return a.key.localeCompare(b.key);
+      });
+  }
+
   // Get complete schema including all database objects
   async getCompleteSchema(client: Client, schemas: string[] = ['public']): Promise<Schema> {
-    const [tables, views, enumTypes, compositeTypes, functions, procedures, triggers, sequences, extensions, schemaDefinitions, comments] = await Promise.all([
+    const [tables, views, enumTypes, compositeTypes, functions, procedures, triggers, sequences, extensions, schemaDefinitions, comments, sqlObjects] = await Promise.all([
       this.getCurrentSchema(client, schemas),
       this.getCurrentViews(client, schemas),
       this.getCurrentEnums(client, schemas),
@@ -687,6 +711,7 @@ export class DatabaseInspector {
       this.getCurrentExtensions(client, schemas),
       this.getCurrentSchemas(client, schemas),
       this.getCurrentComments(client, schemas),
+      this.getCurrentSqlObjects(client, schemas),
     ]);
 
     return {
@@ -701,6 +726,7 @@ export class DatabaseInspector {
       extensions,
       schemas: schemaDefinitions,
       comments,
+      ...(sqlObjects.length > 0 ? { sqlObjects } : {}),
     };
   }
 
@@ -814,6 +840,7 @@ export class DatabaseInspector {
       JOIN pg_namespace fn ON p.pronamespace = fn.oid
       WHERE n.nspname = ANY($1::text[])
         AND NOT t.tgisinternal
+        AND t.tgconstraint = 0
       ORDER BY c.relname, t.tgname
     `, [schemas]);
 
@@ -1392,6 +1419,656 @@ export class DatabaseInspector {
       columnName: row.column_name || undefined,
       comment: row.comment,
     }));
+  }
+
+  private async getCurrentPartitionObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        c.oid,
+        c.relname as table_name,
+        n.nspname as schema_name,
+        pg_get_partkeydef(c.oid) as partition_key
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND c.relkind = 'p'
+        AND d.objid IS NULL
+      ORDER BY n.nspname, c.relname
+    `, [schemas]);
+
+    const objects: SqlObject[] = [];
+
+    for (const row of result.rows) {
+      const columns = await this.getTableColumnDefinitions(client, row.table_name, row.schema_name);
+      const constraints = await this.getTableConstraintDefinitions(client, row.oid);
+      const body = [...columns, ...constraints].join(",\n  ");
+      const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
+      const createStatement = `CREATE TABLE ${qualifiedTable} (\n  ${body}\n) PARTITION BY ${row.partition_key};`;
+
+      objects.push({
+        kind: "partition",
+        key: `partition:${row.schema_name}.${row.table_name}`,
+        name: row.table_name,
+        schema: row.schema_name,
+        createStatement,
+        dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`,
+      });
+    }
+
+    const childResult = await client.query(`
+      SELECT
+        c.relname as table_name,
+        n.nspname as schema_name,
+        parent.relname as parent_name,
+        parent_ns.nspname as parent_schema,
+        pg_get_expr(c.relpartbound, c.oid) as partition_bound
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_inherits i ON i.inhrelid = c.oid
+      JOIN pg_class parent ON parent.oid = i.inhparent
+      JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+      LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND c.relispartition
+        AND d.objid IS NULL
+      ORDER BY n.nspname, c.relname
+    `, [schemas]);
+
+    for (const row of childResult.rows) {
+      const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
+      const parentTable = this.qualifyName(row.parent_name, row.parent_schema);
+      objects.push({
+        kind: "partition",
+        key: `partition:${row.schema_name}.${row.table_name}`,
+        name: row.table_name,
+        schema: row.schema_name,
+        createStatement: `CREATE TABLE ${qualifiedTable} PARTITION OF ${parentTable} ${row.partition_bound};`,
+        dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`,
+        dependencies: [`partition:${row.parent_schema}.${row.parent_name}`],
+      });
+    }
+
+    return objects;
+  }
+
+  private async getCurrentRowSecurityObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        c.relname as table_name,
+        n.nspname as schema_name,
+        c.relrowsecurity as row_security_enabled,
+        c.relforcerowsecurity as row_security_forced
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ANY($1::text[])
+        AND c.relkind IN ('r', 'p')
+        AND (c.relrowsecurity OR c.relforcerowsecurity)
+      ORDER BY n.nspname, c.relname
+    `, [schemas]);
+
+    const objects: SqlObject[] = [];
+
+    for (const row of result.rows) {
+      const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
+
+      if (row.row_security_enabled) {
+        objects.push({
+          kind: "row-level-security",
+          key: `row-level-security:${row.schema_name}.${row.table_name}:enabled`,
+          name: row.table_name,
+          schema: row.schema_name,
+          createStatement: `ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY;`,
+          dropStatement: `ALTER TABLE ${qualifiedTable} DISABLE ROW LEVEL SECURITY;`,
+        });
+      }
+
+      if (row.row_security_forced) {
+        objects.push({
+          kind: "row-level-security",
+          key: `row-level-security:${row.schema_name}.${row.table_name}:force`,
+          name: row.table_name,
+          schema: row.schema_name,
+          createStatement: `ALTER TABLE ${qualifiedTable} FORCE ROW LEVEL SECURITY;`,
+          dropStatement: `ALTER TABLE ${qualifiedTable} NO FORCE ROW LEVEL SECURITY;`,
+        });
+      }
+    }
+
+    return objects;
+  }
+
+  private async getCurrentPolicyObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        pol.polname as policy_name,
+        c.relname as table_name,
+        n.nspname as schema_name,
+        pol.polcmd as policy_command,
+        pol.polpermissive as is_permissive,
+        pg_get_expr(pol.polqual, pol.polrelid) as using_expression,
+        pg_get_expr(pol.polwithcheck, pol.polrelid) as with_check_expression,
+        CASE
+          WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['PUBLIC']::text[]
+          ELSE ARRAY(
+            SELECT rolname
+            FROM pg_roles
+            WHERE oid = ANY(pol.polroles)
+            ORDER BY rolname
+          )
+        END as policy_roles
+      FROM pg_policy pol
+      JOIN pg_class c ON c.oid = pol.polrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ANY($1::text[])
+      ORDER BY n.nspname, c.relname, pol.polname
+    `, [schemas]);
+
+    return result.rows.map((row: any) => {
+      const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
+      const commandMap: Record<string, string> = {
+        r: "SELECT",
+        a: "INSERT",
+        w: "UPDATE",
+        d: "DELETE",
+        "*": "ALL",
+      };
+      const parts = [
+        `CREATE POLICY ${this.quoteIdent(row.policy_name)}`,
+        `ON ${qualifiedTable}`,
+        `AS ${row.is_permissive ? "PERMISSIVE" : "RESTRICTIVE"}`,
+        `FOR ${commandMap[row.policy_command] || "ALL"}`,
+      ];
+
+      const roles = row.policy_roles || [];
+      if (roles.length > 0) {
+        parts.push(`TO ${roles.map((role: string) => this.quoteRole(role)).join(", ")}`);
+      }
+      if (row.using_expression) {
+        parts.push(`USING (${row.using_expression})`);
+      }
+      if (row.with_check_expression) {
+        parts.push(`WITH CHECK (${row.with_check_expression})`);
+      }
+
+      return {
+        kind: "policy" as const,
+        key: `policy:${row.schema_name}.${row.table_name}.${row.policy_name}`,
+        name: row.policy_name,
+        schema: row.schema_name,
+        createStatement: `${parts.join(" ")};`,
+        dropStatement: `DROP POLICY IF EXISTS ${this.quoteIdent(row.policy_name)} ON ${qualifiedTable};`,
+      };
+    });
+  }
+
+  private async getCurrentDomainObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        t.oid,
+        t.typname as type_name,
+        n.nspname as schema_name,
+        format_type(t.typbasetype, t.typtypmod) as base_type,
+        t.typnotnull as is_not_null,
+        t.typdefault as default_value
+      FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND t.typtype = 'd'
+        AND d.objid IS NULL
+      ORDER BY n.nspname, t.typname
+    `, [schemas]);
+
+    const objects: SqlObject[] = [];
+
+    for (const row of result.rows) {
+      const constraints = await client.query(`
+        SELECT
+          conname,
+          pg_get_constraintdef(oid) as definition
+        FROM pg_constraint
+        WHERE contypid = $1
+        ORDER BY conname
+      `, [row.oid]);
+
+      const parts = [
+        `CREATE DOMAIN ${this.qualifyName(row.type_name, row.schema_name)}`,
+        `AS ${row.base_type}`,
+      ];
+
+      if (row.default_value) {
+        parts.push(`DEFAULT ${row.default_value}`);
+      }
+      if (row.is_not_null) {
+        parts.push("NOT NULL");
+      }
+      for (const constraint of constraints.rows) {
+        parts.push(`CONSTRAINT ${this.quoteIdent(constraint.conname)} ${constraint.definition}`);
+      }
+
+      objects.push({
+        kind: "domain-type",
+        key: `domain-type:${row.schema_name}.${row.type_name}`,
+        name: row.type_name,
+        schema: row.schema_name,
+        createStatement: `${parts.join(" ")};`,
+        dropStatement: `DROP DOMAIN IF EXISTS ${this.qualifyName(row.type_name, row.schema_name)} CASCADE;`,
+      });
+    }
+
+    return objects;
+  }
+
+  private async getCurrentRangeObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        t.typname as type_name,
+        n.nspname as schema_name,
+        format_type(r.rngsubtype, NULL) as subtype_name,
+        CASE
+          WHEN opclass.oid IS NULL THEN NULL
+          WHEN opclass_ns.nspname = 'public' THEN quote_ident(opclass.opcname)
+          ELSE quote_ident(opclass_ns.nspname) || '.' || quote_ident(opclass.opcname)
+        END as subtype_opclass_name,
+        CASE
+          WHEN coll.oid IS NULL THEN NULL
+          WHEN coll_ns.nspname = 'public' THEN quote_ident(coll.collname)
+          ELSE quote_ident(coll_ns.nspname) || '.' || quote_ident(coll.collname)
+        END as collation_name,
+        CASE
+          WHEN canonical.oid IS NULL THEN NULL
+          ELSE canonical.oid::regproc::text
+        END as canonical_name,
+        CASE
+          WHEN diff.oid IS NULL THEN NULL
+          ELSE diff.oid::regproc::text
+        END as diff_name
+      FROM pg_range r
+      JOIN pg_type t ON t.oid = r.rngtypid
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      LEFT JOIN pg_opclass opclass ON opclass.oid = r.rngsubopc
+      LEFT JOIN pg_namespace opclass_ns ON opclass_ns.oid = opclass.opcnamespace
+      LEFT JOIN pg_collation coll ON coll.oid = r.rngcollation AND r.rngcollation <> 0
+      LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = coll.collnamespace
+      LEFT JOIN pg_proc canonical ON canonical.oid = r.rngcanonical AND r.rngcanonical <> 0
+      LEFT JOIN pg_proc diff ON diff.oid = r.rngsubdiff AND r.rngsubdiff <> 0
+      LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND d.objid IS NULL
+      ORDER BY n.nspname, t.typname
+    `, [schemas]);
+
+    return result.rows.map((row: any) => {
+      const params = [`subtype = ${row.subtype_name}`];
+      if (row.subtype_opclass_name) {
+        params.push(`subtype_opclass = ${row.subtype_opclass_name}`);
+      }
+      if (row.collation_name) {
+        params.push(`collation = ${row.collation_name}`);
+      }
+      if (row.canonical_name) {
+        params.push(`canonical = ${row.canonical_name}`);
+      }
+      if (row.diff_name) {
+        params.push(`subtype_diff = ${row.diff_name}`);
+      }
+
+      return {
+        kind: "range-type" as const,
+        key: `range-type:${row.schema_name}.${row.type_name}`,
+        name: row.type_name,
+        schema: row.schema_name,
+        createStatement: `CREATE TYPE ${this.qualifyName(row.type_name, row.schema_name)} AS RANGE (${params.join(", ")});`,
+        dropStatement: `DROP TYPE IF EXISTS ${this.qualifyName(row.type_name, row.schema_name)} CASCADE;`,
+      };
+    });
+  }
+
+  private async getCurrentForeignServerObjects(client: Client): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        srvname as server_name,
+        fdw.fdwname as fdw_name,
+        srvoptions as server_options
+      FROM pg_foreign_server s
+      JOIN pg_foreign_data_wrapper fdw ON fdw.oid = s.srvfdw
+      ORDER BY srvname
+    `);
+
+    return result.rows.map((row: any) => {
+      const options = this.formatOptions(row.server_options);
+      const suffix = options ? ` OPTIONS (${options})` : "";
+      return {
+        kind: "foreign-server" as const,
+        key: `foreign-server:${row.server_name}`,
+        name: row.server_name,
+        createStatement: `CREATE SERVER ${this.quoteIdent(row.server_name)} FOREIGN DATA WRAPPER ${this.quoteIdent(row.fdw_name)}${suffix};`,
+        dropStatement: `DROP SERVER IF EXISTS ${this.quoteIdent(row.server_name)} CASCADE;`,
+      };
+    });
+  }
+
+  private async getCurrentConstraintTriggerObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        t.tgname as trigger_name,
+        c.relname as table_name,
+        n.nspname as schema_name,
+        pg_get_triggerdef(t.oid) as trigger_definition
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = ANY($1::text[])
+        AND NOT t.tgisinternal
+        AND t.tgconstraint <> 0
+      ORDER BY n.nspname, c.relname, t.tgname
+    `, [schemas]);
+
+    return result.rows.map((row: any) => ({
+      kind: "constraint-trigger" as const,
+      key: `constraint-trigger:${row.schema_name}.${row.table_name}.${row.trigger_name}`,
+      name: row.trigger_name,
+      schema: row.schema_name,
+      createStatement: this.ensureStatement(row.trigger_definition),
+      dropStatement: `DROP TRIGGER IF EXISTS ${this.quoteIdent(row.trigger_name)} ON ${this.qualifyName(row.table_name, row.schema_name)};`,
+    }));
+  }
+
+  private async getCurrentEventTriggerObjects(client: Client): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        e.evtname as trigger_name,
+        e.evtevent as event_name,
+        e.evttags as trigger_tags,
+        p.proname as function_name,
+        n.nspname as function_schema
+      FROM pg_event_trigger e
+      JOIN pg_proc p ON p.oid = e.evtfoid
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      ORDER BY e.evtname
+    `);
+
+    return result.rows.map((row: any) => {
+      const tagClause = Array.isArray(row.trigger_tags) && row.trigger_tags.length > 0
+        ? ` WHEN TAG IN (${row.trigger_tags.map((tag: string) => this.quoteLiteral(tag)).join(", ")})`
+        : "";
+      return {
+        kind: "event-trigger" as const,
+        key: `event-trigger:${row.trigger_name}`,
+        name: row.trigger_name,
+        createStatement: `CREATE EVENT TRIGGER ${this.quoteIdent(row.trigger_name)} ON ${row.event_name}${tagClause} EXECUTE FUNCTION ${this.qualifyName(row.function_name, row.function_schema)}();`,
+        dropStatement: `DROP EVENT TRIGGER IF EXISTS ${this.quoteIdent(row.trigger_name)};`,
+      };
+    });
+  }
+
+  private async getCurrentRoleObjects(client: Client): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        rolname as role_name,
+        rolcanlogin as can_login,
+        rolsuper as is_superuser,
+        rolcreatedb as can_create_db,
+        rolcreaterole as can_create_role,
+        rolinherit as can_inherit,
+        rolreplication as can_replicate,
+        rolbypassrls as can_bypass_rls,
+        rolconnlimit as connection_limit
+      FROM pg_roles
+      WHERE rolname !~ '^pg_'
+        AND rolname <> 'public'
+      ORDER BY rolname
+    `);
+
+    return result.rows.map((row: any) => {
+      const kind = row.can_login ? "user" : "role";
+      const options = [row.can_login ? "LOGIN" : "NOLOGIN"];
+      if (row.is_superuser) {
+        options.push("SUPERUSER");
+      }
+      if (row.can_create_db) {
+        options.push("CREATEDB");
+      }
+      if (row.can_create_role) {
+        options.push("CREATEROLE");
+      }
+      if (!row.can_inherit) {
+        options.push("NOINHERIT");
+      }
+      if (row.can_replicate) {
+        options.push("REPLICATION");
+      }
+      if (row.can_bypass_rls) {
+        options.push("BYPASSRLS");
+      }
+      if (row.connection_limit !== -1) {
+        options.push(`CONNECTION LIMIT ${row.connection_limit}`);
+      }
+
+      const subject = kind === "user" ? "USER" : "ROLE";
+      return {
+        kind,
+        key: `${kind}:${row.role_name}`,
+        name: row.role_name,
+        createStatement: `CREATE ${subject} ${this.quoteIdent(row.role_name)} WITH ${options.join(" ")};`,
+        dropStatement: `DROP ${subject} IF EXISTS ${this.quoteIdent(row.role_name)};`,
+      };
+    });
+  }
+
+  private async getCurrentGrantObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
+    const [classResult, schemaResult, serverResult] = await Promise.all([
+      client.query(`
+        SELECT
+          n.nspname as schema_name,
+          c.relname as object_name,
+          CASE
+            WHEN c.relkind = 'S' THEN 'SEQUENCE'
+            ELSE 'TABLE'
+          END as object_type,
+          COALESCE(grantee.rolname, 'PUBLIC') as grantee_name,
+          privilege.privilege_type,
+          privilege.is_grantable
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN LATERAL aclexplode(c.relacl) as privilege ON c.relacl IS NOT NULL
+        LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
+        WHERE n.nspname = ANY($1::text[])
+          AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+        ORDER BY n.nspname, c.relname, grantee_name, privilege.privilege_type
+      `, [schemas]),
+      client.query(`
+        SELECT
+          n.nspname as schema_name,
+          COALESCE(grantee.rolname, 'PUBLIC') as grantee_name,
+          privilege.privilege_type,
+          privilege.is_grantable
+        FROM pg_namespace n
+        JOIN LATERAL aclexplode(n.nspacl) as privilege ON n.nspacl IS NOT NULL
+        LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
+        WHERE n.nspname = ANY($1::text[])
+        ORDER BY n.nspname, grantee_name, privilege.privilege_type
+      `, [schemas]),
+      client.query(`
+        SELECT
+          s.srvname as server_name,
+          COALESCE(grantee.rolname, 'PUBLIC') as grantee_name,
+          privilege.privilege_type,
+          privilege.is_grantable
+        FROM pg_foreign_server s
+        JOIN LATERAL aclexplode(s.srvacl) as privilege ON s.srvacl IS NOT NULL
+        LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
+        ORDER BY s.srvname, grantee_name, privilege.privilege_type
+      `),
+    ]);
+
+    const objects: SqlObject[] = [];
+
+    for (const row of classResult.rows) {
+      objects.push(this.buildGrantObject(
+        row.object_type,
+        row.object_name,
+        row.schema_name,
+        row.grantee_name,
+        row.privilege_type,
+        row.is_grantable
+      ));
+    }
+
+    for (const row of schemaResult.rows) {
+      objects.push(this.buildGrantObject(
+        "SCHEMA",
+        row.schema_name,
+        row.schema_name,
+        row.grantee_name,
+        row.privilege_type,
+        row.is_grantable
+      ));
+    }
+
+    for (const row of serverResult.rows) {
+      objects.push(this.buildGrantObject(
+        "FOREIGN SERVER",
+        row.server_name,
+        undefined,
+        row.grantee_name,
+        row.privilege_type,
+        row.is_grantable
+      ));
+    }
+
+    return objects;
+  }
+
+  private async getTableColumnDefinitions(client: Client, tableName: string, tableSchema: string): Promise<string[]> {
+    const result = await client.query(
+      `
+        SELECT
+          a.attname as column_name,
+          format_type(a.atttypid, a.atttypmod) as pg_type,
+          NOT a.attnotnull as is_nullable,
+          pg_get_expr(ad.adbin, ad.adrelid) as column_default,
+          a.attgenerated,
+          CASE
+            WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
+            ELSE NULL
+          END as generation_expression
+        FROM pg_attribute a
+        LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+        JOIN pg_class cls ON cls.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = cls.relnamespace
+        WHERE cls.relname = $1
+          AND n.nspname = $2
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+        ORDER BY a.attnum
+      `,
+      [tableName, tableSchema]
+    );
+
+    return result.rows.map(this.buildColumnDefinition, this);
+  }
+
+  private async getTableConstraintDefinitions(client: Client, relationOid: number): Promise<string[]> {
+    const result = await client.query(`
+      SELECT
+        conname,
+        pg_get_constraintdef(oid) as definition
+      FROM pg_constraint
+      WHERE conrelid = $1
+      ORDER BY conname
+    `, [relationOid]);
+
+    return result.rows.map((row: any) => {
+      return `CONSTRAINT ${this.quoteIdent(row.conname)} ${row.definition}`;
+    });
+  }
+
+  private buildColumnDefinition(row: any): string {
+    const parts = [this.quoteIdent(row.column_name), row.pg_type];
+
+    if (row.attgenerated && row.attgenerated !== "") {
+      const always = row.attgenerated === "s" || row.attgenerated === "a" ? "ALWAYS" : "BY DEFAULT";
+      const stored = row.attgenerated === "s" ? "STORED" : "VIRTUAL";
+      parts.push(`GENERATED ${always} AS (${row.generation_expression}) ${stored}`);
+      return parts.join(" ");
+    }
+
+    if (!row.is_nullable) {
+      parts.push("NOT NULL");
+    }
+    if (row.column_default) {
+      parts.push(`DEFAULT ${row.column_default}`);
+    }
+
+    return parts.join(" ");
+  }
+
+  private buildGrantObject(
+    objectType: string,
+    objectName: string,
+    schemaName: string | undefined,
+    granteeName: string,
+    privilegeType: string,
+    isGrantable: boolean
+  ): SqlObject {
+    const target = this.formatGrantTarget(objectType, objectName, schemaName);
+    const grantOption = isGrantable ? " WITH GRANT OPTION" : "";
+    const createStatement = `GRANT ${privilegeType} ON ${objectType} ${target} TO ${this.quoteRole(granteeName)}${grantOption};`;
+    return {
+      kind: "grant",
+      key: `grant:${createStatement.replace(/\s+/g, " ").trim()}`,
+      name: createStatement.replace(/\s+/g, " ").trim(),
+      schema: schemaName,
+      createStatement,
+      dropStatement: `REVOKE ${privilegeType} ON ${objectType} ${target} FROM ${this.quoteRole(granteeName)};`,
+    };
+  }
+
+  private formatGrantTarget(objectType: string, objectName: string, schemaName?: string): string {
+    if (objectType === "SCHEMA") {
+      return this.quoteIdent(objectName);
+    }
+    if (objectType === "FOREIGN SERVER") {
+      return this.quoteIdent(objectName);
+    }
+    return this.qualifyName(objectName, schemaName);
+  }
+
+  private formatOptions(options: string[] | null): string {
+    if (!options || options.length === 0) {
+      return "";
+    }
+
+    return options.map((option) => {
+      const match = option.match(/^([^=]+)=(.*)$/);
+      if (!match) {
+        return option;
+      }
+      return `${match[1] || ""} ${this.quoteLiteral(match[2] || "")}`;
+    }).join(", ");
+  }
+
+  private ensureStatement(statement: string): string {
+    const trimmed = statement.trim();
+    return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
+  }
+
+  private quoteIdent(value: string): string {
+    return `"${String(value).replace(/"/g, '""')}"`;
+  }
+
+  private quoteLiteral(value: string): string {
+    return `'${String(value).replace(/'/g, "''")}'`;
+  }
+
+  private quoteRole(value: string): string {
+    return value === "PUBLIC" ? "PUBLIC" : this.quoteIdent(value);
+  }
+
+  private qualifyName(name: string, schema?: string): string {
+    return schema ? `${this.quoteIdent(schema)}.${this.quoteIdent(name)}` : this.quoteIdent(name);
   }
 
   // Helper method to analyze view dependencies
