@@ -198,6 +198,31 @@ function quoteTypeIdentifier(value: string): string {
  */
 function extractDefaultValue(defaultNode: any): string {
   try {
+    const sql = deparseSync([
+      {
+        SelectStmt: {
+          targetList: [
+            {
+              ResTarget: {
+                val: defaultNode,
+              },
+            },
+          ],
+          op: "SETOP_NONE",
+          limitOption: "LIMIT_OPTION_DEFAULT",
+        },
+      },
+    ]).trim();
+
+    if (sql.startsWith("SELECT ")) {
+      return sql.slice(7).trim();
+    }
+
+    return sql || "";
+  } catch (error) {
+  }
+
+  try {
     const deparsed = deparseSync([defaultNode]).trim();
     if (deparsed) {
       return deparsed;
@@ -206,7 +231,7 @@ function extractDefaultValue(defaultNode: any): string {
   }
 
   try {
-    if (defaultNode.expr) {
+    if (defaultNode?.expr) {
       return defaultNode.expr.text || defaultNode.expr.value || "";
     }
   } catch (error) {

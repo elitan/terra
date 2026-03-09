@@ -67,7 +67,7 @@ export function parseColumn(columnDef: any): Column | null {
 /**
  * Extract data type from typeName node
  */
-function extractDataType(typeName: any): string {
+export function extractDataType(typeName: any): string {
   try {
     if (!typeName || !typeName.names) return "UNKNOWN";
 

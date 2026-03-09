@@ -325,6 +325,19 @@ describe("Handler module coverage", () => {
       expect(statements).toEqual([]);
     });
 
+    test("does not update for equivalent trigger event order", () => {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        events: ["INSERT", "DELETE", "UPDATE"],
+      });
+      const current = makeTrigger({
+        events: ["INSERT", "UPDATE", "DELETE"],
+      });
+
+      const statements = handler.generateStatements([desired], [current]);
+      expect(statements).toEqual([]);
+    });
+
     test("uses sqlite trigger definition for create and drop statements", () => {
       const handler = new TriggerHandler();
       const sqliteTrigger = makeTrigger({

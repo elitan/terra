@@ -24,6 +24,7 @@ import {
   generateAddUniqueConstraintSQL,
   generateDropUniqueConstraintSQL,
   getQualifiedTableName,
+  getForeignKeyConstraintName,
   splitSchemaTable,
   getBareTableName,
 } from "../../utils/sql";
@@ -386,7 +387,7 @@ export class SchemaDiffer {
     // Special handling for generated columns - they need drop and recreate
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
       (!desiredColumn.generated || !currentColumn.generated ||
-       normalizeExpression(desiredColumn.generated.expression) !== normalizeExpression(currentColumn.generated.expression) ||
+       !expressionsEqual(desiredColumn.generated.expression, currentColumn.generated.expression) ||
        desiredColumn.generated.always !== currentColumn.generated.always ||
        desiredColumn.generated.stored !== currentColumn.generated.stored);
 
@@ -478,7 +479,7 @@ export class SchemaDiffer {
     }
 
     // Step 4: Handle nullable constraint changes last
-    if (desiredColumn.nullable !== currentColumn.nullable) {
+    if (!desiredColumn.generated && !currentColumn.generated && desiredColumn.nullable !== currentColumn.nullable) {
       if (!desiredColumn.nullable) {
         const sql = new SQLBuilder()
           .p("ALTER TABLE")
@@ -913,6 +914,7 @@ export class SchemaDiffer {
     } else if (where1 !== where2) {
       return false;
     }
+    if (index1.expressionOpclass !== index2.expressionOpclass) return false;
     if (index1.tablespace !== index2.tablespace) return false;
 
     const opclasses1 = index1.opclasses || {};
@@ -1005,12 +1007,13 @@ export class SchemaDiffer {
       if (hasOperators) {
         expr = `(${expr})`;
       }
+      const expressionOpclass = index.expressionOpclass;
       const sortOrder = index.sortOrders?.[0];
+      let expressionDefinition = expressionOpclass ? `${expr} ${expressionOpclass}` : expr;
       if (sortOrder === 'DESC') {
-        builder.p(`(${expr} DESC)`);
-      } else {
-        builder.p(`(${expr})`);
+        expressionDefinition += ' DESC';
       }
+      builder.p(`(${expressionDefinition})`);
     } else {
       const quotedColumns = index.columns.map((col, i) => {
         const quoted = `"${col.replace(/"/g, '""')}"`;
@@ -1363,7 +1366,7 @@ export class SchemaDiffer {
     // We'll still do this as separate statements for now (not batched)
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
       (!desiredColumn.generated || !currentColumn.generated ||
-       normalizeExpression(desiredColumn.generated.expression) !== normalizeExpression(currentColumn.generated.expression) ||
+       !expressionsEqual(desiredColumn.generated.expression, currentColumn.generated.expression) ||
        desiredColumn.generated.always !== currentColumn.generated.always ||
        desiredColumn.generated.stored !== currentColumn.generated.stored);
 
@@ -1426,7 +1429,7 @@ export class SchemaDiffer {
     }
 
     // Handle nullable constraint changes
-    if (desiredColumn.nullable !== currentColumn.nullable) {
+    if (!desiredColumn.generated && !currentColumn.generated && desiredColumn.nullable !== currentColumn.nullable) {
       if (!desiredColumn.nullable) {
         alterations.push({
           type: "alter_column_set_not_null",
@@ -1457,9 +1460,6 @@ export class SchemaDiffer {
       return constraints.find(c => expressionsEqual(expr, c.expression));
     };
 
-    const bareTableName = getBareTableName(tableName);
-    const fallbackName = `${bareTableName}_check`;
-
     const processedCurrentNames = new Set<string>();
 
     for (const desired of desiredConstraints) {
@@ -1468,9 +1468,7 @@ export class SchemaDiffer {
         if (matchingCurrent.name) {
           processedCurrentNames.add(matchingCurrent.name);
         }
-        const desiredEffectiveName = desired.name || fallbackName;
-        const currentEffectiveName = matchingCurrent.name || fallbackName;
-        if (currentEffectiveName !== desiredEffectiveName) {
+        if (desired.name && matchingCurrent.name !== desired.name) {
           if (matchingCurrent.name) {
             alterations.push({
               type: "drop_check",
@@ -1715,11 +1713,13 @@ export class SchemaDiffer {
           break;
 
         case "add_check": {
-          const bareTable = getBareTableName(table.name);
-          const constraintName = alt.constraint.name || `${bareTable}_check`;
-          b.p("ADD CONSTRAINT")
-            .ident(constraintName)
-            .p(`CHECK (${alt.constraint.expression})`);
+          if (alt.constraint.name) {
+            b.p("ADD CONSTRAINT")
+              .ident(alt.constraint.name)
+              .p(`CHECK (${alt.constraint.expression})`);
+          } else {
+            b.p(`ADD CHECK (${alt.constraint.expression})`);
+          }
           break;
         }
 
@@ -1728,7 +1728,7 @@ export class SchemaDiffer {
           break;
 
         case "add_foreign_key": {
-          const constraintName = alt.constraint.name || `fk_${table.name}_${alt.constraint.referencedTable}`;
+          const constraintName = getForeignKeyConstraintName(table.name, alt.constraint);
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           const referencedColumns = alt.constraint.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")

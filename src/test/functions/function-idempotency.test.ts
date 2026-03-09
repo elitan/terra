@@ -141,4 +141,30 @@ describe("Function idempotency", () => {
     const statements = functionHandler.generateStatements(desiredFunctions, currentFunctions);
     expect(statements.length).toBeGreaterThan(0);
   });
+
+  test("should keep only the last duplicate function definition for one signature", async () => {
+    const provider = createTestProvider();
+
+    const schema = `
+      CREATE FUNCTION duplicate_fn(a INT)
+      RETURNS INT
+      AS $$
+        SELECT a + 1
+      $$
+      LANGUAGE SQL;
+
+      CREATE OR REPLACE FUNCTION duplicate_fn(a INT)
+      RETURNS INT
+      AS $$
+        SELECT a + 2
+      $$
+      LANGUAGE SQL;
+    `;
+
+    const parsed = await provider.parseSchema(schema);
+    const statements = functionHandler.generateStatements(parsed.functions, []);
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain("SELECT a + 2");
+  });
 });

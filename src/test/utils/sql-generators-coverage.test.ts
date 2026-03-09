@@ -22,6 +22,7 @@ import {
   generateDropTypeSQL,
   generateDropUniqueConstraintSQL,
   generateDropViewSQL,
+  getForeignKeyConstraintName,
   generatePrimaryKeyClause,
   generateRefreshMaterializedViewSQL,
   getQualifiedTableName,
@@ -111,6 +112,7 @@ describe("SQL generators coverage", () => {
       initiallyDeferred: true,
     });
     expect(fkSQL).toContain("FOREIGN KEY");
+    expect(fkSQL).toContain('"fk_orders_user_id_users"');
     expect(fkSQL).toContain("ON DELETE CASCADE");
     expect(fkSQL).toContain("ON UPDATE SET NULL");
     expect(fkSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
@@ -126,6 +128,34 @@ describe("SQL generators coverage", () => {
     expect(uniqueSQL).toContain("UNIQUE (\"email\")");
     expect(uniqueSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(generateDropUniqueConstraintSQL("users", "users_email_unique")).toContain("DROP CONSTRAINT");
+  });
+
+  test("builds distinct generated foreign key names", () => {
+    expect(
+      getForeignKeyConstraintName("application_replies", {
+        columns: ["created_by_user_id"],
+        referencedTable: "users",
+        referencedColumns: ["id"],
+      })
+    ).toBe("fk_application_replies_created_by_user_id_users");
+
+    expect(
+      getForeignKeyConstraintName("application_replies", {
+        columns: ["deleted_by_user_id"],
+        referencedTable: "users",
+        referencedColumns: ["id"],
+      })
+    ).toBe("fk_application_replies_deleted_by_user_id_users");
+  });
+
+  test("uses schema-qualified table targets in alter statements", () => {
+    expect(
+      generateAddForeignKeySQL("ai_token_manager.ai_models", {
+        columns: ["provider_id"],
+        referencedTable: "ai_token_manager.ai_providers",
+        referencedColumns: ["id"],
+      })
+    ).toContain('ALTER TABLE "ai_token_manager"."ai_models"');
   });
 
   test("builds view SQL variations", () => {

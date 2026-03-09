@@ -110,13 +110,6 @@ describe("Issue #70 - CHECK constraint idempotency with IN/NOT IN", () => {
   test("should be idempotent for unnamed constraints after first migration", async () => {
     const schemaService = createTestSchemaService();
 
-    await client.query(`
-      CREATE TABLE exercises (
-        id SERIAL PRIMARY KEY,
-        difficulty TEXT CHECK (difficulty IN ('beginner', 'intermediate', 'advanced'))
-      );
-    `);
-
     const desiredSchema = `
       CREATE TABLE exercises (
         id SERIAL PRIMARY KEY,

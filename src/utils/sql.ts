@@ -1,4 +1,4 @@
-import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType } from "../types/schema";
+import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType, CompositeType } from "../types/schema";
 import { SQLBuilder } from "./sql-builder";
 import { expressionsEqual } from "./expression-comparator";
 
@@ -14,6 +14,51 @@ export function splitSchemaTable(qualifiedName: string): [string, string | undef
 export function getBareTableName(tableName: string): string {
   const parts = tableName.split('.');
   return parts[parts.length - 1] ?? tableName;
+}
+
+function sanitizeConstraintNamePart(value: string): string {
+  return value
+    .replace(/"/g, "")
+    .replace(/\./g, "_")
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function hashConstraintName(value: string): string {
+  let hash = 0;
+
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return hash.toString(36);
+}
+
+export function getForeignKeyConstraintName(
+  tableName: string,
+  foreignKey: ForeignKeyConstraint
+): string {
+  if (foreignKey.name) {
+    return foreignKey.name;
+  }
+
+  const [referencedTable] = splitSchemaTable(foreignKey.referencedTable);
+  const base = [
+    "fk",
+    getBareTableName(tableName),
+    foreignKey.columns.join("_"),
+    referencedTable,
+  ]
+    .map(sanitizeConstraintNamePart)
+    .filter(Boolean)
+    .join("_");
+
+  if (base.length <= 63) {
+    return base;
+  }
+
+  const suffix = hashConstraintName(base);
+  return `${base.slice(0, 63 - suffix.length - 1)}_${suffix}`;
 }
 
 /**
@@ -462,10 +507,11 @@ export function generateAddPrimaryKeySQL(
   const bareTable = getBareTableName(tableName);
   const constraintName = primaryKey.name || `${bareTable}_pkey`;
   const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
 
   return new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("ADD CONSTRAINT")
     .ident(constraintName)
     .p(`PRIMARY KEY (${columns});`)
@@ -476,9 +522,10 @@ export function generateDropPrimaryKeySQL(
   tableName: string,
   constraintName: string
 ): string {
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
   return new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("DROP CONSTRAINT")
     .ident(constraintName)
     .p(";")
@@ -502,13 +549,14 @@ export function generateAddForeignKeySQL(
   tableName: string,
   foreignKey: ForeignKeyConstraint
 ): string {
-  const constraintName = foreignKey.name || `fk_${tableName}_${foreignKey.referencedTable}`;
+  const constraintName = getForeignKeyConstraintName(tableName, foreignKey);
   const columns = foreignKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
   const referencedColumns = foreignKey.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
 
   const builder = new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("ADD CONSTRAINT")
     .ident(constraintName)
     .p(`FOREIGN KEY (${columns}) REFERENCES`)
@@ -532,9 +580,10 @@ export function generateDropForeignKeySQL(
   tableName: string,
   constraintName: string
 ): string {
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
   return new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("DROP CONSTRAINT")
     .ident(constraintName)
     .p(";")
@@ -547,24 +596,29 @@ export function generateAddCheckConstraintSQL(
   tableName: string,
   checkConstraint: CheckConstraint
 ): string {
-  const bareTable = getBareTableName(tableName);
-  const constraintName = checkConstraint.name || `${bareTable}_check`;
-  return new SQLBuilder()
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
+  const builder = new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
-    .p("ADD CONSTRAINT")
-    .ident(constraintName)
-    .p(`CHECK (${checkConstraint.expression});`)
-    .build();
+    .table(targetTable, targetSchema);
+
+  if (checkConstraint.name) {
+    builder.p("ADD CONSTRAINT").ident(checkConstraint.name);
+  } else {
+    builder.p("ADD");
+  }
+
+  builder.p(`CHECK (${checkConstraint.expression});`);
+  return builder.build();
 }
 
 export function generateDropCheckConstraintSQL(
   tableName: string,
   constraintName: string
 ): string {
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
   return new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("DROP CONSTRAINT")
     .ident(constraintName)
     .p(";")
@@ -594,9 +648,10 @@ export function generateAddUniqueConstraintSQL(
   const bareTable = getBareTableName(tableName);
   const constraintName = uniqueConstraint.name || `${bareTable}_${uniqueConstraint.columns.join('_')}_unique`;
   const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
   const builder = new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("ADD CONSTRAINT")
     .ident(constraintName)
     .p(`UNIQUE (${columns})`);
@@ -610,9 +665,10 @@ export function generateDropUniqueConstraintSQL(
   tableName: string,
   constraintName: string
 ): string {
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
   return new SQLBuilder()
     .p("ALTER TABLE")
-    .table(tableName)
+    .table(targetTable, targetSchema)
     .p("DROP CONSTRAINT")
     .ident(constraintName)
     .p(";")
@@ -978,6 +1034,26 @@ export function generateCreateTypeSQL(enumType: EnumType): string {
 
   const values = enumType.values.map(value => `'${value}'`).join(', ');
   builder.p(`AS ENUM (${values});`);
+
+  return builder.build();
+}
+
+export function generateCreateCompositeTypeSQL(compositeType: CompositeType): string {
+  const builder = new SQLBuilder();
+
+  builder.p('CREATE TYPE');
+  if (compositeType.schema) {
+    builder.ident(compositeType.schema);
+    builder.rewriteLastChar('.');
+  }
+  builder.ident(compositeType.name);
+
+  const attributes = compositeType.attributes
+    .map(function (attribute) {
+      return `"${attribute.name.replace(/"/g, '""')}" ${attribute.type}`;
+    })
+    .join(', ');
+  builder.p(`AS (${attributes});`);
 
   return builder.build();
 }

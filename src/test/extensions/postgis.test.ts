@@ -4,30 +4,43 @@ import { SchemaService } from "../../core/schema/service";
 import { DatabaseInspector } from "../../core/schema/inspector";
 import { PostgresProvider } from "../../providers/postgres";
 
-const POSTGIS_CONFIG = {
-  host: process.env.POSTGIS_HOST || "localhost",
-  port: Number.parseInt(process.env.POSTGIS_PORT || "5489", 10),
-  database: process.env.POSTGIS_DB || "sql_terraform_test",
-  user: process.env.POSTGIS_USER || "test_user",
-  password: process.env.POSTGIS_PASSWORD || "test_password",
-};
+function getPostgisConfig() {
+  const connectionString =
+    process.env.POSTGIS_DATABASE_URL ||
+    process.env.EXTENSIONS_DATABASE_URL ||
+    process.env.REAL_WORLD_SCHEMA_DATABASE_URL ||
+    "postgres://test_user:test_password@localhost:5489/sql_terraform_test";
+  const url = new URL(connectionString);
+
+  return {
+    host: url.hostname,
+    port: Number.parseInt(url.port || "5432", 10),
+    database: url.pathname.slice(1) || "postgres",
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+}
 
 async function createPostgisClient(): Promise<Client> {
-  const client = new Client(POSTGIS_CONFIG);
+  const client = new Client(getPostgisConfig());
   await client.connect();
   return client;
 }
 
 function createPostgisSchemaService(): SchemaService {
   const provider = new PostgresProvider();
-  return new SchemaService(provider, { dialect: "postgres", ...POSTGIS_CONFIG });
+  return new SchemaService(provider, { dialect: "postgres", ...getPostgisConfig() });
 }
 
 async function cleanDatabase(client: Client) {
   const tables = await client.query(`
-    SELECT tablename FROM pg_tables
-    WHERE schemaname = 'public'
-      AND tablename NOT IN ('spatial_ref_sys')
+    SELECT t.tablename
+    FROM pg_tables t
+    JOIN pg_class c ON c.relname = t.tablename
+    JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.schemaname
+    LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+    WHERE t.schemaname = 'public'
+      AND d.objid IS NULL
   `);
 
   for (const row of tables.rows) {
@@ -79,7 +92,6 @@ describe("Extension Support - PostGIS", () => {
       expect(spatialRefSys.rows).toHaveLength(1);
 
       const tables = await inspector.getCurrentSchema(client, ['public']);
-
       const foundTable = tables.find(t => t.name === 'spatial_ref_sys');
       expect(foundTable).toBeUndefined();
     });

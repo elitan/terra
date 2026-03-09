@@ -8,6 +8,7 @@ import type {
   UniqueConstraint,
   Index,
   EnumType,
+  CompositeType,
   View,
   Schema,
   Function,
@@ -184,17 +185,7 @@ export class DatabaseInspector {
         ic.reloptions as storage_options,
         CASE
           WHEN ix.indexprs IS NOT NULL THEN
-            -- Extract expression from pg_get_indexdef, removing outer parens and sort options
-            regexp_replace(
-              regexp_replace(
-                regexp_replace(
-                  regexp_replace(i.indexdef, ' WHERE .*$', ''),  -- Remove WHERE clause first
-                  '^.*USING [a-z]+ \\((.+)\\)$', '\\1'  -- Extract content between USING method ( and )
-                ),
-                ' (ASC|DESC|NULLS FIRST|NULLS LAST)+$', '', 'gi'  -- Remove sort options
-              ),
-              '^\\((.+)\\)$', '\\1'  -- Remove outer parentheses
-            )
+            pg_get_indexdef(ix.indexrelid, 1, false)
           ELSE NULL
         END as expression_def,
         CASE
@@ -227,6 +218,21 @@ export class DatabaseInspector {
           ELSE
             ARRAY[]::text[]
         END as opclass_names,
+        CASE
+          WHEN ix.indexprs IS NOT NULL THEN
+            (
+              SELECT
+                CASE
+                  WHEN opc.opcdefault THEN NULL
+                  ELSE opc.opcname
+                END
+              FROM unnest(ix.indclass) WITH ORDINALITY AS u(opcoid, ord)
+              JOIN pg_opclass opc ON opc.oid = u.opcoid
+              ORDER BY u.ord
+              LIMIT 1
+            )
+          ELSE NULL
+        END as expression_opclass_name,
         CASE
           WHEN ix.indpred IS NOT NULL THEN
             regexp_replace(
@@ -280,6 +286,7 @@ export class DatabaseInspector {
         columns,
         sortOrders: hasNonDefaultSort ? sortOrders : undefined,
         opclasses,
+        ...(row.expression_opclass_name ? { expressionOpclass: row.expression_opclass_name } : {}),
         type: this.mapPostgreSQLIndexType(row.access_method),
         unique: row.is_unique,
         concurrent: false,
@@ -518,6 +525,57 @@ export class DatabaseInspector {
     return enums;
   }
 
+  async getCurrentCompositeTypes(client: Client, schemas: string[] = ['public']): Promise<CompositeType[]> {
+    const result = await client.query(`
+      SELECT
+        t.typname as type_name,
+        n.nspname as schema_name,
+        a.attname as attribute_name,
+        format_type(a.atttypid, a.atttypmod) as attribute_type,
+        a.attnum
+      FROM pg_type t
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      JOIN pg_class c ON c.oid = t.typrelid
+      JOIN pg_attribute a ON a.attrelid = c.oid
+      LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND t.typtype = 'c'
+        AND c.relkind = 'c'
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+        AND d.objid IS NULL
+      ORDER BY n.nspname, t.typname, a.attnum
+    `, [schemas]);
+
+    const groups = new Map<string, CompositeType>();
+
+    for (const row of result.rows) {
+      const key = `${row.schema_name}.${row.type_name}`;
+      const current = groups.get(key);
+
+      if (current) {
+        current.attributes.push({
+          name: row.attribute_name,
+          type: row.attribute_type,
+        });
+        continue;
+      }
+
+      groups.set(key, {
+        name: row.type_name,
+        schema: row.schema_name,
+        attributes: [
+          {
+            name: row.attribute_name,
+            type: row.attribute_type,
+          },
+        ],
+      });
+    }
+
+    return Array.from(groups.values());
+  }
+
   // Get all views from the database
   async getCurrentViews(client: Client, schemas: string[] = ['public']): Promise<View[]> {
     const views: View[] = [];
@@ -527,7 +585,7 @@ export class DatabaseInspector {
       SELECT
         v.table_name as view_name,
         v.table_schema as schema_name,
-        v.view_definition,
+        pg_get_viewdef(c.oid, false) as view_definition,
         v.check_option,
         c.reloptions,
         v.is_updatable,
@@ -617,10 +675,11 @@ export class DatabaseInspector {
 
   // Get complete schema including all database objects
   async getCompleteSchema(client: Client, schemas: string[] = ['public']): Promise<Schema> {
-    const [tables, views, enumTypes, functions, procedures, triggers, sequences, extensions, schemaDefinitions, comments] = await Promise.all([
+    const [tables, views, enumTypes, compositeTypes, functions, procedures, triggers, sequences, extensions, schemaDefinitions, comments] = await Promise.all([
       this.getCurrentSchema(client, schemas),
       this.getCurrentViews(client, schemas),
       this.getCurrentEnums(client, schemas),
+      this.getCurrentCompositeTypes(client, schemas),
       this.getCurrentFunctions(client, schemas),
       this.getCurrentProcedures(client, schemas),
       this.getCurrentTriggers(client, schemas),
@@ -634,6 +693,7 @@ export class DatabaseInspector {
       tables,
       views,
       enumTypes,
+      ...(compositeTypes.length > 0 ? { compositeTypes } : {}),
       functions,
       procedures,
       triggers,
@@ -1272,6 +1332,26 @@ export class DatabaseInspector {
       JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
       WHERE n.nspname = ANY($1::text[])
         AND c.relkind IN ('r', 'v', 'm', 'i')
+
+      UNION ALL
+
+      SELECT
+        'TYPE' as object_type,
+        t.typname as object_name,
+        n.nspname as schema_name,
+        NULL as column_name,
+        d.description as comment
+      FROM pg_type t
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      JOIN pg_description d ON d.objoid = t.oid AND d.objsubid = 0
+      LEFT JOIN pg_class c ON c.oid = t.typrelid
+      LEFT JOIN pg_depend dep ON dep.objid = t.oid AND dep.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND dep.objid IS NULL
+        AND (
+          t.typtype = 'e'
+          OR (t.typtype = 'c' AND c.relkind = 'c')
+        )
 
       UNION ALL
 

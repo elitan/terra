@@ -422,11 +422,63 @@ describe("DatabaseInspector coverage", () => {
     ]);
   });
 
+  test("parses expression index opclass metadata", async () => {
+    const inspector = new DatabaseInspector();
+    const client = createClient((sql, params) => {
+      if (sql.includes("FROM pg_indexes i")) {
+        expect(params).toEqual(["users", "public"]);
+        return {
+          rows: [
+            {
+              index_name: "idx_users_lower_email",
+              table_name: "users",
+              table_schema: "public",
+              index_definition: "CREATE INDEX idx_users_lower_email ON users USING gin (lower(email) gin_trgm_ops)",
+              is_unique: false,
+              access_method: "gin",
+              has_expressions: true,
+              tablespace_name: null,
+              storage_options: null,
+              expression_def: "lower(email)",
+              column_names: [],
+              opclass_names: [],
+              expression_opclass_name: "gin_trgm_ops",
+              where_clause: null,
+              sort_options: [0],
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const indexes = await inspector.getTableIndexes(client, "users", "public");
+    expect(indexes).toEqual([
+      {
+        name: "idx_users_lower_email",
+        tableName: "users",
+        schema: "public",
+        columns: [],
+        opclasses: undefined,
+        expressionOpclass: "gin_trgm_ops",
+        type: "gin",
+        unique: false,
+        concurrent: false,
+        where: undefined,
+        expression: "lower(email)",
+        storageParameters: undefined,
+        tablespace: undefined,
+      },
+    ]);
+  });
+
   test("builds complete schema from delegated methods", async () => {
     const inspector = new DatabaseInspector() as any;
     inspector.getCurrentSchema = async () => [{ name: "users" }];
     inspector.getCurrentViews = async () => [{ name: "v_users" }];
     inspector.getCurrentEnums = async () => [{ name: "status" }];
+    inspector.getCurrentCompositeTypes = async () => [];
     inspector.getCurrentFunctions = async () => [{ name: "f" }];
     inspector.getCurrentProcedures = async () => [{ name: "p" }];
     inspector.getCurrentTriggers = async () => [{ name: "t" }];

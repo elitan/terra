@@ -1,52 +1,52 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
-import { DatabaseService } from "../../core/database/client";
 import { DatabaseInspector } from "../../core/schema/inspector";
 import { PostgresProvider } from "../../providers/postgres";
 
-/**
- * Extension Tests - pgvector
- *
- * These tests run against a PostgreSQL instance with pgvector extension.
- * Use DATABASE_URL to point to the pgvector instance (port 5488).
- */
+function getPgvectorConfig() {
+  const connectionString =
+    process.env.PGVECTOR_DATABASE_URL ||
+    process.env.EXTENSIONS_DATABASE_URL ||
+    process.env.REAL_WORLD_SCHEMA_DATABASE_URL ||
+    "postgres://test_user:test_password@localhost:5488/sql_terraform_test";
+  const url = new URL(connectionString);
 
-const PGVECTOR_CONFIG = {
-  host: process.env.PGVECTOR_HOST || "localhost",
-  port: Number.parseInt(process.env.PGVECTOR_PORT || "5488", 10),
-  database: process.env.PGVECTOR_DB || "sql_terraform_test",
-  user: process.env.PGVECTOR_USER || "test_user",
-  password: process.env.PGVECTOR_PASSWORD || "test_password",
-};
+  return {
+    host: url.hostname,
+    port: Number.parseInt(url.port || "5432", 10),
+    database: url.pathname.slice(1) || "postgres",
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+}
 
 async function createPgvectorClient(): Promise<Client> {
-  const client = new Client(PGVECTOR_CONFIG);
+  const client = new Client(getPgvectorConfig());
   await client.connect();
   return client;
 }
 
-function createPgvectorDatabaseService(): DatabaseService {
-  return new DatabaseService(PGVECTOR_CONFIG);
-}
-
 function createPgvectorSchemaService(): SchemaService {
   const provider = new PostgresProvider();
-  return new SchemaService(provider, { dialect: "postgres", ...PGVECTOR_CONFIG });
+  return new SchemaService(provider, { dialect: "postgres", ...getPgvectorConfig() });
 }
 
 async function cleanDatabase(client: Client) {
-  // Drop all tables in public schema
   const tables = await client.query(`
-    SELECT tablename FROM pg_tables
-    WHERE schemaname = 'public'
+    SELECT t.tablename
+    FROM pg_tables t
+    JOIN pg_class c ON c.relname = t.tablename
+    JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.schemaname
+    LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
+    WHERE t.schemaname = 'public'
+      AND d.objid IS NULL
   `);
 
   for (const row of tables.rows) {
     await client.query(`DROP TABLE IF EXISTS ${row.tablename} CASCADE`);
   }
 
-  // Drop custom types (but not extension types)
   const types = await client.query(`
     SELECT t.typname
     FROM pg_type t
@@ -83,25 +83,18 @@ describe("Extension Support - pgvector", () => {
 
   describe("Extension Object Filtering", () => {
     test("should not detect pgvector types as user types", async () => {
-      // Install pgvector extension
       await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
 
-      // Verify pgvector is installed
       const extCheck = await client.query(`
         SELECT * FROM pg_extension WHERE extname = 'vector'
       `);
       expect(extCheck.rows).toHaveLength(1);
 
-      // Check that Terra does NOT detect the vector type
       const types = await inspector.getCurrentEnums(client, ['public']);
-
-      // Should be empty - vector type is owned by extension
       expect(types).toHaveLength(0);
     });
 
     test("should not try to drop pgvector types on empty schema apply", async () => {
-      // Install pgvector via schema
-      // Create a user table with vector column
       const initialSchema = `
         CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -114,27 +107,23 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(initialSchema, ['public'], true);
 
-      // Verify table was created
       const tables1 = await client.query(`
         SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = 'documents'
       `);
       expect(tables1.rows).toHaveLength(1);
 
-      // Now apply schema without table but keep extension
       const schemaWithoutTable = `
         CREATE EXTENSION IF NOT EXISTS vector;
       `;
       await schemaService.apply(schemaWithoutTable, ['public'], true);
 
-      // Verify user table was dropped
       const tables2 = await client.query(`
         SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public' AND table_name = 'documents'
       `);
       expect(tables2.rows).toHaveLength(0);
 
-      // But pgvector extension should still exist
       const vectorType = await client.query(`
         SELECT typname FROM pg_type t
         JOIN pg_namespace n ON t.typnamespace = n.oid
@@ -156,7 +145,6 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(schema, ['public'], true);
 
-      // Verify table and column were created
       const result = await client.query(`
         SELECT column_name, data_type, udt_name
         FROM information_schema.columns
@@ -168,10 +156,8 @@ describe("Extension Support - pgvector", () => {
     });
 
     test("should not detect pgvector functions as user functions", async () => {
-      // Install pgvector
       await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
 
-      // pgvector installs functions like vector_in, vector_out, etc.
       const pgFunctions = await client.query(`
         SELECT proname FROM pg_proc
         WHERE proname LIKE 'vector%'
@@ -179,16 +165,12 @@ describe("Extension Support - pgvector", () => {
       `);
       expect(pgFunctions.rows.length).toBeGreaterThan(0);
 
-      // But Terra should not see them
       const functions = await inspector.getCurrentFunctions(client, ['public']);
-
-      // Filter to only vector-related functions
       const vectorFunctions = functions.filter(f => f.name.startsWith('vector'));
       expect(vectorFunctions).toHaveLength(0);
     });
 
     test("should handle mix of user and extension types", async () => {
-      // Create user enum type and install extension
       const schema = `
         CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -203,7 +185,6 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(schema, ['public'], true);
 
-      // Terra should see the user enum but not the vector type
       const types = await inspector.getCurrentEnums(client, ['public']);
       expect(types).toHaveLength(1);
       expect(types[0].name).toBe('status');
@@ -214,7 +195,6 @@ describe("Extension Support - pgvector", () => {
     test("pgvector extension should be available", async () => {
       await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
 
-      // Verify we can create vector columns
       await client.query(`
         CREATE TABLE test_vectors (
           id SERIAL PRIMARY KEY,
@@ -222,7 +202,6 @@ describe("Extension Support - pgvector", () => {
         );
       `);
 
-      // Insert and query vector data
       await client.query(`
         INSERT INTO test_vectors (embedding) VALUES ('[1,2,3]')
       `);
@@ -250,14 +229,12 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(schema, ['public'], true);
 
-      // Verify extension was created
       const extResult = await client.query(`
         SELECT extname, extversion FROM pg_extension WHERE extname = 'vector'
       `);
       expect(extResult.rows).toHaveLength(1);
       expect(extResult.rows[0].extname).toBe('vector');
 
-      // Verify table was created with vector column
       const tableResult = await client.query(`
         SELECT column_name, udt_name
         FROM information_schema.columns
@@ -268,7 +245,6 @@ describe("Extension Support - pgvector", () => {
     });
 
     test("should be idempotent when extension already exists", async () => {
-      // Manually create extension first
       await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
 
       const schema = `
@@ -280,11 +256,9 @@ describe("Extension Support - pgvector", () => {
         );
       `;
 
-      // Apply schema twice
       await schemaService.apply(schema, ['public'], true);
       await schemaService.apply(schema, ['public'], true);
 
-      // Extension should still exist once
       const extResult = await client.query(`
         SELECT COUNT(*) as count FROM pg_extension WHERE extname = 'vector'
       `);
@@ -303,13 +277,11 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(schemaWithExtension, ['public'], true);
 
-      // Verify extension exists
       let extResult = await client.query(`
         SELECT extname FROM pg_extension WHERE extname = 'vector'
       `);
       expect(extResult.rows).toHaveLength(1);
 
-      // Apply schema without extension - Terra should drop it with CASCADE
       const schemaWithoutExtension = `
         CREATE TABLE docs (
           id SERIAL PRIMARY KEY,
@@ -319,7 +291,6 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(schemaWithoutExtension, ['public'], true);
 
-      // Extension should be dropped
       extResult = await client.query(`
         SELECT extname FROM pg_extension WHERE extname = 'vector'
       `);
@@ -340,7 +311,6 @@ describe("Extension Support - pgvector", () => {
 
       await schemaService.apply(schema, ['public'], true);
 
-      // Verify both extensions exist
       const extResult = await client.query(`
         SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pg_trgm')
         ORDER BY extname
@@ -360,10 +330,8 @@ describe("Extension Support - pgvector", () => {
         );
       `;
 
-      // This should not fail - extension should be created first
       await schemaService.apply(schema, ['public'], true);
 
-      // Verify both extension and table exist
       const extResult = await client.query(`
         SELECT extname FROM pg_extension WHERE extname = 'vector'
       `);
@@ -377,10 +345,8 @@ describe("Extension Support - pgvector", () => {
     });
 
     test("should detect and report existing extensions", async () => {
-      // Manually install extension
       await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
 
-      // Get current extensions
       const extensions = await inspector.getCurrentExtensions(client, ['public']);
 
       const vectorExt = extensions.find(e => e.name === 'vector');

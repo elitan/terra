@@ -13,6 +13,7 @@ import type {
 import type {
   Table,
   EnumType,
+  CompositeType,
   View,
   Function,
   Procedure,
@@ -88,6 +89,7 @@ export class PostgresProvider implements DatabaseProvider {
     return {
       tables: result.tables || [],
       enums: result.enums || [],
+      ...(result.compositeTypes?.length ? { compositeTypes: result.compositeTypes } : {}),
       views: result.views || [],
       functions: result.functions || [],
       procedures: result.procedures || [],
@@ -113,6 +115,14 @@ export class PostgresProvider implements DatabaseProvider {
   ): Promise<EnumType[]> {
     const pgClient = (client as PostgresClient).raw;
     return this.inspector.getCurrentEnums(pgClient, schemas);
+  }
+
+  async getCurrentCompositeTypes(
+    client: DatabaseClient,
+    schemas?: string[]
+  ): Promise<CompositeType[]> {
+    const pgClient = (client as PostgresClient).raw;
+    return this.inspector.getCurrentCompositeTypes(pgClient, schemas);
   }
 
   async getCurrentViews(

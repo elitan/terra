@@ -28,6 +28,15 @@ describe("Expression comparator coverage", () => {
     expect(expressionsEqual("status <> ALL (ARRAY['a', 'b'])", "status NOT IN ('a', 'b')")).toBe(true);
   });
 
+  test("normalizes NOT IN against chained inequality checks", () => {
+    expect(
+      expressionsEqual(
+        "responsible_recruiter_user_id NOT IN (secondary_recruiter_user_id, tertiary_recruiter_user_id)",
+        "(responsible_recruiter_user_id <> secondary_recruiter_user_id) AND (responsible_recruiter_user_id <> tertiary_recruiter_user_id)"
+      )
+    ).toBe(true);
+  });
+
   test("handles ANY and ALL with subquery right-hand side", () => {
     expect(expressionsEqual("status = ANY(SELECT status FROM t)", "status = ANY (SELECT status FROM t)")).toBe(true);
     expect(expressionsEqual("status <> ALL(SELECT status FROM t)", "status <> ALL (SELECT status FROM t)")).toBe(true);
@@ -46,5 +55,18 @@ describe("Expression comparator coverage", () => {
     expect(expressionsEqual("id = '1'::integer", "id = 1")).toBe(true);
     expect(expressionsEqual("id =", "id =")).toBe(true);
     expect(expressionsEqual("id =", "name =")).toBe(false);
+  });
+
+  test("normalizes non-boolean expressions", () => {
+    expect(
+      expressionsEqual(
+        "COALESCE(lower(first_name), ''::text)",
+        "COALESCE(lower(first_name), '')"
+      )
+    ).toBe(true);
+  });
+
+  test("normalizes pg_catalog-qualified function calls", () => {
+    expect(expressionsEqual("pg_catalog.upper(name)", "upper(name)")).toBe(true);
   });
 });

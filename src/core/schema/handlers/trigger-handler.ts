@@ -21,10 +21,10 @@ const config: HandlerConfig<Trigger> = {
 
     const desiredWhen = desired.when ? normalizeExpression(desired.when) : undefined;
     const currentWhen = current.when ? normalizeExpression(current.when) : undefined;
-    const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
-    const currentArgs = normalizeTriggerArgs(current.functionArgs);
     const desiredEvents = normalizeTriggerEvents(desired.events);
     const currentEvents = normalizeTriggerEvents(current.events);
+    const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
+    const currentArgs = normalizeTriggerArgs(current.functionArgs);
 
     return (
       desired.timing !== current.timing ||
@@ -70,6 +70,19 @@ function normalizeTriggerArgs(args: string[] | undefined): string[] {
   return args.map(normalizeTriggerArg);
 }
 
+function normalizeTriggerEvents(events: Trigger["events"]): Trigger["events"] {
+  const eventOrder: Record<Trigger["events"][number], number> = {
+    INSERT: 0,
+    UPDATE: 1,
+    DELETE: 2,
+    TRUNCATE: 3,
+  };
+
+  return [...events].sort(function sortEvents(a, b) {
+    return eventOrder[a] - eventOrder[b];
+  });
+}
+
 function normalizeTriggerArg(arg: string): string {
   const trimmed = arg.trim();
   const isQuoted = trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'");
@@ -80,21 +93,6 @@ function normalizeTriggerArg(arg: string): string {
   }
 
   return `'${trimmed.replace(/'/g, "''")}'`;
-}
-
-function normalizeTriggerEvents(events: Trigger["events"]): Trigger["events"] {
-  const order: Record<string, number> = {
-    INSERT: 0,
-    DELETE: 1,
-    UPDATE: 2,
-    TRUNCATE: 3,
-  };
-
-  return [...events].sort((a, b) => {
-    const left = order[a] ?? Number.MAX_SAFE_INTEGER;
-    const right = order[b] ?? Number.MAX_SAFE_INTEGER;
-    return left - right || a.localeCompare(b);
-  });
 }
 
 export class TriggerHandler {

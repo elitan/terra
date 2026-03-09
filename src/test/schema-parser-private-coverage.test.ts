@@ -128,6 +128,23 @@ describe("SchemaParser private coverage", () => {
       schemaName: undefined,
       comment: "schema comment",
     });
+
+    expect(
+      parser.parseCommentStmt({
+        objtype: "OBJECT_TYPE",
+        comment: "type comment",
+        object: {
+          TypeName: {
+            names: [{ String: { sval: "priority_data" } }],
+          },
+        },
+      })
+    ).toEqual({
+      objectType: "TYPE",
+      objectName: "priority_data",
+      schemaName: undefined,
+      comment: "type comment",
+    });
   });
 
   test("extractObjectParts handles list arrays and fallback values", function () {
@@ -147,6 +164,13 @@ describe("SchemaParser private coverage", () => {
     ]);
 
     expect(parser.extractObjectParts({ String: { sval: "single" } })).toEqual(["single"]);
+    expect(
+      parser.extractObjectParts({
+        TypeName: {
+          names: [{ String: { sval: "public" } }, { String: { sval: "priority_data" } }],
+        },
+      })
+    ).toEqual(["public", "priority_data"]);
     expect(parser.extractObjectParts(42)).toEqual(["42"]);
   });
 });
