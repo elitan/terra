@@ -912,5 +912,28 @@ describe("Parser edge coverage", () => {
         );
       }).toThrow("ALTER TABLE target not found in schema definitions: public.users");
     });
+
+    test("rejects temporary CREATE TABLE AS relation metadata", function () {
+      const parser = new SchemaParser() as any;
+
+      expect(function () {
+        parser.rejectTemporaryRelation(
+          {
+            CreateTableAsStmt: {
+              objtype: "OBJECT_TABLE",
+              into: {
+                rel: {
+                  relname: "scratch_copy",
+                  relpersistence: "t",
+                },
+              },
+            },
+          },
+          "schema.sql"
+        );
+      }).toThrow(
+        'Temporary PostgreSQL table "scratch_copy" is session-local'
+      );
+    });
   });
 });

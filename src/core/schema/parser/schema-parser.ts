@@ -291,6 +291,7 @@ export class SchemaParser {
 
       for (const stmtWrapper of ast.stmts) {
         const stmt = stmtWrapper.stmt;
+        this.rejectTemporaryRelation(stmt, filePath);
 
         if (stmt.CreateStmt && this.isPartitionCreateStatement(stmt.CreateStmt)) {
           const sqlObject = this.parsePartitionSqlObject(stmt);
@@ -475,6 +476,33 @@ export class SchemaParser {
     this.resolveImplicitForeignKeyColumns(tables, filePath);
 
     return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects };
+  }
+
+  private rejectTemporaryRelation(stmt: any, filePath?: string): void {
+    const candidates = [
+      { relation: stmt.CreateStmt?.relation, kind: "table" },
+      { relation: stmt.ViewStmt?.view, kind: "view" },
+      { relation: stmt.CreateSeqStmt?.sequence, kind: "sequence" },
+      {
+        relation: stmt.CreateTableAsStmt?.into?.rel,
+        kind:
+          stmt.CreateTableAsStmt?.objtype === "OBJECT_MATVIEW"
+            ? "materialized view"
+            : "table",
+      },
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate.relation?.relpersistence !== "t") {
+        continue;
+      }
+
+      const name = candidate.relation.relname || "<unnamed>";
+      throw new ParserError(
+        `Temporary PostgreSQL ${candidate.kind} "${name}" is session-local and cannot be managed in a persistent desired schema; use a persistent ${candidate.kind} or remove it from the schema file`,
+        filePath
+      );
+    }
   }
 
   private parseAlterTableConstraints(
