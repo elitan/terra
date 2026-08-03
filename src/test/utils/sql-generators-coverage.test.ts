@@ -133,6 +133,14 @@ describe("SQL generators coverage", () => {
     expect(fkSQL).toContain("ON UPDATE SET NULL");
     expect(fkSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(fkSQL).toContain("NOT VALID");
+    const subsetForeignKeySQL = generateAddForeignKeySQL("orders", {
+      columns: ["tenant_id", "user_id"],
+      referencedTable: "users",
+      referencedColumns: ["tenant_id", "id"],
+      onDelete: "SET NULL",
+      onDeleteColumns: ["user_id"],
+    });
+    expect(subsetForeignKeySQL).toContain('ON DELETE SET NULL ("user_id")');
     expect(generateDropForeignKeySQL("orders", "fk_orders_users")).toContain("DROP CONSTRAINT");
     expect(
       generateValidateForeignKeySQL("public.orders", "fk_orders_users")

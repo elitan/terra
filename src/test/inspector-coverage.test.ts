@@ -379,6 +379,7 @@ describe("DatabaseInspector coverage", () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql) => {
       if (sql.includes("WHERE c.contype = 'f'")) {
+        expect(sql).toContain("to_jsonb(c) -> 'confdelsetcols'");
         return {
           rows: [
             {
@@ -387,7 +388,8 @@ describe("DatabaseInspector coverage", () => {
               referenced_schema: "public",
               referenced_table: "parents",
               referenced_columns: ["id"],
-              delete_rule: "a",
+              delete_set_columns: ["parent_id"],
+              delete_rule: "n",
               update_rule: "a",
               match_type: "f",
               deferrable: true,
@@ -426,8 +428,9 @@ describe("DatabaseInspector coverage", () => {
         columns: ["parent_id"],
         referencedTable: "parents",
         referencedColumns: ["id"],
+        onDeleteColumns: ["parent_id"],
         matchType: "FULL",
-        onDelete: "NO ACTION",
+        onDelete: "SET NULL",
         onUpdate: "NO ACTION",
         deferrable: true,
         initiallyDeferred: true,

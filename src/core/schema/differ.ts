@@ -123,6 +123,20 @@ function stringArraysEqual(
   );
 }
 
+function stringSetsEqual(
+  desired: string[] | undefined,
+  current: string[] | undefined
+): boolean {
+  const desiredValues = new Set(desired || []);
+  const currentValues = new Set(current || []);
+  return (
+    desiredValues.size === currentValues.size &&
+    [...desiredValues].every(function hasValue(value) {
+      return currentValues.has(value);
+    })
+  );
+}
+
 function getIndexKeyCount(index: Index): number {
   return index.expression ? 1 : index.columns.length;
 }
@@ -333,6 +347,7 @@ export class SchemaDiffer {
     context: MigrationContext = {}
   ): MigrationPlan {
     this.validateNullsNotDistinctSupport(desiredSchema, context);
+    this.validateForeignKeyDeleteColumns(desiredSchema, context);
     const statements: string[] = [];
     const deferred: string[] = [];
     const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
@@ -593,6 +608,71 @@ export class SchemaDiffer {
         "nullsNotDistinct",
         true
       );
+    }
+  }
+
+  private validateForeignKeyDeleteColumns(
+    desiredSchema: Table[],
+    context: MigrationContext
+  ): void {
+    for (const table of desiredSchema) {
+      for (const foreignKey of table.foreignKeys || []) {
+        const columns = foreignKey.onDeleteColumns || [];
+        if (columns.length === 0) continue;
+
+        const tableName = getQualifiedTableName(table);
+        if (
+          foreignKey.onDelete !== "SET NULL" &&
+          foreignKey.onDelete !== "SET DEFAULT"
+        ) {
+          throw new ValidationError(
+            `Foreign-key ON DELETE column lists on ${tableName} require SET NULL or SET DEFAULT`,
+            tableName,
+            "onDeleteColumns",
+            columns
+          );
+        }
+
+        const uniqueColumns = new Set(columns);
+        if (uniqueColumns.size !== columns.length) {
+          throw new ValidationError(
+            `Foreign-key ON DELETE column lists on ${tableName} cannot contain duplicate columns`,
+            tableName,
+            "onDeleteColumns",
+            columns
+          );
+        }
+
+        const unknownColumn = columns.find(function findUnknownColumn(column) {
+          return !foreignKey.columns.includes(column);
+        });
+        if (unknownColumn) {
+          throw new ValidationError(
+            `Foreign-key ON DELETE column ${unknownColumn} on ${tableName} must be one of the referencing columns`,
+            tableName,
+            "onDeleteColumns",
+            columns
+          );
+        }
+
+        if (context.postgresVersionNum === undefined) {
+          throw new ValidationError(
+            `Cannot safely use foreign-key ON DELETE column lists on ${tableName} without the PostgreSQL server version`,
+            tableName,
+            "onDeleteColumns",
+            columns
+          );
+        }
+        if (context.postgresVersionNum < 150000) {
+          const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+          throw new ValidationError(
+            `PostgreSQL ${serverMajor} does not support foreign-key ON DELETE column lists; PostgreSQL 15 or newer is required`,
+            tableName,
+            "onDeleteColumns",
+            columns
+          );
+        }
+      }
     }
   }
 
@@ -1764,6 +1844,10 @@ export class SchemaDiffer {
       !action || action === 'NO ACTION' ? undefined : action;
     if (normalizeAction(a.onDelete) !== normalizeAction(b.onDelete) ||
         normalizeAction(a.onUpdate) !== normalizeAction(b.onUpdate)) {
+      return true;
+    }
+
+    if (!stringSetsEqual(a.onDeleteColumns, b.onDeleteColumns)) {
       return true;
     }
 

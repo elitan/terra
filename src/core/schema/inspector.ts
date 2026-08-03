@@ -603,6 +603,19 @@ export class DatabaseInspector {
          FROM unnest(c.confkey) WITH ORDINALITY AS ord(col, n)
          JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = ord.col
         ) AS referenced_columns,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM jsonb_array_elements_text(
+            COALESCE(
+              NULLIF(to_jsonb(c) -> 'confdelsetcols', 'null'::jsonb),
+              '[]'::jsonb
+            )
+          ) WITH ORDINALITY AS delete_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = c.conrelid
+            AND attribute.attnum = delete_column.attnum::smallint
+          ORDER BY delete_column.position
+        ) AS delete_set_columns,
         c.confdeltype AS delete_rule,
         c.confupdtype AS update_rule,
         c.confmatchtype AS match_type,
@@ -649,6 +662,9 @@ export class DatabaseInspector {
       referencedColumns: parseArrayLiteral(row.referenced_columns),
       ...(row.match_type === "f" ? { matchType: "FULL" as const } : {}),
       onDelete: actionMap[row.delete_rule],
+      ...(row.delete_set_columns?.length > 0
+        ? { onDeleteColumns: row.delete_set_columns }
+        : {}),
       onUpdate: actionMap[row.update_rule],
       ...(row.deferrable ? { deferrable: true } : {}),
       ...(row.initially_deferred ? { initiallyDeferred: true } : {}),

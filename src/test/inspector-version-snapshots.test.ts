@@ -244,6 +244,7 @@ function normalizeSnapshot(input: any): unknown {
           referencedColumns: [...(foreignKey.referencedColumns || [])],
           matchType: foreignKey.matchType,
           onDelete: foreignKey.onDelete,
+          onDeleteColumns: foreignKey.onDeleteColumns,
           onUpdate: foreignKey.onUpdate,
           deferrable: foreignKey.deferrable,
           initiallyDeferred: foreignKey.initiallyDeferred,

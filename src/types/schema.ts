@@ -52,6 +52,7 @@ export interface ForeignKeyConstraint {
   referencedColumns: string[];
   matchType?: 'FULL' | 'SIMPLE';
   onDelete?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION';
+  onDeleteColumns?: string[];
   onUpdate?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION';
   deferrable?: boolean;
   initiallyDeferred?: boolean;

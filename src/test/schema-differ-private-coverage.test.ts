@@ -472,6 +472,105 @@ describe("SchemaDiffer private coverage", () => {
     ).toBe(true);
   });
 
+  test("validates versioned foreign key delete action column subsets", function () {
+    const differ = new SchemaDiffer();
+    const baseForeignKey: ForeignKeyConstraint = {
+      name: "users_profile_fkey",
+      columns: ["tenant_id", "profile_id"],
+      referencedTable: "profiles",
+      referencedColumns: ["tenant_id", "id"],
+      onDelete: "SET NULL",
+    };
+    const current = makeTable({ foreignKeys: [baseForeignKey] });
+    const desired = makeTable({
+      foreignKeys: [
+        {
+          ...baseForeignKey,
+          onDeleteColumns: ["profile_id", "tenant_id"],
+        },
+      ],
+    });
+
+    const sql = differ
+      .generateMigrationPlan([desired], [current], {
+        postgresVersionNum: 150000,
+      })
+      .transactional.join("\n");
+    expect(sql).toContain('SET NULL ("profile_id", "tenant_id")');
+
+    const reorderedCurrent = makeTable({
+      foreignKeys: [
+        {
+          ...baseForeignKey,
+          onDeleteColumns: ["tenant_id", "profile_id"],
+        },
+      ],
+    });
+    expect(
+      differ.generateMigrationPlan([desired], [reorderedCurrent], {
+        postgresVersionNum: 150000,
+      }).hasChanges
+    ).toBe(false);
+
+    expect(function rejectUnknownVersion() {
+      differ.generateMigrationPlan([desired], [current]);
+    }).toThrow("without the PostgreSQL server version");
+    expect(function rejectPostgres14() {
+      differ.generateMigrationPlan([desired], [current], {
+        postgresVersionNum: 140000,
+      });
+    }).toThrow("PostgreSQL 15 or newer is required");
+    expect(function rejectInvalidAction() {
+      differ.generateMigrationPlan(
+        [
+          makeTable({
+            foreignKeys: [
+              {
+                ...baseForeignKey,
+                onDelete: "CASCADE",
+                onDeleteColumns: ["profile_id"],
+              },
+            ],
+          }),
+        ],
+        [current],
+        { postgresVersionNum: 150000 }
+      );
+    }).toThrow("require SET NULL or SET DEFAULT");
+    expect(function rejectDuplicateColumn() {
+      differ.generateMigrationPlan(
+        [
+          makeTable({
+            foreignKeys: [
+              {
+                ...baseForeignKey,
+                onDeleteColumns: ["profile_id", "profile_id"],
+              },
+            ],
+          }),
+        ],
+        [current],
+        { postgresVersionNum: 150000 }
+      );
+    }).toThrow("cannot contain duplicate columns");
+    expect(function rejectUnknownColumn() {
+      differ.generateMigrationPlan(
+        [
+          makeTable({
+            foreignKeys: [
+              {
+                ...baseForeignKey,
+                onDeleteColumns: ["missing"],
+              },
+            ],
+          }),
+        ],
+        [current],
+        { postgresVersionNum: 150000 }
+      );
+    }).toThrow("must be one of the referencing columns");
+  });
+
   test("generateMigrationPlan preserves covering index payload columns", function () {
     const differ = new SchemaDiffer();
     const columns = [

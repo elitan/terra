@@ -695,6 +695,14 @@ export function generateForeignKeyClause(
 
   if (foreignKey.onDelete) {
     builder.p(`ON DELETE ${foreignKey.onDelete}`);
+    if (foreignKey.onDeleteColumns && foreignKey.onDeleteColumns.length > 0) {
+      const columns = foreignKey.onDeleteColumns.map(
+        function quoteDeleteActionColumn(column) {
+          return new SQLBuilder().ident(column).build();
+        }
+      );
+      builder.p(`(${columns.join(", ")})`);
+    }
   }
 
   if (foreignKey.onUpdate) {
