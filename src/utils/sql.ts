@@ -703,6 +703,10 @@ export function generateForeignKeyClause(
 
   appendDeferrableOptions(builder, foreignKey);
 
+  if (foreignKey.notValid) {
+    builder.p("NOT VALID");
+  }
+
   return builder.build();
 }
 
@@ -731,6 +735,20 @@ export function generateDropForeignKeySQL(
     .p("ALTER TABLE")
     .table(targetTable, targetSchema)
     .p("DROP CONSTRAINT")
+    .ident(constraintName)
+    .p(";")
+    .build();
+}
+
+export function generateValidateForeignKeySQL(
+  tableName: string,
+  constraintName: string
+): string {
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(targetTable, targetSchema)
+    .p("VALIDATE CONSTRAINT")
     .ident(constraintName)
     .p(";")
     .build();

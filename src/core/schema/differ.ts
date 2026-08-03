@@ -31,6 +31,7 @@ import {
   generateDropCheckConstraintSQL,
   generateAddForeignKeySQL,
   generateDropForeignKeySQL,
+  generateValidateForeignKeySQL,
   generateForeignKeyClause,
   generateAddUniqueConstraintSQL,
   generateDropUniqueConstraintSQL,
@@ -302,10 +303,13 @@ type TableAlteration =
   | { type: "drop_check"; constraintName: string }
   | { type: "add_foreign_key"; constraint: ForeignKeyConstraint }
   | { type: "drop_foreign_key"; constraintName: string }
+  | { type: "validate_foreign_key"; constraintName: string }
   | { type: "add_unique"; constraint: UniqueConstraint }
   | { type: "drop_unique"; constraintName: string }
   | { type: "add_exclusion"; constraint: ExclusionConstraint }
   | { type: "drop_exclusion"; constraintName: string };
+
+type ForeignKeyChange = "none" | "validate" | "replace";
 
 export class SchemaDiffer {
   private options: MigrationOptions;
@@ -692,7 +696,7 @@ export class SchemaDiffer {
     first: ForeignKeyConstraint,
     second: ForeignKeyConstraint
   ): boolean {
-    return !this.foreignKeysDiffer(first, second);
+    return !this.foreignKeyDefinitionsDiffer(first, second);
   }
 
   private createResolverInputTables(tables: Table[]): Table[] {
@@ -1683,7 +1687,12 @@ export class SchemaDiffer {
         const currentByNameMatch = currentByName.get(desired.name);
         if (currentByNameMatch) {
           matchedCurrentNames.add(desired.name);
-          if (this.foreignKeysDiffer(desired, currentByNameMatch)) {
+          const change = this.getForeignKeyChange(desired, currentByNameMatch);
+          if (change === "validate") {
+            statements.push(
+              generateValidateForeignKeySQL(tableName, desired.name)
+            );
+          } else if (change === "replace") {
             statements.push(generateDropForeignKeySQL(tableName, desired.name));
             statements.push(generateAddForeignKeySQL(tableName, desired));
           }
@@ -1696,9 +1705,19 @@ export class SchemaDiffer {
           if (currentByStructMatch.name) {
             matchedCurrentNames.add(currentByStructMatch.name);
           }
-          if (this.foreignKeysDiffer(desired, currentByStructMatch)) {
+          const change = this.getForeignKeyChange(desired, currentByStructMatch);
+          if (change === "validate" && currentByStructMatch.name) {
+            statements.push(
+              generateValidateForeignKeySQL(
+                tableName,
+                currentByStructMatch.name
+              )
+            );
+          } else if (change === "replace") {
             if (currentByStructMatch.name) {
-              statements.push(generateDropForeignKeySQL(tableName, currentByStructMatch.name));
+              statements.push(
+                generateDropForeignKeySQL(tableName, currentByStructMatch.name)
+              );
             }
             statements.push(generateAddForeignKeySQL(tableName, desired));
           }
@@ -1720,7 +1739,10 @@ export class SchemaDiffer {
     return statements;
   }
 
-  private foreignKeysDiffer(a: ForeignKeyConstraint, b: ForeignKeyConstraint): boolean {
+  private foreignKeyDefinitionsDiffer(
+    a: ForeignKeyConstraint,
+    b: ForeignKeyConstraint
+  ): boolean {
     if (a.columns.length !== b.columns.length ||
         !a.columns.every((col, i) => col === b.columns[i])) {
       return true;
@@ -1757,6 +1779,23 @@ export class SchemaDiffer {
     }
 
     return false;
+  }
+
+  private getForeignKeyChange(
+    desired: ForeignKeyConstraint,
+    current: ForeignKeyConstraint
+  ): ForeignKeyChange {
+    if (this.foreignKeyDefinitionsDiffer(desired, current)) {
+      return "replace";
+    }
+
+    const desiredNotValid = Boolean(desired.notValid);
+    const currentNotValid = Boolean(current.notValid);
+    if (desiredNotValid === currentNotValid) {
+      return "none";
+    }
+
+    return currentNotValid ? "validate" : "replace";
   }
 
   /**
@@ -2419,7 +2458,13 @@ export class SchemaDiffer {
         const currentByNameMatch = currentByName.get(desired.name);
         if (currentByNameMatch) {
           matchedCurrentNames.add(desired.name);
-          if (this.foreignKeysDiffer(desired, currentByNameMatch)) {
+          const change = this.getForeignKeyChange(desired, currentByNameMatch);
+          if (change === "validate") {
+            alterations.push({
+              type: "validate_foreign_key",
+              constraintName: desired.name,
+            });
+          } else if (change === "replace") {
             alterations.push({ type: "drop_foreign_key", constraintName: desired.name });
             alterations.push({ type: "add_foreign_key", constraint: desired });
           }
@@ -2432,7 +2477,13 @@ export class SchemaDiffer {
           if (currentByStructMatch.name) {
             matchedCurrentNames.add(currentByStructMatch.name);
           }
-          if (this.foreignKeysDiffer(desired, currentByStructMatch)) {
+          const change = this.getForeignKeyChange(desired, currentByStructMatch);
+          if (change === "validate" && currentByStructMatch.name) {
+            alterations.push({
+              type: "validate_foreign_key",
+              constraintName: currentByStructMatch.name,
+            });
+          } else if (change === "replace") {
             if (currentByStructMatch.name) {
               alterations.push({ type: "drop_foreign_key", constraintName: currentByStructMatch.name });
             }
@@ -2612,10 +2663,11 @@ export class SchemaDiffer {
       add_unique: 23,
       add_exclusion: 24,
       add_foreign_key: 25,
-      reset_table_storage_parameters: 26,
-      set_table_storage_parameters: 27,
-      set_table_access_method: 28,
-      set_table_tablespace: 29,
+      validate_foreign_key: 26,
+      reset_table_storage_parameters: 27,
+      set_table_storage_parameters: 28,
+      set_table_access_method: 29,
+      set_table_tablespace: 30,
     };
 
     const sorted = [...alterations].sort((a, b) => {
@@ -2777,6 +2829,10 @@ export class SchemaDiffer {
           b.p("DROP CONSTRAINT").ident(alt.constraintName);
           break;
 
+        case "validate_foreign_key":
+          b.p("VALIDATE CONSTRAINT").ident(alt.constraintName);
+          break;
+
         case "add_unique": {
           b.p("ADD").p(
             generateUniqueConstraintClause(alt.constraint, table.name)
@@ -2846,6 +2902,7 @@ export class SchemaDiffer {
           `${alteration.constraint.columns.join(",")}->${alteration.constraint.referencedTable}.${alteration.constraint.referencedColumns.join(",")}`
         );
       case "drop_foreign_key":
+      case "validate_foreign_key":
         return alteration.constraintName;
       case "add_unique":
         return alteration.constraint.name || alteration.constraint.columns.join(",");

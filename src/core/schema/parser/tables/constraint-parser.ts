@@ -321,6 +321,7 @@ function parseForeignKeyFromNode(constraint: any, columns: string[]): ForeignKey
       ...(options.initiallyDeferred === undefined
         ? {}
         : { initiallyDeferred: options.initiallyDeferred }),
+      ...(constraint.skip_validation === true ? { notValid: true } : {}),
     };
   } catch (error) {
     Logger.warning(

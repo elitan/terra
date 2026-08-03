@@ -55,6 +55,7 @@ export interface ForeignKeyConstraint {
   onUpdate?: 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION';
   deferrable?: boolean;
   initiallyDeferred?: boolean;
+  notValid?: boolean;
 }
 
 export interface CheckConstraint {

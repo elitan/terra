@@ -15,6 +15,7 @@ import {
   generateDropCheckConstraintSQL,
   generateDropFunctionSQL,
   generateDropForeignKeySQL,
+  generateValidateForeignKeySQL,
   generateDropPrimaryKeySQL,
   generateDropProcedureSQL,
   generateDropSequenceSQL,
@@ -123,6 +124,7 @@ describe("SQL generators coverage", () => {
       onUpdate: "SET NULL",
       deferrable: true,
       initiallyDeferred: true,
+      notValid: true,
     });
     expect(fkSQL).toContain("FOREIGN KEY");
     expect(fkSQL).toContain('"fk_orders_user_id_users"');
@@ -130,7 +132,11 @@ describe("SQL generators coverage", () => {
     expect(fkSQL).toContain("ON DELETE CASCADE");
     expect(fkSQL).toContain("ON UPDATE SET NULL");
     expect(fkSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
+    expect(fkSQL).toContain("NOT VALID");
     expect(generateDropForeignKeySQL("orders", "fk_orders_users")).toContain("DROP CONSTRAINT");
+    expect(
+      generateValidateForeignKeySQL("public.orders", "fk_orders_users")
+    ).toContain('VALIDATE CONSTRAINT "fk_orders_users"');
 
     expect(generateAddCheckConstraintSQL("users", { expression: "age > 0" })).toContain("CHECK (age > 0)");
     expect(generateDropCheckConstraintSQL("users", "users_check")).toContain("DROP CONSTRAINT");

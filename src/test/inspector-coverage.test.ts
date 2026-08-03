@@ -392,6 +392,7 @@ describe("DatabaseInspector coverage", () => {
               match_type: "f",
               deferrable: true,
               initially_deferred: true,
+              validated: false,
             },
           ],
         };
@@ -430,6 +431,7 @@ describe("DatabaseInspector coverage", () => {
         onUpdate: "NO ACTION",
         deferrable: true,
         initiallyDeferred: true,
+        notValid: true,
       },
     ]);
 

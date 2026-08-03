@@ -247,6 +247,7 @@ function normalizeSnapshot(input: any): unknown {
           onUpdate: foreignKey.onUpdate,
           deferrable: foreignKey.deferrable,
           initiallyDeferred: foreignKey.initiallyDeferred,
+          notValid: foreignKey.notValid,
         };
       }),
       checkConstraints: (table.checkConstraints || []).map(function mapCheck(check: any) {

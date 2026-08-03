@@ -607,7 +607,8 @@ export class DatabaseInspector {
         c.confupdtype AS update_rule,
         c.confmatchtype AS match_type,
         c.condeferrable AS deferrable,
-        c.condeferred AS initially_deferred
+        c.condeferred AS initially_deferred,
+        c.convalidated AS validated
       FROM pg_constraint c
       JOIN pg_class cl ON cl.oid = c.conrelid
       JOIN pg_namespace ns ON ns.oid = cl.relnamespace
@@ -651,6 +652,7 @@ export class DatabaseInspector {
       onUpdate: actionMap[row.update_rule],
       ...(row.deferrable ? { deferrable: true } : {}),
       ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
+      ...(row.validated === false ? { notValid: true } : {}),
     }));
   }
 

@@ -4,6 +4,7 @@ import { SchemaDiffer } from "../core/schema/differ";
 import type {
   Column,
   ExclusionConstraint,
+  ForeignKeyConstraint,
   PrimaryKeyConstraint,
   Table,
 } from "../types/schema";
@@ -845,6 +846,55 @@ describe("SchemaDiffer private coverage", () => {
     expect(sql).toContain("REFERENCES \"teams\" (\"id\")");
     expect(sql).toContain("DROP CONSTRAINT \"uq_old_email\"");
     expect(sql).toContain("ADD CONSTRAINT \"uq_email\" UNIQUE");
+  });
+
+  test("foreign key validation state chooses validate, replace, and no-op transitions", function () {
+    const differ = new SchemaDiffer();
+    const valid: ForeignKeyConstraint = {
+      name: "users_profile_fkey",
+      columns: ["id"],
+      referencedTable: "profiles",
+      referencedColumns: ["id"],
+    };
+    const notValid = { ...valid, notValid: true };
+
+    const validateSql = differ
+      .generateMigrationPlan(
+        [makeTable({ foreignKeys: [valid] })],
+        [makeTable({ foreignKeys: [notValid] })]
+      )
+      .transactional.join("\n");
+    expect(validateSql).toContain(
+      'VALIDATE CONSTRAINT "users_profile_fkey"'
+    );
+    expect(validateSql).not.toContain("DROP CONSTRAINT");
+
+    const replaceSql = differ
+      .generateMigrationPlan(
+        [makeTable({ foreignKeys: [notValid] })],
+        [makeTable({ foreignKeys: [valid] })]
+      )
+      .transactional.join("\n");
+    expect(replaceSql).toContain('DROP CONSTRAINT "users_profile_fkey"');
+    expect(replaceSql).toContain("NOT VALID");
+
+    expect(
+      differ.generateMigrationPlan(
+        [makeTable({ foreignKeys: [notValid] })],
+        [makeTable({ foreignKeys: [notValid] })]
+      ).hasChanges
+    ).toBe(false);
+
+    const unnamedDesired = { ...valid, name: undefined };
+    const legacyStatements = (differ as any).generateForeignKeyStatements(
+      '"public"."users"',
+      [unnamedDesired],
+      [notValid]
+    ) as string[];
+    expect(legacyStatements).toHaveLength(1);
+    expect(legacyStatements[0]).toContain(
+      'VALIDATE CONSTRAINT "users_profile_fkey"'
+    );
   });
 
   test("generateMigrationPlan keeps stable order for mixed object kinds", () => {
