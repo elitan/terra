@@ -259,6 +259,147 @@ function readParenthesizedExpression(
   return undefined;
 }
 
+interface SQLiteIdentifier {
+  name: string;
+  end: number;
+}
+
+function readSQLiteIdentifier(sql: string): SQLiteIdentifier | undefined {
+  const start = skipWhitespaceAndComments(sql, 0);
+  const quote = sql[start];
+
+  if (quote === '"' || quote === "'" || quote === "`") {
+    const end = skipQuoted(sql, start, quote);
+    const escapedQuote = quote + quote;
+    return {
+      name: sql.slice(start + 1, end - 1).split(escapedQuote).join(quote),
+      end,
+    };
+  }
+
+  if (quote === "[") {
+    const end = skipBracketIdentifier(sql, start);
+    return {
+      name: sql.slice(start + 1, end - 1).replace(/]]/g, "]"),
+      end,
+    };
+  }
+
+  let end = start;
+  while (end < sql.length && !/[\s(),]/u.test(sql[end] || "")) {
+    end += 1;
+  }
+  if (end === start) {
+    return undefined;
+  }
+
+  return { name: sql.slice(start, end), end };
+}
+
+function findFirstUnquotedParenthesis(sql: string): number | undefined {
+  let cursor = 0;
+
+  while (cursor < sql.length) {
+    const skipped = skipQuotedOrComment(sql, cursor);
+    if (skipped !== undefined) {
+      cursor = skipped;
+      continue;
+    }
+    if (sql[cursor] === "(") {
+      return cursor;
+    }
+    cursor += 1;
+  }
+
+  return undefined;
+}
+
+function splitSQLiteTableDefinitions(sql: string): string[] {
+  const openParenthesis = findFirstUnquotedParenthesis(sql);
+  if (openParenthesis === undefined) {
+    return [];
+  }
+
+  const definitions: string[] = [];
+  let depth = 1;
+  let start = openParenthesis + 1;
+  let cursor = start;
+
+  while (cursor < sql.length) {
+    const skipped = skipQuotedOrComment(sql, cursor);
+    if (skipped !== undefined) {
+      cursor = skipped;
+      continue;
+    }
+
+    if (sql[cursor] === "(") {
+      depth += 1;
+    } else if (sql[cursor] === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        definitions.push(sql.slice(start, cursor).trim());
+        break;
+      }
+    } else if (sql[cursor] === "," && depth === 1) {
+      definitions.push(sql.slice(start, cursor).trim());
+      start = cursor + 1;
+    }
+
+    cursor += 1;
+  }
+
+  return definitions;
+}
+
+function extractGeneratedExpression(columnDefinition: string, start: number): string | undefined {
+  let depth = 0;
+  let cursor = start;
+
+  while (cursor < columnDefinition.length) {
+    const skipped = skipQuotedOrComment(columnDefinition, cursor);
+    if (skipped !== undefined) {
+      cursor = skipped;
+      continue;
+    }
+
+    if (columnDefinition[cursor] === "(") {
+      depth += 1;
+    } else if (columnDefinition[cursor] === ")") {
+      depth -= 1;
+    } else if (depth === 0 && isKeywordAt(columnDefinition, cursor, "AS")) {
+      const openParenthesis = skipWhitespaceAndComments(
+        columnDefinition,
+        cursor + "AS".length
+      );
+      if (columnDefinition[openParenthesis] === "(") {
+        return readParenthesizedExpression(columnDefinition, openParenthesis)?.expression;
+      }
+    }
+
+    cursor += 1;
+  }
+
+  return undefined;
+}
+
+export function extractSQLiteGeneratedExpressions(sql: string): Map<string, string> {
+  const expressions = new Map<string, string>();
+
+  for (const definition of splitSQLiteTableDefinitions(sql)) {
+    const identifier = readSQLiteIdentifier(definition);
+    if (!identifier) {
+      continue;
+    }
+
+    const expression = extractGeneratedExpression(definition, identifier.end);
+    if (expression !== undefined) {
+      expressions.set(identifier.name, expression);
+    }
+  }
+
+  return expressions;
+}
+
 export function extractSQLiteCheckExpressions(sql: string): string[] {
   const expressions: string[] = [];
   let cursor = 0;

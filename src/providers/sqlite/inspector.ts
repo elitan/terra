@@ -12,6 +12,7 @@ import type {
 } from "../../types/schema";
 import {
   extractSQLiteCheckExpressions,
+  extractSQLiteGeneratedExpressions,
   parseSQLiteTriggerMetadata,
 } from "./sql-parser-utils";
 
@@ -22,6 +23,7 @@ interface TableInfo {
   notnull: number;
   dflt_value: string | null;
   pk: number;
+  hidden?: number;
 }
 
 interface ForeignKeyInfo {
@@ -69,16 +71,21 @@ export class SQLiteInspector {
     const result: Table[] = [];
 
     for (const tableRow of tables.rows) {
-      const table = await this.parseTable(client, tableRow.name);
+      const table = await this.parseTable(client, tableRow.name, tableRow.sql);
       result.push(table);
     }
 
     return result;
   }
 
-  private async parseTable(client: SQLiteClient, tableName: string): Promise<Table> {
-    const columns = await this.getColumns(client, tableName);
-    const primaryKey = await this.getPrimaryKey(client, tableName);
+  private async parseTable(
+    client: SQLiteClient,
+    tableName: string,
+    createSql: string | null
+  ): Promise<Table> {
+    const tableInfo = await client.query<TableInfo>(`PRAGMA table_xinfo("${tableName}")`);
+    const columns = this.getColumns(tableInfo.rows, tableName, createSql);
+    const primaryKey = this.getPrimaryKey(tableInfo.rows);
     const foreignKeys = await this.getForeignKeys(client, tableName);
     const indexes = await this.getIndexes(client, tableName);
     const checkConstraints = await this.getCheckConstraints(client, tableName);
@@ -95,20 +102,49 @@ export class SQLiteInspector {
     };
   }
 
-  private async getColumns(client: SQLiteClient, tableName: string): Promise<Column[]> {
-    const info = await client.query<TableInfo>(`PRAGMA table_info("${tableName}")`);
+  private getColumns(
+    rows: TableInfo[],
+    tableName: string,
+    createSql: string | null
+  ): Column[] {
+    const generatedExpressions = extractSQLiteGeneratedExpressions(createSql || "");
+    const inspector = this;
 
-    return info.rows.map(row => ({
-      name: row.name,
-      type: this.normalizeType(row.type),
-      nullable: row.notnull === 0 && row.pk === 0,
-      default: row.dflt_value ? this.normalizeDefault(row.dflt_value) : undefined,
-    }));
+    return rows
+      .filter(function (row) {
+        return row.hidden !== 1;
+      })
+      .map(function (row) {
+        const generated = row.hidden === 2 || row.hidden === 3;
+        const expression = generatedExpressions.get(row.name);
+        if (generated && expression === undefined) {
+          throw new Error(
+            `Unable to inspect generated expression for SQLite column "${tableName}.${row.name}"`
+          );
+        }
+
+        const generatedMetadata = generated && expression !== undefined
+          ? {
+              always: true,
+              expression,
+              stored: row.hidden === 3,
+            }
+          : undefined;
+
+        return {
+          name: row.name,
+          type: inspector.normalizeType(row.type),
+          nullable: row.notnull === 0 && row.pk === 0,
+          default: row.dflt_value
+            ? inspector.normalizeDefault(row.dflt_value)
+            : undefined,
+          generated: generatedMetadata,
+        };
+      });
   }
 
-  private async getPrimaryKey(client: SQLiteClient, tableName: string): Promise<PrimaryKeyConstraint | null> {
-    const info = await client.query<TableInfo>(`PRAGMA table_info("${tableName}")`);
-    const pkColumns = info.rows.filter(row => row.pk > 0).sort((a, b) => a.pk - b.pk);
+  private getPrimaryKey(rows: TableInfo[]): PrimaryKeyConstraint | null {
+    const pkColumns = rows.filter(row => row.pk > 0).sort((a, b) => a.pk - b.pk);
 
     if (pkColumns.length === 0) {
       return null;

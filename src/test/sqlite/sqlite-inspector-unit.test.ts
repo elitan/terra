@@ -27,7 +27,7 @@ describe("SQLiteInspector unit coverage", () => {
         };
       }
 
-      if (sql.includes('PRAGMA table_info("users")')) {
+      if (sql.includes('PRAGMA table_xinfo("users")')) {
         return {
           rows: [
             { cid: 0, name: "id", type: "INT", notnull: 0, dflt_value: null, pk: 1 },
@@ -165,7 +165,7 @@ describe("SQLiteInspector unit coverage", () => {
         };
       }
 
-      if (sql.includes('PRAGMA table_info("logs")')) {
+      if (sql.includes('PRAGMA table_xinfo("logs")')) {
         return {
           rows: [{ cid: 0, name: "id", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 }],
         };
@@ -192,6 +192,60 @@ describe("SQLiteInspector unit coverage", () => {
     expect(tables[0]?.primaryKey).toBeUndefined();
     expect(tables[0]?.checkConstraints).toBeUndefined();
     expect(tables[0]?.uniqueConstraints).toBeUndefined();
+  });
+
+  test("distinguishes generated columns from virtual-table hidden columns", function () {
+    const inspector = new SQLiteInspector() as any;
+    const columns = inspector.getColumns(
+      [
+        { cid: 0, name: "base", type: "INT", notnull: 0, dflt_value: null, pk: 0, hidden: 0 },
+        { cid: 1, name: "dynamic", type: "INT", notnull: 0, dflt_value: null, pk: 0, hidden: 2 },
+        { cid: 2, name: "materialized", type: "INT", notnull: 1, dflt_value: null, pk: 0, hidden: 3 },
+        { cid: 3, name: "internal", type: "", notnull: 0, dflt_value: null, pk: 0, hidden: 1 },
+      ],
+      "computed",
+      "CREATE TABLE computed (base INT, dynamic INT AS (base + 1), materialized INT AS ((base * 2) + abs(base)) STORED NOT NULL)"
+    );
+
+    expect(columns).toEqual([
+      {
+        name: "base",
+        type: "INTEGER",
+        nullable: true,
+        default: undefined,
+        generated: undefined,
+      },
+      {
+        name: "dynamic",
+        type: "INTEGER",
+        nullable: true,
+        default: undefined,
+        generated: {
+          always: true,
+          expression: "base + 1",
+          stored: false,
+        },
+      },
+      {
+        name: "materialized",
+        type: "INTEGER",
+        nullable: false,
+        default: undefined,
+        generated: {
+          always: true,
+          expression: "(base * 2) + abs(base)",
+          stored: true,
+        },
+      },
+    ]);
+
+    expect(function () {
+      inspector.getColumns(
+        [{ cid: 0, name: "lost", type: "INT", notnull: 0, dflt_value: null, pk: 0, hidden: 2 }],
+        "computed",
+        "CREATE TABLE computed (base INT)"
+      );
+    }).toThrow("Unable to inspect generated expression");
   });
 
   test("parses view and trigger metadata", async () => {

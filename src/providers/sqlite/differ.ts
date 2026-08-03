@@ -86,6 +86,9 @@ export class SQLiteDiffer {
       const currentCol = currentColMap.get(col.name);
       if (!currentCol) {
         changes.columnChanges.push({ type: 'add', column: col });
+        if (col.generated?.stored) {
+          changes.requiresRecreate = true;
+        }
       } else if (this.columnsDiffer(col, currentCol)) {
         changes.requiresRecreate = true;
         changes.columnChanges.push({ type: 'modify', column: col, oldColumn: currentCol });
@@ -151,6 +154,17 @@ export class SQLiteDiffer {
     }
     if (this.normalizeDefault(desired.default) !== this.normalizeDefault(current.default)) {
       return true;
+    }
+    if (desired.generated || current.generated) {
+      if (!desired.generated || !current.generated) {
+        return true;
+      }
+      if (
+        desired.generated.stored !== current.generated.stored ||
+        desired.generated.expression.trim() !== current.generated.expression.trim()
+      ) {
+        return true;
+      }
     }
     return false;
   }
@@ -229,14 +243,7 @@ export class SQLiteDiffer {
     const parts: string[] = [];
 
     for (const col of table.columns) {
-      let colDef = `"${col.name}" ${col.type}`;
-      if (!col.nullable) {
-        colDef += ' NOT NULL';
-      }
-      if (col.default !== undefined) {
-        colDef += ` DEFAULT ${col.default}`;
-      }
-      parts.push(colDef);
+      parts.push(this.generateColumnDefinition(col));
     }
 
     if (table.primaryKey && table.primaryKey.columns.length > 0) {
@@ -281,14 +288,24 @@ export class SQLiteDiffer {
   }
 
   private generateAddColumn(tableName: string, column: Column): string {
-    let colDef = `"${column.name}" ${column.type}`;
+    return `ALTER TABLE "${tableName}" ADD COLUMN ${this.generateColumnDefinition(column)};`;
+  }
+
+  private generateColumnDefinition(column: Column): string {
+    let definition = `"${column.name}" ${column.type}`;
+
+    if (column.generated) {
+      definition += ` GENERATED ALWAYS AS (${column.generated.expression})`;
+      definition += column.generated.stored ? " STORED" : " VIRTUAL";
+    }
     if (!column.nullable) {
-      colDef += ' NOT NULL';
+      definition += " NOT NULL";
     }
-    if (column.default !== undefined) {
-      colDef += ` DEFAULT ${column.default}`;
+    if (!column.generated && column.default !== undefined) {
+      definition += ` DEFAULT ${column.default}`;
     }
-    return `ALTER TABLE "${tableName}" ADD COLUMN ${colDef};`;
+
+    return definition;
   }
 
   private generateTableRecreation(desired: Table, current: Table): string[] {
@@ -299,7 +316,7 @@ export class SQLiteDiffer {
     statements.push(this.generateCreateTable(tempTable));
 
     const commonColumns = desired.columns
-      .filter(c => current.columns.some(cc => cc.name === c.name))
+      .filter(c => !c.generated && current.columns.some(cc => cc.name === c.name))
       .map(c => `"${c.name}"`)
       .join(', ');
 

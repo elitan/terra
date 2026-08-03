@@ -89,6 +89,7 @@
 - done: rerun sqlite parity test and `test:core` green after sqlite parity coverage (`101` pass).
 - done: add sqlite parity coverage for trigger/view/index combinations with repeated reapply.
 - done: fix sqlite trigger sql generation to use sqlite trigger definition (remove invalid `EXECUTE FUNCTION` path).
+- done: preserve SQLite VIRTUAL/STORED generated columns through inspection, additive changes, recreation, removal, and rollback.
 - done: add sqlite table recreation regressions for referenced-table migration with existing child rows and post-migration fk enforcement.
 - done: fix sqlite table recreation transaction path to temporarily suspend fk checks, run `PRAGMA foreign_key_check`, and restore enforcement.
 - done: add sqlite rollback/no-leak regression for failed table recreation (`_users_new` cleanup + original row preservation).

@@ -69,4 +69,75 @@ describe("SQLiteDiffer private coverage", () => {
     expect(addColumn).toContain("NOT NULL");
     expect(addColumn).toContain("DEFAULT 'x'");
   });
+
+  test("generated columns select additive and recreation paths safely", function () {
+    const differ = new SQLiteDiffer() as any;
+    const virtualColumn = {
+      name: "virtual_value",
+      type: "TEXT",
+      nullable: true,
+      generated: {
+        always: true,
+        expression: "value || ' virtual'",
+        stored: false,
+      },
+    };
+    const storedColumn = {
+      name: "stored_value",
+      type: "TEXT",
+      nullable: false,
+      generated: {
+        always: true,
+        expression: "value || ' stored'",
+        stored: true,
+      },
+    };
+
+    expect(differ.detectChanges(
+      makeTable({ columns: [...makeTable().columns, virtualColumn] }),
+      makeTable()
+    ).requiresRecreate).toBe(false);
+    expect(differ.detectChanges(
+      makeTable({ columns: [...makeTable().columns, storedColumn] }),
+      makeTable()
+    ).requiresRecreate).toBe(true);
+
+    const createSql = differ.generateCreateTable(
+      makeTable({ columns: [...makeTable().columns, storedColumn] })
+    ) as string;
+    expect(createSql).toContain(
+      '"stored_value" TEXT GENERATED ALWAYS AS (value || \' stored\') STORED NOT NULL'
+    );
+
+    const recreation = differ.generateTableRecreation(
+      makeTable({ columns: [...makeTable().columns, storedColumn] }),
+      makeTable()
+    ) as string[];
+    expect(recreation[1]).toBe(
+      'INSERT INTO "_users_new" ("id") SELECT "id" FROM "users";'
+    );
+  });
+
+  test("does not collapse meaningful whitespace inside generated literals", function () {
+    const differ = new SQLiteDiffer() as any;
+    const baseColumn = {
+      name: "display",
+      type: "TEXT",
+      nullable: true,
+      generated: {
+        always: true,
+        expression: "value || 'a   b'",
+        stored: false,
+      },
+    };
+    const changedColumn = {
+      ...baseColumn,
+      generated: {
+        ...baseColumn.generated,
+        expression: "value || 'a b'",
+      },
+    };
+
+    expect(differ.columnsDiffer(baseColumn, changedColumn)).toBe(true);
+  });
 });

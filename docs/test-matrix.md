@@ -23,7 +23,7 @@
 | feature | postgres | sqlite | notes |
 |---|---|---|---|
 | tables | covered | covered | broad base tests present |
-| columns | covered | covered | includes many conversion cases |
+| columns | covered | covered | includes conversions plus SQLite VIRTUAL/STORED inspection, add, recreate, remove, rollback, and memory/file parity |
 | constraints | covered | partial | nested checks and unique-constraint lifecycle/rollback covered; names and conflict clauses remain under audit |
 | indexes | covered | covered | includes partial/expression in pg |
 | views | covered | covered | sqlite view coverage exists |
@@ -53,7 +53,7 @@
 ## explicit gaps backlog
 
 1. add PostgreSQL 18 local, CI, snapshot, and release verification lanes
-2. complete SQLite constraint-name, conflict-clause, and generated-column interaction coverage
+2. complete SQLite constraint-name and conflict-clause coverage
 3. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
 4. add per-feature rollback-on-error assertions for all core objects
 5. add grammar-aware SQLite fuzzing against the bundled runtime

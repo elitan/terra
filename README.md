@@ -83,6 +83,7 @@ export DATABASE_URL=":memory:"
 | Feature | PostgreSQL | SQLite |
 |---------|------------|--------|
 | Tables & Columns | Yes | Yes |
+| Generated Columns | Yes | Yes |
 | Primary Keys | Yes | Yes |
 | Foreign Keys | Yes | Yes |
 | Indexes | Yes | Yes |
