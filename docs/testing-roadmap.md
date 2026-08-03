@@ -2,7 +2,7 @@
 
 ## scope
 
-- dialects: postgres 14-17 and sqlite
+- dialects: all community-supported postgres majors (currently 14-18) and sqlite
 - no mysql-family work
 - atlas is scenario inspiration only
 
@@ -72,8 +72,8 @@
 ### phase 5
 
 - pg matrix:
-  - pr: 14, 17
-  - nightly: 14, 15, 16, 17
+  - pr: oldest and newest supported majors (currently 14, 18)
+  - nightly: every supported major (currently 14, 15, 16, 17, 18)
 - maintain version-variance map
 
 ### phase 6
@@ -119,4 +119,3 @@
 3. implement feature/fix
 4. run matrix scripts
 5. merge only if all hard gates pass
-

@@ -240,6 +240,73 @@ describe("SQLite Check Constraints", () => {
 
     expect(tables[0].checkConstraints?.length).toBeGreaterThanOrEqual(3);
   });
+
+  test("preserves nested CHECK expressions through apply and reapply", async function () {
+    const desiredSql = `
+      CREATE TABLE measurements (
+        id INTEGER PRIMARY KEY,
+        label TEXT NOT NULL,
+        value INTEGER,
+        CHECK (length(trim(label)) > 0 AND instr(label, ')') = 0),
+        CHECK ((value IS NULL) OR (abs(value) <= 100))
+      );
+    `;
+
+    const parsed = await provider.parseSchema(desiredSql);
+    expect(parsed.tables[0].checkConstraints).toEqual([
+      { expression: "length(trim(label)) > 0 AND instr(label, ')') = 0" },
+      { expression: "(value IS NULL) OR (abs(value) <= 100)" },
+    ]);
+
+    const firstPlan = await schemaService.apply(desiredSql, ["public"], true);
+    expect(firstPlan.hasChanges).toBe(true);
+
+    const secondPlan = await schemaService.plan(desiredSql, ["public"]);
+    expect(secondPlan.hasChanges).toBe(false);
+
+    const client = await provider.createClient(config);
+    try {
+      const tables = await provider.getCurrentSchema(client);
+      expect(tables[0].checkConstraints).toEqual(parsed.tables[0].checkConstraints);
+
+      await client.query(
+        "INSERT INTO measurements (id, label, value) VALUES (1, 'valid', 100)"
+      );
+      await expect(
+        client.query(
+          "INSERT INTO measurements (id, label, value) VALUES (2, 'invalid)', 101)"
+        )
+      ).rejects.toThrow();
+    } finally {
+      await client.end();
+    }
+
+    const expandedSql = desiredSql.replace("abs(value) <= 100", "abs(value) <= 200");
+    const alterationPlan = await schemaService.apply(expandedSql, ["public"], true);
+    expect(alterationPlan.hasChanges).toBe(true);
+
+    const alteredClient = await provider.createClient(config);
+    try {
+      const rows = await alteredClient.query<{ id: number; label: string; value: number }>(
+        "SELECT id, label, value FROM measurements ORDER BY id"
+      );
+      expect(rows.rows).toEqual([{ id: 1, label: "valid", value: 100 }]);
+
+      await alteredClient.query(
+        "INSERT INTO measurements (id, label, value) VALUES (3, 'expanded', 200)"
+      );
+      await expect(
+        alteredClient.query(
+          "INSERT INTO measurements (id, label, value) VALUES (4, 'too-large', 201)"
+        )
+      ).rejects.toThrow();
+    } finally {
+      await alteredClient.end();
+    }
+
+    const finalPlan = await schemaService.plan(expandedSql, ["public"]);
+    expect(finalPlan.hasChanges).toBe(false);
+  });
 });
 
 describe("SQLite Foreign Key Constraints", () => {

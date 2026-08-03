@@ -12,6 +12,7 @@ import type {
   CheckConstraint,
   UniqueConstraint,
 } from "../../types/schema";
+import { extractSQLiteCheckExpressions } from "./sql-parser-utils";
 
 let SQL: Awaited<ReturnType<typeof initSqlJs>> | null = null;
 
@@ -265,15 +266,9 @@ export class SQLiteParser {
     if (!result[0] || !result[0].values[0]) return [];
 
     const sql = result[0].values[0][0] as string;
-    const checkRegex = /CHECK\s*\(([^)]+)\)/gi;
-    const constraints: CheckConstraint[] = [];
-    let match;
-
-    while ((match = checkRegex.exec(sql)) !== null) {
-      constraints.push({ expression: match[1]!.trim() });
-    }
-
-    return constraints;
+    return extractSQLiteCheckExpressions(sql).map(function (expression) {
+      return { expression };
+    });
   }
 
   private getUniqueConstraints(indexes: Index[]): UniqueConstraint[] {

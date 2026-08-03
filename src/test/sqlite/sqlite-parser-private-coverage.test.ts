@@ -76,14 +76,22 @@ describe("SQLiteParser private coverage", () => {
 
     const checkDb = createDb(function (sql: string) {
       if (sql.includes("SELECT sql FROM sqlite_master WHERE type = 'table'")) {
-        return [{ values: [["CREATE TABLE users (age INT CHECK(age > 0), CHECK (age < 120))"]] }];
+        return [{
+          values: [[
+            `CREATE TABLE users (
+              "CHECK" TEXT DEFAULT 'CHECK(fake)',
+              age INT CHECK(age > 0),
+              CHECK /* gap */ ((abs(age) < 120) AND instr("CHECK", ')') = 0)
+            )`,
+          ]],
+        }];
       }
       return [];
     });
 
     expect(parser.getCheckConstraints(checkDb, "users")).toEqual([
       { expression: "age > 0" },
-      { expression: "age < 120" },
+      { expression: `(abs(age) < 120) AND instr("CHECK", ')') = 0` },
     ]);
 
     const triggerDb = createDb(function (sql: string) {

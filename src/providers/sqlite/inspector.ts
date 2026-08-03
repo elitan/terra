@@ -10,6 +10,7 @@ import type {
   CheckConstraint,
   UniqueConstraint,
 } from "../../types/schema";
+import { extractSQLiteCheckExpressions } from "./sql-parser-utils";
 
 interface TableInfo {
   cid: number;
@@ -204,17 +205,9 @@ export class SQLiteInspector {
     }
 
     const sql = tableInfo.rows[0].sql;
-    const checkRegex = /CHECK\s*\(([^)]+)\)/gi;
-    const constraints: CheckConstraint[] = [];
-    let match;
-
-    while ((match = checkRegex.exec(sql)) !== null) {
-      constraints.push({
-        expression: match[1]!.trim(),
-      });
-    }
-
-    return constraints;
+    return extractSQLiteCheckExpressions(sql).map(function (expression) {
+      return { expression };
+    });
   }
 
   private async getUniqueConstraints(

@@ -5,7 +5,13 @@
 - feature
 - operation: create, alter, drop, idempotent-reapply, rollback-on-error
 - dialect: postgres, sqlite
-- postgres version: 14, 15, 16, 17
+- postgres version: 14, 15, 16, 17, 18
+
+## sqlite runtime baseline
+
+- desired-schema parser: `sql.js` 1.13.0 with SQLite 3.49.1
+- migration executor and inspector: `libsql` 0.5.22 with SQLite 3.45.1
+- support is limited to behavior verified on both bundled runtimes until the parser/runtime gap is removed
 
 ## status key
 
@@ -19,7 +25,7 @@
 |---|---|---|---|
 | tables | covered | covered | broad base tests present |
 | columns | covered | covered | includes many conversion cases |
-| constraints | covered | covered | includes fk/check/unique paths |
+| constraints | covered | partial | nested check create/alter/enforce/idempotency covered; names and conflict clauses remain under audit |
 | indexes | covered | covered | includes partial/expression in pg |
 | views | covered | covered | sqlite view coverage exists |
 | schemas | covered | gap | sqlite unsupported by design |
@@ -41,14 +47,14 @@
 
 | lane | postgres versions | sqlite |
 |---|---|---|
-| pr | 14, 17 | yes |
-| nightly | 14, 15, 16, 17 | yes |
-| release | 14, 17 + extension suites | yes |
+| pr | 14, 18 | yes |
+| nightly | 14, 15, 16, 17, 18 | yes |
+| release | 14, 18 + extension suites | yes |
 
 ## explicit gaps backlog
 
-1. deterministic json snapshots for `plan` and `apply` across pg/sqlite
-2. per-feature rollback-on-error assertions for all core objects
-3. parser fuzz corpus and triage automation
-4. pg version-variance map with expected diffs
-5. perf gate thresholds encoded in script
+1. add PostgreSQL 18 local, CI, snapshot, and release verification lanes
+2. remove or explicitly gate the SQLite 3.49.1 parser / 3.45.1 executor syntax gap
+3. complete SQLite constraint-name, conflict-clause, and generated-column interaction coverage
+4. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
+5. add per-feature rollback-on-error assertions for all core objects
