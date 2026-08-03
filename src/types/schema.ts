@@ -238,6 +238,9 @@ export interface Table {
   storageParameters?: Record<string, string>;
   tablespace?: string;
   accessMethod?: string;
+  inherits?: QualifiedName[];
+  inheritedColumns?: Column[];
+  inheritedCheckConstraints?: CheckConstraint[];
   createStatement?: string; // Complete SQLite CREATE TABLE statement for lossless recreation
   virtual?: boolean; // SQLite virtual table backed by a registered module
   strict?: boolean; // SQLite STRICT table option

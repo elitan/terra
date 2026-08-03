@@ -114,6 +114,19 @@ describe("Table parser coverage", () => {
     expect(defaultTable?.accessMethod).toBeUndefined();
   });
 
+  test("parses multiple inheritance parents", async function () {
+    const ast = await parse(`
+      CREATE TABLE child (extra text)
+      INHERITS (public.parent_one, "Tenant"."ParentTwo");
+    `);
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.inherits).toEqual([
+      { name: "parent_one", schema: "public" },
+      { name: "ParentTwo", schema: "Tenant" },
+    ]);
+  });
+
   test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
     const ast = await parse(`
       CREATE TABLE MixedCaseTable (

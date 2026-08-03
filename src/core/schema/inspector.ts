@@ -77,13 +77,28 @@ export class DatabaseInspector {
         c.reloptions as table_storage_options,
         toast_relation.reloptions as toast_storage_options,
         table_access_method.amname as table_access_method,
-        table_tablespace.spcname as table_tablespace_name
+        table_tablespace.spcname as table_tablespace_name,
+        inheritance.parents as inheritance_parents
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.table_schema
       LEFT JOIN pg_class toast_relation ON toast_relation.oid = c.reltoastrelid
       JOIN pg_am table_access_method ON table_access_method.oid = c.relam
       LEFT JOIN pg_tablespace table_tablespace ON table_tablespace.oid = c.reltablespace
+      LEFT JOIN LATERAL (
+        SELECT json_agg(
+          json_build_object(
+            'name', parent.relname,
+            'schema', parent_namespace.nspname
+          )
+          ORDER BY inherited.inhseqno
+        ) as parents
+        FROM pg_inherits inherited
+        JOIN pg_class parent ON parent.oid = inherited.inhparent
+        JOIN pg_namespace parent_namespace
+          ON parent_namespace.oid = parent.relnamespace
+        WHERE inherited.inhrelid = c.oid
+      ) inheritance ON true
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
         AND t.table_type = 'BASE TABLE'
@@ -95,6 +110,7 @@ export class DatabaseInspector {
     for (const row of tablesResult.rows) {
       const tableName = row.table_name;
       const tableSchema = row.table_schema;
+      const inherits = this.parseInheritanceParents(row.inheritance_parents);
 
       // Get columns for each table
       const columnsResult = await client.query(
@@ -131,7 +147,8 @@ export class DatabaseInspector {
             ELSE NULL
           END as column_storage,
           column_type.typstorage as column_default_storage,
-          a.attcompression as column_compression
+          a.attcompression as column_compression,
+          a.attinhcount as inheritance_count
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
@@ -144,7 +161,7 @@ export class DatabaseInspector {
         [tableName, tableSchema]
       );
 
-      const columns: Column[] = columnsResult.rows.map((col: any) => {
+      const inspectedColumns = columnsResult.rows.map((col: any) => {
         let type = col.pg_type;
 
         // Parse generated column info
@@ -180,18 +197,35 @@ export class DatabaseInspector {
         }
 
         return {
-          name: col.column_name,
-          type: type,
-          nullable: col.is_nullable,
-          default: defaultValue,
-          collation,
-          storage,
-          storageDefault,
-          compression,
-          identity,
-          generated,
+          column: {
+            name: col.column_name,
+            type: type,
+            nullable: col.is_nullable,
+            default: defaultValue,
+            collation,
+            storage,
+            storageDefault,
+            compression,
+            identity,
+            generated,
+          } satisfies Column,
+          isLocal: Number(col.inheritance_count || 0) === 0,
         };
       });
+      const columns = inspectedColumns
+        .filter(function filterLocal(item) {
+          return item.isLocal;
+        })
+        .map(function getColumn(item) {
+          return item.column;
+        });
+      const inheritedColumns = inspectedColumns
+        .filter(function filterInherited(item) {
+          return !item.isLocal;
+        })
+        .map(function getColumn(item) {
+          return item.column;
+        });
 
       // Get primary key constraint for this table
       const primaryKey = await this.getPrimaryKeyConstraint(client, tableName, tableSchema);
@@ -201,6 +235,9 @@ export class DatabaseInspector {
 
       // Get check constraints for this table
       const checkConstraints = await this.getCheckConstraints(client, tableName, tableSchema);
+      const inheritedCheckConstraints = inherits
+        ? await this.getInheritedCheckConstraints(client, tableName, tableSchema)
+        : [];
 
       // Get unique constraints for this table
       const uniqueConstraints = await this.getUniqueConstraints(client, tableName, tableSchema);
@@ -212,6 +249,13 @@ export class DatabaseInspector {
         name: tableName,
         schema: tableSchema,
         columns,
+        inherits,
+        inheritedColumns:
+          inheritedColumns.length > 0 ? inheritedColumns : undefined,
+        inheritedCheckConstraints:
+          inheritedCheckConstraints.length > 0
+            ? inheritedCheckConstraints
+            : undefined,
         unlogged: row.relpersistence === "u" ? true : undefined,
         storageParameters: this.parseTableStorageOptions(row),
         accessMethod: row.table_access_method,
@@ -431,6 +475,26 @@ export class DatabaseInspector {
     return Object.keys(parameters).length > 0 ? parameters : undefined;
   }
 
+  private parseInheritanceParents(
+    parents: Array<{ name?: string; schema?: string }> | null
+  ): Table["inherits"] {
+    if (!Array.isArray(parents)) {
+      return undefined;
+    }
+
+    const parsed = parents
+      .filter(function hasName(parent) {
+        return Boolean(parent?.name);
+      })
+      .map(function mapParent(parent) {
+        return {
+          name: parent.name!,
+          schema: parent.schema || undefined,
+        };
+      });
+    return parsed.length > 0 ? parsed : undefined;
+  }
+
   private mapPostgreSQLIndexType(accessMethod: string): Index["type"] {
     switch (accessMethod.toLowerCase()) {
       case "btree":
@@ -526,6 +590,7 @@ export class DatabaseInspector {
       WHERE t.relname = $1
         AND n.nspname = $2
         AND c.contype = 'c'
+        AND c.coninhcount = 0
       ORDER BY c.conname
       `,
       [tableName, tableSchema]
@@ -535,26 +600,46 @@ export class DatabaseInspector {
       return [];
     }
 
-    const checkConstraints: CheckConstraint[] = [];
+    return this.parseCheckConstraintRows(result.rows);
+  }
 
-    for (const row of result.rows) {
-      const constraintName = row.constraint_name;
-      const constraintDef = row.constraint_def;
-      
-      // Extract the expression from the constraint definition
-      // PostgreSQL returns format like "CHECK (expression)"
-      const match = constraintDef.match(/^CHECK \((.+)\)$/);
+  private async getInheritedCheckConstraints(
+    client: Client,
+    tableName: string,
+    tableSchema: string
+  ): Promise<CheckConstraint[]> {
+    const result = await client.query(
+      `
+      SELECT
+        conname as constraint_name,
+        pg_get_constraintdef(c.oid) as constraint_def
+      FROM pg_constraint c
+      JOIN pg_class t ON c.conrelid = t.oid
+      JOIN pg_namespace n ON t.relnamespace = n.oid
+      WHERE t.relname = $1
+        AND n.nspname = $2
+        AND c.contype = 'c'
+        AND c.coninhcount > 0
+      ORDER BY c.conname
+      `,
+      [tableName, tableSchema]
+    );
+
+    return this.parseCheckConstraintRows(result.rows);
+  }
+
+  private parseCheckConstraintRows(rows: any[]): CheckConstraint[] {
+    const constraints: CheckConstraint[] = [];
+    for (const row of rows) {
+      const match = row.constraint_def?.match(/^CHECK \((.+)\)$/);
       if (match) {
-        const expression = match[1];
-        
-        checkConstraints.push({
-          name: constraintName,
-          expression,
+        constraints.push({
+          name: row.constraint_name,
+          expression: match[1],
         });
       }
     }
-
-    return checkConstraints;
+    return constraints;
   }
 
   async getUniqueConstraints(client: Client, tableName: string, tableSchema: string): Promise<UniqueConstraint[]> {

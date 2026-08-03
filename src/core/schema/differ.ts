@@ -67,6 +67,8 @@ type TableAlteration =
       parameters: Record<string, string>;
     }
   | { type: "reset_table_storage_parameters"; parameters: string[] }
+  | { type: "inherit_parent"; parent: QualifiedName }
+  | { type: "no_inherit_parent"; parent: QualifiedName }
   | { type: "set_table_access_method"; accessMethod: string }
   | { type: "set_table_tablespace"; tablespace: string }
   | { type: "add_column"; column: Column }
@@ -159,12 +161,19 @@ export class SchemaDiffer {
     );
 
     // Use DependencyResolver to handle circular dependencies for new tables
+    let orderedNewTables = newTables;
     let foreignKeysToDefer: Array<{ tableName: string; foreignKey: ForeignKeyConstraint }> = [];
     if (newTables.length > 0) {
       const resolverTables = this.createResolverInputTables(newTables);
       const resolver = new DependencyResolver(resolverTables);
       const result = resolver.getCreationOrderWithDetachment();
       foreignKeysToDefer = result.foreignKeysToDefer;
+      const newTablesByKey = new Map(
+        newTables.map((table) => [this.getTableKey(table), table])
+      );
+      orderedNewTables = result.order.map(function getTable(tableKey) {
+        return newTablesByKey.get(tableKey)!;
+      });
     }
 
     // Create a set of deferred FK keys for quick lookup
@@ -173,7 +182,10 @@ export class SchemaDiffer {
     );
 
     // Handle new tables
-    for (const table of orderedDesiredSchema) {
+    const existingTables = orderedDesiredSchema.filter((table) =>
+      currentTables.has(this.getTableKey(table))
+    );
+    for (const table of [...orderedNewTables, ...existingTables]) {
       const tableKey = this.getTableKey(table);
       if (!currentTables.has(tableKey)) {
         // Filter out deferred FKs from the table definition
@@ -467,12 +479,23 @@ export class SchemaDiffer {
         }
         return { ...foreignKey, referencedTable };
       });
+      const differ = this;
+      const inherits = (table.inherits || []).map(function mapParent(parent) {
+        const parentKey = differ.resolveResolverReferencedTableKey(
+          parent.schema ? `${parent.schema}.${parent.name}` : parent.name,
+          table.schema,
+          tableKeys,
+          keysByName
+        );
+        return parentKey ? { name: parentKey } : parent;
+      });
 
       return {
         ...table,
         name: resolverName,
         schema: undefined,
         foreignKeys,
+        inherits,
       };
     });
   }
@@ -1503,6 +1526,11 @@ export class SchemaDiffer {
     context: MigrationContext = {}
   ): TableAlteration[] {
     const alterations: TableAlteration[] = [];
+    const inheritanceChanges = this.collectTableInheritanceAlterations(
+      desiredTable,
+      currentTable,
+      alterations
+    );
 
     this.collectTableStorageParameterAlterations(
       desiredTable,
@@ -1522,7 +1550,12 @@ export class SchemaDiffer {
     );
 
     // Collect column alterations
-    const currentColumns = new Map(currentTable.columns.map((c) => [c.name, c]));
+    const comparableCurrentColumns = inheritanceChanges.removed
+      ? [...currentTable.columns, ...(currentTable.inheritedColumns || [])]
+      : currentTable.columns;
+    const currentColumns = new Map(
+      comparableCurrentColumns.map((c) => [c.name, c])
+    );
     const desiredColumns = new Map(desiredTable.columns.map((c) => [c.name, c]));
 
     // Add new columns
@@ -1545,9 +1578,11 @@ export class SchemaDiffer {
     }
 
     // Drop removed columns
-    for (const column of currentTable.columns) {
-      if (!desiredColumns.has(column.name)) {
-        alterations.push({ type: "drop_column", columnName: column.name });
+    if (!inheritanceChanges.added) {
+      for (const column of comparableCurrentColumns) {
+        if (!desiredColumns.has(column.name)) {
+          alterations.push({ type: "drop_column", columnName: column.name });
+        }
       }
     }
 
@@ -1572,10 +1607,29 @@ export class SchemaDiffer {
     }
 
     // Collect check constraint alterations
+    let comparableCurrentChecks = currentTable.checkConstraints || [];
+    if (inheritanceChanges.removed) {
+      comparableCurrentChecks = [
+        ...comparableCurrentChecks,
+        ...(currentTable.inheritedCheckConstraints || []),
+      ];
+    } else if (inheritanceChanges.added) {
+      const desiredCheckNames = new Set(
+        (desiredTable.checkConstraints || []).map(function getName(constraint) {
+          return constraint.name;
+        })
+      );
+      comparableCurrentChecks = comparableCurrentChecks.filter(
+        function keepDesired(constraint) {
+          return desiredCheckNames.has(constraint.name);
+        }
+      );
+    }
+
     this.collectCheckConstraintAlterations(
       desiredTable.name,
       desiredTable.checkConstraints || [],
-      currentTable.checkConstraints || [],
+      comparableCurrentChecks,
       alterations
     );
 
@@ -1631,6 +1685,58 @@ export class SchemaDiffer {
         parameters: parametersToReset,
       });
     }
+  }
+
+  private collectTableInheritanceAlterations(
+    desiredTable: Table,
+    currentTable: Table,
+    alterations: TableAlteration[]
+  ): { added: boolean; removed: boolean } {
+    const desired = new Map(
+      (desiredTable.inherits || []).map((parent) => [
+        this.getInheritanceParentKey(parent, desiredTable.schema),
+        parent,
+      ])
+    );
+    const current = new Map(
+      (currentTable.inherits || []).map((parent) => [
+        this.getInheritanceParentKey(parent, currentTable.schema),
+        parent,
+      ])
+    );
+    const additions = [...desired].filter(function filterAdded([key]) {
+      return !current.has(key);
+    });
+    const removals = [...current].filter(function filterRemoved([key]) {
+      return !desired.has(key);
+    });
+
+    if (additions.length > 0 && removals.length > 0) {
+      throw new ValidationError(
+        `Changing inheritance parents for ${getQualifiedTableName(desiredTable)} must be applied as separate detach and attach migrations`,
+        getQualifiedTableName(desiredTable),
+        "inherits",
+        desiredTable.inherits
+      );
+    }
+
+    for (const [, parent] of removals.sort(([a], [b]) => a.localeCompare(b))) {
+      alterations.push({ type: "no_inherit_parent", parent });
+    }
+    for (const [, parent] of additions.sort(([a], [b]) => a.localeCompare(b))) {
+      alterations.push({ type: "inherit_parent", parent });
+    }
+    return {
+      added: additions.length > 0,
+      removed: removals.length > 0,
+    };
+  }
+
+  private getInheritanceParentKey(
+    parent: QualifiedName,
+    childSchema?: string
+  ): string {
+    return `${parent.schema || childSchema || "public"}.${parent.name}`;
   }
 
   private collectTableTablespaceAlteration(
@@ -2097,6 +2203,8 @@ export class SchemaDiffer {
     // Sort alterations: drops first, then alters, then adds
     // Within each category, order by dependency (e.g., constraints before columns for drops)
     const operationPriority: Record<string, number> = {
+      inherit_parent: 0,
+      no_inherit_parent: 0,
       drop_foreign_key: 0,
       drop_unique: 1,
       drop_check: 2,
@@ -2147,6 +2255,14 @@ export class SchemaDiffer {
           b.p(
             `SET (${renderStorageParameterAssignments(alt.parameters)})`
           );
+          break;
+
+        case "inherit_parent":
+          b.p("INHERIT").table(alt.parent.name, alt.parent.schema);
+          break;
+
+        case "no_inherit_parent":
+          b.p("NO INHERIT").table(alt.parent.name, alt.parent.schema);
           break;
 
         case "reset_table_storage_parameters":
@@ -2331,6 +2447,9 @@ export class SchemaDiffer {
         return renderStorageParameterAssignments(alteration.parameters);
       case "reset_table_storage_parameters":
         return alteration.parameters.join(",");
+      case "inherit_parent":
+      case "no_inherit_parent":
+        return this.getInheritanceParentKey(alteration.parent, table.schema);
       case "set_table_access_method":
         return alteration.accessMethod;
       case "set_table_tablespace":

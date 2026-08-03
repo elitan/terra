@@ -26,6 +26,18 @@ export function parseCreateTable(stmt: any): Table | null {
     const unlogged = relation.relpersistence === "u" ? true : undefined;
     const storageParameters = parseStorageParameterOptions(stmt.options);
     const accessMethod = stmt.accessMethod || undefined;
+    const inherits = (stmt.inhRelations || [])
+      .map(function parseParent(item: any) {
+        const parent = item?.RangeVar;
+        if (!parent?.relname) {
+          return undefined;
+        }
+        return {
+          name: parent.relname,
+          schema: parent.schemaname || undefined,
+        };
+      })
+      .filter(Boolean);
     const tablespace =
       stmt.tablespacename && stmt.tablespacename !== "pg_default"
         ? stmt.tablespacename
@@ -54,6 +66,7 @@ export function parseCreateTable(stmt: any): Table | null {
       unlogged,
       storageParameters,
       accessMethod,
+      inherits: inherits.length > 0 ? inherits : undefined,
       tablespace,
       primaryKey: constraints.primaryKey,
       foreignKeys:

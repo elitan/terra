@@ -349,6 +349,31 @@ describe("SchemaDiffer private coverage", () => {
     }).toThrow("without the PostgreSQL server version");
   });
 
+  test("generateMigrationPlan handles inheritance transitions", function () {
+    const differ = new SchemaDiffer();
+    const parent = { name: "parent", schema: "public" };
+    const standalone = makeTable();
+    const inherited = makeTable({ inherits: [parent] });
+
+    expect(
+      differ.generateMigrationPlan([inherited], [standalone]).transactional.join("\n")
+    ).toContain('INHERIT "public"."parent"');
+    expect(
+      differ.generateMigrationPlan([standalone], [
+        makeTable({
+          inherits: [parent],
+          inheritedColumns: [makeColumn({ name: "parent_id" })],
+        }),
+      ]).transactional.join("\n")
+    ).toContain('NO INHERIT "public"."parent"');
+    expect(function rejectParentReplacement() {
+      differ.generateMigrationPlan(
+        [makeTable({ inherits: [{ name: "new_parent", schema: "public" }] })],
+        [inherited]
+      );
+    }).toThrow("separate detach and attach migrations");
+  });
+
   test("primary key helpers cover add drop modify and none", () => {
     const differ = new SchemaDiffer();
     const add = (differ as any).comparePrimaryKeys(makePrimaryKey(["id"]), undefined);

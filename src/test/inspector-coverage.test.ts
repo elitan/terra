@@ -21,10 +21,14 @@ describe("DatabaseInspector coverage", () => {
     inspector.getPrimaryKeyConstraint = async function () { return undefined; };
     inspector.getForeignKeyConstraints = async function () { return []; };
     inspector.getCheckConstraints = async function () { return []; };
+    inspector.getInheritedCheckConstraints = async function () {
+      return [{ name: "parent_check", expression: "id > 0" }];
+    };
     inspector.getUniqueConstraints = async function () { return []; };
     inspector.getTableIndexes = async function () { return []; };
     const client = createClient((sql) => {
       if (sql.includes("FROM information_schema.tables")) {
+        expect(sql).toContain("inheritance ON true");
         return {
           rows: [
             {
@@ -33,6 +37,9 @@ describe("DatabaseInspector coverage", () => {
               relpersistence: "u",
               table_access_method: "custom_heap",
               table_tablespace_name: "fast_tables",
+              inheritance_parents: [
+                { name: "events", schema: "public" },
+              ],
             },
           ],
         };
@@ -50,6 +57,7 @@ describe("DatabaseInspector coverage", () => {
               column_default_storage: "x",
               column_storage: null,
               column_compression: "",
+              inheritance_count: 1,
             },
           ],
         };
@@ -62,6 +70,14 @@ describe("DatabaseInspector coverage", () => {
     expect(tables[0]?.unlogged).toBe(true);
     expect(tables[0]?.accessMethod).toBe("custom_heap");
     expect(tables[0]?.tablespace).toBe("fast_tables");
+    expect(tables[0]?.inherits).toEqual([
+      { name: "events", schema: "public" },
+    ]);
+    expect(tables[0]?.columns).toEqual([]);
+    expect(tables[0]?.inheritedColumns?.[0]?.name).toBe("payload");
+    expect(tables[0]?.inheritedCheckConstraints?.[0]?.name).toBe(
+      "parent_check"
+    );
   });
 
   test("parses views and materialized view indexes", async () => {

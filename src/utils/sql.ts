@@ -500,6 +500,12 @@ export function generateCreateTableStatement(table: Table): string {
     .p(table.unlogged ? "CREATE UNLOGGED TABLE" : "CREATE TABLE")
     .table(table.name, table.schema)
     .p("(\n  " + columnDefs.join(",\n  ") + "\n)");
+  if (table.inherits && table.inherits.length > 0) {
+    const parents = table.inherits.map(function renderParent(parent) {
+      return new SQLBuilder().table(parent.name, parent.schema).build();
+    });
+    builder.p(`INHERITS (${parents.join(", ")})`);
+  }
   if (table.accessMethod) {
     builder.p("USING").ident(table.accessMethod);
   }

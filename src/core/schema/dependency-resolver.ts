@@ -35,6 +35,15 @@ export class DependencyResolver {
 
     // Build dependency relationships from foreign keys
     for (const table of tables) {
+      for (const parent of table.inherits || []) {
+        const currentNode = this.nodes.get(table.name);
+        const parentNode = this.nodes.get(parent.name);
+        if (currentNode && parentNode && parent.name !== table.name) {
+          currentNode.dependencies.add(parent.name);
+          parentNode.dependents.add(table.name);
+        }
+      }
+
       if (table.foreignKeys) {
         for (const fk of table.foreignKeys) {
           const referencedTable = fk.referencedTable;

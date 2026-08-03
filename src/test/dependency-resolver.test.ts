@@ -81,6 +81,21 @@ describe("DependencyResolver", () => {
 
       expect(order).toEqual(["customers", "orders", "order_items"]);
     });
+
+    test("orders inheritance parents before children", function () {
+      const tables: Table[] = [
+        {
+          name: "child",
+          columns: [],
+          inherits: [{ name: "parent" }],
+        },
+        { name: "parent", columns: [] },
+      ];
+      const resolver = new DependencyResolver(tables);
+
+      expect(resolver.getCreationOrder()).toEqual(["parent", "child"]);
+      expect(resolver.getDeletionOrder()).toEqual(["child", "parent"]);
+    });
   });
 
   describe("Deletion Order", () => {
