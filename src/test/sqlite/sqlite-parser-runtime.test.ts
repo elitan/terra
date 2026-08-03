@@ -11,6 +11,7 @@ describe("SQLiteParser execution-runtime parity", function () {
         name TEXT NOT NULL,
         age INTEGER CHECK ((age IS NULL) OR (abs(age) < 120))
       );
+      CREATE TABLE user_audit (user_id INTEGER, action TEXT);
       CREATE UNIQUE INDEX idx_users_name ON users (name);
       CREATE VIEW adult_users AS SELECT id, name FROM users WHERE age >= 18;
       CREATE TRIGGER trg_users_insert
@@ -18,10 +19,18 @@ describe("SQLiteParser execution-runtime parity", function () {
         BEGIN
           UPDATE users SET name = trim(NEW.name) WHERE id = NEW.id;
         END;
+      CREATE TRIGGER trg_users_update
+        UPDATE OF name ON users
+        BEGIN
+          INSERT INTO user_audit (user_id, action) VALUES (NEW.id, 'update');
+        END;
     `);
 
-    expect(schema.tables).toHaveLength(1);
-    expect(schema.tables[0]?.indexes).toEqual([
+    expect(schema.tables).toHaveLength(2);
+    const users = schema.tables.find(function (table) {
+      return table.name === "users";
+    });
+    expect(users?.indexes).toEqual([
       {
         name: "idx_users_name",
         tableName: "users",
@@ -30,7 +39,7 @@ describe("SQLiteParser execution-runtime parity", function () {
         type: "btree",
       },
     ]);
-    expect(schema.tables[0]?.checkConstraints).toEqual([
+    expect(users?.checkConstraints).toEqual([
       { expression: "(age IS NULL) OR (abs(age) < 120)" },
     ]);
     expect(schema.views).toEqual([
@@ -39,9 +48,18 @@ describe("SQLiteParser execution-runtime parity", function () {
         definition: "SELECT id, name FROM users WHERE age >= 18",
       },
     ]);
-    expect(schema.triggers).toHaveLength(1);
-    expect(schema.triggers[0]?.name).toBe("trg_users_insert");
+    expect(schema.triggers).toHaveLength(2);
+    expect(schema.triggers[0]).toMatchObject({
+      name: "trg_users_insert",
+      timing: "AFTER",
+      events: ["INSERT"],
+    });
     expect(schema.triggers[0]?.definition).toContain("UPDATE users SET name");
+    expect(schema.triggers[1]).toMatchObject({
+      name: "trg_users_update",
+      timing: "BEFORE",
+      events: ["UPDATE"],
+    });
   });
 
   test("includes the schema path in runtime syntax errors", async function () {

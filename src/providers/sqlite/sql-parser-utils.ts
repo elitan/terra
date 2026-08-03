@@ -103,6 +103,125 @@ function skipWhitespaceAndComments(sql: string, index: number): number {
   return cursor;
 }
 
+type SQLiteTriggerTiming = "BEFORE" | "AFTER" | "INSTEAD OF";
+type SQLiteTriggerEvent = "INSERT" | "UPDATE" | "DELETE";
+
+interface SQLiteTriggerMetadata {
+  timing: SQLiteTriggerTiming;
+  events: SQLiteTriggerEvent[];
+}
+
+interface SQLiteToken {
+  kind: "word" | "quoted" | "symbol";
+  value: string;
+  end: number;
+}
+
+function readSQLiteToken(sql: string, index: number): SQLiteToken | undefined {
+  const start = skipWhitespaceAndComments(sql, index);
+  if (start >= sql.length) {
+    return undefined;
+  }
+
+  const character = sql[start];
+  if (character === '"' || character === "'" || character === "`" || character === "[") {
+    const end = character === "["
+      ? skipBracketIdentifier(sql, start)
+      : skipQuoted(sql, start, character);
+    return { kind: "quoted", value: sql.slice(start, end), end };
+  }
+
+  if (isIdentifierCharacter(character)) {
+    let end = start + 1;
+    while (isIdentifierCharacter(sql[end])) {
+      end += 1;
+    }
+    return { kind: "word", value: sql.slice(start, end).toUpperCase(), end };
+  }
+
+  return { kind: "symbol", value: character || "", end: start + 1 };
+}
+
+function isWord(
+  token: SQLiteToken | undefined,
+  word: string
+): token is SQLiteToken & { kind: "word" } {
+  return token?.kind === "word" && token.value === word;
+}
+
+function readExpectedWord(
+  sql: string,
+  index: number,
+  word: string
+): SQLiteToken | undefined {
+  const token = readSQLiteToken(sql, index);
+  return isWord(token, word) ? token : undefined;
+}
+
+export function parseSQLiteTriggerMetadata(sql: string): SQLiteTriggerMetadata {
+  const fallback: SQLiteTriggerMetadata = { timing: "BEFORE", events: [] };
+  let token = readExpectedWord(sql, 0, "CREATE");
+  if (!token) {
+    return fallback;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "TEMP") || isWord(token, "TEMPORARY")) {
+    token = readSQLiteToken(sql, token.end);
+  }
+  if (!isWord(token, "TRIGGER")) {
+    return fallback;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "IF")) {
+    const notToken = readExpectedWord(sql, token.end, "NOT");
+    const existsToken = notToken
+      ? readExpectedWord(sql, notToken.end, "EXISTS")
+      : undefined;
+    if (!existsToken) {
+      return fallback;
+    }
+    token = readSQLiteToken(sql, existsToken.end);
+  }
+
+  if (!token || token.kind === "symbol") {
+    return fallback;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (token?.kind === "symbol" && token.value === ".") {
+    const triggerName = readSQLiteToken(sql, token.end);
+    if (!triggerName || triggerName.kind === "symbol") {
+      return fallback;
+    }
+    token = readSQLiteToken(sql, triggerName.end);
+  }
+
+  let timing: SQLiteTriggerTiming = "BEFORE";
+  if (isWord(token, "BEFORE") || isWord(token, "AFTER")) {
+    timing = token.value as "BEFORE" | "AFTER";
+    token = readSQLiteToken(sql, token.end);
+  } else if (isWord(token, "INSTEAD")) {
+    const ofToken = readExpectedWord(sql, token.end, "OF");
+    if (!ofToken) {
+      return fallback;
+    }
+    timing = "INSTEAD OF";
+    token = readSQLiteToken(sql, ofToken.end);
+  }
+
+  if (
+    !isWord(token, "INSERT") &&
+    !isWord(token, "UPDATE") &&
+    !isWord(token, "DELETE")
+  ) {
+    return fallback;
+  }
+
+  return { timing, events: [token.value as SQLiteTriggerEvent] };
+}
+
 interface ParenthesizedExpression {
   expression: string;
   end: number;

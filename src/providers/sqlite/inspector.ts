@@ -10,7 +10,10 @@ import type {
   CheckConstraint,
   UniqueConstraint,
 } from "../../types/schema";
-import { extractSQLiteCheckExpressions } from "./sql-parser-utils";
+import {
+  extractSQLiteCheckExpressions,
+  parseSQLiteTriggerMetadata,
+} from "./sql-parser-utils";
 
 interface TableInfo {
   cid: number;
@@ -265,19 +268,15 @@ export class SQLiteInspector {
       ORDER BY name
     `);
 
-    return triggers.rows.map(row => {
+    return triggers.rows.map(function (row) {
       const sql = row.sql || '';
-      const timing = sql.match(/\b(BEFORE|AFTER|INSTEAD\s+OF)\b/i)?.[1]?.toUpperCase() as 'BEFORE' | 'AFTER' | 'INSTEAD OF' || 'BEFORE';
-      const events: ('INSERT' | 'UPDATE' | 'DELETE')[] = [];
-      if (/\bINSERT\b/i.test(sql)) events.push('INSERT');
-      if (/\bUPDATE\b/i.test(sql)) events.push('UPDATE');
-      if (/\bDELETE\b/i.test(sql)) events.push('DELETE');
+      const metadata = parseSQLiteTriggerMetadata(sql);
 
       return {
         name: row.name,
         tableName: row.tbl_name,
-        timing: timing === 'INSTEAD OF' ? 'INSTEAD OF' : timing as 'BEFORE' | 'AFTER',
-        events,
+        timing: metadata.timing,
+        events: metadata.events,
         functionName: '',
         definition: sql.trim().replace(/;+\s*$/g, ''),
       };

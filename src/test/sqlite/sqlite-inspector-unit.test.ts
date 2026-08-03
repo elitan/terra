@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SQLiteInspector } from "../../providers/sqlite/inspector";
+import { parseSQLiteTriggerMetadata } from "../../providers/sqlite/sql-parser-utils";
 
 function createMockClient(
   handler: (sql: string, params?: unknown[]) => { rows: unknown[] }
@@ -212,13 +213,19 @@ describe("SQLiteInspector unit coverage", () => {
               type: "trigger",
               name: "trg_users",
               tbl_name: "users",
-              sql: "CREATE TRIGGER trg_users INSTEAD OF INSERT OR UPDATE OR DELETE ON users BEGIN SELECT 1; END;",
+              sql: "CREATE TRIGGER trg_users INSTEAD OF UPDATE OF name ON users BEGIN INSERT INTO audit VALUES (NEW.id); DELETE FROM stale_audit; END;",
             },
             {
               type: "trigger",
               name: "trg_default",
               tbl_name: "users",
               sql: null,
+            },
+            {
+              type: "trigger",
+              name: "after",
+              tbl_name: "users",
+              sql: 'CREATE TRIGGER IF NOT EXISTS main."after" /* header DELETE */ DELETE ON users BEGIN UPDATE users SET name = OLD.name; END;',
             },
           ],
         };
@@ -239,9 +246,9 @@ describe("SQLiteInspector unit coverage", () => {
         name: "trg_users",
         tableName: "users",
         timing: "INSTEAD OF",
-        events: ["INSERT", "UPDATE", "DELETE"],
+        events: ["UPDATE"],
         functionName: "",
-        definition: "CREATE TRIGGER trg_users INSTEAD OF INSERT OR UPDATE OR DELETE ON users BEGIN SELECT 1; END",
+        definition: "CREATE TRIGGER trg_users INSTEAD OF UPDATE OF name ON users BEGIN INSERT INTO audit VALUES (NEW.id); DELETE FROM stale_audit; END",
       },
       {
         name: "trg_default",
@@ -251,6 +258,62 @@ describe("SQLiteInspector unit coverage", () => {
         functionName: "",
         definition: "",
       },
+      {
+        name: "after",
+        tableName: "users",
+        timing: "BEFORE",
+        events: ["DELETE"],
+        functionName: "",
+        definition: 'CREATE TRIGGER IF NOT EXISTS main."after" /* header DELETE */ DELETE ON users BEGIN UPDATE users SET name = OLD.name; END',
+      },
     ]);
+  });
+});
+
+describe("SQLite trigger header parser", function () {
+  test("parses timing and event across valid SQLite header variants", function () {
+    expect(
+      parseSQLiteTriggerMetadata(
+        "CREATE TEMPORARY TRIGGER `insert` AFTER DELETE ON users BEGIN INSERT INTO audit VALUES (1); END"
+      )
+    ).toEqual({ timing: "AFTER", events: ["DELETE"] });
+    expect(
+      parseSQLiteTriggerMetadata(
+        "CREATE TEMP TRIGGER [delete] BEFORE INSERT ON users BEGIN DELETE FROM audit; END"
+      )
+    ).toEqual({ timing: "BEFORE", events: ["INSERT"] });
+    expect(
+      parseSQLiteTriggerMetadata(
+        "CREATE TRIGGER 'update' INSTEAD /* comment */ OF UPDATE OF name ON users BEGIN SELECT 1; END"
+      )
+    ).toEqual({ timing: "INSTEAD OF", events: ["UPDATE"] });
+    expect(
+      parseSQLiteTriggerMetadata(
+        "CREATE -- header comment\nTRIGGER plain DELETE ON users BEGIN UPDATE users SET id = id; END"
+      )
+    ).toEqual({ timing: "BEFORE", events: ["DELETE"] });
+  });
+
+  test("returns safe metadata for absent or malformed headers", function () {
+    const malformedHeaders = [
+      "",
+      "SELECT 1",
+      "CREATE VIEW example AS SELECT 1",
+      "CREATE TRIGGER",
+      "CREATE TRIGGER IF EXISTS example INSERT ON users BEGIN SELECT 1; END",
+      "CREATE TRIGGER IF NOT example INSERT ON users BEGIN SELECT 1; END",
+      "CREATE TRIGGER main. INSERT ON users BEGIN SELECT 1; END",
+      "CREATE TRIGGER example INSTEAD INSERT ON users BEGIN SELECT 1; END",
+      "CREATE TRIGGER example DURING INSERT ON users BEGIN SELECT 1; END",
+      "CREATE /* unterminated comment",
+      'CREATE TRIGGER "unterminated',
+    ];
+
+    for (const sql of malformedHeaders) {
+      expect(parseSQLiteTriggerMetadata(sql)).toEqual({
+        timing: "BEFORE",
+        events: [],
+      });
+    }
   });
 });

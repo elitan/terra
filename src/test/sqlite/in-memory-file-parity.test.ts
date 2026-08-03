@@ -45,9 +45,15 @@ const schemaWithTriggerViewIndexSql = `
   CREATE TRIGGER trg_users_insert
   AFTER INSERT ON users
   BEGIN
+    UPDATE users SET email = lower(NEW.email) WHERE id = NEW.id;
     INSERT INTO audit_log(user_id, action) VALUES (NEW.id, 'insert');
   END;
 `;
+
+const replacementTriggerSchemaSql = schemaWithTriggerViewIndexSql.replace(
+  "VALUES (NEW.id, 'insert')",
+  "VALUES (NEW.id, 'created')"
+);
 
 function toSnapshot(tables: Array<{ name: string; columns: Array<{ name: string; type: string }> }>): string[] {
   return tables
@@ -160,10 +166,45 @@ async function runTriggerViewIndexScenario(config: SQLiteConnectionConfig): Prom
       }
     }
 
+    const currentTriggers = await provider.getCurrentTriggers(client);
+    expect(currentTriggers).toHaveLength(1);
+    expect(currentTriggers[0]).toMatchObject({
+      timing: "AFTER",
+      events: ["INSERT"],
+    });
+
+    const replacement = await provider.parseSchema(replacementTriggerSchemaSql);
+    const replacementStatements = triggerHandler.generateStatements(
+      replacement.triggers,
+      currentTriggers
+    );
+    expect(replacementStatements).toHaveLength(2);
+    expect(replacementStatements[0]).toBe('DROP TRIGGER IF EXISTS "trg_users_insert";');
+    await provider.executeInTransaction(client, replacementStatements);
+
+    const replacedTriggers = await provider.getCurrentTriggers(client);
+    expect(
+      triggerHandler.generateStatements(replacement.triggers, replacedTriggers)
+    ).toEqual([]);
+
+    await client.query(
+      "INSERT INTO users (id, email) VALUES (?, ?)",
+      [1, "USER@EXAMPLE.COM"]
+    );
+    const user = await client.query<{ email: string }>(
+      "SELECT email FROM users WHERE id = ?",
+      [1]
+    );
+    const audit = await client.query<{ action: string }>(
+      "SELECT action FROM audit_log WHERE user_id = ?",
+      [1]
+    );
+    expect(user.rows).toEqual([{ email: "user@example.com" }]);
+    expect(audit.rows).toEqual([{ action: "created" }]);
+
     const tables = await provider.getCurrentSchema(client);
     const views = await provider.getCurrentViews(client);
-    const triggers = await provider.getCurrentTriggers(client);
-    return toComboSnapshot(tables, views, triggers);
+    return toComboSnapshot(tables, views, replacedTriggers);
   } finally {
     await client.end();
   }

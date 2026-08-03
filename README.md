@@ -93,7 +93,7 @@ export DATABASE_URL=":memory:"
 | Sequences | Yes | No |
 | Functions | Yes | No |
 | Procedures | Yes | No |
-| Triggers | Yes | No |
+| Triggers | Yes | Yes |
 | Materialized Views | Yes | No |
 | Schemas | Yes | No |
 | Extensions | Yes | No |

@@ -32,7 +32,7 @@
 | sequences | covered | gap | sqlite unsupported by design |
 | functions | covered | gap | sqlite unsupported by design |
 | procedures | covered | gap | sqlite unsupported by design |
-| triggers | covered | covered | sqlite trigger support tested |
+| triggers | covered | covered | sqlite header metadata, body-DML separation, replacement, execution, and repeated reapply tested in memory and on disk |
 | materialized views | covered | gap | sqlite unsupported by design |
 | extensions | covered | gap | pgvector/postgis tests present |
 | advisory locks | covered | gap | sqlite unsupported by design |
