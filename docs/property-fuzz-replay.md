@@ -20,6 +20,19 @@ if `FC_PATH` is set, `FC_TARGET` is required.
 
 all property scripts run with `TERRADB_TEST_SILENT=1` by default.
 
+run the deterministic SQLite grammar property:
+
+```bash
+bun run test:sqlite:grammar
+```
+
+replay a SQLite grammar seed/path or increase its run count:
+
+```bash
+FC_SEED=<seed> FC_PATH=<path> bun run test:sqlite:grammar
+SQLITE_GRAMMAR_RUNS=500 bun run test:sqlite:grammar
+```
+
 to see full sql/log output during replay:
 
 ```bash

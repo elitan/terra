@@ -18,5 +18,29 @@
     "status": "fixed",
     "fixedIn": "type(strict): avoid false destructive classification for safe enum statements",
     "notes": "isDestructiveStatement matched all statements containing TYPE token"
+  },
+  {
+    "id": "sqlite-virtual-table-quoted-identity-idempotency",
+    "testFile": "src/test/sqlite/sqlite-grammar.property.test.ts",
+    "seed": 20260803,
+    "path": "0",
+    "counterexample": {
+      "stem": "case end",
+      "payloadColumn": "value \"text\"",
+      "quoteStyle": "backtick",
+      "strict": true,
+      "withoutRowid": true,
+      "autoincrement": false,
+      "storedGenerated": true,
+      "collation": "RTRIM",
+      "indexOrder": "DESC",
+      "conflict": "IGNORE",
+      "tokenizer": "porter",
+      "interleavedComment": true,
+      "reverseOptions": false
+    },
+    "status": "fixed",
+    "fixedIn": "fix(sqlite): canonicalize virtual table identities",
+    "notes": "exact virtual-table DDL comparison treated equivalent identifier quote styles as definition changes"
   }
 ]

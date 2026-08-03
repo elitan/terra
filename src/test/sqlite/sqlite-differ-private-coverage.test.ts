@@ -216,4 +216,24 @@ describe("SQLiteDiffer private coverage", () => {
     expect(sequenceSql.join("\n")).toContain("'user''s'");
     expect(sequenceSql.join("\n")).toContain("'_user''s_new'");
   });
+
+  test("canonicalizes virtual table names without hiding module changes", function () {
+    const differ = new SQLiteDiffer() as any;
+    const desired = makeTable({
+      name: "search docs",
+      virtual: true,
+      createStatement: "CREATE VIRTUAL TABLE `search docs` USING fts5(title, tokenize='porter')",
+    });
+    const current = makeTable({
+      name: "search docs",
+      virtual: true,
+      createStatement: `CREATE VIRTUAL TABLE "search docs" USING fts5(title, tokenize='porter')`,
+    });
+
+    expect(differ.tableDefinitionsDiffer(desired, current)).toBe(false);
+    expect(differ.tableDefinitionsDiffer({
+      ...desired,
+      createStatement: "CREATE VIRTUAL TABLE `search docs` USING fts5(title, tokenize='unicode61')",
+    }, current)).toBe(true);
+  });
 });

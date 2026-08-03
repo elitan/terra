@@ -99,6 +99,8 @@
 - done: reject connection-local SQLite temporary tables, views, triggers, and virtual tables instead of silently omitting them from the persistent desired schema.
 - done: preflight SQLite `ATTACH`, `DETACH`, and `VACUUM` statements so desired-schema parsing cannot create or mutate external database files.
 - done: reject top-level SQLite DML, query, DROP/ALTER, maintenance, and transaction statements while preserving INSERT/UPDATE/DELETE/SELECT inside CREATE TRIGGER bodies.
+- done: add deterministic grammar-aware SQLite generation across identifier quoting, comments, table options, constraints, generated columns, indexes, views, triggers, FTS5, runtime behavior, and apply/replan idempotency.
+- done: fix SQLite virtual-table idempotency across equivalent identifier quote styles found by grammar seed `20260803`, path `0`.
 - done: add sqlite table recreation regressions for referenced-table migration with existing child rows and post-migration fk enforcement.
 - done: fix sqlite table recreation transaction path to temporarily suspend fk checks, run `PRAGMA foreign_key_check`, and restore enforcement.
 - done: add sqlite rollback/no-leak regression for failed table recreation (`_users_new` cleanup + original row preservation).

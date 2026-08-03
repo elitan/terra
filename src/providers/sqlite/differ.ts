@@ -291,8 +291,16 @@ export class SQLiteDiffer {
     }
 
     if (desired.virtual || current.virtual) {
-      return this.normalizeSql(desired.createStatement) !==
-        this.normalizeSql(current.createStatement);
+      const desiredStatement = replaceSQLiteCreateTableName(
+        desired.createStatement,
+        "__terradb_table__"
+      ) || desired.createStatement;
+      const currentStatement = replaceSQLiteCreateTableName(
+        current.createStatement,
+        "__terradb_table__"
+      ) || current.createStatement;
+      return this.normalizeSql(desiredStatement) !==
+        this.normalizeSql(currentStatement);
     }
 
     const desiredDefinition = parseSQLiteTableDefinition(desired.createStatement);

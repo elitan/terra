@@ -38,7 +38,7 @@
 | advisory locks | covered | gap | sqlite unsupported by design |
 | cli contract | partial | partial | json/no-color added, more cases needed |
 | deterministic output | partial | partial | json format added, snapshot depth pending |
-| parser robustness | partial | partial | malformed corpus and random ascii fuzz added; SQLite enforces CREATE-only top-level input, preserves trigger-body DML, rejects temporary objects, and preflights external-file statements without keyword false positives |
+| parser robustness | partial | covered | malformed corpus and random ascii fuzz plus deterministic SQLite grammar generation; SQLite enforces CREATE-only top-level input, preserves trigger-body DML, rejects temporary objects, and preflights external-file statements without keyword false positives |
 | performance budgets | partial | partial | perf tests exist, gate script pending |
 | flake rerun gate | partial | partial | script/workflow added, trend tracking pending |
 
@@ -55,4 +55,3 @@
 1. add PostgreSQL 18 local, CI, snapshot, and release verification lanes
 2. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
 3. add per-feature rollback-on-error assertions for all core objects
-4. add grammar-aware SQLite fuzzing against the bundled runtime
