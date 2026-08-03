@@ -292,6 +292,9 @@ export class SchemaParser {
       for (const stmtWrapper of ast.stmts) {
         const stmt = stmtWrapper.stmt;
         this.rejectTemporaryRelation(stmt, filePath);
+        if (stmt.CreateStmt) {
+          this.rejectUnsupportedTableShorthand(stmt.CreateStmt, filePath);
+        }
 
         if (stmt.CreateStmt && this.isPartitionCreateStatement(stmt.CreateStmt)) {
           const sqlObject = this.parsePartitionSqlObject(stmt);
@@ -510,6 +513,30 @@ export class SchemaParser {
       const name = candidate.relation.relname || "<unnamed>";
       throw new ParserError(
         `Temporary PostgreSQL ${candidate.kind} "${name}" is session-local and cannot be managed in a persistent desired schema; use a persistent ${candidate.kind} or remove it from the schema file`,
+        filePath
+      );
+    }
+  }
+
+  private rejectUnsupportedTableShorthand(
+    stmt: any,
+    filePath?: string
+  ): void {
+    if (stmt.ofTypename) {
+      throw new ParserError(
+        "PostgreSQL CREATE TABLE OF is not supported in desired schemas because the persistent dependency on its composite type is not modeled; define a regular table with explicit columns instead",
+        filePath
+      );
+    }
+
+    const hasLikeClause = (stmt.tableElts || []).some(
+      function hasTableLikeClause(item: any) {
+        return Boolean(item.TableLikeClause);
+      }
+    );
+    if (hasLikeClause) {
+      throw new ParserError(
+        "PostgreSQL CREATE TABLE LIKE is not supported in desired schemas because copied columns, constraints, indexes, and options cannot be represented safely; define the table structure explicitly instead",
         filePath
       );
     }
