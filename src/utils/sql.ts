@@ -3,6 +3,7 @@ import { SQLBuilder } from "./sql-builder";
 import { expressionsEqual } from "./expression-comparator";
 import { identityColumnsAreDifferent, renderIdentityClause } from "./identity";
 import { collationsAreDifferent, renderCollationName } from "./collation";
+import { getColumnPhysicalChanges } from "./column-physical";
 
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
@@ -398,6 +399,11 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
   }
 
   if (collationsAreDifferent(desired.collation, current.collation)) {
+    return true;
+  }
+
+  const physicalChanges = getColumnPhysicalChanges(desired, current);
+  if (physicalChanges.storage || physicalChanges.compression) {
     return true;
   }
 

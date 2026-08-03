@@ -98,6 +98,10 @@ async function prepareSchema(client: Client): Promise<void> {
       email text NOT NULL
     );
 
+    ALTER TABLE public.users
+      ALTER COLUMN display_name SET STORAGE EXTERNAL,
+      ALTER COLUMN display_name SET COMPRESSION pglz;
+
     CREATE TABLE public.audit_log (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       user_id integer NOT NULL,
@@ -184,6 +188,8 @@ function normalizeSnapshot(input: any): unknown {
                 name: column.collation.name,
               }
             : undefined,
+          storage: column.storage,
+          compression: column.compression,
           identity: column.identity
             ? {
                 generation: column.identity.generation,

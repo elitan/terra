@@ -8,6 +8,7 @@ import type {
   UniqueConstraint,
   IdentityColumn,
   QualifiedName,
+  ColumnStorage,
 } from "../../types/schema";
 import type { MigrationPlan, MigrationOptions } from "../../types/migration";
 import { DEFAULT_MIGRATION_OPTIONS } from "../../types/migration";
@@ -43,6 +44,9 @@ import {
   getAlterColumnCollation,
   renderCollationName,
 } from "../../utils/collation";
+import {
+  getColumnPhysicalChanges,
+} from "../../utils/column-physical";
 import { DependencyResolver } from "./dependency-resolver";
 
 /**
@@ -62,6 +66,16 @@ type TableAlteration =
   | { type: "alter_column_drop_default"; columnName: string }
   | { type: "alter_column_set_not_null"; columnName: string }
   | { type: "alter_column_drop_not_null"; columnName: string }
+  | {
+      type: "alter_column_set_storage";
+      columnName: string;
+      storage: ColumnStorage | 'DEFAULT';
+    }
+  | {
+      type: "alter_column_set_compression";
+      columnName: string;
+      compression: string;
+    }
   | {
       type: "alter_column_add_identity";
       columnName: string;
@@ -154,6 +168,21 @@ export class SchemaDiffer {
           })
         };
         statements.push(generateCreateTableStatement(filteredTable));
+
+        const physicalAlterations: TableAlteration[] = [];
+        for (const column of filteredTable.columns) {
+          this.collectColumnPhysicalAlterations(
+            column,
+            undefined,
+            false,
+            physicalAlterations
+          );
+        }
+        if (physicalAlterations.length > 0) {
+          statements.push(
+            this.batchAlterTableChanges(filteredTable, physicalAlterations)
+          );
+        }
       } else {
         // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(tableKey)!;
@@ -364,8 +393,6 @@ export class SchemaDiffer {
       desiredTable.columns.map((c) => [c.name, c])
     );
 
-    const qualifiedTableName = getQualifiedTableName(desiredTable);
-
     // Add new columns
     for (const column of desiredTable.columns) {
       if (!currentColumns.has(column.name)) {
@@ -376,6 +403,18 @@ export class SchemaDiffer {
           .p(generateColumnDefinition(column));
 
         statements.push(builder.p(";").build());
+        const physicalAlterations: TableAlteration[] = [];
+        this.collectColumnPhysicalAlterations(
+          column,
+          undefined,
+          false,
+          physicalAlterations
+        );
+        if (physicalAlterations.length > 0) {
+          statements.push(
+            this.batchAlterTableChanges(desiredTable, physicalAlterations)
+          );
+        }
       } else {
         // Check for column modifications
         const currentColumn = currentColumns.get(column.name)!;
@@ -383,7 +422,7 @@ export class SchemaDiffer {
           // Handle actual column modifications
           const modificationStatements =
             this.generateColumnModificationStatements(
-              qualifiedTableName,
+              desiredTable,
               column,
               currentColumn
             );
@@ -410,11 +449,12 @@ export class SchemaDiffer {
   }
 
   private generateColumnModificationStatements(
-    tableName: string,
+    table: Table,
     desiredColumn: Column,
     currentColumn: Column
   ): string[] {
     const statements: string[] = [];
+    const tableName = getQualifiedTableName(table);
 
     // Special handling for generated columns - they need drop and recreate
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
@@ -442,6 +482,19 @@ export class SchemaDiffer {
         .p(generateColumnDefinition(desiredColumn));
 
       statements.push(addBuilder.p(";").build());
+
+      const physicalAlterations: TableAlteration[] = [];
+      this.collectColumnPhysicalAlterations(
+        desiredColumn,
+        undefined,
+        false,
+        physicalAlterations
+      );
+      if (physicalAlterations.length > 0) {
+        statements.push(
+          this.batchAlterTableChanges(table, physicalAlterations)
+        );
+      }
 
       return statements;
     }
@@ -486,6 +539,35 @@ export class SchemaDiffer {
         collation
       );
       statements.push(typeConversionSQL);
+    }
+
+    const physicalChanges = getColumnPhysicalChanges(
+      desiredColumn,
+      currentColumn,
+      typeIsChanging
+    );
+    if (physicalChanges.storage) {
+      statements.push(
+        new SQLBuilder()
+          .p("ALTER TABLE")
+          .p(tableName)
+          .p("ALTER COLUMN")
+          .ident(desiredColumn.name)
+          .p(`SET STORAGE ${physicalChanges.storage};`)
+          .build()
+      );
+    }
+
+    if (physicalChanges.compression) {
+      statements.push(
+        new SQLBuilder()
+          .p("ALTER TABLE")
+          .p(tableName)
+          .p("ALTER COLUMN")
+          .ident(desiredColumn.name)
+          .p(`SET COMPRESSION ${physicalChanges.compression};`)
+          .build()
+      );
     }
 
     // Step 3: Set the new default if needed (after type change)
@@ -1303,6 +1385,12 @@ export class SchemaDiffer {
     for (const column of desiredTable.columns) {
       if (!currentColumns.has(column.name)) {
         alterations.push({ type: "add_column", column });
+        this.collectColumnPhysicalAlterations(
+          column,
+          undefined,
+          false,
+          alterations
+        );
       } else {
         // Check for column modifications
         const currentColumn = currentColumns.get(column.name)!;
@@ -1389,6 +1477,12 @@ export class SchemaDiffer {
       // Drop and recreate - these can't be batched with other operations
       alterations.push({ type: "drop_column", columnName: desiredColumn.name });
       alterations.push({ type: "add_column", column: desiredColumn });
+      this.collectColumnPhysicalAlterations(
+        desiredColumn,
+        undefined,
+        false,
+        alterations
+      );
       return;
     }
 
@@ -1438,6 +1532,13 @@ export class SchemaDiffer {
         usingClause,
       });
     }
+
+    this.collectColumnPhysicalAlterations(
+      desiredColumn,
+      currentColumn,
+      typeIsChanging,
+      alterations
+    );
 
     // Set the new default if needed
     if (defaultIsChanging) {
@@ -1517,6 +1618,34 @@ export class SchemaDiffer {
         columnName: desiredColumn.name,
         clause: change.clause,
         order: change.order,
+      });
+    }
+  }
+
+  private collectColumnPhysicalAlterations(
+    desiredColumn: Column,
+    currentColumn: Column | undefined,
+    typeIsChanging: boolean,
+    alterations: TableAlteration[]
+  ): void {
+    const changes = getColumnPhysicalChanges(
+      desiredColumn,
+      currentColumn,
+      typeIsChanging
+    );
+    if (changes.storage) {
+      alterations.push({
+        type: "alter_column_set_storage",
+        columnName: desiredColumn.name,
+        storage: changes.storage,
+      });
+    }
+
+    if (changes.compression) {
+      alterations.push({
+        type: "alter_column_set_compression",
+        columnName: desiredColumn.name,
+        compression: changes.compression,
       });
     }
   }
@@ -1747,12 +1876,14 @@ export class SchemaDiffer {
       alter_column_type: 10,
       alter_column_set_default: 11,
       alter_column_drop_default: 12,
-      alter_column_set_not_null: 13,
-      alter_column_add_identity: 14,
-      alter_column_set_identity_generation: 15,
-      alter_column_set_identity_option: 16,
-      alter_column_drop_not_null: 18,
-      add_column: 20,
+      add_column: 13,
+      alter_column_set_storage: 14,
+      alter_column_set_compression: 15,
+      alter_column_set_not_null: 16,
+      alter_column_add_identity: 17,
+      alter_column_set_identity_generation: 18,
+      alter_column_set_identity_option: 19,
+      alter_column_drop_not_null: 20,
       add_primary_key: 21,
       add_check: 22,
       add_unique: 23,
@@ -1821,6 +1952,18 @@ export class SchemaDiffer {
           b.p("ALTER COLUMN")
             .ident(alt.columnName)
             .p("DROP NOT NULL");
+          break;
+
+        case "alter_column_set_storage":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`SET STORAGE ${alt.storage}`);
+          break;
+
+        case "alter_column_set_compression":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`SET COMPRESSION ${alt.compression}`);
           break;
 
         case "alter_column_add_identity":
@@ -1944,6 +2087,8 @@ export class SchemaDiffer {
       case "alter_column_add_identity":
       case "alter_column_drop_identity":
       case "alter_column_set_identity_generation":
+      case "alter_column_set_storage":
+      case "alter_column_set_compression":
         return alteration.columnName;
       case "alter_column_set_identity_option":
         return `${alteration.columnName}:${String(alteration.order).padStart(2, "0")}:${alteration.clause}`;

@@ -22,6 +22,10 @@ import type {
 } from "../../types/schema";
 import { renderIdentityClause } from "../../utils/identity";
 import { renderCollationName } from "../../utils/collation";
+import {
+  columnCompressionFromCatalog,
+  columnStorageFromCatalog,
+} from "../../utils/column-physical";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -111,7 +115,13 @@ export class DatabaseInspector {
           identity_sequence.seqcache as identity_cache,
           identity_sequence.seqcycle as identity_cycle,
           column_collation_namespace.nspname as column_collation_schema,
-          column_collation.collname as column_collation_name
+          column_collation.collname as column_collation_name,
+          CASE
+            WHEN a.attstorage <> column_type.typstorage THEN a.attstorage
+            ELSE NULL
+          END as column_storage,
+          column_type.typstorage as column_default_storage,
+          a.attcompression as column_compression
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
@@ -131,6 +141,13 @@ export class DatabaseInspector {
         let generated: Column['generated'] | undefined = undefined;
         const identity = this.buildIdentityColumn(col);
         const collation = this.buildColumnCollation(col);
+        const storage = columnStorageFromCatalog(col.column_storage);
+        const storageDefault = columnStorageFromCatalog(
+          col.column_default_storage
+        );
+        const compression = columnCompressionFromCatalog(
+          col.column_compression
+        );
         let defaultValue = col.column_default;
 
         if (col.attgenerated && col.attgenerated !== '') {
@@ -158,6 +175,9 @@ export class DatabaseInspector {
           nullable: col.is_nullable,
           default: defaultValue,
           collation,
+          storage,
+          storageDefault,
+          compression,
           identity,
           generated,
         };
@@ -2032,7 +2052,13 @@ export class DatabaseInspector {
           identity_sequence.seqcache as identity_cache,
           identity_sequence.seqcycle as identity_cycle,
           column_collation_namespace.nspname as column_collation_schema,
-          column_collation.collname as column_collation_name
+          column_collation.collname as column_collation_name,
+          CASE
+            WHEN a.attstorage <> column_type.typstorage THEN a.attstorage
+            ELSE NULL
+          END as column_storage,
+          column_type.typstorage as column_default_storage,
+          a.attcompression as column_compression
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid

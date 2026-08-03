@@ -5,6 +5,8 @@ export interface QualifiedName {
 
 export type IdentitySequenceName = QualifiedName;
 
+export type ColumnStorage = 'PLAIN' | 'EXTERNAL' | 'EXTENDED' | 'MAIN';
+
 export interface IdentityColumn {
   generation: 'ALWAYS' | 'BY DEFAULT';
   sequenceName?: IdentitySequenceName;
@@ -22,6 +24,9 @@ export interface Column {
   nullable: boolean;
   default?: string;
   collation?: QualifiedName;
+  storage?: ColumnStorage;
+  storageDefault?: ColumnStorage;
+  compression?: 'pglz' | 'lz4' | (string & {});
   identity?: IdentityColumn;
   generated?: {
     always: boolean;

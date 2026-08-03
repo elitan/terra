@@ -9,6 +9,10 @@ import { deparseSync } from "pgsql-parser";
 import type { Column } from "../../../../types/schema";
 import { normalizeIdentityColumn } from "../../../../utils/identity";
 import { normalizeCollation } from "../../../../utils/collation";
+import {
+  normalizeColumnCompression,
+  normalizeColumnStorage,
+} from "../../../../utils/column-physical";
 
 /**
  * Extract all columns from CREATE TABLE tableElts array
@@ -50,6 +54,9 @@ export function parseColumn(columnDef: any): Column | null {
 
     const collation = extractColumnCollation(columnDef.collClause);
 
+    const storage = normalizeColumnStorage(columnDef.storage_name);
+    const compression = normalizeColumnCompression(columnDef.compression);
+
     const generated = extractGeneratedColumn(columnDef.constraints || []);
 
     const identity = extractIdentityColumn(columnDef.constraints || [], type);
@@ -61,6 +68,8 @@ export function parseColumn(columnDef: any): Column | null {
       nullable: !constraints.notNull && !constraints.primary && !isSerial && !identity,
       default: defaultValue,
       collation,
+      storage,
+      compression,
       identity,
       generated,
     };

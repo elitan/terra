@@ -78,7 +78,9 @@
             "collation": {
               "schema": "pg_catalog",
               "name": "C"
-            }
+            },
+            "storage": "EXTERNAL",
+            "compression": "pglz"
           },
           {
             "name": "email",
@@ -429,7 +431,9 @@
             "collation": {
               "schema": "pg_catalog",
               "name": "C"
-            }
+            },
+            "storage": "EXTERNAL",
+            "compression": "pglz"
           },
           {
             "name": "email",
@@ -780,7 +784,9 @@
             "collation": {
               "schema": "pg_catalog",
               "name": "C"
-            }
+            },
+            "storage": "EXTERNAL",
+            "compression": "pglz"
           },
           {
             "name": "email",
@@ -1131,7 +1137,9 @@
             "collation": {
               "schema": "pg_catalog",
               "name": "C"
-            }
+            },
+            "storage": "EXTERNAL",
+            "compression": "pglz"
           },
           {
             "name": "email",

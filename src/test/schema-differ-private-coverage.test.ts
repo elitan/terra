@@ -110,7 +110,7 @@ describe("SchemaDiffer private coverage", () => {
     });
 
     const statements = (differ as any).generateColumnModificationStatements(
-      "\"public\".\"users\"",
+      makeTable(),
       desired,
       current
     ) as string[];
