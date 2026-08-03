@@ -25,6 +25,7 @@ export function parseCreateTable(stmt: any): Table | null {
     const schema = relation.schemaname || undefined;
     const unlogged = relation.relpersistence === "u" ? true : undefined;
     const storageParameters = parseStorageParameterOptions(stmt.options);
+    const accessMethod = stmt.accessMethod || undefined;
     const tablespace =
       stmt.tablespacename && stmt.tablespacename !== "pg_default"
         ? stmt.tablespacename
@@ -52,6 +53,7 @@ export function parseCreateTable(stmt: any): Table | null {
       columns,
       unlogged,
       storageParameters,
+      accessMethod,
       tablespace,
       primaryKey: constraints.primaryKey,
       foreignKeys:

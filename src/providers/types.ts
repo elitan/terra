@@ -12,7 +12,7 @@ import type {
   Comment,
   SqlObject,
 } from "../types/schema";
-import type { MigrationPlan } from "../types/migration";
+import type { MigrationContext, MigrationPlan } from "../types/migration";
 
 export type DatabaseDialect = "postgres" | "sqlite";
 
@@ -120,7 +120,12 @@ export interface DatabaseProvider {
   getCurrentComments(client: DatabaseClient, schemas?: string[]): Promise<Comment[]>;
   getCurrentSqlObjects?(client: DatabaseClient, schemas?: string[]): Promise<SqlObject[]>;
 
-  generateMigrationPlan(desired: Table[], current: Table[]): MigrationPlan;
+  getMigrationContext?(client: DatabaseClient): Promise<MigrationContext>;
+  generateMigrationPlan(
+    desired: Table[],
+    current: Table[],
+    context?: MigrationContext
+  ): MigrationPlan;
 
   supportsFeature(feature: DatabaseFeature): boolean;
   validateSchema(schema: ParsedSchema): ValidationResult;

@@ -24,7 +24,7 @@ import type {
   Comment,
   SqlObject,
 } from "../../types/schema";
-import type { MigrationPlan } from "../../types/migration";
+import type { MigrationContext, MigrationPlan } from "../../types/migration";
 import { SchemaParser } from "../../core/schema/parser";
 import { DatabaseInspector } from "../../core/schema/inspector";
 import { SchemaDiffer } from "../../core/schema/differ";
@@ -199,8 +199,30 @@ export class PostgresProvider implements DatabaseProvider {
     return this.inspector.getCurrentSqlObjects(pgClient, schemas);
   }
 
-  generateMigrationPlan(desired: Table[], current: Table[]): MigrationPlan {
-    return this.differ.generateMigrationPlan(desired, current);
+  async getMigrationContext(
+    client: DatabaseClient
+  ): Promise<MigrationContext> {
+    const result = await client.query<{
+      postgres_version_num: string;
+      default_table_access_method: string;
+    }>(`
+      SELECT
+        current_setting('server_version_num') as postgres_version_num,
+        current_setting('default_table_access_method') as default_table_access_method
+    `);
+    const row = result.rows[0];
+    return {
+      postgresVersionNum: Number(row?.postgres_version_num),
+      defaultTableAccessMethod: row?.default_table_access_method || "heap",
+    };
+  }
+
+  generateMigrationPlan(
+    desired: Table[],
+    current: Table[],
+    context?: MigrationContext
+  ): MigrationPlan {
+    return this.differ.generateMigrationPlan(desired, current, context);
   }
 
   supportsFeature(_feature: DatabaseFeature): boolean {

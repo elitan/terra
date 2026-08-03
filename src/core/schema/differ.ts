@@ -10,8 +10,13 @@ import type {
   QualifiedName,
   ColumnStorage,
 } from "../../types/schema";
-import type { MigrationPlan, MigrationOptions } from "../../types/migration";
+import type {
+  MigrationContext,
+  MigrationPlan,
+  MigrationOptions,
+} from "../../types/migration";
 import { DEFAULT_MIGRATION_OPTIONS } from "../../types/migration";
+import { ValidationError } from "../../types/errors";
 import {
   generateCreateTableStatement,
   columnsAreDifferent,
@@ -62,6 +67,7 @@ type TableAlteration =
       parameters: Record<string, string>;
     }
   | { type: "reset_table_storage_parameters"; parameters: string[] }
+  | { type: "set_table_access_method"; accessMethod: string }
   | { type: "set_table_tablespace"; tablespace: string }
   | { type: "add_column"; column: Column }
   | { type: "drop_column"; columnName: string }
@@ -130,7 +136,8 @@ export class SchemaDiffer {
 
   generateMigrationPlan(
     desiredSchema: Table[],
-    currentSchema: Table[]
+    currentSchema: Table[],
+    context: MigrationContext = {}
   ): MigrationPlan {
     const statements: string[] = [];
     const deferred: string[] = [];
@@ -202,7 +209,11 @@ export class SchemaDiffer {
         );
 
         // Collect all table alterations (columns, constraints, etc.)
-        const alterations = this.collectTableAlterations(table, currentTable);
+        const alterations = this.collectTableAlterations(
+          table,
+          currentTable,
+          context
+        );
 
         // Generate a single batched ALTER TABLE statement for all compatible operations
         if (alterations.length > 0) {
@@ -1488,7 +1499,8 @@ export class SchemaDiffer {
    */
   private collectTableAlterations(
     desiredTable: Table,
-    currentTable: Table
+    currentTable: Table,
+    context: MigrationContext = {}
   ): TableAlteration[] {
     const alterations: TableAlteration[] = [];
 
@@ -1500,6 +1512,12 @@ export class SchemaDiffer {
     this.collectTableTablespaceAlteration(
       desiredTable,
       currentTable,
+      alterations
+    );
+    this.collectTableAccessMethodAlteration(
+      desiredTable,
+      currentTable,
+      context,
       alterations
     );
 
@@ -1628,6 +1646,45 @@ export class SchemaDiffer {
         tablespace: desired,
       });
     }
+  }
+
+  private collectTableAccessMethodAlteration(
+    desiredTable: Table,
+    currentTable: Table,
+    context: MigrationContext,
+    alterations: TableAlteration[]
+  ): void {
+    const defaultAccessMethod = context.defaultTableAccessMethod || "heap";
+    const desired = desiredTable.accessMethod || defaultAccessMethod;
+    const current = currentTable.accessMethod || defaultAccessMethod;
+    if (desired === current) {
+      return;
+    }
+
+    const tableName = getQualifiedTableName(desiredTable);
+    if (context.postgresVersionNum === undefined) {
+      throw new ValidationError(
+        `Cannot safely change the access method of existing table ${tableName} without the PostgreSQL server version`,
+        tableName,
+        "accessMethod",
+        desired
+      );
+    }
+
+    if (context.postgresVersionNum < 150000) {
+      const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+      throw new ValidationError(
+        `PostgreSQL ${serverMajor} cannot change the access method of existing table ${tableName}; PostgreSQL 15 or newer is required for an in-place change`,
+        tableName,
+        "accessMethod",
+        desired
+      );
+    }
+
+    alterations.push({
+      type: "set_table_access_method",
+      accessMethod: desired,
+    });
   }
 
   /**
@@ -2063,7 +2120,8 @@ export class SchemaDiffer {
       add_foreign_key: 24,
       reset_table_storage_parameters: 25,
       set_table_storage_parameters: 26,
-      set_table_tablespace: 27,
+      set_table_access_method: 27,
+      set_table_tablespace: 28,
     };
 
     const sorted = [...alterations].sort((a, b) => {
@@ -2093,6 +2151,10 @@ export class SchemaDiffer {
 
         case "reset_table_storage_parameters":
           b.p(`RESET (${alt.parameters.join(", ")})`);
+          break;
+
+        case "set_table_access_method":
+          b.p("SET ACCESS METHOD").ident(alt.accessMethod);
           break;
 
         case "set_table_tablespace":
@@ -2269,6 +2331,8 @@ export class SchemaDiffer {
         return renderStorageParameterAssignments(alteration.parameters);
       case "reset_table_storage_parameters":
         return alteration.parameters.join(",");
+      case "set_table_access_method":
+        return alteration.accessMethod;
       case "set_table_tablespace":
         return alteration.tablespace;
       case "add_column":

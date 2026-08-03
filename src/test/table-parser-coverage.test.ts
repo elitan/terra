@@ -101,6 +101,19 @@ describe("Table parser coverage", () => {
     expect(defaultTable?.tablespace).toBeUndefined();
   });
 
+  test("parses a table access method", async function () {
+    const ast = await parse(`
+      CREATE TABLE custom_heap (id integer) USING "Terra Heap";
+      CREATE TABLE default_heap (id integer);
+    `);
+
+    const custom = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+    const defaultTable = parseCreateTable(ast.stmts[1]?.stmt?.CreateStmt);
+
+    expect(custom?.accessMethod).toBe("Terra Heap");
+    expect(defaultTable?.accessMethod).toBeUndefined();
+  });
+
   test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
     const ast = await parse(`
       CREATE TABLE MixedCaseTable (

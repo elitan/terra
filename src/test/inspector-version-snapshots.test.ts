@@ -177,6 +177,7 @@ function normalizeSnapshot(input: any): unknown {
       schema: table.schema,
       name: table.name,
       unlogged: table.unlogged,
+      accessMethod: table.accessMethod,
       storageParameters: table.storageParameters
         ? normalizeObject(table.storageParameters)
         : undefined,

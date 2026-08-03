@@ -5,6 +5,11 @@ export interface MigrationPlan {
   hasChanges: boolean;
 }
 
+export interface MigrationContext {
+  postgresVersionNum?: number;
+  defaultTableAccessMethod?: string;
+}
+
 export interface MigrationOptions {
   /** Use CREATE INDEX CONCURRENTLY by default for production safety (default: true) */
   useConcurrentIndexes?: boolean;

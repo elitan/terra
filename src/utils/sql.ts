@@ -500,6 +500,9 @@ export function generateCreateTableStatement(table: Table): string {
     .p(table.unlogged ? "CREATE UNLOGGED TABLE" : "CREATE TABLE")
     .table(table.name, table.schema)
     .p("(\n  " + columnDefs.join(",\n  ") + "\n)");
+  if (table.accessMethod) {
+    builder.p("USING").ident(table.accessMethod);
+  }
   if (table.storageParameters) {
     builder.p(
       `WITH (${renderStorageParameterAssignments(table.storageParameters)})`

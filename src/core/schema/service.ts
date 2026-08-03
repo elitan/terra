@@ -460,7 +460,12 @@ export class SchemaService {
       compositeTypeCreateStatements = compositeTypeResult.transactional;
     }
 
-    const tablePlan = this.provider.generateMigrationPlan(desiredSchema, currentSchema);
+    const migrationContext = await this.provider.getMigrationContext?.(client);
+    const tablePlan = this.provider.generateMigrationPlan(
+      desiredSchema,
+      currentSchema,
+      migrationContext
+    );
     const tableStatements = tablePlan.transactional;
     const deferredTableStatements = tablePlan.deferred;
     const concurrentStatements = [...enumAddValueStatements, ...tablePlan.concurrent];

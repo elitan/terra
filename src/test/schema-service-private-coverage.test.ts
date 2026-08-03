@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { SchemaService } from "../core/schema/service";
 import type { DatabaseClient, DatabaseProvider, ParsedSchema, ValidationResult } from "../providers/types";
 import { StrictModeError } from "../types/errors";
-import type { MigrationPlan } from "../types/migration";
+import type { MigrationContext, MigrationPlan } from "../types/migration";
 
 let promptAnswer = "yes";
 
@@ -29,6 +29,7 @@ interface MockState {
   executeInTransactionCalls: string[][];
   acquireCalls: string[];
   releaseCalls: string[];
+  migrationContexts: Array<MigrationContext | undefined>;
 }
 
 function createParsedSchema(overrides: Partial<ParsedSchema> = {}): ParsedSchema {
@@ -71,6 +72,7 @@ function createMockProvider(options: {
   plan?: MigrationPlan;
   validation?: ValidationResult;
   features?: Set<string>;
+  migrationContext?: MigrationContext;
 } = {}): { provider: DatabaseProvider; state: MockState } {
   const state: MockState = {
     clientEndCalls: 0,
@@ -79,6 +81,7 @@ function createMockProvider(options: {
     executeInTransactionCalls: [],
     acquireCalls: [],
     releaseCalls: [],
+    migrationContexts: [],
   };
 
   const parsedSchema = options.parsedSchema ?? createParsedSchema();
@@ -135,7 +138,11 @@ function createMockProvider(options: {
     getCurrentComments: async function () {
       return [];
     },
-    generateMigrationPlan: function () {
+    getMigrationContext: async function () {
+      return options.migrationContext || {};
+    },
+    generateMigrationPlan: function (_desired, _current, context) {
+      state.migrationContexts.push(context);
       return {
         transactional: [...plan.transactional],
         concurrent: [...plan.concurrent],
@@ -480,6 +487,10 @@ describe("SchemaService private coverage", function () {
   });
 
   test("plan logs transactional deferred and concurrent changes", async function () {
+    const migrationContext = {
+      postgresVersionNum: 170000,
+      defaultTableAccessMethod: "heap",
+    };
     const mock = createMockProvider({
       parsedSchema: createParsedSchema({ tables: [{ name: "users", columns: [] }] }),
       plan: createPlan({
@@ -488,6 +499,7 @@ describe("SchemaService private coverage", function () {
         concurrent: ["CREATE INDEX CONCURRENTLY users_email_idx ON users (email);"],
         hasChanges: true,
       }),
+      migrationContext,
     });
 
     const service = createService(mock.provider);
@@ -497,6 +509,7 @@ describe("SchemaService private coverage", function () {
     expect(plan.transactional).toHaveLength(1);
     expect(plan.deferred).toHaveLength(1);
     expect(plan.concurrent).toHaveLength(1);
+    expect(mock.state.migrationContexts).toEqual([migrationContext]);
     expect(mock.state.clientEndCalls).toBe(1);
   });
 

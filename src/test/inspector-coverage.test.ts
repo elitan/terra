@@ -31,6 +31,7 @@ describe("DatabaseInspector coverage", () => {
               table_name: "event_buffer",
               table_schema: "public",
               relpersistence: "u",
+              table_access_method: "custom_heap",
               table_tablespace_name: "fast_tables",
             },
           ],
@@ -59,6 +60,7 @@ describe("DatabaseInspector coverage", () => {
     const tables = await inspector.getCurrentSchema(client, ["public"]);
 
     expect(tables[0]?.unlogged).toBe(true);
+    expect(tables[0]?.accessMethod).toBe("custom_heap");
     expect(tables[0]?.tablespace).toBe("fast_tables");
   });
 

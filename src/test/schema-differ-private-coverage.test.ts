@@ -311,6 +311,44 @@ describe("SchemaDiffer private coverage", () => {
     ).toBe(false);
   });
 
+  test("generateMigrationPlan handles versioned table access methods", function () {
+    const differ = new SchemaDiffer();
+    const heap = makeTable({ accessMethod: "heap" });
+    const custom = makeTable({ accessMethod: "custom_heap" });
+    const postgres15 = {
+      postgresVersionNum: 150000,
+      defaultTableAccessMethod: "heap",
+    };
+
+    expect(
+      differ
+        .generateMigrationPlan([custom], [heap], postgres15)
+        .transactional.join("\n")
+    ).toContain('SET ACCESS METHOD "custom_heap"');
+    expect(
+      differ
+        .generateMigrationPlan([makeTable()], [heap], postgres15)
+        .hasChanges
+    ).toBe(false);
+    expect(
+      differ
+        .generateMigrationPlan([makeTable()], [heap], {
+          ...postgres15,
+          defaultTableAccessMethod: "custom_heap",
+        })
+        .transactional.join("\n")
+    ).toContain('SET ACCESS METHOD "custom_heap"');
+    expect(function rejectPostgres14Change() {
+      differ.generateMigrationPlan([custom], [heap], {
+        postgresVersionNum: 140000,
+        defaultTableAccessMethod: "heap",
+      });
+    }).toThrow("PostgreSQL 14 cannot change the access method");
+    expect(function rejectUnknownVersionChange() {
+      differ.generateMigrationPlan([custom], [heap]);
+    }).toThrow("without the PostgreSQL server version");
+  });
+
   test("primary key helpers cover add drop modify and none", () => {
     const differ = new SchemaDiffer();
     const add = (differ as any).comparePrimaryKeys(makePrimaryKey(["id"]), undefined);
