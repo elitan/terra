@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
-import { deparseSync, parse, loadModule } from "pgsql-parser";
+import { deparseSync, parse, parseSync, loadModule } from "pgsql-parser";
 import { Logger } from "../../../utils/logger";
 import { parseCreateTable } from "./tables/table-parser";
 import { parseCreateIndex } from "./index-parser";
@@ -23,8 +23,24 @@ import {
   parseCheckConstraint,
   parseForeignKey,
 } from "./tables/constraint-parser";
-import type { Table, Index, EnumType, CompositeType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment, SqlObject } from "../../../types/schema";
+import type {
+  Table,
+  Index,
+  EnumType,
+  CompositeType,
+  View,
+  Function,
+  Procedure,
+  Trigger,
+  Sequence,
+  Extension,
+  SchemaDefinition,
+  Comment,
+  SqlObject,
+  QualifiedName,
+} from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
+import { DEFAULT_COLLATION } from "../../../utils/collation";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -188,6 +204,7 @@ export class SchemaParser {
     for (const index of indexes) {
       const table = tableMap.get(index.tableName);
       if (table) {
+        this.normalizeIndexCollations(index, table);
         if (!table.indexes) {
           table.indexes = [];
         }
@@ -209,6 +226,124 @@ export class SchemaParser {
       comments,
       sqlObjects,
     };
+  }
+
+  private normalizeIndexCollations(index: Index, table: Table): void {
+    if (!index.collations) {
+      return;
+    }
+
+    const expressionCollation = index.expression
+      ? this.getExpressionNaturalCollation(index.expression, table)
+      : undefined;
+    const normalized = index.collations.map(function normalizeKeyCollation(
+      collation,
+      position
+    ) {
+      if (!collation) {
+        return undefined;
+      }
+
+      const columnName = index.columns[position];
+      const column = columnName
+        ? table.columns.find(function findColumn(candidate) {
+            return candidate.name === columnName;
+          })
+        : undefined;
+      const naturalCollation = column
+        ? column.collation || DEFAULT_COLLATION
+        : expressionCollation;
+      return SchemaParser.collationNamesEqual(collation, naturalCollation)
+        ? undefined
+        : collation;
+    });
+
+    index.collations = normalized.some(function hasCollation(collation) {
+      return Boolean(collation);
+    })
+      ? normalized
+      : undefined;
+  }
+
+  private getExpressionNaturalCollation(
+    expression: string,
+    table: Table
+  ): QualifiedName | undefined {
+    const ast = parseSync(`SELECT ${expression} AS terradb_index_expression`);
+    const expressionNode =
+      ast.stmts?.[0]?.stmt?.SelectStmt?.targetList?.[0]?.ResTarget?.val;
+    const referencedColumns = new Set<string>();
+
+    function collectColumnReferences(value: unknown): void {
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          collectColumnReferences(item);
+        }
+        return;
+      }
+      if (!value || typeof value !== "object") {
+        return;
+      }
+
+      const record = value as Record<string, unknown>;
+      const columnReference = record.ColumnRef as
+        | { fields?: Array<{ String?: { sval?: string } }> }
+        | undefined;
+      if (columnReference) {
+        const columnName = columnReference.fields
+          ?.map(function getReferencePart(field) {
+            return field.String?.sval;
+          })
+          .filter(function hasReferencePart(part): part is string {
+            return Boolean(part);
+          })
+          .at(-1);
+        if (columnName) {
+          referencedColumns.add(columnName);
+        }
+        return;
+      }
+
+      for (const child of Object.values(record)) {
+        collectColumnReferences(child);
+      }
+    }
+
+    collectColumnReferences(expressionNode);
+    if (referencedColumns.size === 0) {
+      return DEFAULT_COLLATION;
+    }
+
+    const columns = [...referencedColumns].map(function findColumn(columnName) {
+      return table.columns.find(function hasName(candidate) {
+        return candidate.name === columnName;
+      });
+    });
+    if (columns.some(function isMissing(column) {
+      return !column;
+    })) {
+      return undefined;
+    }
+
+    const naturalCollations = columns.map(function getColumnCollation(column) {
+      return column?.collation || DEFAULT_COLLATION;
+    });
+    const firstCollation = naturalCollations[0];
+    return naturalCollations.every(function hasSameCollation(collation) {
+      return SchemaParser.collationNamesEqual(collation, firstCollation);
+    })
+      ? firstCollation
+      : undefined;
+  }
+
+  private static collationNamesEqual(
+    first: QualifiedName | undefined,
+    second: QualifiedName | undefined
+  ): boolean {
+    if (!first || !second || first.name !== second.name) {
+      return first === second;
+    }
+    return !first.schema || !second.schema || first.schema === second.schema;
   }
 
   /**

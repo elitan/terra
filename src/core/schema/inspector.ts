@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import { parse } from "pgsql-parser";
 import type {
   Table,
   Column,
@@ -23,6 +24,7 @@ import type {
 } from "../../types/schema";
 import { renderIdentityClause } from "../../utils/identity";
 import { renderCollationName } from "../../utils/collation";
+import { parseIndexCollations } from "./parser/index-parser";
 import {
   columnCompressionFromCatalog,
   columnStorageFromCatalog,
@@ -467,7 +469,8 @@ export class DatabaseInspector {
       [tableName, tableSchema]
     );
 
-    return result.rows.map((row: any) => {
+    const indexes: Index[] = [];
+    for (const row of result.rows) {
       const columns = row.column_names || [];
       const opclassNames = row.opclass_names || [];
       const sortOptions: number[] = row.sort_options || [];
@@ -489,7 +492,10 @@ export class DatabaseInspector {
           return nullsOrder !== defaultOrder;
         }
       );
-      return {
+      const collations = await this.parseIndexDefinitionCollations(
+        row.index_definition
+      );
+      indexes.push({
         name: row.index_name,
         tableName: row.table_name,
         schema: row.table_schema,
@@ -497,6 +503,7 @@ export class DatabaseInspector {
         ...(row.included_columns?.length > 0
           ? { include: row.included_columns }
           : {}),
+        ...(collations ? { collations } : {}),
         sortOrders: hasNonDefaultSort ? sortOrders : undefined,
         nullsOrders: hasNonDefaultNullsOrder ? nullsOrders : undefined,
         opclasses,
@@ -509,8 +516,26 @@ export class DatabaseInspector {
         expression: row.has_expressions ? row.expression_def : undefined,
         storageParameters: this.parseStorageOptions(row.storage_options),
         tablespace: row.tablespace_name || undefined,
-      };
-    });
+      });
+    }
+    return indexes;
+  }
+
+  private async parseIndexDefinitionCollations(
+    indexDefinition: string | undefined
+  ): Promise<Index["collations"]> {
+    if (!indexDefinition) {
+      return undefined;
+    }
+
+    const ast = await parse(indexDefinition);
+    const indexStatement = ast.stmts?.[0]?.stmt?.IndexStmt;
+    if (!indexStatement) {
+      throw new Error(
+        `PostgreSQL returned an invalid index definition: ${indexDefinition}`
+      );
+    }
+    return parseIndexCollations(indexStatement.indexParams);
   }
 
   private parseStorageOptions(

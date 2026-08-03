@@ -107,6 +107,7 @@ export interface Index {
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: string[];
   include?: string[]; // PostgreSQL non-key payload columns for covering indexes
+  collations?: Array<QualifiedName | undefined>; // Explicit PostgreSQL collation override per key
   sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
   nullsOrders?: ('FIRST' | 'LAST')[]; // Effective null placement when any key uses a non-default order
   terms?: IndexTerm[]; // Complete ordered keys, including SQLite expressions and collations

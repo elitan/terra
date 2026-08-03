@@ -6,7 +6,7 @@
 
 import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
-import type { Index } from "../../../types/schema";
+import type { Index, QualifiedName } from "../../../types/schema";
 import { parseStorageParameterOptions } from "../../../utils/storage-parameters";
 
 /**
@@ -30,6 +30,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       .filter(Boolean);
 
     const columns: string[] = [];
+    const collations = parseIndexCollations(indexParams);
     const sortOrders: ('ASC' | 'DESC')[] = [];
     const nullsOrders: ('FIRST' | 'LAST')[] = [];
     let opclasses: Record<string, string> | undefined;
@@ -152,6 +153,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       schema,
       columns,
       ...(include.length > 0 ? { include } : {}),
+      ...(collations ? { collations } : {}),
       sortOrders: hasNonDefaultSort ? sortOrders : undefined,
       nullsOrders: hasNonDefaultNullsOrder ? nullsOrders : undefined,
       opclasses,
@@ -171,4 +173,32 @@ export function parseCreateIndex(stmt: any): Index | null {
     );
     return null;
   }
+}
+
+export function parseIndexCollations(
+  indexParams: any[] | undefined
+): Array<QualifiedName | undefined> | undefined {
+  const collations = (indexParams || []).map(function parseIndexCollation(param) {
+    const nameParts = (param.IndexElem?.collation || [])
+      .map(function getNamePart(node: any) {
+        return node.String?.sval;
+      })
+      .filter(function hasNamePart(value: string | undefined): value is string {
+        return Boolean(value);
+      });
+
+    const name = nameParts.at(-1);
+    if (!name) {
+      return undefined;
+    }
+
+    const schema = nameParts.length > 1 ? nameParts.at(-2) : undefined;
+    return schema ? { name, schema } : { name };
+  });
+
+  return collations.some(function hasCollation(collation) {
+    return Boolean(collation);
+  })
+    ? collations
+    : undefined;
 }

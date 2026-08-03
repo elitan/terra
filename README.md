@@ -142,6 +142,7 @@ CONSTRAINT unique_email UNIQUE (email)
 CREATE INDEX idx_email ON users (email);
 CREATE INDEX idx_active ON users (email) WHERE active = true;  -- partial index
 CREATE UNIQUE INDEX idx_unique_email ON users (email);
+CREATE INDEX idx_email_bytewise ON users (email COLLATE "C");  -- PostgreSQL
 ```
 
 ### PostgreSQL-only Features

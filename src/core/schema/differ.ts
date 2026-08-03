@@ -174,6 +174,34 @@ function indexNullsOrdersEqual(first: Index, second: Index): boolean {
   return true;
 }
 
+function indexCollationNamesEqual(
+  first: QualifiedName | undefined,
+  second: QualifiedName | undefined
+): boolean {
+  if (!first || !second) {
+    return first === second;
+  }
+  if (first.name !== second.name) {
+    return false;
+  }
+  return !first.schema || !second.schema || first.schema === second.schema;
+}
+
+function indexCollationsEqual(first: Index, second: Index): boolean {
+  const keyCount = Math.max(getIndexKeyCount(first), getIndexKeyCount(second));
+  for (let position = 0; position < keyCount; position++) {
+    if (
+      !indexCollationNamesEqual(
+        first.collations?.[position],
+        second.collations?.[position]
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function getNonDefaultNullsOrder(
   index: Index,
   position: number
@@ -1561,6 +1589,7 @@ export class SchemaDiffer {
     }
 
     if (!indexNullsOrdersEqual(index1, index2)) return false;
+    if (!indexCollationsEqual(index1, index2)) return false;
 
     const where1 = index1.where;
     const where2 = index2.where;
@@ -1663,8 +1692,15 @@ export class SchemaDiffer {
         expr = `(${expr})`;
       }
       const expressionOpclass = index.expressionOpclass;
+      const collation = index.collations?.[0];
       const sortOrder = index.sortOrders?.[0];
-      let expressionDefinition = expressionOpclass ? `${expr} ${expressionOpclass}` : expr;
+      let expressionDefinition = expr;
+      if (collation) {
+        expressionDefinition += ` COLLATE ${renderCollationName(collation)}`;
+      }
+      if (expressionOpclass) {
+        expressionDefinition += ` ${expressionOpclass}`;
+      }
       if (sortOrder === 'DESC') {
         expressionDefinition += ' DESC';
       }
@@ -1676,9 +1712,16 @@ export class SchemaDiffer {
     } else {
       const quotedColumns = index.columns.map((col, i) => {
         const quoted = `"${col.replace(/"/g, '""')}"`;
+        const collation = index.collations?.[i];
         const opclass = index.opclasses?.[col];
         const sortOrder = index.sortOrders?.[i];
-        let result = opclass ? `${quoted} ${opclass}` : quoted;
+        let result = quoted;
+        if (collation) {
+          result += ` COLLATE ${renderCollationName(collation)}`;
+        }
+        if (opclass) {
+          result += ` ${opclass}`;
+        }
         if (sortOrder === 'DESC') {
           result += ' DESC';
         }
