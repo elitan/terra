@@ -1,7 +1,9 @@
-export interface IdentitySequenceName {
+export interface QualifiedName {
   name: string;
   schema?: string;
 }
+
+export type IdentitySequenceName = QualifiedName;
 
 export interface IdentityColumn {
   generation: 'ALWAYS' | 'BY DEFAULT';
@@ -19,6 +21,7 @@ export interface Column {
   type: string;
   nullable: boolean;
   default?: string;
+  collation?: QualifiedName;
   identity?: IdentityColumn;
   generated?: {
     always: boolean;

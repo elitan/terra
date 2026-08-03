@@ -2,6 +2,7 @@ import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckCo
 import { SQLBuilder } from "./sql-builder";
 import { expressionsEqual } from "./expression-comparator";
 import { identityColumnsAreDifferent, renderIdentityClause } from "./identity";
+import { collationsAreDifferent, renderCollationName } from "./collation";
 
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
@@ -396,6 +397,10 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
     return true;
   }
 
+  if (collationsAreDifferent(desired.collation, current.collation)) {
+    return true;
+  }
+
   // Check if nullability is different
   if (desired.nullable !== current.nullable) {
     return true;
@@ -442,6 +447,10 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
 
 export function generateColumnDefinition(column: Column): string {
   const builder = new SQLBuilder().ident(column.name).p(column.type);
+
+  if (column.collation) {
+    builder.p(`COLLATE ${renderCollationName(column.collation)}`);
+  }
 
   if (column.identity) {
     builder.p(renderIdentityClause(column.identity));

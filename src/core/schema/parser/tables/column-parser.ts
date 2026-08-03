@@ -8,6 +8,7 @@ import { Logger } from "../../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { Column } from "../../../../types/schema";
 import { normalizeIdentityColumn } from "../../../../utils/identity";
+import { normalizeCollation } from "../../../../utils/collation";
 
 /**
  * Extract all columns from CREATE TABLE tableElts array
@@ -47,6 +48,8 @@ export function parseColumn(columnDef: any): Column | null {
 
     const defaultValue = extractDefaultValue(columnDef.constraints || []);
 
+    const collation = extractColumnCollation(columnDef.collClause);
+
     const generated = extractGeneratedColumn(columnDef.constraints || []);
 
     const identity = extractIdentityColumn(columnDef.constraints || [], type);
@@ -57,6 +60,7 @@ export function parseColumn(columnDef: any): Column | null {
       type,
       nullable: !constraints.notNull && !constraints.primary && !isSerial && !identity,
       default: defaultValue,
+      collation,
       identity,
       generated,
     };
@@ -66,6 +70,25 @@ export function parseColumn(columnDef: any): Column | null {
     );
     return null;
   }
+}
+
+function extractColumnCollation(
+  collClause: any
+): Column['collation'] | undefined {
+  const parts = (collClause?.collname || [])
+    .map(function getCollationPart(item: any) {
+      return item?.String?.sval;
+    })
+    .filter(function hasCollationPart(value: unknown): value is string {
+      return typeof value === "string" && value.length > 0;
+    });
+  const name = parts.at(-1);
+  if (!name) return undefined;
+
+  return normalizeCollation({
+    name,
+    schema: parts.length > 1 ? parts.at(-2) : undefined,
+  });
 }
 
 /**

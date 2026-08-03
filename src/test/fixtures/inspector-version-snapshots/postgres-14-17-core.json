@@ -72,6 +72,15 @@
             "default": "now()"
           },
           {
+            "name": "display_name",
+            "type": "text",
+            "nullable": true,
+            "collation": {
+              "schema": "pg_catalog",
+              "name": "C"
+            }
+          },
+          {
             "name": "email",
             "type": "text",
             "nullable": false
@@ -412,6 +421,15 @@
             "type": "timestamp without time zone",
             "nullable": true,
             "default": "now()"
+          },
+          {
+            "name": "display_name",
+            "type": "text",
+            "nullable": true,
+            "collation": {
+              "schema": "pg_catalog",
+              "name": "C"
+            }
           },
           {
             "name": "email",
@@ -756,6 +774,15 @@
             "default": "now()"
           },
           {
+            "name": "display_name",
+            "type": "text",
+            "nullable": true,
+            "collation": {
+              "schema": "pg_catalog",
+              "name": "C"
+            }
+          },
+          {
             "name": "email",
             "type": "text",
             "nullable": false
@@ -1096,6 +1123,15 @@
             "type": "timestamp without time zone",
             "nullable": true,
             "default": "now()"
+          },
+          {
+            "name": "display_name",
+            "type": "text",
+            "nullable": true,
+            "collation": {
+              "schema": "pg_catalog",
+              "name": "C"
+            }
           },
           {
             "name": "email",

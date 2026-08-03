@@ -84,6 +84,7 @@ async function prepareSchema(client: Client): Promise<void> {
     CREATE TABLE public.users (
       id integer GENERATED ALWAYS AS IDENTITY,
       email text NOT NULL,
+      display_name text COLLATE "C",
       status public.user_status NOT NULL DEFAULT 'active',
       score integer NOT NULL DEFAULT 0,
       created_at timestamp without time zone DEFAULT now(),
@@ -177,6 +178,12 @@ function normalizeSnapshot(input: any): unknown {
           type: normalizeSpace(String(column.type)),
           nullable: Boolean(column.nullable),
           default: normalizeMaybeText(column.default),
+          collation: column.collation
+            ? {
+                schema: column.collation.schema,
+                name: column.collation.name,
+              }
+            : undefined,
           identity: column.identity
             ? {
                 generation: column.identity.generation,

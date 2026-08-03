@@ -7,6 +7,7 @@ import type {
   ForeignKeyConstraint,
   UniqueConstraint,
   IdentityColumn,
+  QualifiedName,
 } from "../../types/schema";
 import type { MigrationPlan, MigrationOptions } from "../../types/migration";
 import { DEFAULT_MIGRATION_OPTIONS } from "../../types/migration";
@@ -37,6 +38,11 @@ import {
   identitySequenceNamesDiffer,
   renderIdentityClause,
 } from "../../utils/identity";
+import {
+  collationsAreDifferent,
+  getAlterColumnCollation,
+  renderCollationName,
+} from "../../utils/collation";
 import { DependencyResolver } from "./dependency-resolver";
 
 /**
@@ -45,7 +51,13 @@ import { DependencyResolver } from "./dependency-resolver";
 type TableAlteration =
   | { type: "add_column"; column: Column }
   | { type: "drop_column"; columnName: string }
-  | { type: "alter_column_type"; columnName: string; newType: string; usingClause?: string }
+  | {
+      type: "alter_column_type";
+      columnName: string;
+      newType: string;
+      collation?: QualifiedName;
+      usingClause?: string;
+    }
   | { type: "alter_column_set_default"; columnName: string; default: string }
   | { type: "alter_column_drop_default"; columnName: string }
   | { type: "alter_column_set_not_null"; columnName: string }
@@ -437,6 +449,10 @@ export class SchemaDiffer {
     const normalizedDesiredType = normalizeType(desiredColumn.type);
     const normalizedCurrentType = normalizeType(currentColumn.type);
     const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
+    const collationIsChanging = collationsAreDifferent(
+      desiredColumn.collation,
+      currentColumn.collation
+    );
 
     // Normalize defaults for comparison (strips type casts like ::text, ::character varying)
     const normalizedCurrentDefault = normalizeDefault(currentColumn.default);
@@ -455,13 +471,19 @@ export class SchemaDiffer {
       statements.push(sql);
     }
 
-    // Step 2: Change the type if needed
-    if (typeIsChanging) {
+    // Step 2: Change the type or collation if needed
+    if (typeIsChanging || collationIsChanging) {
+      const collation = getAlterColumnCollation(
+        desiredColumn.collation,
+        currentColumn.collation,
+        typeIsChanging
+      );
       const typeConversionSQL = this.generateTypeConversionSQL(
         tableName,
         desiredColumn.name,
         desiredColumn.type,
-        currentColumn.type
+        currentColumn.type,
+        collation
       );
       statements.push(typeConversionSQL);
     }
@@ -520,48 +542,29 @@ export class SchemaDiffer {
     tableName: string,
     columnName: string,
     desiredType: string,
-    currentType: string
+    currentType: string,
+    collation?: QualifiedName
   ): string {
-    // Special handling for SERIAL type conversions
-    if (desiredType === "SERIAL") {
-      // SERIAL can't be used in ALTER COLUMN, must use INTEGER
-      // and handle sequence creation separately if needed
-      const needsUsing = this.requiresUsingClause(currentType, "INTEGER");
-
-      const builder = new SQLBuilder()
-        .p("ALTER TABLE")
-        .p(tableName) // tableName is already qualified
-        .p("ALTER COLUMN")
-        .ident(columnName)
-        .p("TYPE INTEGER");
-
-      if (needsUsing) {
-        const usingExpression = this.generateUsingExpression(
-          columnName,
-          currentType,
-          "INTEGER"
-        );
-        builder.p(`USING ${usingExpression}`);
-      }
-
-      return builder.p(";").build();
-    }
-
-    // Check if we need a USING clause for type conversion
-    const needsUsing = this.requiresUsingClause(currentType, desiredType);
+    // SERIAL is not valid in ALTER COLUMN TYPE, so use its underlying type.
+    const alterType = desiredType === "SERIAL" ? "INTEGER" : desiredType;
+    const needsUsing = this.requiresUsingClause(currentType, alterType);
 
     const builder = new SQLBuilder()
       .p("ALTER TABLE")
       .p(tableName) // tableName is already qualified
       .p("ALTER COLUMN")
       .ident(columnName)
-      .p(`TYPE ${desiredType}`);
+      .p(`TYPE ${alterType}`);
+
+    if (collation) {
+      builder.p(`COLLATE ${renderCollationName(collation)}`);
+    }
 
     if (needsUsing) {
       const usingExpression = this.generateUsingExpression(
         columnName,
         currentType,
-        desiredType
+        alterType
       );
       builder.p(`USING ${usingExpression}`);
     }
@@ -1394,6 +1397,10 @@ export class SchemaDiffer {
     const normalizedDesiredType = normalizeType(desiredColumn.type);
     const normalizedCurrentType = normalizeType(currentColumn.type);
     const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
+    const collationIsChanging = collationsAreDifferent(
+      desiredColumn.collation,
+      currentColumn.collation
+    );
 
     const normalizedCurrentDefault = normalizeDefault(currentColumn.default);
     const normalizedDesiredDefault = normalizeDefault(desiredColumn.default);
@@ -1407,12 +1414,18 @@ export class SchemaDiffer {
       });
     }
 
-    // Change the type if needed
-    if (typeIsChanging) {
-      const needsUsing = this.requiresUsingClause(currentColumn.type, desiredColumn.type);
+    // Change the type or collation if needed
+    if (typeIsChanging || collationIsChanging) {
+      const needsUsing = typeIsChanging &&
+        this.requiresUsingClause(currentColumn.type, desiredColumn.type);
       const usingClause = needsUsing
         ? this.generateUsingExpression(desiredColumn.name, currentColumn.type, desiredColumn.type)
         : undefined;
+      const collation = getAlterColumnCollation(
+        desiredColumn.collation,
+        currentColumn.collation,
+        typeIsChanging
+      );
 
       // Handle SERIAL specially
       const actualType = desiredColumn.type === "SERIAL" ? "INTEGER" : desiredColumn.type;
@@ -1421,6 +1434,7 @@ export class SchemaDiffer {
         type: "alter_column_type",
         columnName: desiredColumn.name,
         newType: actualType,
+        collation,
         usingClause,
       });
     }
@@ -1777,6 +1791,9 @@ export class SchemaDiffer {
           b.p("ALTER COLUMN")
             .ident(alt.columnName)
             .p(`TYPE ${alt.newType}`);
+          if (alt.collation) {
+            b.p(`COLLATE ${renderCollationName(alt.collation)}`);
+          }
           if (alt.usingClause) {
             b.p(`USING ${alt.usingClause}`);
           }

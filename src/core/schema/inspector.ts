@@ -21,6 +21,7 @@ import type {
   SqlObject,
 } from "../../types/schema";
 import { renderIdentityClause } from "../../utils/identity";
+import { renderCollationName } from "../../utils/collation";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -48,6 +49,15 @@ const IDENTITY_SEQUENCE_JOIN_SQL = `
       AND dependency.deptype = 'i'
     LIMIT 1
   ) identity_sequence ON a.attidentity != ''
+`;
+
+const COLUMN_COLLATION_JOIN_SQL = `
+  JOIN pg_type column_type ON column_type.oid = a.atttypid
+  LEFT JOIN pg_collation column_collation
+    ON column_collation.oid = a.attcollation
+    AND a.attcollation <> column_type.typcollation
+  LEFT JOIN pg_namespace column_collation_namespace
+    ON column_collation_namespace.oid = column_collation.collnamespace
 `;
 
 export class DatabaseInspector {
@@ -99,12 +109,15 @@ export class DatabaseInspector {
           identity_sequence.seqmin as identity_min_value,
           identity_sequence.seqmax as identity_max_value,
           identity_sequence.seqcache as identity_cache,
-          identity_sequence.seqcycle as identity_cycle
+          identity_sequence.seqcycle as identity_cycle,
+          column_collation_namespace.nspname as column_collation_schema,
+          column_collation.collname as column_collation_name
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = cls.relnamespace
         ${IDENTITY_SEQUENCE_JOIN_SQL}
+        ${COLUMN_COLLATION_JOIN_SQL}
         WHERE cls.relname = $1 AND n.nspname = $2 AND a.attnum > 0 AND NOT a.attisdropped
         ORDER BY a.attnum
       `,
@@ -117,6 +130,7 @@ export class DatabaseInspector {
         // Parse generated column info
         let generated: Column['generated'] | undefined = undefined;
         const identity = this.buildIdentityColumn(col);
+        const collation = this.buildColumnCollation(col);
         let defaultValue = col.column_default;
 
         if (col.attgenerated && col.attgenerated !== '') {
@@ -143,6 +157,7 @@ export class DatabaseInspector {
           type: type,
           nullable: col.is_nullable,
           default: defaultValue,
+          collation,
           identity,
           generated,
         };
@@ -2015,12 +2030,15 @@ export class DatabaseInspector {
           identity_sequence.seqmin as identity_min_value,
           identity_sequence.seqmax as identity_max_value,
           identity_sequence.seqcache as identity_cache,
-          identity_sequence.seqcycle as identity_cycle
+          identity_sequence.seqcycle as identity_cycle,
+          column_collation_namespace.nspname as column_collation_schema,
+          column_collation.collname as column_collation_name
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = cls.relnamespace
         ${IDENTITY_SEQUENCE_JOIN_SQL}
+        ${COLUMN_COLLATION_JOIN_SQL}
         WHERE cls.relname = $1
           AND n.nspname = $2
           AND a.attnum > 0
@@ -2051,6 +2069,11 @@ export class DatabaseInspector {
   private buildColumnDefinition(row: any): string {
     const parts = [this.quoteIdent(row.column_name), row.pg_type];
 
+    const collation = this.buildColumnCollation(row);
+    if (collation) {
+      parts.push(`COLLATE ${renderCollationName(collation)}`);
+    }
+
     const identity = this.buildIdentityColumn(row);
     if (identity) {
       parts.push(renderIdentityClause(identity));
@@ -2072,6 +2095,16 @@ export class DatabaseInspector {
     }
 
     return parts.join(" ");
+  }
+
+  private buildColumnCollation(row: any): Column['collation'] | undefined {
+    if (!row.column_collation_name) return undefined;
+    return {
+      name: String(row.column_collation_name),
+      schema: row.column_collation_schema
+        ? String(row.column_collation_schema)
+        : undefined,
+    };
   }
 
   private buildIdentityColumn(row: any): Column['identity'] | undefined {
