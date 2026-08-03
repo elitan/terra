@@ -198,19 +198,7 @@ export class SchemaParser {
 
     const { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects } = await this.parseWithPgsql(sql, filePath);
 
-    // Associate standalone indexes with their tables
-    const tableMap = new Map(tables.map((t) => [t.name, t]));
-
-    for (const index of indexes) {
-      const table = tableMap.get(index.tableName);
-      if (table) {
-        this.normalizeIndexCollations(index, table);
-        if (!table.indexes) {
-          table.indexes = [];
-        }
-        table.indexes.push(index);
-      }
-    }
+    this.associateIndexes(tables, views, indexes, filePath);
 
     return {
       tables,
@@ -226,6 +214,55 @@ export class SchemaParser {
       comments,
       sqlObjects,
     };
+  }
+
+  private associateIndexes(
+    tables: Table[],
+    views: View[],
+    indexes: Index[],
+    filePath?: string
+  ): void {
+    const tableMap = new Map(
+      tables.map(function mapTable(table) {
+        return [SchemaParser.tableKey(table.name, table.schema), table] as const;
+      })
+    );
+    const viewMap = new Map(
+      views.map(function mapView(view) {
+        return [SchemaParser.tableKey(view.name, view.schema), view] as const;
+      })
+    );
+
+    for (const index of indexes) {
+      const targetKey = SchemaParser.tableKey(index.tableName, index.schema);
+      const table = tableMap.get(targetKey);
+      if (table) {
+        this.normalizeIndexCollations(index, table);
+        if (!table.indexes) {
+          table.indexes = [];
+        }
+        table.indexes.push(index);
+        continue;
+      }
+
+      const view = viewMap.get(targetKey);
+      if (!view) {
+        throw new ParserError(
+          `Index ${index.name} targets ${targetKey}, but that table is not defined in the desired schema; define the table in the desired schema and qualify the index target when it is outside public`,
+          filePath
+        );
+      }
+      if (!view.materialized) {
+        throw new ParserError(
+          `Index ${index.name} targets ordinary view ${targetKey}; PostgreSQL indexes can target tables and materialized views, not ordinary views`,
+          filePath
+        );
+      }
+      if (!view.indexes) {
+        view.indexes = [];
+      }
+      view.indexes.push(index);
+    }
   }
 
   private normalizeIndexCollations(index: Index, table: Table): void {

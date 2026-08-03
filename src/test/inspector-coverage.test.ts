@@ -153,14 +153,52 @@ describe("DatabaseInspector coverage", () => {
       }
 
       if (sql.includes("FROM pg_indexes")) {
-        if (params?.[0] === "public" && params?.[1] === "mv_users") {
+        if (params?.[0] === "mv_users" && params?.[1] === "public") {
           return {
-            rows: [{ indexname: "mv_users_idx", indexdef: "CREATE INDEX mv_users_idx ON mv_users(id)" }],
+            rows: [{
+              index_name: "mv_users_idx",
+              table_name: "mv_users",
+              table_schema: "public",
+              index_definition:
+                'CREATE UNIQUE INDEX mv_users_idx ON public.mv_users USING btree (id DESC NULLS LAST) INCLUDE (label) WITH (fillfactor=75)',
+              is_unique: true,
+              nulls_not_distinct: false,
+              access_method: "btree",
+              has_expressions: false,
+              tablespace_name: null,
+              storage_options: ["fillfactor=75"],
+              expression_def: null,
+              column_names: ["id"],
+              included_columns: ["label"],
+              opclass_names: [null],
+              expression_opclass_name: null,
+              where_clause: null,
+              sort_options: [1],
+            }],
           };
         }
-        if (params?.[0] === "tenant_a" && params?.[1] === "mv_orders") {
+        if (params?.[0] === "mv_orders" && params?.[1] === "tenant_a") {
           return {
-            rows: [{ indexname: "mv_orders_idx", indexdef: "CREATE INDEX mv_orders_idx ON mv_orders(id)" }],
+            rows: [{
+              index_name: "mv_orders_idx",
+              table_name: "mv_orders",
+              table_schema: "tenant_a",
+              index_definition:
+                'CREATE INDEX mv_orders_idx ON tenant_a.mv_orders USING btree ((lower(label)) COLLATE "C") WHERE active',
+              is_unique: false,
+              nulls_not_distinct: false,
+              access_method: "btree",
+              has_expressions: true,
+              tablespace_name: null,
+              storage_options: null,
+              expression_def: "lower(label)",
+              column_names: [],
+              included_columns: [],
+              opclass_names: [],
+              expression_opclass_name: null,
+              where_clause: "active",
+              sort_options: [0],
+            }],
           };
         }
         throw new Error(`Unexpected pg_indexes params: ${JSON.stringify(params)}`);
@@ -194,8 +232,15 @@ describe("DatabaseInspector coverage", () => {
           {
             name: "mv_users_idx",
             tableName: "mv_users",
-            columns: [],
+            schema: "public",
+            columns: ["id"],
+            include: ["label"],
+            sortOrders: ["DESC"],
+            nullsOrders: ["LAST"],
             type: "btree",
+            unique: true,
+            concurrent: false,
+            storageParameters: { fillfactor: "75" },
           },
         ],
       },
@@ -208,8 +253,14 @@ describe("DatabaseInspector coverage", () => {
           {
             name: "mv_orders_idx",
             tableName: "mv_orders",
+            schema: "tenant_a",
             columns: [],
+            collations: [{ name: "C" }],
             type: "btree",
+            unique: false,
+            concurrent: false,
+            where: "active",
+            expression: "lower(label)",
           },
         ],
       },

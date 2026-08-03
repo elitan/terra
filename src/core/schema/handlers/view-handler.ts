@@ -5,6 +5,7 @@ import {
   generateCreateOrReplaceViewSQL,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
+import { SchemaDiffer } from "../differ";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -171,14 +172,57 @@ const sqliteConfig: HandlerConfig<View> = {
   needsUpdate: sqliteViewNeedsUpdate,
 };
 
+const materializedViewIndexDiffer = new SchemaDiffer({
+  useConcurrentIndexes: false,
+  useConcurrentDrops: false,
+});
+
+function generateMaterializedViewIndexStatements(
+  desiredViews: View[],
+  currentViews: View[]
+): string[] {
+  const statements: string[] = [];
+  const currentMap = new Map(
+    currentViews.map(function mapView(view) {
+      return [getViewKey(view), view] as const;
+    })
+  );
+
+  for (const desired of desiredViews) {
+    if (!desired.materialized) {
+      continue;
+    }
+
+    const current = currentMap.get(getViewKey(desired));
+    const currentIndexes =
+      current && !config.needsUpdate(desired, current)
+        ? current.indexes || []
+        : [];
+    statements.push(
+      ...materializedViewIndexDiffer.generateStandaloneIndexStatements(
+        desired.indexes || [],
+        currentIndexes
+      )
+    );
+  }
+  return statements;
+}
+
 export class ViewHandler {
   generateStatements(desiredViews: View[], currentViews: View[]): string[] {
     const usesCreateStatements = desiredViews.some(hasCreateStatement) ||
       currentViews.some(hasCreateStatement);
-    return generateStatements(
+    const statements = generateStatements(
       desiredViews,
       currentViews,
       usesCreateStatements ? sqliteConfig : config
     );
+    if (usesCreateStatements) {
+      return statements;
+    }
+    statements.push(
+      ...generateMaterializedViewIndexStatements(desiredViews, currentViews)
+    );
+    return statements;
   }
 }

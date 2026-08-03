@@ -529,9 +529,9 @@ export class SchemaDiffer {
         }
 
         // Handle index changes separately (they use CONCURRENTLY which can't be batched)
-        const indexStatements = this.generateIndexStatements(
-          table,
-          currentTable
+        const indexStatements = this.generateStandaloneIndexStatements(
+          table.indexes || [],
+          currentTable.indexes || []
         );
         statements.push(...indexStatements);
       }
@@ -1452,15 +1452,15 @@ export class SchemaDiffer {
    * - Batching constraints with other ALTER TABLE operations
    * - Proper PostgreSQL semantics (constraints vs performance indexes)
    */
-  private generateIndexStatements(
-    desiredTable: Table,
-    currentTable: Table
+  generateStandaloneIndexStatements(
+    desiredIndexes: Index[],
+    currentIndexes: Index[]
   ): string[] {
     const statements: string[] = [];
 
     const indexComparison = this.compareIndexes(
-      desiredTable.indexes || [],
-      currentTable.indexes || []
+      desiredIndexes,
+      currentIndexes
     );
 
     const toRemove = [...indexComparison.toRemove].sort((a, b) =>

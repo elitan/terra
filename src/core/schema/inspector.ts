@@ -1080,22 +1080,13 @@ export class DatabaseInspector {
         materialized: true,
       };
 
-      // Get indexes for materialized views
-      const indexesResult = await client.query(`
-        SELECT
-          indexname,
-          indexdef
-        FROM pg_indexes
-        WHERE schemaname = $1 AND tablename = $2
-      `, [row.schema_name, row.view_name]);
-
-      if (indexesResult.rows.length > 0) {
-        view.indexes = indexesResult.rows.map(idx => ({
-          name: idx.indexname,
-          tableName: row.view_name,
-          columns: [], // We'll parse this from indexdef if needed
-          type: 'btree' as const, // Default type
-        }));
+      const indexes = await this.getTableIndexes(
+        client,
+        row.view_name,
+        row.schema_name
+      );
+      if (indexes.length > 0) {
+        view.indexes = indexes;
       }
 
       views.push(view);
