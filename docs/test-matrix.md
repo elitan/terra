@@ -24,7 +24,7 @@
 |---|---|---|---|
 | tables | covered | covered | SQLite regular/FTS5/RTree virtual tables, shadow filtering, STRICT/WITHOUT ROWID, exact DDL, quoted identifiers, AUTOINCREMENT high-water preservation, changes, removal, and rollback covered in memory and on disk |
 | columns | covered | covered | includes conversions plus SQLite VIRTUAL/STORED inspection, add, recreate, remove, rollback, and memory/file parity |
-| constraints | covered | covered | SQLite named inline/table constraints, collations, sort order, and ON CONFLICT behavior are preserved and change-detected |
+| constraints | covered | covered | PostgreSQL foreign-key MATCH FULL is lifecycle-tested on 14-17, MATCH SIMPLE normalizes to the default, and unimplemented MATCH PARTIAL is rejected before planning; SQLite named inline/table constraints, collations, sort order, and ON CONFLICT behavior are preserved and change-detected |
 | indexes | covered | covered | SQLite mixed column/expression keys, collations, ASC/DESC ordering, partial predicates, planner use, recreation, rollback, and memory/file parity covered |
 | views | covered | covered | sqlite full definitions, explicit column lists, replacement, recreation ordering, and rollback covered |
 | schemas | covered | gap | sqlite unsupported by design |

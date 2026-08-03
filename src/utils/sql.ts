@@ -668,24 +668,30 @@ export function generateExclusionConstraintClause(
   return builder.build();
 }
 
-// Foreign Key SQL generation
-export function generateAddForeignKeySQL(
-  tableName: string,
-  foreignKey: ForeignKeyConstraint
+export function generateForeignKeyClause(
+  foreignKey: ForeignKeyConstraint,
+  tableName: string
 ): string {
   const constraintName = getForeignKeyConstraintName(tableName, foreignKey);
-  const columns = foreignKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-  const referencedColumns = foreignKey.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-  const [targetTable, targetSchema] = splitSchemaTable(tableName);
+  const columns = foreignKey.columns.map(function quoteColumn(column) {
+    return new SQLBuilder().ident(column).build();
+  });
+  const referencedColumns = foreignKey.referencedColumns.map(
+    function quoteReferencedColumn(column) {
+      return new SQLBuilder().ident(column).build();
+    }
+  );
 
   const builder = new SQLBuilder()
-    .p("ALTER TABLE")
-    .table(targetTable, targetSchema)
-    .p("ADD CONSTRAINT")
+    .p("CONSTRAINT")
     .ident(constraintName)
-    .p(`FOREIGN KEY (${columns}) REFERENCES`)
+    .p(`FOREIGN KEY (${columns.join(", ")}) REFERENCES`)
     .table(...splitSchemaTable(foreignKey.referencedTable))
-    .p(`(${referencedColumns})`);
+    .p(`(${referencedColumns.join(", ")})`);
+
+  if (foreignKey.matchType) {
+    builder.p(`MATCH ${foreignKey.matchType}`);
+  }
 
   if (foreignKey.onDelete) {
     builder.p(`ON DELETE ${foreignKey.onDelete}`);
@@ -697,7 +703,23 @@ export function generateAddForeignKeySQL(
 
   appendDeferrableOptions(builder, foreignKey);
 
-  return builder.p(";").build();
+  return builder.build();
+}
+
+// Foreign Key SQL generation
+export function generateAddForeignKeySQL(
+  tableName: string,
+  foreignKey: ForeignKeyConstraint
+): string {
+  const [targetTable, targetSchema] = splitSchemaTable(tableName);
+
+  return new SQLBuilder()
+    .p("ALTER TABLE")
+    .table(targetTable, targetSchema)
+    .p("ADD")
+    .p(generateForeignKeyClause(foreignKey, tableName))
+    .p(";")
+    .build();
 }
 
 export function generateDropForeignKeySQL(

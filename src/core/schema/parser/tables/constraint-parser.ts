@@ -305,6 +305,7 @@ function parseForeignKeyFromNode(constraint: any, columns: string[]): ForeignKey
 
     const onDelete = constraint.fk_del_action ? fk_action_map[constraint.fk_del_action] : undefined;
     const onUpdate = constraint.fk_upd_action ? fk_action_map[constraint.fk_upd_action] : undefined;
+    const matchType = constraint.fk_matchtype === "f" ? "FULL" : undefined;
 
     const options = getDeferrableOptions(constraint);
 
@@ -313,6 +314,7 @@ function parseForeignKeyFromNode(constraint: any, columns: string[]): ForeignKey
       columns,
       referencedTable: referencedSchema ? `${referencedSchema}.${referencedTable}` : referencedTable,
       referencedColumns,
+      ...(matchType ? { matchType } : {}),
       onDelete,
       onUpdate,
       ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),

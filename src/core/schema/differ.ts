@@ -31,11 +31,11 @@ import {
   generateDropCheckConstraintSQL,
   generateAddForeignKeySQL,
   generateDropForeignKeySQL,
+  generateForeignKeyClause,
   generateAddUniqueConstraintSQL,
   generateDropUniqueConstraintSQL,
   generateUniqueConstraintClause,
   getQualifiedTableName,
-  getForeignKeyConstraintName,
   splitSchemaTable,
   getBareTableName,
   generateColumnDefinition,
@@ -60,6 +60,12 @@ import { DependencyResolver } from "./dependency-resolver";
 function normalizeReferencedTableName(referencedTable: string): string {
   const [name, schema] = splitSchemaTable(referencedTable);
   return `${schema || "public"}.${name}`;
+}
+
+function normalizeForeignKeyMatchType(
+  matchType: ForeignKeyConstraint["matchType"]
+): "FULL" | "SIMPLE" {
+  return matchType === "FULL" ? "FULL" : "SIMPLE";
 }
 
 function findOuterClosingParenthesis(value: string): number {
@@ -1739,6 +1745,13 @@ export class SchemaDiffer {
       return true;
     }
 
+    if (
+      normalizeForeignKeyMatchType(a.matchType) !==
+      normalizeForeignKeyMatchType(b.matchType)
+    ) {
+      return true;
+    }
+
     if (a.deferrable !== b.deferrable || a.initiallyDeferred !== b.initiallyDeferred) {
       return true;
     }
@@ -2756,26 +2769,7 @@ export class SchemaDiffer {
           break;
 
         case "add_foreign_key": {
-          const constraintName = getForeignKeyConstraintName(table.name, alt.constraint);
-          const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-          const referencedColumns = alt.constraint.referencedColumns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-          b.p("ADD CONSTRAINT")
-            .ident(constraintName)
-            .p(`FOREIGN KEY (${columns}) REFERENCES`)
-            .table(...splitSchemaTable(alt.constraint.referencedTable))
-            .p(`(${referencedColumns})`);
-          if (alt.constraint.onDelete) {
-            b.p(`ON DELETE ${alt.constraint.onDelete}`);
-          }
-          if (alt.constraint.onUpdate) {
-            b.p(`ON UPDATE ${alt.constraint.onUpdate}`);
-          }
-          if (alt.constraint.deferrable) {
-            b.p("DEFERRABLE");
-            if (alt.constraint.initiallyDeferred) {
-              b.p("INITIALLY DEFERRED");
-            }
-          }
+          b.p("ADD").p(generateForeignKeyClause(alt.constraint, table.name));
           break;
         }
 

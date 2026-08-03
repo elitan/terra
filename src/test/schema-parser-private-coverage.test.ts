@@ -50,6 +50,24 @@ describe("SchemaParser private coverage", () => {
     expect(result).toEqual({});
   });
 
+  test("extractErrorContext marks only the failing source line", function () {
+    const parser = new SchemaParser() as any;
+    const result = parser.extractErrorContext(
+      'syntax error at or near "broken"',
+      "first line\nsecond line\nbroken token\nfourth line\nfifth line"
+    );
+
+    expect(result.line).toBe(3);
+    expect(result.column).toBe(1);
+    expect(result.snippet?.split("\n")).toEqual([
+      "     1 | first line",
+      "     2 | second line",
+      "→    3 | broken token",
+      "     4 | fourth line",
+      "     5 | fifth line",
+    ]);
+  });
+
   test("parseCommentStmt handles column and schema qualified object names", function () {
     const parser = new SchemaParser() as any;
 

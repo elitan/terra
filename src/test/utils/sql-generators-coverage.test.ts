@@ -118,6 +118,7 @@ describe("SQL generators coverage", () => {
       columns: ["user_id"],
       referencedTable: "public.users",
       referencedColumns: ["id"],
+      matchType: "FULL",
       onDelete: "CASCADE",
       onUpdate: "SET NULL",
       deferrable: true,
@@ -125,6 +126,7 @@ describe("SQL generators coverage", () => {
     });
     expect(fkSQL).toContain("FOREIGN KEY");
     expect(fkSQL).toContain('"fk_orders_user_id_users"');
+    expect(fkSQL).toContain("MATCH FULL");
     expect(fkSQL).toContain("ON DELETE CASCADE");
     expect(fkSQL).toContain("ON UPDATE SET NULL");
     expect(fkSQL).toContain("DEFERRABLE INITIALLY DEFERRED");

@@ -433,6 +433,16 @@ export class SchemaParser {
         // Try to extract line/column info from pgsql-parser error message
         const { line, column, snippet } = this.extractErrorContext(error.message, sql);
 
+        if (error.message.includes("MATCH PARTIAL not yet implemented")) {
+          throw new ParserError(
+            "PostgreSQL does not implement MATCH PARTIAL; use MATCH SIMPLE or MATCH FULL",
+            filePath,
+            line,
+            column,
+            snippet
+          );
+        }
+
         throw new ParserError(
           error.message,
           filePath,

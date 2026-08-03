@@ -605,6 +605,7 @@ export class DatabaseInspector {
         ) AS referenced_columns,
         c.confdeltype AS delete_rule,
         c.confupdtype AS update_rule,
+        c.confmatchtype AS match_type,
         c.condeferrable AS deferrable,
         c.condeferred AS initially_deferred
       FROM pg_constraint c
@@ -645,6 +646,7 @@ export class DatabaseInspector {
         ? row.referenced_table
         : `${row.referenced_schema}.${row.referenced_table}`,
       referencedColumns: parseArrayLiteral(row.referenced_columns),
+      ...(row.match_type === "f" ? { matchType: "FULL" as const } : {}),
       onDelete: actionMap[row.delete_rule],
       onUpdate: actionMap[row.update_rule],
       ...(row.deferrable ? { deferrable: true } : {}),
