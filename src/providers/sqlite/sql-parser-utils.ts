@@ -114,6 +114,7 @@ interface SQLiteTriggerMetadata {
 interface SQLiteToken {
   kind: "word" | "quoted" | "symbol";
   value: string;
+  start: number;
   end: number;
 }
 
@@ -128,7 +129,7 @@ function readSQLiteToken(sql: string, index: number): SQLiteToken | undefined {
     const end = character === "["
       ? skipBracketIdentifier(sql, start)
       : skipQuoted(sql, start, character);
-    return { kind: "quoted", value: sql.slice(start, end), end };
+    return { kind: "quoted", value: sql.slice(start, end), start, end };
   }
 
   if (isIdentifierCharacter(character)) {
@@ -136,10 +137,10 @@ function readSQLiteToken(sql: string, index: number): SQLiteToken | undefined {
     while (isIdentifierCharacter(sql[end])) {
       end += 1;
     }
-    return { kind: "word", value: sql.slice(start, end).toUpperCase(), end };
+    return { kind: "word", value: sql.slice(start, end).toUpperCase(), start, end };
   }
 
-  return { kind: "symbol", value: character || "", end: start + 1 };
+  return { kind: "symbol", value: character || "", start, end: start + 1 };
 }
 
 function isWord(
@@ -370,12 +371,21 @@ function findFirstUnquotedParenthesis(sql: string): number | undefined {
 }
 
 function splitSQLiteTableDefinitions(sql: string): string[] {
+  return readSQLiteParenthesizedList(sql)?.items || [];
+}
+
+interface SQLiteParenthesizedList {
+  items: string[];
+  end: number;
+}
+
+function readSQLiteParenthesizedList(sql: string): SQLiteParenthesizedList | undefined {
   const openParenthesis = findFirstUnquotedParenthesis(sql);
   if (openParenthesis === undefined) {
-    return [];
+    return undefined;
   }
 
-  const definitions: string[] = [];
+  const items: string[] = [];
   let depth = 1;
   let start = openParenthesis + 1;
   let cursor = start;
@@ -392,18 +402,88 @@ function splitSQLiteTableDefinitions(sql: string): string[] {
     } else if (sql[cursor] === ")") {
       depth -= 1;
       if (depth === 0) {
-        definitions.push(sql.slice(start, cursor).trim());
-        break;
+        items.push(sql.slice(start, cursor).trim());
+        return { items, end: cursor + 1 };
       }
     } else if (sql[cursor] === "," && depth === 1) {
-      definitions.push(sql.slice(start, cursor).trim());
+      items.push(sql.slice(start, cursor).trim());
       start = cursor + 1;
     }
 
     cursor += 1;
   }
 
-  return definitions;
+  return undefined;
+}
+
+function getTopLevelSQLiteTokens(sql: string): SQLiteToken[] {
+  const tokens: SQLiteToken[] = [];
+  let depth = 0;
+  let cursor = 0;
+
+  while (cursor < sql.length) {
+    const token = readSQLiteToken(sql, cursor);
+    if (!token) {
+      break;
+    }
+
+    if (token.kind === "symbol" && token.value === "(") {
+      depth += 1;
+    } else if (token.kind === "symbol" && token.value === ")") {
+      depth -= 1;
+    } else if (depth === 0) {
+      tokens.push(token);
+    }
+    cursor = token.end;
+  }
+
+  return tokens;
+}
+
+function stripSQLiteIndexTermModifiers(term: string): string {
+  const tokens = getTopLevelSQLiteTokens(term);
+  let end = term.length;
+  let lastIndex = tokens.length - 1;
+
+  if (
+    isWord(tokens[lastIndex], "ASC") ||
+    isWord(tokens[lastIndex], "DESC")
+  ) {
+    end = tokens[lastIndex]!.start;
+    lastIndex -= 1;
+  }
+
+  if (lastIndex >= 1 && isWord(tokens[lastIndex - 1], "COLLATE")) {
+    end = Math.min(end, tokens[lastIndex - 1]!.start);
+  }
+
+  return term.slice(0, end).trim();
+}
+
+export interface SQLiteIndexDefinition {
+  expressions: string[];
+  where?: string;
+}
+
+export function parseSQLiteIndexDefinition(sql: string): SQLiteIndexDefinition {
+  const list = readSQLiteParenthesizedList(sql);
+  if (!list) {
+    return { expressions: [] };
+  }
+
+  let token = readSQLiteToken(sql, list.end);
+  while (token && !isWord(token, "WHERE")) {
+    token = readSQLiteToken(sql, token.end);
+  }
+
+  const where = token
+    ? sql.slice(token.end).trim().replace(/;+\s*$/g, "")
+    : undefined;
+
+  return {
+    expressions: list.items.map(stripSQLiteIndexTermModifiers),
+    where: where || undefined,
+  };
 }
 
 function extractGeneratedExpression(columnDefinition: string, start: number): string | undefined {

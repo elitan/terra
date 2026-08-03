@@ -82,6 +82,15 @@ describe("SQLiteInspector unit coverage", () => {
         return { rows: [{ seqno: 0, cid: 1, name: "email" }] };
       }
 
+      if (sql.includes('PRAGMA index_xinfo("idx_users_email")')) {
+        return {
+          rows: [
+            { seqno: 0, cid: 1, name: "email", desc: 0, coll: "BINARY", key: 1 },
+            { seqno: 1, cid: -1, name: null, desc: 0, coll: "BINARY", key: 0 },
+          ],
+        };
+      }
+
       if (sql.includes('PRAGMA index_info("idx_users_pk_custom")')) {
         return { rows: [{ seqno: 0, cid: 0, name: "id" }] };
       }
@@ -90,7 +99,28 @@ describe("SQLiteInspector unit coverage", () => {
         return { rows: [{ seqno: 0, cid: 1, name: "email" }] };
       }
 
+      if (sql.includes('PRAGMA index_xinfo("idx_users_partial")')) {
+        return {
+          rows: [
+            { seqno: 0, cid: 1, name: "email", desc: 0, coll: "BINARY", key: 1 },
+            { seqno: 1, cid: -1, name: null, desc: 0, coll: "BINARY", key: 0 },
+          ],
+        };
+      }
+
       if (sql.includes("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?")) {
+        if (params?.[0] === "idx_users_email") {
+          return {
+            rows: [
+              {
+                type: "index",
+                name: "idx_users_email",
+                tbl_name: "users",
+                sql: "CREATE UNIQUE INDEX idx_users_email ON users(email)",
+              },
+            ],
+          };
+        }
         if (params?.[0] === "idx_users_partial") {
           return {
             rows: [
@@ -140,6 +170,9 @@ describe("SQLiteInspector unit coverage", () => {
         columns: ["email"],
         unique: true,
         type: "btree",
+        sortOrders: ["ASC"],
+        terms: [{ column: "email", collation: "BINARY", order: "ASC" }],
+        createStatement: "CREATE UNIQUE INDEX idx_users_email ON users(email)",
       },
       {
         name: "idx_users_partial",
@@ -147,6 +180,9 @@ describe("SQLiteInspector unit coverage", () => {
         columns: ["email"],
         unique: false,
         type: "btree",
+        sortOrders: ["ASC"],
+        terms: [{ column: "email", collation: "BINARY", order: "ASC" }],
+        createStatement: "CREATE INDEX idx_users_partial ON users(email) WHERE email IS NOT NULL",
         where: "email IS NOT NULL",
       },
     ]);

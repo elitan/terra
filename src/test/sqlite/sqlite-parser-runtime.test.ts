@@ -37,6 +37,9 @@ describe("SQLiteParser execution-runtime parity", function () {
         columns: ["name"],
         unique: true,
         type: "btree",
+        sortOrders: ["ASC"],
+        terms: [{ column: "name", collation: "BINARY", order: "ASC" }],
+        createStatement: "CREATE UNIQUE INDEX idx_users_name ON users (name)",
       },
     ]);
     expect(users?.checkConstraints).toEqual([

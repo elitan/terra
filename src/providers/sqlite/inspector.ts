@@ -9,11 +9,13 @@ import type {
   ForeignKeyConstraint,
   CheckConstraint,
   UniqueConstraint,
+  IndexTerm,
 } from "../../types/schema";
 import {
   extractSQLiteCheckExpressions,
   extractSQLiteGeneratedExpressions,
   extractSQLiteViewDefinition,
+  parseSQLiteIndexDefinition,
   parseSQLiteTriggerMetadata,
 } from "./sql-parser-utils";
 
@@ -43,13 +45,15 @@ interface IndexInfo {
   name: string;
   unique: number;
   origin: string;
-  partial: number;
 }
 
 interface IndexColumnInfo {
   seqno: number;
   cid: number;
-  name: string;
+  name: string | null;
+  desc: number;
+  coll: string;
+  key: number;
 }
 
 interface SqliteMasterRow {
@@ -84,7 +88,9 @@ export class SQLiteInspector {
     tableName: string,
     createSql: string | null
   ): Promise<Table> {
-    const tableInfo = await client.query<TableInfo>(`PRAGMA table_xinfo("${tableName}")`);
+    const tableInfo = await client.query<TableInfo>(
+      `PRAGMA table_xinfo(${this.quoteIdentifier(tableName)})`
+    );
     const columns = this.getColumns(tableInfo.rows, tableName, createSql);
     const primaryKey = this.getPrimaryKey(tableInfo.rows);
     const foreignKeys = await this.getForeignKeys(client, tableName);
@@ -157,7 +163,9 @@ export class SQLiteInspector {
   }
 
   private async getForeignKeys(client: SQLiteClient, tableName: string): Promise<ForeignKeyConstraint[]> {
-    const fks = await client.query<ForeignKeyInfo>(`PRAGMA foreign_key_list("${tableName}")`);
+    const fks = await client.query<ForeignKeyInfo>(
+      `PRAGMA foreign_key_list(${this.quoteIdentifier(tableName)})`
+    );
 
     const fkMap = new Map<number, ForeignKeyConstraint>();
 
@@ -190,16 +198,61 @@ export class SQLiteInspector {
   }
 
   private async getIndexes(client: SQLiteClient, tableName: string): Promise<Index[]> {
-    const indexList = await client.query<IndexInfo>(`PRAGMA index_list("${tableName}")`);
+    const indexList = await client.query<IndexInfo>(
+      `PRAGMA index_list(${this.quoteIdentifier(tableName)})`
+    );
     const result: Index[] = [];
 
     for (const idx of indexList.rows) {
-      if (idx.name.startsWith('sqlite_autoindex_')) {
+      if (idx.origin !== "c" || idx.name.startsWith('sqlite_autoindex_')) {
         continue;
       }
 
-      const indexInfo = await client.query<IndexColumnInfo>(`PRAGMA index_info("${idx.name}")`);
-      const columns = indexInfo.rows.sort((a, b) => a.seqno - b.seqno).map(col => col.name);
+      const indexInfo = await client.query<IndexColumnInfo>(
+        `PRAGMA index_xinfo(${this.quoteIdentifier(idx.name)})`
+      );
+      const keyColumns = indexInfo.rows
+        .filter(function (column) {
+          return column.key === 1;
+        })
+        .sort(function (left, right) {
+          return left.seqno - right.seqno;
+        });
+      const createResult = await client.query<SqliteMasterRow>(
+        `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
+        [idx.name]
+      );
+      const createStatement = createResult.rows[0]?.sql
+        ?.trim()
+        .replace(/;+\s*$/g, "");
+      if (!createStatement) {
+        throw new Error(`Unable to inspect CREATE statement for SQLite index "${idx.name}"`);
+      }
+
+      const definition = parseSQLiteIndexDefinition(createStatement);
+      if (definition.expressions.length !== keyColumns.length) {
+        throw new Error(`Unable to inspect indexed terms for SQLite index "${idx.name}"`);
+      }
+
+      const terms: IndexTerm[] = keyColumns.map(function (column, position) {
+        const common = {
+          collation: column.coll,
+          order: column.desc === 1 ? "DESC" as const : "ASC" as const,
+        };
+        if (column.cid === -2) {
+          return {
+            expression: definition.expressions[position]!,
+            ...common,
+          };
+        }
+        if (column.name === null) {
+          throw new Error(`Unable to inspect column for SQLite index "${idx.name}"`);
+        }
+        return { column: column.name, ...common };
+      });
+      const columns = terms.flatMap(function (term) {
+        return term.column === undefined ? [] : [term.column];
+      });
 
       const index: Index = {
         name: idx.name,
@@ -207,31 +260,23 @@ export class SQLiteInspector {
         columns,
         unique: idx.unique === 1,
         type: "btree",
+        sortOrders: terms.map(function (term) {
+          return term.order || "ASC";
+        }),
+        terms,
+        createStatement,
       };
 
-      if (idx.origin === 'pk') {
-        index.constraint = { type: 'p' };
-      } else if (idx.origin === 'u') {
-        index.constraint = { type: 'u' };
-      }
-
-      if (idx.partial === 1) {
-        const createStmt = await client.query<SqliteMasterRow>(
-          `SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
-          [idx.name]
-        );
-        if (createStmt.rows[0]?.sql) {
-          const whereMatch = createStmt.rows[0].sql.match(/WHERE\s+(.+)$/i);
-          if (whereMatch) {
-            index.where = whereMatch[1];
-          }
-        }
+      if (definition.where !== undefined) {
+        index.where = definition.where;
       }
 
       result.push(index);
     }
 
-    return result;
+    return result.sort(function (left, right) {
+      return left.name.localeCompare(right.name);
+    });
   }
 
   private async getCheckConstraints(client: SQLiteClient, tableName: string): Promise<CheckConstraint[]> {
@@ -254,7 +299,9 @@ export class SQLiteInspector {
     client: SQLiteClient,
     tableName: string
   ): Promise<UniqueConstraint[]> {
-    const indexList = await client.query<IndexInfo>(`PRAGMA index_list("${tableName}")`);
+    const indexList = await client.query<IndexInfo>(
+      `PRAGMA index_list(${this.quoteIdentifier(tableName)})`
+    );
     const constraints: UniqueConstraint[] = [];
 
     for (const index of indexList.rows) {
@@ -263,14 +310,21 @@ export class SQLiteInspector {
       }
 
       const indexInfo = await client.query<IndexColumnInfo>(
-        `PRAGMA index_info("${index.name}")`
+        `PRAGMA index_info(${this.quoteIdentifier(index.name)})`
       );
+      if (indexInfo.rows.some(function (column) {
+        return column.name === null;
+      })) {
+        throw new Error(
+          `Unable to inspect UNIQUE constraint columns for SQLite index "${index.name}"`
+        );
+      }
       const columns = indexInfo.rows
         .sort(function (left, right) {
           return left.seqno - right.seqno;
         })
         .map(function (column) {
-          return column.name;
+          return column.name as string;
         });
       constraints.push({ columns });
     }
@@ -332,5 +386,9 @@ export class SQLiteInspector {
       return value;
     }
     return value;
+  }
+
+  private quoteIdentifier(value: string): string {
+    return `"${value.replace(/"/g, '""')}"`;
   }
 }

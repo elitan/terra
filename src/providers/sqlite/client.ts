@@ -19,8 +19,7 @@ export class SQLiteClient implements DatabaseClient {
   ): Promise<QueryResult<T>> {
     const stmt = this.db.prepare(sql);
     const sqlParams = params as (string | number | bigint | boolean | null | Uint8Array)[] | undefined;
-    if (sql.trim().toUpperCase().startsWith("SELECT") ||
-        sql.trim().toUpperCase().startsWith("PRAGMA")) {
+    if (stmt.reader) {
       const rows = sqlParams ? stmt.all(...sqlParams) : stmt.all();
       return { rows: rows as T[] };
     } else {

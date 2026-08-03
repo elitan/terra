@@ -25,7 +25,7 @@
 | tables | covered | covered | broad base tests present |
 | columns | covered | covered | includes conversions plus SQLite VIRTUAL/STORED inspection, add, recreate, remove, rollback, and memory/file parity |
 | constraints | covered | partial | nested checks and unique-constraint lifecycle/rollback covered; names and conflict clauses remain under audit |
-| indexes | covered | covered | includes partial/expression in pg |
+| indexes | covered | covered | SQLite mixed column/expression keys, collations, ASC/DESC ordering, partial predicates, planner use, recreation, rollback, and memory/file parity covered |
 | views | covered | covered | sqlite full definitions, explicit column lists, replacement, recreation ordering, and rollback covered |
 | schemas | covered | gap | sqlite unsupported by design |
 | enums | covered | gap | sqlite unsupported by design |

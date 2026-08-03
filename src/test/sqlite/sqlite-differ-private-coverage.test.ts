@@ -140,4 +140,43 @@ describe("SQLiteDiffer private coverage", () => {
 
     expect(differ.columnsDiffer(baseColumn, changedColumn)).toBe(true);
   });
+
+  test("compares structured index terms and reuses lossless index SQL", function () {
+    const differ = new SQLiteDiffer() as any;
+    const createStatement = `CREATE INDEX "search index" ON users(
+      lower(name || 'a   b') COLLATE NOCASE DESC
+    ) WHERE active = 1`;
+    const baseIndex = {
+      name: "search index",
+      tableName: "users",
+      columns: [],
+      unique: false,
+      terms: [{
+        expression: "lower(name || 'a   b')",
+        collation: "NOCASE",
+        order: "DESC",
+      }],
+      where: "active = 1",
+      createStatement,
+    };
+
+    expect(differ.generateCreateIndex(baseIndex)).toBe(`${createStatement};`);
+    expect(differ.indexesDiffer(baseIndex, {
+      ...baseIndex,
+      terms: [{
+        expression: "lower(name   ||   'a   b')",
+        collation: "nocase",
+        order: "DESC",
+      }],
+      where: "active   =   1",
+    })).toBe(false);
+    expect(differ.indexesDiffer(baseIndex, {
+      ...baseIndex,
+      terms: [{
+        expression: "lower(name || 'a b')",
+        collation: "NOCASE",
+        order: "DESC",
+      }],
+    })).toBe(true);
+  });
 });

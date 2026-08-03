@@ -38,12 +38,21 @@ export interface UniqueConstraint {
   initiallyDeferred?: boolean;
 }
 
+export interface IndexTerm {
+  column?: string;
+  expression?: string;
+  collation?: string;
+  order?: 'ASC' | 'DESC';
+}
+
 export interface Index {
   name: string;
   tableName: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: string[];
   sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
+  terms?: IndexTerm[]; // Complete ordered keys, including SQLite expressions and collations
+  createStatement?: string; // Complete CREATE INDEX statement when exact syntax must be preserved
   opclasses?: Record<string, string>; // Maps column name to operator class (e.g., gin_trgm_ops)
   expressionOpclass?: string;
   type?: "btree" | "hash" | "gist" | "spgist" | "gin" | "brin" | (string & {});

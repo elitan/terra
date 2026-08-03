@@ -1,4 +1,11 @@
-import type { Table, Column, Index, ForeignKeyConstraint, CheckConstraint } from "../../types/schema";
+import type {
+  Table,
+  Column,
+  Index,
+  IndexTerm,
+  ForeignKeyConstraint,
+  CheckConstraint,
+} from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
 
 interface ColumnChange {
@@ -45,7 +52,7 @@ export class SQLiteDiffer {
             }
           }
           for (const index of changes.indexesToDrop) {
-            statements.push(`DROP INDEX IF EXISTS "${index.name}";`);
+            statements.push(`DROP INDEX IF EXISTS ${this.quoteIdentifier(index.name)};`);
           }
           for (const index of changes.indexesToAdd) {
             statements.push(this.generateCreateIndex(index));
@@ -233,9 +240,39 @@ export class SQLiteDiffer {
   }
 
   private indexesDiffer(desired: Index, current: Index): boolean {
-    if (desired.columns.join(',') !== current.columns.join(',')) return true;
+    if (desired.terms || current.terms) {
+      if (!desired.terms || !current.terms) {
+        return true;
+      }
+      if (this.indexTermsDiffer(desired.terms, current.terms)) {
+        return true;
+      }
+    } else if (desired.columns.join(',') !== current.columns.join(',')) {
+      return true;
+    }
     if (desired.unique !== current.unique) return true;
-    if (desired.where !== current.where) return true;
+    if (this.normalizeSql(desired.where) !== this.normalizeSql(current.where)) return true;
+    return false;
+  }
+
+  private indexTermsDiffer(desired: IndexTerm[], current: IndexTerm[]): boolean {
+    if (desired.length !== current.length) {
+      return true;
+    }
+
+    for (let index = 0; index < desired.length; index += 1) {
+      const term = desired[index]!;
+      const currentTerm = current[index];
+      if (!currentTerm ||
+        term.column !== currentTerm.column ||
+        this.normalizeSql(term.expression) !== this.normalizeSql(currentTerm.expression) ||
+        (term.collation || "BINARY").toUpperCase() !==
+          (currentTerm.collation || "BINARY").toUpperCase() ||
+        (term.order || "ASC") !== (currentTerm.order || "ASC")) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -278,6 +315,10 @@ export class SQLiteDiffer {
   }
 
   private generateCreateIndex(index: Index): string {
+    if (index.createStatement?.trim()) {
+      return `${index.createStatement.trim().replace(/;+\s*$/g, "")};`;
+    }
+
     const unique = index.unique ? 'UNIQUE ' : '';
     const cols = index.columns.map(c => `"${c}"`).join(', ');
     let sql = `CREATE ${unique}INDEX "${index.name}" ON "${index.tableName}" (${cols})`;
@@ -347,5 +388,47 @@ export class SQLiteDiffer {
   private normalizeDefault(value: string | undefined): string | undefined {
     if (value === undefined) return undefined;
     return value;
+  }
+
+  private normalizeSql(value: string | undefined): string | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    let normalized = "";
+    let quote: string | undefined;
+
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index] || "";
+      if (quote) {
+        normalized += character;
+        if (character === quote) {
+          if (value[index + 1] === quote) {
+            normalized += quote;
+            index += 1;
+          } else {
+            quote = undefined;
+          }
+        }
+      } else if (character === "'" || character === '"' || character === "`") {
+        quote = character;
+        normalized += character;
+      } else if (character === "[") {
+        quote = "]";
+        normalized += character;
+      } else if (/\s/u.test(character)) {
+        if (normalized.length > 0 && !normalized.endsWith(" ")) {
+          normalized += " ";
+        }
+      } else {
+        normalized += character;
+      }
+    }
+
+    return normalized.trim();
+  }
+
+  private quoteIdentifier(value: string): string {
+    return `"${value.replace(/"/g, '""')}"`;
   }
 }

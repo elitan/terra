@@ -19,6 +19,12 @@ describe("SQLiteClient coverage", () => {
     const pragma = await client.query<{ name: string }>("PRAGMA table_info(users)");
     expect(pragma.rows.length).toBeGreaterThan(0);
 
+    const plan = await client.query<{ detail: string }>(
+      "EXPLAIN QUERY PLAN SELECT id FROM users WHERE id = ?",
+      [1]
+    );
+    expect(plan.rows[0]?.detail).toContain("INTEGER PRIMARY KEY");
+
     client.execMultiple("INSERT INTO users (id, name) VALUES (2, 'other');");
     const txCount = client.inTransaction(function () {
       return client.raw.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
