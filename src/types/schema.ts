@@ -236,6 +236,7 @@ export interface Table {
   columns: Column[];
   unlogged?: boolean;
   storageParameters?: Record<string, string>;
+  tablespace?: string;
   createStatement?: string; // Complete SQLite CREATE TABLE statement for lossless recreation
   virtual?: boolean; // SQLite virtual table backed by a registered module
   strict?: boolean; // SQLite STRICT table option

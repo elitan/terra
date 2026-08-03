@@ -505,6 +505,9 @@ export function generateCreateTableStatement(table: Table): string {
       `WITH (${renderStorageParameterAssignments(table.storageParameters)})`
     );
   }
+  if (table.tablespace) {
+    builder.p("TABLESPACE").ident(table.tablespace);
+  }
   return builder.build() + ";";
 }
 

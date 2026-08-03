@@ -75,11 +75,13 @@ export class DatabaseInspector {
         t.table_schema,
         c.relpersistence,
         c.reloptions as table_storage_options,
-        toast_relation.reloptions as toast_storage_options
+        toast_relation.reloptions as toast_storage_options,
+        table_tablespace.spcname as table_tablespace_name
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.table_schema
       LEFT JOIN pg_class toast_relation ON toast_relation.oid = c.reltoastrelid
+      LEFT JOIN pg_tablespace table_tablespace ON table_tablespace.oid = c.reltablespace
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
         AND t.table_type = 'BASE TABLE'
@@ -210,6 +212,7 @@ export class DatabaseInspector {
         columns,
         unlogged: row.relpersistence === "u" ? true : undefined,
         storageParameters: this.parseTableStorageOptions(row),
+        tablespace: row.table_tablespace_name || undefined,
         primaryKey,
         foreignKeys: foreignKeys.length > 0 ? foreignKeys : undefined,
         checkConstraints: checkConstraints.length > 0 ? checkConstraints : undefined,

@@ -88,6 +88,19 @@ describe("Table parser coverage", () => {
     expect(parsed?.foreignKeys?.[0]?.referencedTable).toBe("parent_records");
   });
 
+  test("parses custom and default table tablespaces", async function () {
+    const ast = await parse(`
+      CREATE TABLE custom_space (id integer) TABLESPACE "Fast Space";
+      CREATE TABLE default_space (id integer) TABLESPACE pg_default;
+    `);
+
+    const custom = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+    const defaultTable = parseCreateTable(ast.stmts[1]?.stmt?.CreateStmt);
+
+    expect(custom?.tablespace).toBe("Fast Space");
+    expect(defaultTable?.tablespace).toBeUndefined();
+  });
+
   test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
     const ast = await parse(`
       CREATE TABLE MixedCaseTable (

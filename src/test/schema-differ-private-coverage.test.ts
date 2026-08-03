@@ -290,6 +290,27 @@ describe("SchemaDiffer private coverage", () => {
     ).toContain("SET LOGGED");
   });
 
+  test("generateMigrationPlan preserves table tablespace direction", function () {
+    const differ = new SchemaDiffer();
+    const defaultTable = makeTable();
+    const customTable = makeTable({ tablespace: "Fast Space" });
+    const explicitDefault = makeTable({ tablespace: "pg_default" });
+
+    expect(
+      differ
+        .generateMigrationPlan([customTable], [defaultTable])
+        .transactional.join("\n")
+    ).toContain('SET TABLESPACE "Fast Space"');
+    expect(
+      differ
+        .generateMigrationPlan([defaultTable], [customTable])
+        .transactional.join("\n")
+    ).toContain('SET TABLESPACE "pg_default"');
+    expect(
+      differ.generateMigrationPlan([explicitDefault], [defaultTable]).hasChanges
+    ).toBe(false);
+  });
+
   test("primary key helpers cover add drop modify and none", () => {
     const differ = new SchemaDiffer();
     const add = (differ as any).comparePrimaryKeys(makePrimaryKey(["id"]), undefined);

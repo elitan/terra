@@ -62,6 +62,7 @@ type TableAlteration =
       parameters: Record<string, string>;
     }
   | { type: "reset_table_storage_parameters"; parameters: string[] }
+  | { type: "set_table_tablespace"; tablespace: string }
   | { type: "add_column"; column: Column }
   | { type: "drop_column"; columnName: string }
   | {
@@ -1496,6 +1497,11 @@ export class SchemaDiffer {
       currentTable,
       alterations
     );
+    this.collectTableTablespaceAlteration(
+      desiredTable,
+      currentTable,
+      alterations
+    );
 
     // Collect column alterations
     const currentColumns = new Map(currentTable.columns.map((c) => [c.name, c]));
@@ -1605,6 +1611,21 @@ export class SchemaDiffer {
       alterations.push({
         type: "reset_table_storage_parameters",
         parameters: parametersToReset,
+      });
+    }
+  }
+
+  private collectTableTablespaceAlteration(
+    desiredTable: Table,
+    currentTable: Table,
+    alterations: TableAlteration[]
+  ): void {
+    const desired = desiredTable.tablespace || "pg_default";
+    const current = currentTable.tablespace || "pg_default";
+    if (desired !== current) {
+      alterations.push({
+        type: "set_table_tablespace",
+        tablespace: desired,
       });
     }
   }
@@ -2042,6 +2063,7 @@ export class SchemaDiffer {
       add_foreign_key: 24,
       reset_table_storage_parameters: 25,
       set_table_storage_parameters: 26,
+      set_table_tablespace: 27,
     };
 
     const sorted = [...alterations].sort((a, b) => {
@@ -2071,6 +2093,10 @@ export class SchemaDiffer {
 
         case "reset_table_storage_parameters":
           b.p(`RESET (${alt.parameters.join(", ")})`);
+          break;
+
+        case "set_table_tablespace":
+          b.p("SET TABLESPACE").ident(alt.tablespace);
           break;
 
         case "add_column":
@@ -2243,6 +2269,8 @@ export class SchemaDiffer {
         return renderStorageParameterAssignments(alteration.parameters);
       case "reset_table_storage_parameters":
         return alteration.parameters.join(",");
+      case "set_table_tablespace":
+        return alteration.tablespace;
       case "add_column":
         return alteration.column.name;
       case "drop_column":

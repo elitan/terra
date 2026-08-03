@@ -180,6 +180,7 @@ function normalizeSnapshot(input: any): unknown {
       storageParameters: table.storageParameters
         ? normalizeObject(table.storageParameters)
         : undefined,
+      tablespace: table.tablespace,
       columns: (table.columns || []).map(function mapColumn(column: any) {
         return {
           name: column.name,
