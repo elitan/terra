@@ -31,6 +31,7 @@ export function parseCreateIndex(stmt: any): Index | null {
 
     const columns: string[] = [];
     const sortOrders: ('ASC' | 'DESC')[] = [];
+    const nullsOrders: ('FIRST' | 'LAST')[] = [];
     let opclasses: Record<string, string> | undefined;
     let expression: string | undefined;
     let expressionOpclass: string | undefined;
@@ -38,6 +39,19 @@ export function parseCreateIndex(stmt: any): Index | null {
     function parseOrdering(ordering: string | number | undefined): 'ASC' | 'DESC' {
       if (ordering === 'SORTBY_DESC' || ordering === 2) return 'DESC';
       return 'ASC';
+    }
+
+    function parseNullsOrdering(
+      nullsOrdering: string | number | undefined,
+      sortOrder: 'ASC' | 'DESC'
+    ): 'FIRST' | 'LAST' {
+      if (nullsOrdering === 'SORTBY_NULLS_FIRST' || nullsOrdering === 1) {
+        return 'FIRST';
+      }
+      if (nullsOrdering === 'SORTBY_NULLS_LAST' || nullsOrdering === 2) {
+        return 'LAST';
+      }
+      return sortOrder === 'DESC' ? 'FIRST' : 'LAST';
     }
 
     function parseOpclass(opclass: any[] | undefined): string | undefined {
@@ -55,15 +69,26 @@ export function parseCreateIndex(stmt: any): Index | null {
       expression = deparseSync([indexParams[0].IndexElem.expr]).trim();
       expressionOpclass = parseOpclass(indexParams[0].IndexElem.opclass);
       const ordering = indexParams[0].IndexElem.ordering;
-      sortOrders.push(parseOrdering(ordering));
+      const sortOrder = parseOrdering(ordering);
+      sortOrders.push(sortOrder);
+      nullsOrders.push(
+        parseNullsOrdering(
+          indexParams[0].IndexElem.nulls_ordering,
+          sortOrder
+        )
+      );
     } else {
       for (const param of indexParams) {
         if (param.IndexElem) {
           const colName = param.IndexElem.name;
           const ordering = param.IndexElem.ordering;
+          const sortOrder = parseOrdering(ordering);
           if (colName) {
             columns.push(colName);
-            sortOrders.push(parseOrdering(ordering));
+            sortOrders.push(sortOrder);
+            nullsOrders.push(
+              parseNullsOrdering(param.IndexElem.nulls_ordering, sortOrder)
+            );
             const opclassName = parseOpclass(param.IndexElem.opclass);
             if (opclassName) {
               if (!opclasses) opclasses = {};
@@ -72,13 +97,23 @@ export function parseCreateIndex(stmt: any): Index | null {
           } else if (param.IndexElem.expr) {
             expression = deparseSync([param.IndexElem.expr]).trim();
             expressionOpclass = parseOpclass(param.IndexElem.opclass);
-            sortOrders.push(parseOrdering(ordering));
+            sortOrders.push(sortOrder);
+            nullsOrders.push(
+              parseNullsOrdering(param.IndexElem.nulls_ordering, sortOrder)
+            );
             break;
           }
         }
       }
     }
     const hasNonDefaultSort = sortOrders.some(s => s === 'DESC');
+    const hasNonDefaultNullsOrder = nullsOrders.some(function isNonDefault(
+      nullsOrder,
+      index
+    ) {
+      const defaultOrder = sortOrders[index] === 'DESC' ? 'FIRST' : 'LAST';
+      return nullsOrder !== defaultOrder;
+    });
 
     const type = (stmt.accessMethod || 'btree').toLowerCase() as Index["type"];
 
@@ -118,6 +153,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       columns,
       ...(include.length > 0 ? { include } : {}),
       sortOrders: hasNonDefaultSort ? sortOrders : undefined,
+      nullsOrders: hasNonDefaultNullsOrder ? nullsOrders : undefined,
       opclasses,
       ...(expressionOpclass ? { expressionOpclass } : {}),
       type,

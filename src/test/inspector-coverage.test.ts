@@ -483,6 +483,7 @@ describe("DatabaseInspector coverage", () => {
         columns: ["email", "created_at"],
         include: ["display_name", "updated_at"],
         sortOrders: ["DESC", "ASC"],
+        nullsOrders: ["LAST", "LAST"],
         opclasses: { email: "text_pattern_ops" },
         type: "btree",
         unique: true,

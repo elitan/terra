@@ -644,7 +644,15 @@ describe("Parser edge coverage", () => {
       const index = parseCreateIndex({
         idxname: "idx_users_email",
         relation: { relname: "users", schemaname: "public" },
-        indexParams: [{ IndexElem: { name: "email", ordering: "SORTBY_DESC" } }],
+        indexParams: [
+          {
+            IndexElem: {
+              name: "email",
+              ordering: "SORTBY_DESC",
+              nulls_ordering: "SORTBY_NULLS_LAST",
+            },
+          },
+        ],
         indexIncludingParams: [
           { IndexElem: { name: "display_name" } },
           { IndexElem: { name: "updated_at" } },
@@ -660,6 +668,7 @@ describe("Parser edge coverage", () => {
       });
 
       expect(index?.sortOrders).toEqual(["DESC"]);
+      expect(index?.nullsOrders).toEqual(["LAST"]);
       expect(index?.include).toEqual(["display_name", "updated_at"]);
       expect(index?.unique).toBe(true);
       expect(index?.nullsNotDistinct).toBe(true);

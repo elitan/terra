@@ -521,6 +521,50 @@ describe("SchemaDiffer private coverage", () => {
     ).toBe(true);
   });
 
+  test("generateMigrationPlan preserves non-default index null ordering", function () {
+    const differ = new SchemaDiffer();
+    const columns = [
+      makeColumn(),
+      makeColumn({ name: "starts_at", type: "TIMESTAMP", nullable: true }),
+      makeColumn({ name: "ends_at", type: "TIMESTAMP", nullable: true }),
+    ];
+    const defaultIndex = {
+      name: "users_time_idx",
+      tableName: "users",
+      columns: ["starts_at", "ends_at"],
+      sortOrders: ["ASC", "DESC"] as ("ASC" | "DESC")[],
+      type: "btree" as const,
+    };
+    const current = makeTable({ columns, indexes: [defaultIndex] });
+    const explicitDefaults = makeTable({
+      columns,
+      indexes: [
+        {
+          ...defaultIndex,
+          nullsOrders: ["LAST", "FIRST"],
+        },
+      ],
+    });
+    const reversed = makeTable({
+      columns,
+      indexes: [
+        {
+          ...defaultIndex,
+          nullsOrders: ["FIRST", "LAST"],
+        },
+      ],
+    });
+
+    expect(differ.generateMigrationPlan([explicitDefaults], [current]).hasChanges)
+      .toBe(false);
+    const plan = differ.generateMigrationPlan([reversed], [current]);
+    const sql = [...plan.transactional, ...plan.concurrent].join("\n");
+    expect(sql).toContain('"starts_at" NULLS FIRST');
+    expect(sql).toContain('"ends_at" DESC NULLS LAST');
+    expect(differ.generateMigrationPlan([current], [reversed]).hasChanges)
+      .toBe(true);
+  });
+
   test("generateMigrationPlan handles inheritance transitions", function () {
     const differ = new SchemaDiffer();
     const parent = { name: "parent", schema: "public" };

@@ -114,6 +114,50 @@ function stringArraysEqual(
   );
 }
 
+function getIndexKeyCount(index: Index): number {
+  return index.expression ? 1 : index.columns.length;
+}
+
+function getIndexSortOrder(index: Index, position: number): 'ASC' | 'DESC' {
+  return index.sortOrders?.[position] || 'ASC';
+}
+
+function getDefaultNullsOrder(sortOrder: 'ASC' | 'DESC'): 'FIRST' | 'LAST' {
+  return sortOrder === 'DESC' ? 'FIRST' : 'LAST';
+}
+
+function getEffectiveNullsOrder(
+  index: Index,
+  position: number
+): 'FIRST' | 'LAST' {
+  return (
+    index.nullsOrders?.[position] ||
+    getDefaultNullsOrder(getIndexSortOrder(index, position))
+  );
+}
+
+function indexNullsOrdersEqual(first: Index, second: Index): boolean {
+  const keyCount = Math.max(getIndexKeyCount(first), getIndexKeyCount(second));
+  for (let position = 0; position < keyCount; position++) {
+    if (
+      getEffectiveNullsOrder(first, position) !==
+      getEffectiveNullsOrder(second, position)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getNonDefaultNullsOrder(
+  index: Index,
+  position: number
+): 'FIRST' | 'LAST' | undefined {
+  const defaultOrder = getDefaultNullsOrder(getIndexSortOrder(index, position));
+  const nullsOrder = index.nullsOrders?.[position] || defaultOrder;
+  return nullsOrder === defaultOrder ? undefined : nullsOrder;
+}
+
 function stringRecordsEqual(
   desired: Record<string, string> | undefined,
   current: Record<string, string> | undefined
@@ -1345,6 +1389,8 @@ export class SchemaDiffer {
       }
     }
 
+    if (!indexNullsOrdersEqual(index1, index2)) return false;
+
     const where1 = index1.where;
     const where2 = index2.where;
     if (where1 && where2) {
@@ -1451,6 +1497,10 @@ export class SchemaDiffer {
       if (sortOrder === 'DESC') {
         expressionDefinition += ' DESC';
       }
+      const nullsOrder = getNonDefaultNullsOrder(index, 0);
+      if (nullsOrder) {
+        expressionDefinition += ` NULLS ${nullsOrder}`;
+      }
       builder.p(`(${expressionDefinition})`);
     } else {
       const quotedColumns = index.columns.map((col, i) => {
@@ -1460,6 +1510,10 @@ export class SchemaDiffer {
         let result = opclass ? `${quoted} ${opclass}` : quoted;
         if (sortOrder === 'DESC') {
           result += ' DESC';
+        }
+        const nullsOrder = getNonDefaultNullsOrder(index, i);
+        if (nullsOrder) {
+          result += ` NULLS ${nullsOrder}`;
         }
         return result;
       }).join(", ");

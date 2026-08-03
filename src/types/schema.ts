@@ -95,6 +95,7 @@ export interface Index {
   columns: string[];
   include?: string[]; // PostgreSQL non-key payload columns for covering indexes
   sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
+  nullsOrders?: ('FIRST' | 'LAST')[]; // Effective null placement when any key uses a non-default order
   terms?: IndexTerm[]; // Complete ordered keys, including SQLite expressions and collations
   createStatement?: string; // Complete CREATE INDEX statement when exact syntax must be preserved
   opclasses?: Record<string, string>; // Maps column name to operator class (e.g., gin_trgm_ops)

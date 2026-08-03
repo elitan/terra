@@ -282,6 +282,7 @@ function normalizeSnapshot(input: any): unknown {
           columns: [...(index.columns || [])],
           include: index.include ? [...index.include] : undefined,
           sortOrders: index.sortOrders ? [...index.sortOrders] : undefined,
+          nullsOrders: index.nullsOrders ? [...index.nullsOrders] : undefined,
           where: normalizeMaybeText(index.where),
           expression: normalizeMaybeText(index.expression),
           opclasses: index.opclasses ? normalizeObject(index.opclasses) : undefined,

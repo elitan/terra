@@ -447,6 +447,15 @@ export class DatabaseInspector {
       }
       const sortOrders = sortOptions.map((opt: number) => (opt & 1) ? 'DESC' : 'ASC') as ('ASC' | 'DESC')[];
       const hasNonDefaultSort = sortOrders.some(s => s === 'DESC');
+      const nullsOrders = sortOptions.map(function mapNullsOrder(opt: number) {
+        return (opt & 2) ? 'FIRST' : 'LAST';
+      }) as ('FIRST' | 'LAST')[];
+      const hasNonDefaultNullsOrder = nullsOrders.some(
+        function isNonDefault(nullsOrder, index) {
+          const defaultOrder = sortOrders[index] === 'DESC' ? 'FIRST' : 'LAST';
+          return nullsOrder !== defaultOrder;
+        }
+      );
       return {
         name: row.index_name,
         tableName: row.table_name,
@@ -456,6 +465,7 @@ export class DatabaseInspector {
           ? { include: row.included_columns }
           : {}),
         sortOrders: hasNonDefaultSort ? sortOrders : undefined,
+        nullsOrders: hasNonDefaultNullsOrder ? nullsOrders : undefined,
         opclasses,
         ...(row.expression_opclass_name ? { expressionOpclass: row.expression_opclass_name } : {}),
         type: this.mapPostgreSQLIndexType(row.access_method),
