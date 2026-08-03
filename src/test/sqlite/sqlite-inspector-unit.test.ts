@@ -290,8 +290,12 @@ describe("SQLiteInspector unit coverage", () => {
 
     const views = await inspector.getCurrentViews(client);
     expect(views).toEqual([
-      { name: "v_users", definition: "SELECT id FROM users" },
-      { name: "v_empty", definition: "" },
+      {
+        name: "v_users",
+        definition: "SELECT id FROM users",
+        createStatement: "CREATE VIEW v_users AS SELECT id FROM users",
+      },
+      { name: "v_empty", definition: "", createStatement: undefined },
     ]);
 
     const triggers = await inspector.getCurrentTriggers(client);

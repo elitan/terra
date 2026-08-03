@@ -13,6 +13,7 @@ import type {
 import {
   extractSQLiteCheckExpressions,
   extractSQLiteGeneratedExpressions,
+  extractSQLiteViewDefinition,
   parseSQLiteTriggerMetadata,
 } from "./sql-parser-utils";
 
@@ -287,11 +288,12 @@ export class SQLiteInspector {
       ORDER BY name
     `);
 
-    return views.rows.map(row => {
-      const defMatch = row.sql?.match(/AS\s+(.+)$/is);
+    return views.rows.map(function (row) {
+      const createStatement = row.sql?.trim().replace(/;+\s*$/g, "") || "";
       return {
         name: row.name,
-        definition: defMatch?.[1]?.trim() ?? '',
+        definition: extractSQLiteViewDefinition(createStatement),
+        createStatement: createStatement || undefined,
       };
     });
   }

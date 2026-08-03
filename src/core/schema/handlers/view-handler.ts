@@ -124,6 +124,31 @@ function getViewKey(view: View): string {
   return `${view.schema || "public"}.${view.name}`;
 }
 
+function hasCreateStatement(view: View): boolean {
+  return typeof view.createStatement === "string" && view.createStatement.trim().length > 0;
+}
+
+function cleanCreateStatement(statement: string): string {
+  return statement.trim().replace(/;+\s*$/g, "");
+}
+
+function quoteSQLiteIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function generateSQLiteDropView(view: View): string {
+  return `DROP VIEW IF EXISTS ${quoteSQLiteIdentifier(view.name)};`;
+}
+
+function generateSQLiteCreateView(view: View): string {
+  return `${cleanCreateStatement(view.createStatement || "")};`;
+}
+
+function sqliteViewNeedsUpdate(desired: View, current: View): boolean {
+  return cleanCreateStatement(desired.createStatement || "") !==
+    cleanCreateStatement(current.createStatement || "");
+}
+
 const config: HandlerConfig<View> = {
   name: "view",
   getKey: getViewKey,
@@ -138,8 +163,22 @@ const config: HandlerConfig<View> = {
     desired.securityBarrier !== current.securityBarrier,
 };
 
+const sqliteConfig: HandlerConfig<View> = {
+  name: "view",
+  getKey: getViewKey,
+  generateDrop: generateSQLiteDropView,
+  generateCreate: generateSQLiteCreateView,
+  needsUpdate: sqliteViewNeedsUpdate,
+};
+
 export class ViewHandler {
   generateStatements(desiredViews: View[], currentViews: View[]): string[] {
-    return generateStatements(desiredViews, currentViews, config);
+    const usesCreateStatements = desiredViews.some(hasCreateStatement) ||
+      currentViews.some(hasCreateStatement);
+    return generateStatements(
+      desiredViews,
+      currentViews,
+      usesCreateStatements ? sqliteConfig : config
+    );
   }
 }

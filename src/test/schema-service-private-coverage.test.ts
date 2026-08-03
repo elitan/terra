@@ -293,6 +293,45 @@ describe("SchemaService private coverage", function () {
     expect(privateService.countObjects(filtered)).toBe(7);
   });
 
+  test("filterCurrentSqlObjects retains scoped objects and desired global objects", function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as {
+      filterCurrentSqlObjects: (
+        current: NonNullable<ParsedSchema["sqlObjects"]>,
+        desired: NonNullable<ParsedSchema["sqlObjects"]>
+      ) => NonNullable<ParsedSchema["sqlObjects"]>;
+    };
+    const scopedPolicy = {
+      kind: "policy" as const,
+      key: "policy:public.users:tenant_policy",
+      name: "tenant_policy",
+      schema: "public",
+      createStatement: "CREATE POLICY tenant_policy ON public.users USING (true);",
+    };
+    const desiredRole = {
+      kind: "role" as const,
+      key: "role:app_user",
+      name: "app_user",
+      createStatement: "CREATE ROLE app_user;",
+    };
+    const unrelatedRole = {
+      kind: "role" as const,
+      key: "role:external_user",
+      name: "external_user",
+      createStatement: "CREATE ROLE external_user;",
+    };
+
+    const filtered = privateService.filterCurrentSqlObjects(
+      [scopedPolicy, desiredRole, unrelatedRole],
+      [desiredRole]
+    );
+
+    expect(filtered.map(function (item) {
+      return item.key;
+    })).toEqual([scopedPolicy.key, desiredRole.key]);
+  });
+
   test("promptForConfirmation accepts yes and y only", async function () {
     const mock = createMockProvider();
     const service = createService(mock.provider);

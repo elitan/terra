@@ -83,6 +83,7 @@ export interface View {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   definition: string; // The SELECT statement
+  createStatement?: string; // Complete CREATE VIEW statement when exact syntax must be preserved
   materialized?: boolean;
   columns?: Column[]; // For typed views or materialized views
   indexes?: Index[]; // Only for materialized views

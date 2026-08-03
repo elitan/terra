@@ -222,6 +222,61 @@ export function parseSQLiteTriggerMetadata(sql: string): SQLiteTriggerMetadata {
   return { timing, events: [token.value as SQLiteTriggerEvent] };
 }
 
+export function extractSQLiteViewDefinition(sql: string): string {
+  let token = readExpectedWord(sql, 0, "CREATE");
+  if (!token) {
+    return "";
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "TEMP") || isWord(token, "TEMPORARY")) {
+    token = readSQLiteToken(sql, token.end);
+  }
+  if (!isWord(token, "VIEW")) {
+    return "";
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "IF")) {
+    const notToken = readExpectedWord(sql, token.end, "NOT");
+    const existsToken = notToken
+      ? readExpectedWord(sql, notToken.end, "EXISTS")
+      : undefined;
+    if (!existsToken) {
+      return "";
+    }
+    token = readSQLiteToken(sql, existsToken.end);
+  }
+
+  if (!token || token.kind === "symbol") {
+    return "";
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (token?.kind === "symbol" && token.value === ".") {
+    const viewName = readSQLiteToken(sql, token.end);
+    if (!viewName || viewName.kind === "symbol") {
+      return "";
+    }
+    token = readSQLiteToken(sql, viewName.end);
+  }
+
+  if (token?.kind === "symbol" && token.value === "(") {
+    const columns = readParenthesizedExpression(sql, token.end - 1);
+    if (!columns) {
+      return "";
+    }
+    token = readSQLiteToken(sql, columns.end);
+  }
+
+  if (!isWord(token, "AS")) {
+    return "";
+  }
+
+  const definitionStart = skipWhitespaceAndComments(sql, token.end);
+  return sql.slice(definitionStart).trim().replace(/;+\s*$/g, "");
+}
+
 interface ParenthesizedExpression {
   expression: string;
   end: number;

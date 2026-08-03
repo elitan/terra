@@ -46,6 +46,7 @@ describe("SQLiteParser execution-runtime parity", function () {
       {
         name: "adult_users",
         definition: "SELECT id, name FROM users WHERE age >= 18",
+        createStatement: "CREATE VIEW adult_users AS SELECT id, name FROM users WHERE age >= 18",
       },
     ]);
     expect(schema.triggers).toHaveLength(2);

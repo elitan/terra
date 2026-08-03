@@ -73,4 +73,37 @@ describe("view handler schema scope", function () {
 
     expect(statements).toEqual([]);
   });
+
+  test("uses complete sqlite view statements for create and replacement", function () {
+    const handler = new ViewHandler();
+    const desired = makeView({
+      schema: undefined,
+      definition: "SELECT 'a   b' AS value",
+      createStatement: "CREATE VIEW status_view(label) AS SELECT 'a   b' AS value",
+    });
+    const current = makeView({
+      schema: undefined,
+      definition: "SELECT 'a b' AS value",
+      createStatement: "CREATE VIEW status_view(label) AS SELECT 'a b' AS value",
+    });
+
+    const statements = handler.generateStatements([desired], [current]);
+    expect(statements).toEqual([
+      'DROP VIEW IF EXISTS "status_view";',
+      "CREATE VIEW status_view(label) AS SELECT 'a   b' AS value;",
+    ]);
+  });
+
+  test("quotes sqlite view names when dropping complete definitions", function () {
+    const handler = new ViewHandler();
+    const current = makeView({
+      name: 'status"view',
+      schema: undefined,
+      createStatement: 'CREATE VIEW "status""view" AS SELECT 1 AS id',
+    });
+
+    expect(handler.generateStatements([], [current])).toEqual([
+      'DROP VIEW IF EXISTS "status""view";',
+    ]);
+  });
 });

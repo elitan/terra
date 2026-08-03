@@ -376,5 +376,25 @@ describe("Handler module coverage", () => {
       const statements = handler.generateStatements([desired], [current]);
       expect(statements).toEqual([]);
     });
+
+    test("preserves and compares whitespace inside sqlite trigger literals", function () {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        schema: undefined,
+        tableName: "users",
+        functionName: "",
+        definition: "CREATE TRIGGER trg_users_insert AFTER INSERT ON users BEGIN INSERT INTO audit_log(action) VALUES ('a   b'); END",
+      });
+      const current = makeTrigger({
+        schema: undefined,
+        tableName: "users",
+        functionName: "",
+        definition: "CREATE TRIGGER trg_users_insert AFTER INSERT ON users BEGIN INSERT INTO audit_log(action) VALUES ('a b'); END",
+      });
+
+      const statements = handler.generateStatements([desired], [current]);
+      expect(statements).toHaveLength(2);
+      expect(statements[1]).toContain("VALUES ('a   b')");
+    });
   });
 });

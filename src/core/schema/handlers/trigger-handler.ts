@@ -42,8 +42,52 @@ function hasSqliteDefinition(trigger: Trigger): boolean {
   return typeof trigger.definition === "string" && trigger.definition.trim().length > 0;
 }
 
+function cleanTriggerDefinition(definition: string): string {
+  return definition.trim().replace(/;+\s*$/g, "");
+}
+
 function normalizeTriggerDefinition(definition: string): string {
-  return definition.replace(/;+\s*$/g, "").replace(/\s+/g, " ").trim();
+  const cleaned = cleanTriggerDefinition(definition);
+  let normalized = "";
+  let quote: string | undefined;
+
+  for (let index = 0; index < cleaned.length; index += 1) {
+    const character = cleaned[index] || "";
+
+    if (quote) {
+      normalized += character;
+      if (character === quote) {
+        if (cleaned[index + 1] === quote) {
+          normalized += quote;
+          index += 1;
+        } else {
+          quote = undefined;
+        }
+      }
+      continue;
+    }
+
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+      normalized += character;
+      continue;
+    }
+    if (character === "[") {
+      quote = "]";
+      normalized += character;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      if (normalized.length > 0 && !normalized.endsWith(" ")) {
+        normalized += " ";
+      }
+      continue;
+    }
+
+    normalized += character;
+  }
+
+  return normalized.trim();
 }
 
 function generateDropTriggerStatement(trigger: Trigger): string {
@@ -56,7 +100,7 @@ function generateDropTriggerStatement(trigger: Trigger): string {
 
 function generateCreateTriggerStatement(trigger: Trigger): string {
   if (hasSqliteDefinition(trigger)) {
-    return `${normalizeTriggerDefinition(trigger.definition || "")};`;
+    return `${cleanTriggerDefinition(trigger.definition || "")};`;
   }
 
   return generateCreateTriggerSQL(trigger);

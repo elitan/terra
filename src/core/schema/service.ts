@@ -489,10 +489,31 @@ export class SchemaService {
       desiredViews,
       currentViews
     );
-    const viewStatements = this.viewHandler.generateStatements(normalizedDesiredViews, currentViews);
+    let viewStatements = this.viewHandler.generateStatements(normalizedDesiredViews, currentViews);
 
     if (this.provider.supportsFeature("triggers")) {
       triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
+    }
+
+    let preTableTriggerStatements: string[] = [];
+    let preTableViewStatements: string[] = [];
+    if (this.provider.dialect === "sqlite") {
+      const recreatesTable = tableStatements.some(function (statement) {
+        return /^CREATE TABLE\s+"_[^"]+_new"\s*\(/i.test(statement.trim());
+      });
+      const replacesOrDropsView = viewStatements.some(function (statement) {
+        return /^DROP VIEW\s+/i.test(statement.trim());
+      });
+
+      if (recreatesTable) {
+        preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);
+        preTableViewStatements = this.viewHandler.generateStatements([], currentViews);
+        viewStatements = this.viewHandler.generateStatements(normalizedDesiredViews, []);
+        triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, []);
+      } else if (replacesOrDropsView && this.provider.supportsFeature("triggers")) {
+        preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);
+        triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, []);
+      }
     }
 
     commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
@@ -528,6 +549,8 @@ export class SchemaService {
       ...preSequenceStatements,
       ...sqlObjectPlan.preTableCreate,
       ...sqlObjectPlan.earlyDrop,
+      ...preTableTriggerStatements,
+      ...preTableViewStatements,
       ...tableStatements,
       ...sqlObjectPlan.postTableCreate,
       ...postSequenceStatements,

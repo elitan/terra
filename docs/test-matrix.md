@@ -26,13 +26,13 @@
 | columns | covered | covered | includes conversions plus SQLite VIRTUAL/STORED inspection, add, recreate, remove, rollback, and memory/file parity |
 | constraints | covered | partial | nested checks and unique-constraint lifecycle/rollback covered; names and conflict clauses remain under audit |
 | indexes | covered | covered | includes partial/expression in pg |
-| views | covered | covered | sqlite view coverage exists |
+| views | covered | covered | sqlite full definitions, explicit column lists, replacement, recreation ordering, and rollback covered |
 | schemas | covered | gap | sqlite unsupported by design |
 | enums | covered | gap | sqlite unsupported by design |
 | sequences | covered | gap | sqlite unsupported by design |
 | functions | covered | gap | sqlite unsupported by design |
 | procedures | covered | gap | sqlite unsupported by design |
-| triggers | covered | covered | sqlite header metadata, body-DML separation, replacement, execution, and repeated reapply tested in memory and on disk |
+| triggers | covered | covered | sqlite header metadata, literal-safe bodies, table/view recreation restoration, execution, rollback, and repeated reapply tested in memory and on disk |
 | materialized views | covered | gap | sqlite unsupported by design |
 | extensions | covered | gap | pgvector/postgis tests present |
 | advisory locks | covered | gap | sqlite unsupported by design |
