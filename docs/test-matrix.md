@@ -9,9 +9,8 @@
 
 ## sqlite runtime baseline
 
-- desired-schema parser: `sql.js` 1.13.0 with SQLite 3.49.1
-- migration executor and inspector: `libsql` 0.5.22 with SQLite 3.45.1
-- support is limited to behavior verified on both bundled runtimes until the parser/runtime gap is removed
+- desired-schema parser, migration executor, and inspector: `libsql` 0.5.22 with SQLite 3.45.1
+- desired schemas are parsed by the execution runtime so accepted grammar cannot exceed apply support
 
 ## status key
 
@@ -54,7 +53,7 @@
 ## explicit gaps backlog
 
 1. add PostgreSQL 18 local, CI, snapshot, and release verification lanes
-2. remove or explicitly gate the SQLite 3.49.1 parser / 3.45.1 executor syntax gap
-3. complete SQLite constraint-name, conflict-clause, and generated-column interaction coverage
-4. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
-5. add per-feature rollback-on-error assertions for all core objects
+2. complete SQLite constraint-name, conflict-clause, and generated-column interaction coverage
+3. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
+4. add per-feature rollback-on-error assertions for all core objects
+5. add grammar-aware SQLite fuzzing against the bundled runtime

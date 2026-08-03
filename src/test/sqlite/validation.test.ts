@@ -347,6 +347,29 @@ describe("SQLite SQL Parsing Errors", () => {
   test("should throw on duplicate column name", async () => {
     await expect(provider.parseSchema("CREATE TABLE users (id INTEGER, id TEXT);")).rejects.toThrow();
   });
+
+  test("matches desired-schema syntax acceptance to the execution runtime", async function () {
+    const schemaSql = "CREATE TABLE runtime_parity (value INTEGER DEFAULT 1_000);";
+    const client = await provider.createClient({ dialect: "sqlite", filename: ":memory:" });
+    let runtimeAccepted = true;
+
+    try {
+      await client.query(schemaSql);
+    } catch {
+      runtimeAccepted = false;
+    } finally {
+      await client.end();
+    }
+
+    let parserAccepted = true;
+    try {
+      await provider.parseSchema(schemaSql);
+    } catch {
+      parserAccepted = false;
+    }
+
+    expect(parserAccepted).toBe(runtimeAccepted);
+  });
 });
 
 describe("SQLite Connection", () => {
