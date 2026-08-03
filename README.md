@@ -103,7 +103,7 @@ SQLite uses table recreation for schema changes that ALTER TABLE doesn't support
 Table recreation preserves SQLite-specific definitions including `STRICT`, `WITHOUT ROWID`, `AUTOINCREMENT`, collations, named constraints, and `ON CONFLICT` policies.
 SQLite virtual tables are managed losslessly; bundled FTS5 and RTree modules are covered, while their implementation-owned shadow tables are never managed as user tables.
 SQLite desired schemas accept top-level `CREATE` statements and manage the persistent `main` database only. Imperative SQL, connection-local temporary objects, and external-database statements are rejected before migration planning; DML inside trigger bodies remains supported.
-PostgreSQL desired schemas also describe persistent database state. Session-local temporary tables, views, and sequences are rejected before migration planning instead of being converted into persistent objects.
+PostgreSQL desired schemas also describe persistent database state. Session-local temporary tables, views, and sequences are rejected before migration planning instead of being converted into persistent objects. Query-derived tables created with `CREATE TABLE AS` or `SELECT INTO` are also rejected because their structure and optional initial data cannot be reconciled declaratively; define their table structure explicitly and load data separately.
 
 ## Commands
 

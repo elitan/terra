@@ -324,10 +324,18 @@ export class SchemaParser {
             views.push(view);
           }
         } else if (stmt.CreateTableAsStmt) {
+          if (stmt.CreateTableAsStmt.objtype !== "OBJECT_MATVIEW") {
+            throw this.unsupportedDerivedTableError(
+              "CREATE TABLE AS",
+              filePath
+            );
+          }
           const view = parseCreateMaterializedView(stmt.CreateTableAsStmt);
           if (view) {
             views.push(view);
           }
+        } else if (stmt.SelectStmt?.intoClause) {
+          throw this.unsupportedDerivedTableError("SELECT INTO", filePath);
         } else if (stmt.CreateFunctionStmt) {
           if (stmt.CreateFunctionStmt.is_procedure) {
             const proc = parseCreateProcedure(stmt.CreateFunctionStmt);
@@ -503,6 +511,16 @@ export class SchemaParser {
         filePath
       );
     }
+  }
+
+  private unsupportedDerivedTableError(
+    statement: "CREATE TABLE AS" | "SELECT INTO",
+    filePath?: string
+  ): ParserError {
+    return new ParserError(
+      `PostgreSQL ${statement} is not supported in desired schemas because query-derived structure and optional initial data cannot be represented declaratively; define the table with CREATE TABLE and load data separately`,
+      filePath
+    );
   }
 
   private parseAlterTableConstraints(
