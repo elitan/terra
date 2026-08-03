@@ -10,9 +10,28 @@ interface SQLiteSchemaObjectRow {
 }
 
 const UNSUPPORTED_DESIRED_SCHEMA_STATEMENTS = [
+  "ALTER",
+  "ANALYZE",
   "ATTACH",
+  "BEGIN",
+  "COMMIT",
+  "DELETE",
   "DETACH",
+  "DROP",
+  "END",
+  "EXPLAIN",
+  "INSERT",
+  "PRAGMA",
+  "REINDEX",
+  "RELEASE",
+  "REPLACE",
+  "ROLLBACK",
+  "SAVEPOINT",
+  "SELECT",
+  "UPDATE",
+  "VALUES",
   "VACUUM",
+  "WITH",
 ];
 
 export class SQLiteParser {
@@ -32,7 +51,8 @@ export class SQLiteParser {
       );
       if (unsupportedKeyword) {
         throw new ParserError(
-          `${unsupportedKeyword} is not supported in SQLite desired schemas`,
+          `${unsupportedKeyword} is not supported in SQLite desired schemas. ` +
+            "Use CREATE statements to describe the objects that should exist",
           filePath
         );
       }

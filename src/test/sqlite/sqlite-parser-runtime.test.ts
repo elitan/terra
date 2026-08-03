@@ -151,7 +151,9 @@ describe("SQLiteParser execution-runtime parity", function () {
       CREATE TRIGGER log_attach
         AFTER INSERT ON "attach"
         BEGIN
-          INSERT INTO audit_log(message) VALUES ('DETACH auxiliary');
+          INSERT INTO audit_log(message)
+          VALUES (CASE WHEN NEW."detach" IS NULL THEN 'DETACH auxiliary' ELSE 'value' END);
+          UPDATE audit_log SET message = trim(message);
         END;
     `);
 
@@ -161,5 +163,36 @@ describe("SQLiteParser execution-runtime parity", function () {
     expect(schema.triggers.map(function (trigger) {
       return trigger.name;
     })).toEqual(["log_attach"]);
+  });
+
+  test("rejects imperative top-level statements in declarative schemas", async function () {
+    const parser = new SQLiteParser();
+    const statements = [
+      ["ALTER TABLE users ADD COLUMN name TEXT;", "ALTER"],
+      ["ANALYZE;", "ANALYZE"],
+      ["BEGIN TRANSACTION;", "BEGIN"],
+      ["COMMIT;", "COMMIT"],
+      ["DELETE FROM users;", "DELETE"],
+      ["DROP TABLE users;", "DROP"],
+      ["END TRANSACTION;", "END"],
+      ["EXPLAIN SELECT 1;", "EXPLAIN"],
+      ["INSERT INTO users(id) VALUES (1);", "INSERT"],
+      ["PRAGMA user_version = 1;", "PRAGMA"],
+      ["REINDEX;", "REINDEX"],
+      ["RELEASE savepoint_name;", "RELEASE"],
+      ["REPLACE INTO users(id) VALUES (1);", "REPLACE"],
+      ["ROLLBACK;", "ROLLBACK"],
+      ["SAVEPOINT savepoint_name;", "SAVEPOINT"],
+      ["SELECT 1;", "SELECT"],
+      ["UPDATE users SET id = 2;", "UPDATE"],
+      ["VALUES (1);", "VALUES"],
+      ["WITH value(x) AS (VALUES (1)) SELECT x FROM value;", "WITH"],
+    ];
+
+    for (const [sql, keyword] of statements) {
+      await expect(parser.parseSchema(sql, "imperative.sql")).rejects.toThrow(
+        `${keyword} is not supported in SQLite desired schemas`
+      );
+    }
   });
 });

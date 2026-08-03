@@ -728,45 +728,69 @@ export function findSQLiteStatementStartKeyword(
   }));
   let cursor = 0;
   let atStatementStart = true;
+  let awaitingCreateObject = false;
+  let triggerStatement = false;
+  let inTriggerBody = false;
+  let triggerCaseDepth = 0;
+  let triggerEndSeen = false;
 
   while (cursor < sql.length) {
-    if (/\s/u.test(sql[cursor] || "")) {
-      cursor += 1;
-      continue;
+    const token = readSQLiteToken(sql, cursor);
+    if (!token) {
+      break;
     }
+    cursor = token.end;
 
-    const isComment = sql.startsWith("--", cursor) || sql.startsWith("/*", cursor);
-    const skipped = skipQuotedOrComment(sql, cursor);
-    if (skipped !== undefined) {
-      if (!isComment) {
-        atStatementStart = false;
+    if (token.kind === "symbol" && token.value === ";") {
+      if (inTriggerBody && !triggerEndSeen) {
+        continue;
       }
-      cursor = skipped;
-      continue;
-    }
-
-    if (sql[cursor] === ";") {
       atStatementStart = true;
-      cursor += 1;
+      awaitingCreateObject = false;
+      triggerStatement = false;
+      inTriggerBody = false;
+      triggerCaseDepth = 0;
+      triggerEndSeen = false;
       continue;
     }
 
-    if (isIdentifierCharacter(sql[cursor])) {
-      const start = cursor;
-      cursor += 1;
-      while (isIdentifierCharacter(sql[cursor])) {
-        cursor += 1;
+    if (token.kind === "word") {
+      const keyword = token.value;
+      if (inTriggerBody) {
+        if (keyword === "CASE") {
+          triggerCaseDepth += 1;
+        } else if (keyword === "END") {
+          if (triggerCaseDepth > 0) {
+            triggerCaseDepth -= 1;
+          } else {
+            triggerEndSeen = true;
+          }
+        }
+        continue;
       }
-      const keyword = sql.slice(start, cursor).toUpperCase();
-      if (atStatementStart && candidates.has(keyword)) {
-        return keyword;
+      if (atStatementStart) {
+        if (candidates.has(keyword)) {
+          return keyword;
+        }
+        awaitingCreateObject = keyword === "CREATE";
+        atStatementStart = false;
+        continue;
       }
+      if (awaitingCreateObject) {
+        if (keyword === "TEMP" || keyword === "TEMPORARY") {
+          continue;
+        }
+        triggerStatement = keyword === "TRIGGER";
+        awaitingCreateObject = false;
+      } else if (triggerStatement && keyword === "BEGIN") {
+        inTriggerBody = true;
+      }
+      continue;
+    }
+
+    if (!inTriggerBody) {
       atStatementStart = false;
-      continue;
     }
-
-    atStatementStart = false;
-    cursor += 1;
   }
 
   return undefined;
