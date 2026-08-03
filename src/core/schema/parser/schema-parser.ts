@@ -444,6 +444,8 @@ export class SchemaParser {
               "you want to exist. Terra will automatically determine what needs to be dropped.",
             filePath
           );
+        } else {
+          throw this.unsupportedStatementError(stmt, filePath);
         }
       }
     } catch (error) {
@@ -521,6 +523,44 @@ export class SchemaParser {
       `PostgreSQL ${statement} is not supported in desired schemas because query-derived structure and optional initial data cannot be represented declaratively; define the table with CREATE TABLE and load data separately`,
       filePath
     );
+  }
+
+  private unsupportedStatementError(stmt: any, filePath?: string): ParserError {
+    const statement = this.unsupportedStatementName(stmt);
+    return new ParserError(
+      `PostgreSQL ${statement} is not supported in desired schemas. TerraDB manages declarative schema state only; run data, query, session, maintenance, and unsupported DDL commands separately`,
+      filePath
+    );
+  }
+
+  private unsupportedStatementName(stmt: any): string {
+    if (stmt.VacuumStmt) {
+      return stmt.VacuumStmt.is_vacuumcmd ? "VACUUM" : "ANALYZE";
+    }
+    if (stmt.VariableSetStmt) {
+      return "SET";
+    }
+    if (stmt.TransactionStmt) {
+      return "TRANSACTION";
+    }
+    if (stmt.RefreshMatViewStmt) {
+      return "REFRESH MATERIALIZED VIEW";
+    }
+    if (stmt.AlterSeqStmt) {
+      return "ALTER SEQUENCE";
+    }
+
+    const nodeName = Object.keys(stmt).find(function findStatementNode(key) {
+      return key.endsWith("Stmt");
+    });
+    if (!nodeName) {
+      return "STATEMENT";
+    }
+
+    return nodeName
+      .replace(/Stmt$/, "")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .toUpperCase();
   }
 
   private parseAlterTableConstraints(

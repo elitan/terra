@@ -38,7 +38,7 @@
 | advisory locks | covered | gap | sqlite unsupported by design |
 | cli contract | partial | partial | json/no-color added, more cases needed |
 | deterministic output | partial | partial | json format added, snapshot depth pending |
-| parser robustness | partial | covered | malformed corpus and random ascii fuzz plus deterministic SQLite grammar generation; PostgreSQL rejects session-local temporary relations and query-derived `CREATE TABLE AS`/`SELECT INTO` tables before planning while preserving materialized views; SQLite enforces CREATE-only top-level input, preserves trigger-body DML, rejects temporary objects, and preflights external-file statements without keyword false positives |
+| parser robustness | partial | covered | malformed corpus and random ascii fuzz plus deterministic SQLite grammar generation; PostgreSQL rejects session-local or query-derived tables plus all other untracked top-level data/query/session/transaction/maintenance/DDL commands before planning while preserving materialized views and routine-body SQL; SQLite enforces CREATE-only top-level input, preserves trigger-body DML, rejects temporary objects, and preflights external-file statements without keyword false positives |
 | performance budgets | partial | partial | perf tests exist, gate script pending |
 | flake rerun gate | partial | partial | script/workflow added, trend tracking pending |
 
