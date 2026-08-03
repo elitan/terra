@@ -2,6 +2,14 @@ function isIdentifierCharacter(character: string | undefined): boolean {
   return character !== undefined && /[\p{L}\p{N}_$]/u.test(character);
 }
 
+const SQLITE_TABLE_CONSTRAINT_KEYWORDS = new Set([
+  "CHECK",
+  "CONSTRAINT",
+  "FOREIGN",
+  "PRIMARY",
+  "UNIQUE",
+]);
+
 function isKeywordAt(sql: string, index: number, keyword: string): boolean {
   const candidate = sql.slice(index, index + keyword.length);
   if (candidate.toUpperCase() !== keyword) {
@@ -521,6 +529,9 @@ export function extractSQLiteGeneratedExpressions(sql: string): Map<string, stri
   const expressions = new Map<string, string>();
 
   for (const definition of splitSQLiteTableDefinitions(sql)) {
+    if (isSQLiteTableConstraint(definition)) {
+      continue;
+    }
     const identifier = readSQLiteIdentifier(definition);
     if (!identifier) {
       continue;
@@ -533,6 +544,141 @@ export function extractSQLiteGeneratedExpressions(sql: string): Map<string, stri
   }
 
   return expressions;
+}
+
+export function extractSQLiteAutoincrementColumns(sql: string): string[] {
+  const columns: string[] = [];
+
+  for (const definition of splitSQLiteTableDefinitions(sql)) {
+    if (isSQLiteTableConstraint(definition)) {
+      continue;
+    }
+    const identifier = readSQLiteIdentifier(definition);
+    if (!identifier) {
+      continue;
+    }
+
+    let cursor = identifier.end;
+    while (cursor < definition.length) {
+      const skipped = skipQuotedOrComment(definition, cursor);
+      if (skipped !== undefined) {
+        cursor = skipped;
+        continue;
+      }
+      if (isKeywordAt(definition, cursor, "AUTOINCREMENT")) {
+        columns.push(identifier.name);
+        break;
+      }
+      cursor += 1;
+    }
+  }
+
+  return columns;
+}
+
+export function extractSQLiteColumnDefinition(
+  sql: string,
+  columnName: string
+): string | undefined {
+  for (const definition of splitSQLiteTableDefinitions(sql)) {
+    if (isSQLiteTableConstraint(definition)) {
+      continue;
+    }
+    const identifier = readSQLiteIdentifier(definition);
+    if (identifier?.name === columnName) {
+      return definition;
+    }
+  }
+
+  return undefined;
+}
+
+export function replaceSQLiteColumnDefinitionName(
+  definition: string,
+  columnName: string
+): string | undefined {
+  const identifier = readSQLiteIdentifier(definition);
+  if (!identifier) {
+    return undefined;
+  }
+
+  const start = skipWhitespaceAndComments(definition, 0);
+  const quotedName = `"${columnName.replace(/"/g, '""')}"`;
+  return definition.slice(0, start) + quotedName + definition.slice(identifier.end);
+}
+
+export interface SQLiteTableDefinition {
+  columns: Array<{ name: string; definition: string }>;
+  constraints: string[];
+}
+
+function isSQLiteTableConstraint(definition: string): boolean {
+  const token = readSQLiteToken(definition, 0);
+  return token?.kind === "word" &&
+    SQLITE_TABLE_CONSTRAINT_KEYWORDS.has(token.value);
+}
+
+export function parseSQLiteTableDefinition(sql: string): SQLiteTableDefinition {
+  const columns: SQLiteTableDefinition["columns"] = [];
+  const constraints: string[] = [];
+
+  for (const definition of splitSQLiteTableDefinitions(sql)) {
+    if (isSQLiteTableConstraint(definition)) {
+      constraints.push(definition);
+      continue;
+    }
+
+    const identifier = readSQLiteIdentifier(definition);
+    if (identifier) {
+      columns.push({ name: identifier.name, definition });
+    }
+  }
+
+  return { columns, constraints };
+}
+
+export function replaceSQLiteCreateTableName(
+  sql: string,
+  tableName: string
+): string | undefined {
+  let token = readExpectedWord(sql, 0, "CREATE");
+  if (!token) {
+    return undefined;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "TEMP") || isWord(token, "TEMPORARY")) {
+    token = readSQLiteToken(sql, token.end);
+  }
+  if (!isWord(token, "TABLE")) {
+    return undefined;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "IF")) {
+    const notToken = readExpectedWord(sql, token.end, "NOT");
+    const existsToken = notToken
+      ? readExpectedWord(sql, notToken.end, "EXISTS")
+      : undefined;
+    if (!existsToken) {
+      return undefined;
+    }
+    token = readSQLiteToken(sql, existsToken.end);
+  }
+  if (!token || token.kind === "symbol") {
+    return undefined;
+  }
+
+  const dot = readSQLiteToken(sql, token.end);
+  if (dot?.kind === "symbol" && dot.value === ".") {
+    token = readSQLiteToken(sql, dot.end);
+    if (!token || token.kind === "symbol") {
+      return undefined;
+    }
+  }
+
+  const quotedName = `"${tableName.replace(/"/g, '""')}"`;
+  return sql.slice(0, token.start) + quotedName + sql.slice(token.end);
 }
 
 export function extractSQLiteCheckExpressions(sql: string): string[] {

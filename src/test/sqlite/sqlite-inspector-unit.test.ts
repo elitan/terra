@@ -36,6 +36,14 @@ describe("SQLiteInspector unit coverage", () => {
         };
       }
 
+      if (sql === "PRAGMA table_list") {
+        return {
+          rows: [
+            { schema: "main", name: "users", type: "table", wr: 0, strict: 0 },
+          ],
+        };
+      }
+
       if (sql.includes('PRAGMA foreign_key_list("users")')) {
         return {
           rows: [
@@ -204,6 +212,13 @@ describe("SQLiteInspector unit coverage", () => {
       if (sql.includes('PRAGMA table_xinfo("logs")')) {
         return {
           rows: [{ cid: 0, name: "id", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 }],
+        };
+      }
+      if (sql === "PRAGMA table_list") {
+        return {
+          rows: [
+            { schema: "main", name: "logs", type: "table", wr: 0, strict: 0 },
+          ],
         };
       }
 

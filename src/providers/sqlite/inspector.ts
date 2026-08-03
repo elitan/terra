@@ -13,10 +13,12 @@ import type {
 } from "../../types/schema";
 import {
   extractSQLiteCheckExpressions,
+  extractSQLiteAutoincrementColumns,
   extractSQLiteGeneratedExpressions,
   extractSQLiteViewDefinition,
   parseSQLiteIndexDefinition,
   parseSQLiteTriggerMetadata,
+  replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
 
 interface TableInfo {
@@ -63,6 +65,14 @@ interface SqliteMasterRow {
   sql: string | null;
 }
 
+interface SQLiteTableListRow {
+  schema: string;
+  name: string;
+  type: string;
+  wr: number;
+  strict: number;
+}
+
 export class SQLiteInspector {
   async getCurrentSchema(client: SQLiteClient): Promise<Table[]> {
     const tables = await client.query<SqliteMasterRow>(`
@@ -72,11 +82,30 @@ export class SQLiteInspector {
         AND name NOT LIKE 'sqlite_%'
       ORDER BY name
     `);
+    const tableList = await client.query<SQLiteTableListRow>("PRAGMA table_list");
+    const tableOptions = new Map(
+      tableList.rows
+        .filter(function (row) {
+          return row.schema === "main";
+        })
+        .map(function (row) {
+          return [row.name, row] as const;
+        })
+    );
 
     const result: Table[] = [];
 
     for (const tableRow of tables.rows) {
-      const table = await this.parseTable(client, tableRow.name, tableRow.sql);
+      const options = tableOptions.get(tableRow.name);
+      const table = await this.parseTable(
+        client,
+        tableRow.name,
+        tableRow.sql,
+        {
+          strict: options?.strict === 1,
+          withoutRowid: options?.wr === 1,
+        }
+      );
       result.push(table);
     }
 
@@ -86,8 +115,16 @@ export class SQLiteInspector {
   private async parseTable(
     client: SQLiteClient,
     tableName: string,
-    createSql: string | null
+    createSql: string | null,
+    tableOptions: { strict: boolean; withoutRowid: boolean }
   ): Promise<Table> {
+    const rawCreateStatement = createSql?.trim().replace(/;+\s*$/g, "") || "";
+    const createStatement = replaceSQLiteCreateTableName(
+      rawCreateStatement,
+      tableName
+    )
+      ? rawCreateStatement
+      : "";
     const tableInfo = await client.query<TableInfo>(
       `PRAGMA table_xinfo(${this.quoteIdentifier(tableName)})`
     );
@@ -97,10 +134,17 @@ export class SQLiteInspector {
     const indexes = await this.getIndexes(client, tableName);
     const checkConstraints = await this.getCheckConstraints(client, tableName);
     const uniqueConstraints = await this.getUniqueConstraints(client, tableName);
+    const autoincrementColumns = extractSQLiteAutoincrementColumns(createStatement);
 
     return {
       name: tableName,
       columns,
+      createStatement: createStatement || undefined,
+      strict: tableOptions.strict,
+      withoutRowid: tableOptions.withoutRowid,
+      autoincrementColumns: autoincrementColumns.length > 0
+        ? autoincrementColumns
+        : undefined,
       primaryKey: primaryKey || undefined,
       foreignKeys: foreignKeys.length > 0 ? foreignKeys : undefined,
       checkConstraints: checkConstraints.length > 0 ? checkConstraints : undefined,

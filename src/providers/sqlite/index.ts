@@ -317,7 +317,7 @@ export class SQLiteProvider implements DatabaseProvider {
 
   private requiresForeignKeySuspension(statements: string[]): boolean {
     const hasTempRecreateTable = statements.some((statement) =>
-      /^CREATE TABLE\s+"_[^"]+_new"\s*\(/i.test(statement.trim())
+      /^CREATE\s+TABLE\s+"_(?:""|[^"])+_new"\s*\(/i.test(statement.trim())
     );
     const hasDropTable = statements.some((statement) =>
       /^DROP TABLE\s+/i.test(statement.trim())

@@ -7,6 +7,12 @@ import type {
   CheckConstraint,
 } from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
+import {
+  extractSQLiteColumnDefinition,
+  parseSQLiteTableDefinition,
+  replaceSQLiteColumnDefinitionName,
+  replaceSQLiteCreateTableName,
+} from "./sql-parser-utils";
 
 interface ColumnChange {
   type: 'add' | 'drop' | 'modify';
@@ -48,7 +54,7 @@ export class SQLiteDiffer {
         } else {
           for (const change of changes.columnChanges) {
             if (change.type === 'add') {
-              statements.push(this.generateAddColumn(table.name, change.column));
+              statements.push(this.generateAddColumn(table, change.column));
             }
           }
           for (const index of changes.indexesToDrop) {
@@ -63,7 +69,7 @@ export class SQLiteDiffer {
 
     for (const table of current) {
       if (!desiredMap.has(table.name)) {
-        statements.push(`DROP TABLE IF EXISTS "${table.name}";`);
+        statements.push(`DROP TABLE IF EXISTS ${this.quoteIdentifier(table.name)};`);
       }
     }
 
@@ -126,6 +132,14 @@ export class SQLiteDiffer {
     if (this.uniqueConstraintsDiffer(desired.uniqueConstraints, current.uniqueConstraints)) {
       changes.requiresRecreate = true;
       changes.uniqueConstraintsChanged = true;
+    }
+
+    if (this.tableOptionsDiffer(desired, current)) {
+      changes.requiresRecreate = true;
+    }
+
+    if (this.tableDefinitionsDiffer(desired, current)) {
+      changes.requiresRecreate = true;
     }
 
     const currentIndexMap = new Map((current.indexes || []).map(i => [i.name, i]));
@@ -255,6 +269,69 @@ export class SQLiteDiffer {
     return false;
   }
 
+  private tableOptionsDiffer(desired: Table, current: Table): boolean {
+    if (Boolean(desired.strict) !== Boolean(current.strict)) {
+      return true;
+    }
+    if (Boolean(desired.withoutRowid) !== Boolean(current.withoutRowid)) {
+      return true;
+    }
+
+    const desiredAutoincrement = [...(desired.autoincrementColumns || [])].sort();
+    const currentAutoincrement = [...(current.autoincrementColumns || [])].sort();
+    return desiredAutoincrement.join("\0") !== currentAutoincrement.join("\0");
+  }
+
+  private tableDefinitionsDiffer(desired: Table, current: Table): boolean {
+    if (!desired.createStatement || !current.createStatement) {
+      return false;
+    }
+
+    const desiredDefinition = parseSQLiteTableDefinition(desired.createStatement);
+    const currentDefinition = parseSQLiteTableDefinition(current.createStatement);
+    const currentColumns = new Map(
+      currentDefinition.columns.map(function (column) {
+        return [column.name, column.definition] as const;
+      })
+    );
+
+    for (const column of desiredDefinition.columns) {
+      const currentColumn = currentColumns.get(column.name);
+      if (!currentColumn) {
+        continue;
+      }
+      const desiredCanonical = replaceSQLiteColumnDefinitionName(
+        column.definition,
+        "__terradb_column__"
+      );
+      const currentCanonical = replaceSQLiteColumnDefinitionName(
+        currentColumn,
+        "__terradb_column__"
+      );
+      if (
+        this.normalizeSql(desiredCanonical) !==
+        this.normalizeSql(currentCanonical)
+      ) {
+        return true;
+      }
+    }
+
+    const desiredConstraints = this.normalizeDefinitions(
+      desiredDefinition.constraints
+    );
+    const currentConstraints = this.normalizeDefinitions(
+      currentDefinition.constraints
+    );
+    return desiredConstraints.join("\0") !== currentConstraints.join("\0");
+  }
+
+  private normalizeDefinitions(definitions: string[]): string[] {
+    const differ = this;
+    return definitions.map(function (definition) {
+      return differ.normalizeSql(definition) || "";
+    }).sort();
+  }
+
   private indexTermsDiffer(desired: IndexTerm[], current: IndexTerm[]): boolean {
     if (desired.length !== current.length) {
       return true;
@@ -277,6 +354,17 @@ export class SQLiteDiffer {
   }
 
   private generateCreateTable(table: Table): string {
+    if (table.createStatement?.trim()) {
+      const createStatement = replaceSQLiteCreateTableName(
+        table.createStatement.trim().replace(/;+\s*$/g, ""),
+        table.name
+      );
+      if (!createStatement) {
+        throw new Error(`Unable to rewrite CREATE TABLE statement for "${table.name}"`);
+      }
+      return `${createStatement};`;
+    }
+
     const parts: string[] = [];
 
     for (const col of table.columns) {
@@ -284,14 +372,14 @@ export class SQLiteDiffer {
     }
 
     if (table.primaryKey && table.primaryKey.columns.length > 0) {
-      const pkCols = table.primaryKey.columns.map(c => `"${c}"`).join(', ');
+      const pkCols = this.quoteIdentifiers(table.primaryKey.columns);
       parts.push(`PRIMARY KEY (${pkCols})`);
     }
 
     for (const fk of table.foreignKeys || []) {
-      const fkCols = fk.columns.map(c => `"${c}"`).join(', ');
-      const refCols = fk.referencedColumns.map(c => `"${c}"`).join(', ');
-      let fkDef = `FOREIGN KEY (${fkCols}) REFERENCES "${fk.referencedTable}" (${refCols})`;
+      const fkCols = this.quoteIdentifiers(fk.columns);
+      const refCols = this.quoteIdentifiers(fk.referencedColumns);
+      let fkDef = `FOREIGN KEY (${fkCols}) REFERENCES ${this.quoteIdentifier(fk.referencedTable)} (${refCols})`;
       if (fk.onDelete && fk.onDelete !== 'NO ACTION') {
         fkDef += ` ON DELETE ${fk.onDelete}`;
       }
@@ -302,8 +390,10 @@ export class SQLiteDiffer {
     }
 
     for (const uc of table.uniqueConstraints || []) {
-      const ucCols = uc.columns.map(c => `"${c}"`).join(', ');
-      const name = uc.name ? `CONSTRAINT "${uc.name}" ` : "";
+      const ucCols = this.quoteIdentifiers(uc.columns);
+      const name = uc.name
+        ? `CONSTRAINT ${this.quoteIdentifier(uc.name)} `
+        : "";
       parts.push(`${name}UNIQUE (${ucCols})`);
     }
 
@@ -311,7 +401,7 @@ export class SQLiteDiffer {
       parts.push(`CHECK (${cc.expression})`);
     }
 
-    return `CREATE TABLE "${table.name}" (\n${parts.map(p => '  ' + p).join(',\n')}\n);`;
+    return `CREATE TABLE ${this.quoteIdentifier(table.name)} (\n${parts.map(p => '  ' + p).join(',\n')}\n);`;
   }
 
   private generateCreateIndex(index: Index): string {
@@ -320,20 +410,29 @@ export class SQLiteDiffer {
     }
 
     const unique = index.unique ? 'UNIQUE ' : '';
-    const cols = index.columns.map(c => `"${c}"`).join(', ');
-    let sql = `CREATE ${unique}INDEX "${index.name}" ON "${index.tableName}" (${cols})`;
+    const cols = this.quoteIdentifiers(index.columns);
+    let sql = `CREATE ${unique}INDEX ${this.quoteIdentifier(index.name)} ON ${this.quoteIdentifier(index.tableName)} (${cols})`;
     if (index.where) {
       sql += ` WHERE ${index.where}`;
     }
     return sql + ';';
   }
 
-  private generateAddColumn(tableName: string, column: Column): string {
-    return `ALTER TABLE "${tableName}" ADD COLUMN ${this.generateColumnDefinition(column)};`;
+  private generateAddColumn(table: Table, column: Column): string {
+    const exactDefinition = table.createStatement
+      ? extractSQLiteColumnDefinition(table.createStatement, column.name)
+      : undefined;
+    const definition = exactDefinition
+      ? replaceSQLiteColumnDefinitionName(exactDefinition, column.name)
+      : this.generateColumnDefinition(column);
+    if (!definition) {
+      throw new Error(`Unable to rewrite SQLite column definition for "${column.name}"`);
+    }
+    return `ALTER TABLE ${this.quoteIdentifier(table.name)} ADD COLUMN ${definition};`;
   }
 
   private generateColumnDefinition(column: Column): string {
-    let definition = `"${column.name}" ${column.type}`;
+    let definition = `${this.quoteIdentifier(column.name)} ${column.type}`;
 
     if (column.generated) {
       definition += ` GENERATED ALWAYS AS (${column.generated.expression})`;
@@ -356,19 +455,31 @@ export class SQLiteDiffer {
     const tempTable = { ...desired, name: tempName };
     statements.push(this.generateCreateTable(tempTable));
 
+    const differ = this;
     const commonColumns = desired.columns
       .filter(c => !c.generated && current.columns.some(cc => cc.name === c.name))
-      .map(c => `"${c.name}"`)
+      .map(function (column) {
+        return differ.quoteIdentifier(column.name);
+      })
       .join(', ');
 
     if (commonColumns) {
       statements.push(
-        `INSERT INTO "${tempName}" (${commonColumns}) SELECT ${commonColumns} FROM "${desired.name}";`
+        `INSERT INTO ${this.quoteIdentifier(tempName)} (${commonColumns}) SELECT ${commonColumns} FROM ${this.quoteIdentifier(desired.name)};`
       );
     }
 
-    statements.push(`DROP TABLE "${desired.name}";`);
-    statements.push(`ALTER TABLE "${tempName}" RENAME TO "${desired.name}";`);
+    if (
+      (desired.autoincrementColumns || []).length > 0 &&
+      (current.autoincrementColumns || []).length > 0
+    ) {
+      statements.push(...this.generateSequencePreservation(desired.name, tempName));
+    }
+
+    statements.push(`DROP TABLE ${this.quoteIdentifier(desired.name)};`);
+    statements.push(
+      `ALTER TABLE ${this.quoteIdentifier(tempName)} RENAME TO ${this.quoteIdentifier(desired.name)};`
+    );
 
     for (const index of desired.indexes || []) {
       if (!index.constraint) {
@@ -377,6 +488,15 @@ export class SQLiteDiffer {
     }
 
     return statements;
+  }
+
+  private generateSequencePreservation(tableName: string, tempName: string): string[] {
+    const tableValue = this.quoteStringLiteral(tableName);
+    const tempValue = this.quoteStringLiteral(tempName);
+    return [
+      `UPDATE sqlite_sequence SET seq = MAX(seq, COALESCE((SELECT MAX(seq) FROM sqlite_sequence WHERE name = ${tableValue}), seq)) WHERE name = ${tempValue};`,
+      `INSERT INTO sqlite_sequence(name, seq) SELECT ${tempValue}, seq FROM sqlite_sequence WHERE name = ${tableValue} AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ${tempValue});`,
+    ];
   }
 
   private normalizeType(type: string): string {
@@ -430,5 +550,16 @@ export class SQLiteDiffer {
 
   private quoteIdentifier(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
+  }
+
+  private quoteIdentifiers(values: string[]): string {
+    const differ = this;
+    return values.map(function (value) {
+      return differ.quoteIdentifier(value);
+    }).join(", ");
+  }
+
+  private quoteStringLiteral(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
   }
 }

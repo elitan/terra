@@ -60,7 +60,7 @@ describe("SQLiteDiffer private coverage", () => {
     }) as string;
     expect(createIndex).toContain("WHERE id > 0");
 
-    const addColumn = differ.generateAddColumn("users", {
+    const addColumn = differ.generateAddColumn(makeTable(), {
       name: "email",
       type: "TEXT",
       nullable: false,
@@ -178,5 +178,42 @@ describe("SQLiteDiffer private coverage", () => {
         order: "DESC",
       }],
     })).toBe(true);
+  });
+
+  test("compares lossless SQLite table definitions without blocking additive columns", function () {
+    const differ = new SQLiteDiffer() as any;
+    const current = makeTable({
+      createStatement: "CREATE TABLE users(id INTEGER COLLATE BINARY, CONSTRAINT named CHECK(id > 0))",
+      strict: false,
+      withoutRowid: false,
+    });
+    const additive = makeTable({
+      columns: [
+        ...makeTable().columns,
+        { name: "label", type: "TEXT", nullable: true },
+      ],
+      createStatement: "CREATE TABLE users(id INTEGER COLLATE BINARY, label TEXT COLLATE NOCASE, CONSTRAINT named CHECK(id > 0))",
+      strict: false,
+      withoutRowid: false,
+    });
+
+    expect(differ.tableDefinitionsDiffer(additive, current)).toBe(false);
+    expect(differ.tableDefinitionsDiffer({
+      ...current,
+      createStatement: "CREATE TABLE users(id INTEGER COLLATE NOCASE, CONSTRAINT named CHECK(id > 0))",
+    }, current)).toBe(true);
+    expect(differ.tableDefinitionsDiffer({
+      ...current,
+      createStatement: "CREATE TABLE users(id INTEGER COLLATE BINARY, CONSTRAINT renamed CHECK(id > 0))",
+    }, current)).toBe(true);
+    expect(differ.tableOptionsDiffer({ ...current, strict: true }, current)).toBe(true);
+    expect(differ.tableOptionsDiffer({
+      ...current,
+      autoincrementColumns: ["id"],
+    }, current)).toBe(true);
+
+    const sequenceSql = differ.generateSequencePreservation("user's", "_user's_new");
+    expect(sequenceSql.join("\n")).toContain("'user''s'");
+    expect(sequenceSql.join("\n")).toContain("'_user''s_new'");
   });
 });

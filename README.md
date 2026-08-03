@@ -100,6 +100,7 @@ export DATABASE_URL=":memory:"
 | Extensions | Yes | No |
 
 SQLite uses table recreation for schema changes that ALTER TABLE doesn't support (column type changes, constraint modifications, etc.).
+Table recreation preserves SQLite-specific definitions including `STRICT`, `WITHOUT ROWID`, `AUTOINCREMENT`, collations, named constraints, and `ON CONFLICT` policies.
 
 ## Commands
 

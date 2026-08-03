@@ -92,6 +92,8 @@
 - done: preserve SQLite VIRTUAL/STORED generated columns through inspection, additive changes, recreation, removal, and rollback.
 - done: preserve complete SQLite views and table/view triggers through generalized table recreation and failed-migration rollback.
 - done: preserve complete SQLite index definitions, including mixed expression/column keys, collations, sort orders, and partial predicates, through recreation and rollback.
+- done: preserve SQLite STRICT/WITHOUT ROWID options, quoted identifiers, named constraints, collations, conflict policies, and exact table DDL through additive changes and recreation.
+- done: preserve SQLite AUTOINCREMENT high-water marks through table recreation so deleted historical rowids are not reused.
 - done: add sqlite table recreation regressions for referenced-table migration with existing child rows and post-migration fk enforcement.
 - done: fix sqlite table recreation transaction path to temporarily suspend fk checks, run `PRAGMA foreign_key_check`, and restore enforcement.
 - done: add sqlite rollback/no-leak regression for failed table recreation (`_users_new` cleanup + original row preservation).

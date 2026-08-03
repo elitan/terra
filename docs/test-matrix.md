@@ -22,9 +22,9 @@
 
 | feature | postgres | sqlite | notes |
 |---|---|---|---|
-| tables | covered | covered | broad base tests present |
+| tables | covered | covered | SQLite STRICT/WITHOUT ROWID, exact DDL, quoted identifiers, AUTOINCREMENT high-water preservation, option removal, and rollback covered in memory and on disk |
 | columns | covered | covered | includes conversions plus SQLite VIRTUAL/STORED inspection, add, recreate, remove, rollback, and memory/file parity |
-| constraints | covered | partial | nested checks and unique-constraint lifecycle/rollback covered; names and conflict clauses remain under audit |
+| constraints | covered | covered | SQLite named inline/table constraints, collations, sort order, and ON CONFLICT behavior are preserved and change-detected |
 | indexes | covered | covered | SQLite mixed column/expression keys, collations, ASC/DESC ordering, partial predicates, planner use, recreation, rollback, and memory/file parity covered |
 | views | covered | covered | sqlite full definitions, explicit column lists, replacement, recreation ordering, and rollback covered |
 | schemas | covered | gap | sqlite unsupported by design |
@@ -53,7 +53,6 @@
 ## explicit gaps backlog
 
 1. add PostgreSQL 18 local, CI, snapshot, and release verification lanes
-2. complete SQLite constraint-name and conflict-clause coverage
-3. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
-4. add per-feature rollback-on-error assertions for all core objects
-5. add grammar-aware SQLite fuzzing against the bundled runtime
+2. add deterministic json snapshots for `plan` and `apply` across pg/sqlite
+3. add per-feature rollback-on-error assertions for all core objects
+4. add grammar-aware SQLite fuzzing against the bundled runtime

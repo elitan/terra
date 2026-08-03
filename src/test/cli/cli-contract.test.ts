@@ -930,7 +930,10 @@ describe("CLI Contract", () => {
 
       expect(result.exitCode).toBe(0);
       const payload = parseJsonOutput(result.output);
-      const createUsersSql = `CREATE TABLE "users" (\n  "id" INTEGER NOT NULL,\n  "email" TEXT NOT NULL,\n  PRIMARY KEY ("id")\n);`;
+      const createUsersSql = `CREATE TABLE "users" (
+          id INTEGER PRIMARY KEY,
+          email TEXT NOT NULL
+        );`;
       expect(payload).toEqual({
         schemaVersion: 1,
         command: "plan",
@@ -1095,7 +1098,10 @@ describe("CLI Contract", () => {
 
       expect(result.exitCode).toBe(0);
       const payload = parseJsonOutput(result.output);
-      const createUsersSql = `CREATE TABLE "users" (\n  "id" INTEGER NOT NULL,\n  "email" TEXT NOT NULL,\n  PRIMARY KEY ("id")\n);`;
+      const createUsersSql = `CREATE TABLE "users" (
+          id INTEGER PRIMARY KEY,
+          email TEXT NOT NULL
+        );`;
       expect(payload).toEqual({
         schemaVersion: 1,
         command: "apply",
