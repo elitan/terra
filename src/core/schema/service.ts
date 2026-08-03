@@ -499,7 +499,7 @@ export class SchemaService {
     let preTableViewStatements: string[] = [];
     if (this.provider.dialect === "sqlite") {
       const recreatesTable = tableStatements.some(function (statement) {
-        return /^CREATE\s+TABLE\s+"_(?:""|[^"])+_new"\s*\(/i.test(statement.trim());
+        return /^CREATE\s+(?:VIRTUAL\s+)?TABLE\s+"_(?:""|[^"])+_new"(?=\s*(?:\(|USING\b))/i.test(statement.trim());
       });
       const replacesOrDropsView = viewStatements.some(function (statement) {
         return /^DROP VIEW\s+/i.test(statement.trim());

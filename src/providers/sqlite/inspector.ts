@@ -68,7 +68,7 @@ interface SqliteMasterRow {
 interface SQLiteTableListRow {
   schema: string;
   name: string;
-  type: string;
+  type: "table" | "view" | "shadow" | "virtual";
   wr: number;
   strict: number;
 }
@@ -97,11 +97,15 @@ export class SQLiteInspector {
 
     for (const tableRow of tables.rows) {
       const options = tableOptions.get(tableRow.name);
+      if (options?.type === "shadow") {
+        continue;
+      }
       const table = await this.parseTable(
         client,
         tableRow.name,
         tableRow.sql,
         {
+          virtual: options?.type === "virtual",
           strict: options?.strict === 1,
           withoutRowid: options?.wr === 1,
         }
@@ -116,7 +120,11 @@ export class SQLiteInspector {
     client: SQLiteClient,
     tableName: string,
     createSql: string | null,
-    tableOptions: { strict: boolean; withoutRowid: boolean }
+    tableOptions: {
+      virtual: boolean;
+      strict: boolean;
+      withoutRowid: boolean;
+    }
   ): Promise<Table> {
     const rawCreateStatement = createSql?.trim().replace(/;+\s*$/g, "") || "";
     const createStatement = replaceSQLiteCreateTableName(
@@ -140,6 +148,7 @@ export class SQLiteInspector {
       name: tableName,
       columns,
       createStatement: createStatement || undefined,
+      virtual: tableOptions.virtual || undefined,
       strict: tableOptions.strict,
       withoutRowid: tableOptions.withoutRowid,
       autoincrementColumns: autoincrementColumns.length > 0

@@ -210,6 +210,7 @@ export interface Table {
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: Column[];
   createStatement?: string; // Complete SQLite CREATE TABLE statement for lossless recreation
+  virtual?: boolean; // SQLite virtual table backed by a registered module
   strict?: boolean; // SQLite STRICT table option
   withoutRowid?: boolean; // SQLite WITHOUT ROWID table option
   autoincrementColumns?: string[]; // SQLite INTEGER PRIMARY KEY AUTOINCREMENT columns

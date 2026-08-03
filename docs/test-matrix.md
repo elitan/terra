@@ -22,7 +22,7 @@
 
 | feature | postgres | sqlite | notes |
 |---|---|---|---|
-| tables | covered | covered | SQLite STRICT/WITHOUT ROWID, exact DDL, quoted identifiers, AUTOINCREMENT high-water preservation, option removal, and rollback covered in memory and on disk |
+| tables | covered | covered | SQLite regular/FTS5/RTree virtual tables, shadow filtering, STRICT/WITHOUT ROWID, exact DDL, quoted identifiers, AUTOINCREMENT high-water preservation, changes, removal, and rollback covered in memory and on disk |
 | columns | covered | covered | includes conversions plus SQLite VIRTUAL/STORED inspection, add, recreate, remove, rollback, and memory/file parity |
 | constraints | covered | covered | SQLite named inline/table constraints, collations, sort order, and ON CONFLICT behavior are preserved and change-detected |
 | indexes | covered | covered | SQLite mixed column/expression keys, collations, ASC/DESC ordering, partial predicates, planner use, recreation, rollback, and memory/file parity covered |

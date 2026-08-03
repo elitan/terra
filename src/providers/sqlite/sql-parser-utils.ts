@@ -650,6 +650,9 @@ export function replaceSQLiteCreateTableName(
   if (isWord(token, "TEMP") || isWord(token, "TEMPORARY")) {
     token = readSQLiteToken(sql, token.end);
   }
+  if (isWord(token, "VIRTUAL")) {
+    token = readSQLiteToken(sql, token.end);
+  }
   if (!isWord(token, "TABLE")) {
     return undefined;
   }

@@ -270,6 +270,9 @@ export class SQLiteDiffer {
   }
 
   private tableOptionsDiffer(desired: Table, current: Table): boolean {
+    if (Boolean(desired.virtual) !== Boolean(current.virtual)) {
+      return true;
+    }
     if (Boolean(desired.strict) !== Boolean(current.strict)) {
       return true;
     }
@@ -285,6 +288,11 @@ export class SQLiteDiffer {
   private tableDefinitionsDiffer(desired: Table, current: Table): boolean {
     if (!desired.createStatement || !current.createStatement) {
       return false;
+    }
+
+    if (desired.virtual || current.virtual) {
+      return this.normalizeSql(desired.createStatement) !==
+        this.normalizeSql(current.createStatement);
     }
 
     const desiredDefinition = parseSQLiteTableDefinition(desired.createStatement);
