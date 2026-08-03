@@ -277,6 +277,19 @@ describe("SchemaDiffer private coverage", () => {
     expect(plan.deferred).toHaveLength(0);
   });
 
+  test("generateMigrationPlan preserves table persistence direction", function () {
+    const differ = new SchemaDiffer();
+    const logged = makeTable({ unlogged: undefined });
+    const unlogged = makeTable({ unlogged: true });
+
+    expect(
+      differ.generateMigrationPlan([unlogged], [logged]).transactional.join("\n")
+    ).toContain("SET UNLOGGED");
+    expect(
+      differ.generateMigrationPlan([logged], [unlogged]).transactional.join("\n")
+    ).toContain("SET LOGGED");
+  });
+
   test("primary key helpers cover add drop modify and none", () => {
     const differ = new SchemaDiffer();
     const add = (differ as any).comparePrimaryKeys(makePrimaryKey(["id"]), undefined);

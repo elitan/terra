@@ -70,7 +70,7 @@ export class DatabaseInspector {
 
     // Get all tables from specified schemas (excluding extension-owned tables)
     const tablesResult = await client.query(`
-      SELECT t.table_name, t.table_schema
+      SELECT t.table_name, t.table_schema, c.relpersistence
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.table_schema
@@ -202,6 +202,7 @@ export class DatabaseInspector {
         name: tableName,
         schema: tableSchema,
         columns,
+        unlogged: row.relpersistence === "u" ? true : undefined,
         primaryKey,
         foreignKeys: foreignKeys.length > 0 ? foreignKeys : undefined,
         checkConstraints: checkConstraints.length > 0 ? checkConstraints : undefined,

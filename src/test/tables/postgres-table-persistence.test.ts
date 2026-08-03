@@ -1,0 +1,345 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { Client } from "pg";
+import type { MigrationPlan } from "../../types/migration";
+import { createColumnTestServices } from "../columns/column-test-utils";
+import { cleanDatabase, createTestClient } from "../utils";
+
+describe("PostgreSQL table persistence", function () {
+  let client: Client;
+  const services = createColumnTestServices();
+
+  beforeEach(async function () {
+    client = await createTestClient();
+    await cleanDatabase(client);
+  });
+
+  afterEach(async function () {
+    await cleanDatabase(client);
+    await client.end();
+  });
+
+  async function planSchema(schema: string): Promise<MigrationPlan> {
+    const current = await services.inspector.getCurrentSchema(client);
+    const desired = await services.parser.parseSchema(schema);
+    return services.differ.generateMigrationPlan(desired.tables, current);
+  }
+
+  async function getRelationPersistence(
+    relationNames: string[]
+  ): Promise<Record<string, string>> {
+    const result = await client.query(
+      `
+        SELECT c.relname, c.relpersistence
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relname = ANY($1::text[])
+        ORDER BY c.relname
+      `,
+      [relationNames]
+    );
+    return Object.fromEntries(
+      result.rows.map(function mapPersistence(row) {
+        return [row.relname, row.relpersistence];
+      })
+    );
+  }
+
+  test("parses and renders unlogged persistence", async function () {
+    const desired = await services.parser.parseSchema(`
+      CREATE TABLE public.permanent_table (id integer);
+      CREATE UNLOGGED TABLE public.unlogged_table (id integer);
+    `);
+
+    expect(
+      desired.tables.find(function findPermanent(table) {
+        return table.name === "permanent_table";
+      })?.unlogged
+    ).toBeUndefined();
+    expect(
+      desired.tables.find(function findUnlogged(table) {
+        return table.name === "unlogged_table";
+      })?.unlogged
+    ).toBe(true);
+
+    const sql = services.differ
+      .generateMigrationPlan(desired.tables, [])
+      .transactional.join("\n");
+    expect(sql).toContain('CREATE TABLE "public"."permanent_table"');
+    expect(sql).toContain('CREATE UNLOGGED TABLE "public"."unlogged_table"');
+  });
+
+  test("creates, inspects, and reapplies an unlogged table", async function () {
+    const schema = `
+      CREATE UNLOGGED TABLE public.persistence_create (
+        id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        payload text NOT NULL UNIQUE
+      );
+    `;
+
+    const first = await planSchema(schema);
+    expect(first.transactional.join("\n")).toContain(
+      'CREATE UNLOGGED TABLE "public"."persistence_create"'
+    );
+    await services.executor.executePlan(client, first, true);
+
+    const current = await services.inspector.getCurrentSchema(client);
+    expect(
+      current.find(function findTable(table) {
+        return table.name === "persistence_create";
+      })?.unlogged
+    ).toBe(true);
+    expect(
+      await getRelationPersistence([
+        "persistence_create",
+        "persistence_create_pkey",
+        "persistence_create_payload_unique",
+      ])
+    ).toEqual({
+      persistence_create: "u",
+      persistence_create_payload_unique: "u",
+      persistence_create_pkey: "u",
+    });
+    expect((await planSchema(schema)).hasChanges).toBe(false);
+  });
+
+  test("converts a populated logged table with other alterations", async function () {
+    await client.query(`
+      CREATE TABLE public.persistence_change (
+        id integer PRIMARY KEY,
+        payload text NOT NULL
+      );
+      INSERT INTO public.persistence_change VALUES (1, 'preserved');
+    `);
+    const schema = `
+      CREATE UNLOGGED TABLE public.persistence_change (
+        id integer PRIMARY KEY,
+        payload text NOT NULL,
+        added integer DEFAULT 7
+      );
+    `;
+
+    const plan = await planSchema(schema);
+    const sql = plan.transactional.join("\n");
+    expect(sql).toContain("SET UNLOGGED");
+    expect(sql).toContain('ADD COLUMN "added" INT4 DEFAULT 7');
+    expect(sql).not.toMatch(/DROP (?:TABLE|COLUMN)/);
+    await services.executor.executePlan(client, plan, true);
+
+    expect(
+      (
+        await client.query(
+          "SELECT id, payload, added FROM public.persistence_change"
+        )
+      ).rows
+    ).toEqual([{ id: 1, payload: "preserved", added: 7 }]);
+    expect(
+      await getRelationPersistence([
+        "persistence_change",
+        "persistence_change_pkey",
+      ])
+    ).toEqual({
+      persistence_change: "u",
+      persistence_change_pkey: "u",
+    });
+    expect((await planSchema(schema)).hasChanges).toBe(false);
+  });
+
+  test("converts an unlogged table back to logged without losing data", async function () {
+    await client.query(`
+      CREATE UNLOGGED TABLE public.persistence_reset (
+        id integer PRIMARY KEY,
+        payload text NOT NULL
+      );
+      INSERT INTO public.persistence_reset VALUES (1, 'preserved');
+    `);
+    const schema = `
+      CREATE TABLE public.persistence_reset (
+        id integer PRIMARY KEY,
+        payload text NOT NULL
+      );
+    `;
+
+    const plan = await planSchema(schema);
+    const sql = plan.transactional.join("\n");
+    expect(sql).toContain("SET LOGGED");
+    expect(sql).not.toMatch(/DROP (?:TABLE|COLUMN)/);
+    await services.executor.executePlan(client, plan, true);
+
+    expect(
+      (await client.query("SELECT * FROM public.persistence_reset")).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
+    expect(
+      await getRelationPersistence([
+        "persistence_reset",
+        "persistence_reset_pkey",
+      ])
+    ).toEqual({
+      persistence_reset: "p",
+      persistence_reset_pkey: "p",
+    });
+    expect((await planSchema(schema)).hasChanges).toBe(false);
+  });
+
+  test("orders foreign-key dependencies for persistence changes", async function () {
+    await client.query(`
+      CREATE TABLE public.persistence_parent (id integer PRIMARY KEY);
+      CREATE TABLE public.persistence_child (
+        id integer PRIMARY KEY,
+        parent_id integer NOT NULL,
+        CONSTRAINT persistence_child_parent_fk
+          FOREIGN KEY (parent_id) REFERENCES public.persistence_parent(id)
+      );
+      INSERT INTO public.persistence_parent VALUES (1);
+      INSERT INTO public.persistence_child VALUES (1, 1);
+    `);
+    const unloggedSchema = `
+      CREATE UNLOGGED TABLE public.persistence_parent (
+        id integer PRIMARY KEY
+      );
+      CREATE UNLOGGED TABLE public.persistence_child (
+        id integer PRIMARY KEY,
+        parent_id integer NOT NULL,
+        CONSTRAINT persistence_child_parent_fk
+          FOREIGN KEY (parent_id) REFERENCES public.persistence_parent(id)
+      );
+    `;
+
+    const unloggedPlan = await planSchema(unloggedSchema);
+    const unloggedSql = unloggedPlan.transactional.join("\n");
+    expect(
+      unloggedSql.indexOf('ALTER TABLE "public"."persistence_child"')
+    ).toBeLessThan(
+      unloggedSql.indexOf('ALTER TABLE "public"."persistence_parent"')
+    );
+    await services.executor.executePlan(client, unloggedPlan, true);
+    expect((await planSchema(unloggedSchema)).hasChanges).toBe(false);
+
+    const loggedSchema = unloggedSchema.replaceAll(
+      "CREATE UNLOGGED TABLE",
+      "CREATE TABLE"
+    );
+    const loggedPlan = await planSchema(loggedSchema);
+    const loggedSql = loggedPlan.transactional.join("\n");
+    expect(
+      loggedSql.indexOf('ALTER TABLE "public"."persistence_parent"')
+    ).toBeLessThan(
+      loggedSql.indexOf('ALTER TABLE "public"."persistence_child"')
+    );
+    await services.executor.executePlan(client, loggedPlan, true);
+
+    expect(
+      (await client.query("SELECT parent_id FROM public.persistence_child")).rows
+    ).toEqual([{ parent_id: 1 }]);
+    expect((await planSchema(loggedSchema)).hasChanges).toBe(false);
+  });
+
+  test("drops removed referencing tables before changing persistence", async function () {
+    await client.query(`
+      CREATE TABLE public.persistence_drop_parent (id integer PRIMARY KEY);
+      CREATE TABLE public.persistence_drop_child (
+        id integer PRIMARY KEY,
+        parent_id integer REFERENCES public.persistence_drop_parent(id)
+      );
+    `);
+    const schema = `
+      CREATE UNLOGGED TABLE public.persistence_drop_parent (
+        id integer PRIMARY KEY
+      );
+    `;
+
+    const plan = await planSchema(schema);
+    const sql = plan.transactional.join("\n");
+    expect(
+      sql.indexOf('DROP TABLE "public"."persistence_drop_child"')
+    ).toBeLessThan(
+      sql.indexOf('ALTER TABLE "public"."persistence_drop_parent"')
+    );
+    await services.executor.executePlan(client, plan, true);
+
+    expect(
+      await getRelationPersistence(["persistence_drop_parent"])
+    ).toEqual({ persistence_drop_parent: "u" });
+    expect((await planSchema(schema)).hasChanges).toBe(false);
+  });
+
+  test("temporarily detaches circular foreign keys during conversion", async function () {
+    await client.query(`
+      CREATE TABLE public.persistence_cycle_a (
+        id integer PRIMARY KEY,
+        b_id integer
+      );
+      CREATE TABLE public.persistence_cycle_b (
+        id integer PRIMARY KEY,
+        a_id integer
+      );
+      ALTER TABLE public.persistence_cycle_a
+        ADD CONSTRAINT persistence_cycle_a_b_fk
+        FOREIGN KEY (b_id) REFERENCES public.persistence_cycle_b(id);
+      ALTER TABLE public.persistence_cycle_b
+        ADD CONSTRAINT persistence_cycle_b_a_fk
+        FOREIGN KEY (a_id) REFERENCES public.persistence_cycle_a(id);
+    `);
+    const schema = `
+      CREATE UNLOGGED TABLE public.persistence_cycle_a (
+        id integer PRIMARY KEY,
+        b_id integer,
+        CONSTRAINT persistence_cycle_a_b_fk
+          FOREIGN KEY (b_id) REFERENCES public.persistence_cycle_b(id)
+      );
+      CREATE UNLOGGED TABLE public.persistence_cycle_b (
+        id integer PRIMARY KEY,
+        a_id integer,
+        CONSTRAINT persistence_cycle_b_a_fk
+          FOREIGN KEY (a_id) REFERENCES public.persistence_cycle_a(id)
+      );
+    `;
+
+    const plan = await planSchema(schema);
+    const statements = plan.transactional;
+    const firstPersistence = statements.findIndex(function findPersistence(sql) {
+      return sql.includes("SET UNLOGGED");
+    });
+    const lastPersistence = statements.findLastIndex(function findPersistence(sql) {
+      return sql.includes("SET UNLOGGED");
+    });
+    expect(statements.slice(0, firstPersistence).join("\n")).toContain(
+      "DROP CONSTRAINT"
+    );
+    expect(statements.slice(lastPersistence + 1).join("\n")).toContain(
+      "ADD CONSTRAINT"
+    );
+    await services.executor.executePlan(client, plan, true);
+
+    expect(
+      await getRelationPersistence([
+        "persistence_cycle_a",
+        "persistence_cycle_b",
+      ])
+    ).toEqual({
+      persistence_cycle_a: "u",
+      persistence_cycle_b: "u",
+    });
+    expect((await planSchema(schema)).hasChanges).toBe(false);
+
+    const loggedSchema = schema.replaceAll(
+      "CREATE UNLOGGED TABLE",
+      "CREATE TABLE"
+    );
+    await services.executor.executePlan(
+      client,
+      await planSchema(loggedSchema),
+      true
+    );
+    expect(
+      await getRelationPersistence([
+        "persistence_cycle_a",
+        "persistence_cycle_b",
+      ])
+    ).toEqual({
+      persistence_cycle_a: "p",
+      persistence_cycle_b: "p",
+    });
+    expect((await planSchema(loggedSchema)).hasChanges).toBe(false);
+  });
+});

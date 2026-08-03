@@ -16,6 +16,50 @@ describe("DatabaseInspector coverage", () => {
     expect(inspector.mapPostgreSQLIndexType("CUSTOM_TYPE")).toBe("custom_type");
   });
 
+  test("maps unlogged table persistence", async function () {
+    const inspector = new DatabaseInspector() as any;
+    inspector.getPrimaryKeyConstraint = async function () { return undefined; };
+    inspector.getForeignKeyConstraints = async function () { return []; };
+    inspector.getCheckConstraints = async function () { return []; };
+    inspector.getUniqueConstraints = async function () { return []; };
+    inspector.getTableIndexes = async function () { return []; };
+    const client = createClient((sql) => {
+      if (sql.includes("FROM information_schema.tables")) {
+        return {
+          rows: [
+            {
+              table_name: "event_buffer",
+              table_schema: "public",
+              relpersistence: "u",
+            },
+          ],
+        };
+      }
+      if (sql.includes("FROM pg_attribute")) {
+        return {
+          rows: [
+            {
+              column_name: "payload",
+              pg_type: "text",
+              is_nullable: true,
+              column_default: null,
+              attgenerated: "",
+              attidentity: "",
+              column_default_storage: "x",
+              column_storage: null,
+              column_compression: "",
+            },
+          ],
+        };
+      }
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const tables = await inspector.getCurrentSchema(client, ["public"]);
+
+    expect(tables[0]?.unlogged).toBe(true);
+  });
+
   test("parses views and materialized view indexes", async () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql, params) => {

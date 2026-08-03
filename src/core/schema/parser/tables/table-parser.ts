@@ -22,6 +22,7 @@ export function parseCreateTable(stmt: any): Table | null {
     if (!tableName) return null;
 
     const schema = relation.schemaname || undefined;
+    const unlogged = relation.relpersistence === "u" ? true : undefined;
 
     const columns = extractColumns(stmt.tableElts || []);
 
@@ -43,6 +44,7 @@ export function parseCreateTable(stmt: any): Table | null {
       name: tableName,
       schema,
       columns,
+      unlogged,
       primaryKey: constraints.primaryKey,
       foreignKeys:
         normalizedForeignKeys.length > 0

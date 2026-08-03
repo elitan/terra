@@ -44,10 +44,13 @@ import {
   getAlterColumnCollation,
   renderCollationName,
 } from "../../utils/collation";
-import {
-  getColumnPhysicalChanges,
-} from "../../utils/column-physical";
+import { getColumnPhysicalChanges } from "../../utils/column-physical";
 import { DependencyResolver } from "./dependency-resolver";
+
+function normalizeReferencedTableName(referencedTable: string): string {
+  const [name, schema] = splitSchemaTable(referencedTable);
+  return `${schema || "public"}.${name}`;
+}
 
 /**
  * Represents a single alteration that can be part of a batched ALTER TABLE statement
@@ -291,6 +294,13 @@ export class SchemaDiffer {
       }
     }
 
+    statements.push(
+      ...this.generateTablePersistenceStatements(
+        orderedDesiredSchema,
+        currentTables
+      )
+    );
+
     // Separate statements into transactional and concurrent
     const transactional: string[] = [];
     const concurrent: string[] = [];
@@ -317,6 +327,101 @@ export class SchemaDiffer {
 
   private getDeterministicTableOrder(tables: Table[]): Table[] {
     return [...tables].sort((a, b) => this.getTableKey(a).localeCompare(this.getTableKey(b)));
+  }
+
+  private generateTablePersistenceStatements(
+    desiredTables: Table[],
+    currentTables: Map<string, Table>
+  ): string[] {
+    const transitions = desiredTables.filter((table) => {
+      const current = currentTables.get(this.getTableKey(table));
+      return Boolean(
+        current && Boolean(table.unlogged) !== Boolean(current.unlogged)
+      );
+    });
+    const toLogged = transitions.filter((table) => !table.unlogged);
+    const toUnlogged = transitions.filter((table) => table.unlogged);
+
+    return [
+      ...this.generateTablePersistenceGroup(toLogged, currentTables, false),
+      ...this.generateTablePersistenceGroup(toUnlogged, currentTables, true),
+    ];
+  }
+
+  private generateTablePersistenceGroup(
+    desiredTables: Table[],
+    currentTables: Map<string, Table>,
+    unlogged: boolean
+  ): string[] {
+    if (desiredTables.length === 0) return [];
+
+    const tablesByKey = new Map(
+      desiredTables.map((table) => [this.getTableKey(table), table])
+    );
+    const resolver = new DependencyResolver(
+      this.createResolverInputTables(desiredTables)
+    );
+    const result = unlogged
+      ? resolver.getDeletionOrderWithDetachment()
+      : resolver.getCreationOrderWithDetachment();
+    const droppedForeignKeys: string[] = [];
+    const restoredForeignKeys: string[] = [];
+
+    const detachedForeignKeys = [...result.foreignKeysToDefer].sort((a, b) => {
+      const aKey = `${a.tableName}:${a.foreignKey.name || a.foreignKey.columns.join(",")}`;
+      const bKey = `${b.tableName}:${b.foreignKey.name || b.foreignKey.columns.join(",")}`;
+      return aKey.localeCompare(bKey);
+    });
+    for (const detached of detachedForeignKeys) {
+      const desiredTable = tablesByKey.get(detached.tableName);
+      const currentTable = currentTables.get(detached.tableName);
+      if (!desiredTable || !currentTable) continue;
+
+      const desiredForeignKey = (desiredTable.foreignKeys || []).find(
+        (foreignKey) =>
+          this.foreignKeysMatchForPersistence(
+            foreignKey,
+            detached.foreignKey
+          )
+      );
+      if (!desiredForeignKey) continue;
+
+      const currentForeignKey = (currentTable.foreignKeys || []).find(
+        (foreignKey) =>
+          this.foreignKeysMatchForPersistence(desiredForeignKey, foreignKey)
+      );
+      if (!currentForeignKey?.name) continue;
+
+      const tableName = this.getTableKey(desiredTable);
+      droppedForeignKeys.push(
+        generateDropForeignKeySQL(tableName, currentForeignKey.name)
+      );
+      restoredForeignKeys.push(
+        generateAddForeignKeySQL(tableName, desiredForeignKey)
+      );
+    }
+
+    const persistenceStatements = result.order.map((tableKey) => {
+      const table = tablesByKey.get(tableKey)!;
+      return new SQLBuilder()
+        .p("ALTER TABLE")
+        .table(table.name, table.schema)
+        .p(unlogged ? "SET UNLOGGED;" : "SET LOGGED;")
+        .build();
+    });
+
+    return [
+      ...droppedForeignKeys,
+      ...persistenceStatements,
+      ...restoredForeignKeys,
+    ];
+  }
+
+  private foreignKeysMatchForPersistence(
+    first: ForeignKeyConstraint,
+    second: ForeignKeyConstraint
+  ): boolean {
+    return !this.foreignKeysDiffer(first, second);
   }
 
   private createResolverInputTables(tables: Table[]): Table[] {
@@ -1303,7 +1408,10 @@ export class SchemaDiffer {
       return true;
     }
 
-    if (a.referencedTable !== b.referencedTable) {
+    if (
+      normalizeReferencedTableName(a.referencedTable) !==
+      normalizeReferencedTableName(b.referencedTable)
+    ) {
       return true;
     }
 

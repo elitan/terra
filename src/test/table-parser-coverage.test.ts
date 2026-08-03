@@ -74,6 +74,20 @@ describe("Table parser coverage", () => {
     ]);
   });
 
+  test("parses unlogged persistence and canonical public references", async function () {
+    const ast = await parse(`
+      CREATE UNLOGGED TABLE public.child_records (
+        id integer PRIMARY KEY,
+        parent_id integer REFERENCES parent_records(id)
+      );
+    `);
+
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.unlogged).toBe(true);
+    expect(parsed?.foreignKeys?.[0]?.referencedTable).toBe("parent_records");
+  });
+
   test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
     const ast = await parse(`
       CREATE TABLE MixedCaseTable (

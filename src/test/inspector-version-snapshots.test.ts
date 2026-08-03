@@ -102,7 +102,7 @@ async function prepareSchema(client: Client): Promise<void> {
       ALTER COLUMN display_name SET STORAGE EXTERNAL,
       ALTER COLUMN display_name SET COMPRESSION pglz;
 
-    CREATE TABLE public.audit_log (
+    CREATE UNLOGGED TABLE public.audit_log (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       user_id integer NOT NULL,
       payload jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -176,6 +176,7 @@ function normalizeSnapshot(input: any): unknown {
     return {
       schema: table.schema,
       name: table.name,
+      unlogged: table.unlogged,
       columns: (table.columns || []).map(function mapColumn(column: any) {
         return {
           name: column.name,

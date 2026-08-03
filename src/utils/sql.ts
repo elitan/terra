@@ -496,7 +496,7 @@ export function generateCreateTableStatement(table: Table): string {
   }
 
   const builder = new SQLBuilder()
-    .p("CREATE TABLE")
+    .p(table.unlogged ? "CREATE UNLOGGED TABLE" : "CREATE TABLE")
     .table(table.name, table.schema)
     .p("(\n  " + columnDefs.join(",\n  ") + "\n)");
   return builder.build() + ";";
