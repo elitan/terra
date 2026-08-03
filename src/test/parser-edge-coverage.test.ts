@@ -640,7 +640,7 @@ describe("Parser edge coverage", () => {
   });
 
   describe("index parser edge paths", () => {
-    test("parses storage params and quoted tablespace", () => {
+    test("parses storage params and quoted tablespace", function () {
       const index = parseCreateIndex({
         idxname: "idx_users_email",
         relation: { relname: "users", schemaname: "public" },
@@ -654,6 +654,8 @@ describe("Parser edge coverage", () => {
       });
 
       expect(index?.sortOrders).toEqual(["DESC"]);
+      expect(index?.unique).toBe(false);
+      expect(index?.concurrent).toBe(false);
       expect(index?.storageParameters).toEqual({ fillfactor: "70", note: "x", count: "3" });
       expect(index?.tablespace).toBe("\"Fast Space\"");
     });

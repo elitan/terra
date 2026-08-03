@@ -70,10 +70,16 @@ export class DatabaseInspector {
 
     // Get all tables from specified schemas (excluding extension-owned tables)
     const tablesResult = await client.query(`
-      SELECT t.table_name, t.table_schema, c.relpersistence
+      SELECT
+        t.table_name,
+        t.table_schema,
+        c.relpersistence,
+        c.reloptions as table_storage_options,
+        toast_relation.reloptions as toast_storage_options
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.table_schema
+      LEFT JOIN pg_class toast_relation ON toast_relation.oid = c.reltoastrelid
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
         AND t.table_type = 'BASE TABLE'
@@ -203,6 +209,7 @@ export class DatabaseInspector {
         schema: tableSchema,
         columns,
         unlogged: row.relpersistence === "u" ? true : undefined,
+        storageParameters: this.parseTableStorageOptions(row),
         primaryKey,
         foreignKeys: foreignKeys.length > 0 ? foreignKeys : undefined,
         checkConstraints: checkConstraints.length > 0 ? checkConstraints : undefined,
@@ -399,6 +406,20 @@ export class DatabaseInspector {
         const value = match[2];
         parameters[key] = value.replace(/^'(.*)'$/, '$1');
       }
+    }
+
+    return Object.keys(parameters).length > 0 ? parameters : undefined;
+  }
+
+  private parseTableStorageOptions(
+    row: any
+  ): Record<string, string> | undefined {
+    const tableOptions = this.parseStorageOptions(row.table_storage_options);
+    const toastOptions = this.parseStorageOptions(row.toast_storage_options);
+    const parameters: Record<string, string> = { ...(tableOptions || {}) };
+
+    for (const [name, value] of Object.entries(toastOptions || {})) {
+      parameters[`toast.${name}`] = value;
     }
 
     return Object.keys(parameters).length > 0 ? parameters : undefined;

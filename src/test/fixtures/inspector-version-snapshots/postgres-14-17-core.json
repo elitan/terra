@@ -65,6 +65,10 @@
       {
         "schema": "public",
         "name": "users",
+        "storageParameters": {
+          "fillfactor": "80",
+          "toast.autovacuum_enabled": "false"
+        },
         "columns": [
           {
             "name": "created_at",
@@ -419,6 +423,10 @@
       {
         "schema": "public",
         "name": "users",
+        "storageParameters": {
+          "fillfactor": "80",
+          "toast.autovacuum_enabled": "false"
+        },
         "columns": [
           {
             "name": "created_at",
@@ -773,6 +781,10 @@
       {
         "schema": "public",
         "name": "users",
+        "storageParameters": {
+          "fillfactor": "80",
+          "toast.autovacuum_enabled": "false"
+        },
         "columns": [
           {
             "name": "created_at",
@@ -1127,6 +1139,10 @@
       {
         "schema": "public",
         "name": "users",
+        "storageParameters": {
+          "fillfactor": "80",
+          "toast.autovacuum_enabled": "false"
+        },
         "columns": [
           {
             "name": "created_at",

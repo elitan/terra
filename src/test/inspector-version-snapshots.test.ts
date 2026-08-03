@@ -91,7 +91,7 @@ async function prepareSchema(client: Client): Promise<void> {
       CONSTRAINT users_pkey PRIMARY KEY (id),
       CONSTRAINT users_email_unique UNIQUE (email) DEFERRABLE INITIALLY DEFERRED,
       CONSTRAINT users_score_check CHECK (score >= 0)
-    );
+    ) WITH (fillfactor=80, toast.autovacuum_enabled=false);
 
     CREATE TABLE tenant_a.users (
       id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -177,6 +177,9 @@ function normalizeSnapshot(input: any): unknown {
       schema: table.schema,
       name: table.name,
       unlogged: table.unlogged,
+      storageParameters: table.storageParameters
+        ? normalizeObject(table.storageParameters)
+        : undefined,
       columns: (table.columns || []).map(function mapColumn(column: any) {
         return {
           name: column.name,

@@ -9,6 +9,7 @@ import { Logger } from "../../../../utils/logger";
 import { extractColumns } from "./column-parser";
 import { extractAllConstraints } from "./constraint-parser";
 import type { Table } from "../../../../types/schema";
+import { parseStorageParameterOptions } from "../../../../utils/storage-parameters";
 
 /**
  * Parse CREATE TABLE statement from pgsql-parser AST
@@ -23,6 +24,7 @@ export function parseCreateTable(stmt: any): Table | null {
 
     const schema = relation.schemaname || undefined;
     const unlogged = relation.relpersistence === "u" ? true : undefined;
+    const storageParameters = parseStorageParameterOptions(stmt.options);
 
     const columns = extractColumns(stmt.tableElts || []);
 
@@ -45,6 +47,7 @@ export function parseCreateTable(stmt: any): Table | null {
       schema,
       columns,
       unlogged,
+      storageParameters,
       primaryKey: constraints.primaryKey,
       foreignKeys:
         normalizedForeignKeys.length > 0

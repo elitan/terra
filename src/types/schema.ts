@@ -235,6 +235,7 @@ export interface Table {
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: Column[];
   unlogged?: boolean;
+  storageParameters?: Record<string, string>;
   createStatement?: string; // Complete SQLite CREATE TABLE statement for lossless recreation
   virtual?: boolean; // SQLite virtual table backed by a registered module
   strict?: boolean; // SQLite STRICT table option

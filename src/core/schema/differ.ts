@@ -45,6 +45,7 @@ import {
   renderCollationName,
 } from "../../utils/collation";
 import { getColumnPhysicalChanges } from "../../utils/column-physical";
+import { renderStorageParameterAssignments } from "../../utils/storage-parameters";
 import { DependencyResolver } from "./dependency-resolver";
 
 function normalizeReferencedTableName(referencedTable: string): string {
@@ -56,6 +57,11 @@ function normalizeReferencedTableName(referencedTable: string): string {
  * Represents a single alteration that can be part of a batched ALTER TABLE statement
  */
 type TableAlteration =
+  | {
+      type: "set_table_storage_parameters";
+      parameters: Record<string, string>;
+    }
+  | { type: "reset_table_storage_parameters"; parameters: string[] }
   | { type: "add_column"; column: Column }
   | { type: "drop_column"; columnName: string }
   | {
@@ -1485,6 +1491,12 @@ export class SchemaDiffer {
   ): TableAlteration[] {
     const alterations: TableAlteration[] = [];
 
+    this.collectTableStorageParameterAlterations(
+      desiredTable,
+      currentTable,
+      alterations
+    );
+
     // Collect column alterations
     const currentColumns = new Map(currentTable.columns.map((c) => [c.name, c]));
     const desiredColumns = new Map(desiredTable.columns.map((c) => [c.name, c]));
@@ -1563,6 +1575,38 @@ export class SchemaDiffer {
     );
 
     return alterations;
+  }
+
+  private collectTableStorageParameterAlterations(
+    desiredTable: Table,
+    currentTable: Table,
+    alterations: TableAlteration[]
+  ): void {
+    const desired = desiredTable.storageParameters || {};
+    const current = currentTable.storageParameters || {};
+    const parametersToSet = Object.fromEntries(
+      Object.entries(desired).filter(function filterChanged([name, value]) {
+        return current[name] !== value;
+      })
+    );
+    const parametersToReset = Object.keys(current)
+      .filter(function filterRemoved(name) {
+        return desired[name] === undefined;
+      })
+      .sort();
+
+    if (Object.keys(parametersToSet).length > 0) {
+      alterations.push({
+        type: "set_table_storage_parameters",
+        parameters: parametersToSet,
+      });
+    }
+    if (parametersToReset.length > 0) {
+      alterations.push({
+        type: "reset_table_storage_parameters",
+        parameters: parametersToReset,
+      });
+    }
   }
 
   /**
@@ -1996,6 +2040,8 @@ export class SchemaDiffer {
       add_check: 22,
       add_unique: 23,
       add_foreign_key: 24,
+      reset_table_storage_parameters: 25,
+      set_table_storage_parameters: 26,
     };
 
     const sorted = [...alterations].sort((a, b) => {
@@ -2017,6 +2063,16 @@ export class SchemaDiffer {
     builder.mapComma(sorted, (alt, b) => {
       b.nl();
       switch (alt.type) {
+        case "set_table_storage_parameters":
+          b.p(
+            `SET (${renderStorageParameterAssignments(alt.parameters)})`
+          );
+          break;
+
+        case "reset_table_storage_parameters":
+          b.p(`RESET (${alt.parameters.join(", ")})`);
+          break;
+
         case "add_column":
           b.p("ADD COLUMN")
             .p(generateColumnDefinition(alt.column));
@@ -2183,6 +2239,10 @@ export class SchemaDiffer {
 
   private getAlterationSortKey(table: Table, alteration: TableAlteration): string {
     switch (alteration.type) {
+      case "set_table_storage_parameters":
+        return renderStorageParameterAssignments(alteration.parameters);
+      case "reset_table_storage_parameters":
+        return alteration.parameters.join(",");
       case "add_column":
         return alteration.column.name;
       case "drop_column":

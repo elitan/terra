@@ -4,6 +4,7 @@ import { expressionsEqual } from "./expression-comparator";
 import { identityColumnsAreDifferent, renderIdentityClause } from "./identity";
 import { collationsAreDifferent, renderCollationName } from "./collation";
 import { getColumnPhysicalChanges } from "./column-physical";
+import { renderStorageParameterAssignments } from "./storage-parameters";
 
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
@@ -499,6 +500,11 @@ export function generateCreateTableStatement(table: Table): string {
     .p(table.unlogged ? "CREATE UNLOGGED TABLE" : "CREATE TABLE")
     .table(table.name, table.schema)
     .p("(\n  " + columnDefs.join(",\n  ") + "\n)");
+  if (table.storageParameters) {
+    builder.p(
+      `WITH (${renderStorageParameterAssignments(table.storageParameters)})`
+    );
+  }
   return builder.build() + ";";
 }
 

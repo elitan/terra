@@ -7,6 +7,7 @@
 import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { Index } from "../../../types/schema";
+import { parseStorageParameterOptions } from "../../../utils/storage-parameters";
 
 /**
  * Parse CREATE INDEX statement from pgsql-parser AST
@@ -82,40 +83,7 @@ export function parseCreateIndex(stmt: any): Index | null {
 
     const whereClause = stmt.whereClause ? deparseSync([stmt.whereClause]).trim() : undefined;
 
-    let storageParameters: Record<string, string> | undefined;
-    if (stmt.options && stmt.options.length > 0) {
-      storageParameters = {};
-      for (const opt of stmt.options) {
-        if (opt.DefElem) {
-          const key = opt.DefElem.defname;
-          let value: string | undefined;
-
-          if (opt.DefElem.arg?.Integer) {
-            value = String(opt.DefElem.arg.Integer.ival);
-          } else if (opt.DefElem.arg?.String) {
-            value = opt.DefElem.arg.String.sval;
-          } else if (opt.DefElem.arg?.TypeName) {
-            const names = opt.DefElem.arg.TypeName.names || [];
-            if (names.length > 0 && names[0].String) {
-              value = names[0].String.sval;
-            }
-          } else if (opt.DefElem.arg?.A_Const) {
-            const aConst = opt.DefElem.arg.A_Const;
-            if (aConst.String) {
-              value = aConst.String.sval;
-            } else if (aConst.Integer) {
-              value = String(aConst.Integer.ival);
-            }
-          }
-          if (key && value) {
-            storageParameters[key] = value;
-          }
-        }
-      }
-      if (Object.keys(storageParameters).length === 0) {
-        storageParameters = undefined;
-      }
-    }
+    const storageParameters = parseStorageParameterOptions(stmt.options);
 
     let tablespace: string | undefined;
     if (stmt.tableSpace) {
