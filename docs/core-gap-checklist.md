@@ -96,6 +96,8 @@
 - done: preserve SQLite AUTOINCREMENT high-water marks through table recreation so deleted historical rowids are not reused.
 - done: manage SQLite FTS5/RTree virtual tables losslessly and exclude their implementation-owned shadow tables from desired/current schema diffs.
 - done: cover SQLite virtual-table create, query behavior, idempotency, destructive strict-mode blocking, definition change, view restoration, rollback, and removal in memory and on disk.
+- done: reject connection-local SQLite temporary tables, views, triggers, and virtual tables instead of silently omitting them from the persistent desired schema.
+- done: preflight SQLite `ATTACH`, `DETACH`, and `VACUUM` statements so desired-schema parsing cannot create or mutate external database files.
 - done: add sqlite table recreation regressions for referenced-table migration with existing child rows and post-migration fk enforcement.
 - done: fix sqlite table recreation transaction path to temporarily suspend fk checks, run `PRAGMA foreign_key_check`, and restore enforcement.
 - done: add sqlite rollback/no-leak regression for failed table recreation (`_users_new` cleanup + original row preservation).

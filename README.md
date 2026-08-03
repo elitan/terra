@@ -102,6 +102,7 @@ export DATABASE_URL=":memory:"
 SQLite uses table recreation for schema changes that ALTER TABLE doesn't support (column type changes, constraint modifications, etc.).
 Table recreation preserves SQLite-specific definitions including `STRICT`, `WITHOUT ROWID`, `AUTOINCREMENT`, collations, named constraints, and `ON CONFLICT` policies.
 SQLite virtual tables are managed losslessly; bundled FTS5 and RTree modules are covered, while their implementation-owned shadow tables are never managed as user tables.
+SQLite desired schemas manage the persistent `main` database only. Connection-local temporary objects and `ATTACH`, `DETACH`, or `VACUUM` statements are rejected before migration planning.
 
 ## Commands
 

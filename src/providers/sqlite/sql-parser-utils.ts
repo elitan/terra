@@ -718,3 +718,56 @@ export function extractSQLiteCheckExpressions(sql: string): string[] {
 
   return expressions;
 }
+
+export function findSQLiteStatementStartKeyword(
+  sql: string,
+  keywords: string[]
+): string | undefined {
+  const candidates = new Set(keywords.map(function (keyword) {
+    return keyword.toUpperCase();
+  }));
+  let cursor = 0;
+  let atStatementStart = true;
+
+  while (cursor < sql.length) {
+    if (/\s/u.test(sql[cursor] || "")) {
+      cursor += 1;
+      continue;
+    }
+
+    const isComment = sql.startsWith("--", cursor) || sql.startsWith("/*", cursor);
+    const skipped = skipQuotedOrComment(sql, cursor);
+    if (skipped !== undefined) {
+      if (!isComment) {
+        atStatementStart = false;
+      }
+      cursor = skipped;
+      continue;
+    }
+
+    if (sql[cursor] === ";") {
+      atStatementStart = true;
+      cursor += 1;
+      continue;
+    }
+
+    if (isIdentifierCharacter(sql[cursor])) {
+      const start = cursor;
+      cursor += 1;
+      while (isIdentifierCharacter(sql[cursor])) {
+        cursor += 1;
+      }
+      const keyword = sql.slice(start, cursor).toUpperCase();
+      if (atStatementStart && candidates.has(keyword)) {
+        return keyword;
+      }
+      atStatementStart = false;
+      continue;
+    }
+
+    atStatementStart = false;
+    cursor += 1;
+  }
+
+  return undefined;
+}

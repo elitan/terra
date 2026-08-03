@@ -38,7 +38,7 @@
 | advisory locks | covered | gap | sqlite unsupported by design |
 | cli contract | partial | partial | json/no-color added, more cases needed |
 | deterministic output | partial | partial | json format added, snapshot depth pending |
-| parser robustness | partial | partial | malformed corpus and random ascii fuzz added |
+| parser robustness | partial | partial | malformed corpus and random ascii fuzz added; SQLite rejects temporary objects and preflights external-file statements without keyword false positives |
 | performance budgets | partial | partial | perf tests exist, gate script pending |
 | flake rerun gate | partial | partial | script/workflow added, trend tracking pending |
 

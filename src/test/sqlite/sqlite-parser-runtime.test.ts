@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { SQLiteParser } from "../../providers/sqlite/parser";
 import { ParserError } from "../../types/errors";
 
@@ -76,5 +79,87 @@ describe("SQLiteParser execution-runtime parity", function () {
       expect(error).toBeInstanceOf(ParserError);
       expect((error as ParserError).filePath).toBe("schema.sql");
     }
+  });
+
+  test("rejects connection-local temporary schema objects", async function () {
+    const parser = new SQLiteParser();
+    const schemas = [
+      "CREATE TEMP TABLE session_cache (id INTEGER);",
+      `CREATE TABLE users (id INTEGER);
+       CREATE TEMP VIEW current_users AS SELECT id FROM users;`,
+      `CREATE TABLE users (id INTEGER);
+       CREATE TEMP TRIGGER users_insert AFTER INSERT ON users BEGIN
+         SELECT NEW.id;
+       END;`,
+      "CREATE VIRTUAL TABLE temp.search_docs USING fts5(body);",
+    ];
+
+    for (const sql of schemas) {
+      await expect(parser.parseSchema(sql, "temporary.sql")).rejects.toThrow(
+        "Temporary SQLite schema objects are not supported"
+      );
+    }
+  });
+
+  test("rejects external-database statements before they can write files", async function () {
+    const parser = new SQLiteParser();
+    const attachedPath = path.join(
+      os.tmpdir(),
+      `terradb-parser-attached-${Date.now()}.db`
+    );
+    const vacuumPath = path.join(
+      os.tmpdir(),
+      `terradb-parser-vacuum-${Date.now()}.db`
+    );
+    const sqlPath = attachedPath.replace(/'/g, "''");
+    const vacuumSqlPath = vacuumPath.replace(/'/g, "''");
+
+    try {
+      await expect(parser.parseSchema(
+        `attach database '${sqlPath}' AS auxiliary;
+         CREATE TABLE auxiliary.users (id INTEGER);`,
+        "attached.sql"
+      )).rejects.toThrow("ATTACH is not supported in SQLite desired schemas");
+      expect(fs.existsSync(attachedPath)).toBe(false);
+      await expect(parser.parseSchema(
+        `CREATE TABLE users (id INTEGER);
+         VACUUM INTO '${vacuumSqlPath}';`,
+        "vacuum.sql"
+      )).rejects.toThrow("VACUUM is not supported in SQLite desired schemas");
+      expect(fs.existsSync(vacuumPath)).toBe(false);
+      await expect(
+        parser.parseSchema("DETACH DATABASE auxiliary;", "detached.sql")
+      ).rejects.toThrow("DETACH is not supported in SQLite desired schemas");
+    } finally {
+      if (fs.existsSync(attachedPath)) {
+        fs.unlinkSync(attachedPath);
+      }
+      if (fs.existsSync(vacuumPath)) {
+        fs.unlinkSync(vacuumPath);
+      }
+    }
+  });
+
+  test("does not mistake comments identifiers or literals for ATTACH statements", async function () {
+    const parser = new SQLiteParser();
+    const schema = await parser.parseSchema(`
+      -- ATTACH DATABASE 'ignored.db' AS auxiliary;
+      CREATE TABLE "attach" (
+        "detach" TEXT DEFAULT 'ATTACH DATABASE literal AS auxiliary'
+      );
+      CREATE TABLE audit_log (message TEXT);
+      CREATE TRIGGER log_attach
+        AFTER INSERT ON "attach"
+        BEGIN
+          INSERT INTO audit_log(message) VALUES ('DETACH auxiliary');
+        END;
+    `);
+
+    expect(schema.tables.map(function (table) {
+      return table.name;
+    })).toEqual(["attach", "audit_log"]);
+    expect(schema.triggers.map(function (trigger) {
+      return trigger.name;
+    })).toEqual(["log_attach"]);
   });
 });
