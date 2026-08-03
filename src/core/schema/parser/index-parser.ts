@@ -23,6 +23,11 @@ export function parseCreateIndex(stmt: any): Index | null {
     const schema = stmt.relation?.schemaname || undefined;
 
     const indexParams = stmt.indexParams || [];
+    const include = (stmt.indexIncludingParams || [])
+      .map(function getIncludedColumn(param: any) {
+        return param.IndexElem?.name;
+      })
+      .filter(Boolean);
 
     const columns: string[] = [];
     const sortOrders: ('ASC' | 'DESC')[] = [];
@@ -111,6 +116,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       tableName,
       schema,
       columns,
+      ...(include.length > 0 ? { include } : {}),
       sortOrders: hasNonDefaultSort ? sortOrders : undefined,
       opclasses,
       ...(expressionOpclass ? { expressionOpclass } : {}),

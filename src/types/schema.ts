@@ -93,6 +93,7 @@ export interface Index {
   tableName: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   columns: string[];
+  include?: string[]; // PostgreSQL non-key payload columns for covering indexes
   sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
   terms?: IndexTerm[]; // Complete ordered keys, including SQLite expressions and collations
   createStatement?: string; // Complete CREATE INDEX statement when exact syntax must be preserved

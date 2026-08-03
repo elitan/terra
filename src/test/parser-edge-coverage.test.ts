@@ -645,6 +645,10 @@ describe("Parser edge coverage", () => {
         idxname: "idx_users_email",
         relation: { relname: "users", schemaname: "public" },
         indexParams: [{ IndexElem: { name: "email", ordering: "SORTBY_DESC" } }],
+        indexIncludingParams: [
+          { IndexElem: { name: "display_name" } },
+          { IndexElem: { name: "updated_at" } },
+        ],
         options: [
           { DefElem: { defname: "fillfactor", arg: { Integer: { ival: 70 } } } },
           { DefElem: { defname: "note", arg: { A_Const: { String: { sval: "x" } } } } },
@@ -656,6 +660,7 @@ describe("Parser edge coverage", () => {
       });
 
       expect(index?.sortOrders).toEqual(["DESC"]);
+      expect(index?.include).toEqual(["display_name", "updated_at"]);
       expect(index?.unique).toBe(true);
       expect(index?.nullsNotDistinct).toBe(true);
       expect(index?.concurrent).toBe(false);

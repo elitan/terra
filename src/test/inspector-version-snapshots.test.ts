@@ -280,6 +280,7 @@ function normalizeSnapshot(input: any): unknown {
           unique: Boolean(index.unique),
           nullsNotDistinct: index.nullsNotDistinct,
           columns: [...(index.columns || [])],
+          include: index.include ? [...index.include] : undefined,
           sortOrders: index.sortOrders ? [...index.sortOrders] : undefined,
           where: normalizeMaybeText(index.where),
           expression: normalizeMaybeText(index.expression),

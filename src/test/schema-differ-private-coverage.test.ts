@@ -465,6 +465,62 @@ describe("SchemaDiffer private coverage", () => {
     ).toBe(true);
   });
 
+  test("generateMigrationPlan preserves covering index payload columns", function () {
+    const differ = new SchemaDiffer();
+    const columns = [
+      makeColumn(),
+      makeColumn({ name: "email", type: "TEXT", nullable: true }),
+      makeColumn({ name: "display_name", type: "TEXT", nullable: true }),
+      makeColumn({ name: "updated_at", type: "TIMESTAMP", nullable: true }),
+    ];
+    const ordinary = makeTable({
+      columns,
+      indexes: [
+        {
+          name: "users_email_idx",
+          tableName: "users",
+          columns: ["email"],
+          type: "btree",
+        },
+      ],
+    });
+    const covering = makeTable({
+      columns,
+      indexes: [
+        {
+          name: "users_email_idx",
+          tableName: "users",
+          columns: ["email"],
+          include: ["display_name", "updated_at"],
+          type: "btree",
+        },
+      ],
+    });
+
+    const addPlan = differ.generateMigrationPlan([covering], [ordinary]);
+    expect([...addPlan.transactional, ...addPlan.concurrent].join("\n"))
+      .toContain('INCLUDE ("display_name", "updated_at")');
+    expect(
+      differ.generateMigrationPlan([ordinary], [covering]).hasChanges
+    ).toBe(true);
+    expect(
+      differ.generateMigrationPlan(
+        [covering],
+        [
+          makeTable({
+            columns,
+            indexes: [
+              {
+                ...covering.indexes![0]!,
+                include: ["updated_at", "display_name"],
+              },
+            ],
+          }),
+        ]
+      ).hasChanges
+    ).toBe(true);
+  });
+
   test("generateMigrationPlan handles inheritance transitions", function () {
     const differ = new SchemaDiffer();
     const parent = { name: "parent", schema: "public" };

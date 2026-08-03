@@ -347,16 +347,29 @@ export class DatabaseInspector {
           WHEN ix.indexprs IS NULL THEN
             -- Regular column-based index
             ARRAY(
-              SELECT a.attname
-              FROM pg_attribute a
-              WHERE a.attrelid = ix.indrelid
-                AND a.attnum = ANY(ix.indkey)
-              ORDER BY array_position(ix.indkey, a.attnum)
+              SELECT attribute.attname
+              FROM unnest(ix.indkey) WITH ORDINALITY
+                AS key_column(attnum, position)
+              JOIN pg_attribute attribute
+                ON attribute.attrelid = ix.indrelid
+                AND attribute.attnum = key_column.attnum
+              WHERE key_column.position <= ix.indnkeyatts
+              ORDER BY key_column.position
             )
           ELSE
             -- Expression index - no simple column names
             ARRAY[]::text[]
         END as column_names,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM unnest(ix.indkey) WITH ORDINALITY
+            AS included_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = ix.indrelid
+            AND attribute.attnum = included_column.attnum
+          WHERE included_column.position > ix.indnkeyatts
+          ORDER BY included_column.position
+        ) as included_columns,
         -- Get operator class names for each column (non-default only)
         CASE
           WHEN ix.indexprs IS NULL THEN
@@ -439,6 +452,9 @@ export class DatabaseInspector {
         tableName: row.table_name,
         schema: row.table_schema,
         columns,
+        ...(row.included_columns?.length > 0
+          ? { include: row.included_columns }
+          : {}),
         sortOrders: hasNonDefaultSort ? sortOrders : undefined,
         opclasses,
         ...(row.expression_opclass_name ? { expressionOpclass: row.expression_opclass_name } : {}),

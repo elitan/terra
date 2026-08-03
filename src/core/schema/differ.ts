@@ -1303,6 +1303,7 @@ export class SchemaDiffer {
     if (index1.tableName !== index2.tableName) return false;
     if (index1.type !== index2.type) return false;
     if (index1.unique !== index2.unique) return false;
+    if (!stringArraysEqual(index1.include, index2.include)) return false;
     if (
       Boolean(index1.nullsNotDistinct) !== Boolean(index2.nullsNotDistinct)
     ) {
@@ -1463,6 +1464,13 @@ export class SchemaDiffer {
         return result;
       }).join(", ");
       builder.p(`(${quotedColumns})`);
+    }
+
+    if (index.include && index.include.length > 0) {
+      const includedColumns = index.include.map(function quoteColumn(column) {
+        return new SQLBuilder().ident(column).build();
+      });
+      builder.p(`INCLUDE (${includedColumns.join(", ")})`);
     }
 
     if (index.nullsNotDistinct) {
