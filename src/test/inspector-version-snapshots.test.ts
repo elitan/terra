@@ -90,7 +90,7 @@ async function prepareSchema(client: Client): Promise<void> {
       created_at timestamp without time zone DEFAULT now(),
       CONSTRAINT users_pkey PRIMARY KEY (id),
       CONSTRAINT users_email_unique UNIQUE (email) DEFERRABLE INITIALLY DEFERRED,
-      CONSTRAINT users_score_check CHECK (score >= 0)
+      CONSTRAINT users_score_check CHECK (score >= 0) NO INHERIT
     ) WITH (fillfactor=80, toast.autovacuum_enabled=false);
 
     CREATE TABLE tenant_a.users (
@@ -101,6 +101,10 @@ async function prepareSchema(client: Client): Promise<void> {
     ALTER TABLE public.users
       ALTER COLUMN display_name SET STORAGE EXTERNAL,
       ALTER COLUMN display_name SET COMPRESSION pglz;
+
+    ALTER TABLE public.users
+      ADD CONSTRAINT users_created_at_check
+      CHECK (created_at IS NOT NULL) NOT VALID;
 
     CREATE UNLOGGED TABLE public.audit_log (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -255,6 +259,8 @@ function normalizeSnapshot(input: any): unknown {
         return {
           name: check.name,
           expression: normalizeSpace(String(check.expression || "")),
+          noInherit: check.noInherit,
+          notValid: check.notValid,
         };
       }),
       uniqueConstraints: (table.uniqueConstraints || []).map(function mapUnique(unique: any) {

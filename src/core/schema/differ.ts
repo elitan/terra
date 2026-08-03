@@ -29,6 +29,8 @@ import {
   generatePrimaryKeyClause,
   generateAddCheckConstraintSQL,
   generateDropCheckConstraintSQL,
+  generateCheckConstraintClause,
+  generateValidateConstraintSQL,
   generateAddForeignKeySQL,
   generateDropForeignKeySQL,
   generateValidateForeignKeySQL,
@@ -315,6 +317,7 @@ type TableAlteration =
   | { type: "drop_primary_key"; constraintName: string }
   | { type: "add_check"; constraint: CheckConstraint }
   | { type: "drop_check"; constraintName: string }
+  | { type: "validate_check"; constraintName: string }
   | { type: "add_foreign_key"; constraint: ForeignKeyConstraint }
   | { type: "drop_foreign_key"; constraintName: string }
   | { type: "validate_foreign_key"; constraintName: string }
@@ -324,6 +327,56 @@ type TableAlteration =
   | { type: "drop_exclusion"; constraintName: string };
 
 type ForeignKeyChange = "none" | "validate" | "replace";
+type CheckConstraintChange = "none" | "validate" | "replace";
+
+function getCheckConstraintChange(
+  desired: CheckConstraint,
+  current: CheckConstraint
+): CheckConstraintChange {
+  if (!expressionsEqual(desired.expression, current.expression)) {
+    return "replace";
+  }
+  if (Boolean(desired.noInherit) !== Boolean(current.noInherit)) {
+    return "replace";
+  }
+  if (Boolean(desired.notValid) === Boolean(current.notValid)) {
+    return "none";
+  }
+  return current.notValid && !desired.notValid ? "validate" : "replace";
+}
+
+function findMatchingCheckConstraint(
+  desired: CheckConstraint,
+  unmatchedCurrent: Set<CheckConstraint>
+): CheckConstraint | undefined {
+  if (desired.name) {
+    for (const current of unmatchedCurrent) {
+      if (current.name === desired.name) {
+        return current;
+      }
+    }
+  }
+
+  let validationCandidate: CheckConstraint | undefined;
+  let replacementCandidate: CheckConstraint | undefined;
+  for (const current of unmatchedCurrent) {
+    if (!expressionsEqual(desired.expression, current.expression)) {
+      continue;
+    }
+    const change = getCheckConstraintChange(desired, current);
+    if (change === "none") {
+      return current;
+    }
+    if (change === "validate") {
+      if (!validationCandidate) {
+        validationCandidate = current;
+      }
+    } else if (!replacementCandidate) {
+      replacementCandidate = current;
+    }
+  }
+  return validationCandidate || replacementCandidate;
+}
 
 export class SchemaDiffer {
   private options: MigrationOptions;
@@ -398,6 +451,11 @@ export class SchemaDiffer {
         // Filter out deferred FKs from the table definition
         const filteredTable = {
           ...table,
+          checkConstraints: table.checkConstraints?.filter(
+            function keepInlineCheck(constraint) {
+              return !constraint.notValid;
+            }
+          ),
           foreignKeys: table.foreignKeys?.filter(fk => {
             const key = `${tableKey}:${fk.name || fk.columns.join(',')}`;
             return !deferredFKSet.has(key);
@@ -487,8 +545,15 @@ export class SchemaDiffer {
           }
         }
 
-        // Note: Check and unique constraints are already included in CREATE TABLE
-        // Only foreign keys need to be added separately
+        for (const checkConstraint of table.checkConstraints || []) {
+          if (checkConstraint.notValid) {
+            statements.push(
+              generateAddCheckConstraintSQL(qualifiedName, checkConstraint)
+            );
+          }
+        }
+
+        // Valid checks and unique constraints are already included in CREATE TABLE.
       }
     }
 
@@ -1705,34 +1770,35 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    const findMatchingConstraint = (
-      expr: string,
-      constraints: CheckConstraint[]
-    ): CheckConstraint | undefined => {
-      return constraints.find(c => expressionsEqual(expr, c.expression));
-    };
-
-    const processedCurrentNames = new Set<string>();
+    const unmatchedCurrent = new Set(currentConstraints);
 
     for (const desired of desiredConstraints) {
-      const matchingCurrent = findMatchingConstraint(desired.expression, currentConstraints);
+      const matchingCurrent = findMatchingCheckConstraint(
+        desired,
+        unmatchedCurrent
+      );
       if (matchingCurrent) {
-        if (matchingCurrent.name) {
-          processedCurrentNames.add(matchingCurrent.name);
-        }
-        if (matchingCurrent.name !== desired.name) {
+        unmatchedCurrent.delete(matchingCurrent);
+        const nameChanged =
+          Boolean(desired.name) && matchingCurrent.name !== desired.name;
+        const change = getCheckConstraintChange(desired, matchingCurrent);
+        if (nameChanged || change === "replace") {
           if (matchingCurrent.name) {
             statements.push(generateDropCheckConstraintSQL(tableName, matchingCurrent.name));
           }
           statements.push(generateAddCheckConstraintSQL(tableName, desired));
+        } else if (change === "validate" && matchingCurrent.name) {
+          statements.push(
+            generateValidateConstraintSQL(tableName, matchingCurrent.name)
+          );
         }
       } else {
         statements.push(generateAddCheckConstraintSQL(tableName, desired));
       }
     }
 
-    for (const current of currentConstraints) {
-      if (current.name && !processedCurrentNames.has(current.name)) {
+    for (const current of unmatchedCurrent) {
+      if (current.name) {
         statements.push(generateDropCheckConstraintSQL(tableName, current.name));
       }
     }
@@ -2469,22 +2535,19 @@ export class SchemaDiffer {
     currentConstraints: CheckConstraint[],
     alterations: TableAlteration[]
   ): void {
-    const findMatchingConstraint = (
-      expr: string,
-      constraints: CheckConstraint[]
-    ): CheckConstraint | undefined => {
-      return constraints.find(c => expressionsEqual(expr, c.expression));
-    };
-
-    const processedCurrentNames = new Set<string>();
+    const unmatchedCurrent = new Set(currentConstraints);
 
     for (const desired of desiredConstraints) {
-      const matchingCurrent = findMatchingConstraint(desired.expression, currentConstraints);
+      const matchingCurrent = findMatchingCheckConstraint(
+        desired,
+        unmatchedCurrent
+      );
       if (matchingCurrent) {
-        if (matchingCurrent.name) {
-          processedCurrentNames.add(matchingCurrent.name);
-        }
-        if (desired.name && matchingCurrent.name !== desired.name) {
+        unmatchedCurrent.delete(matchingCurrent);
+        const nameChanged =
+          Boolean(desired.name) && matchingCurrent.name !== desired.name;
+        const change = getCheckConstraintChange(desired, matchingCurrent);
+        if (nameChanged || change === "replace") {
           if (matchingCurrent.name) {
             alterations.push({
               type: "drop_check",
@@ -2495,6 +2558,11 @@ export class SchemaDiffer {
             type: "add_check",
             constraint: desired,
           });
+        } else if (change === "validate" && matchingCurrent.name) {
+          alterations.push({
+            type: "validate_check",
+            constraintName: matchingCurrent.name,
+          });
         }
       } else {
         alterations.push({
@@ -2504,8 +2572,8 @@ export class SchemaDiffer {
       }
     }
 
-    for (const current of currentConstraints) {
-      if (current.name && !processedCurrentNames.has(current.name)) {
+    for (const current of unmatchedCurrent) {
+      if (current.name) {
         alterations.push({
           type: "drop_check",
           constraintName: current.name,
@@ -2747,6 +2815,7 @@ export class SchemaDiffer {
       add_unique: 23,
       add_exclusion: 24,
       add_foreign_key: 25,
+      validate_check: 26,
       validate_foreign_key: 26,
       reset_table_storage_parameters: 27,
       set_table_storage_parameters: 28,
@@ -2890,18 +2959,18 @@ export class SchemaDiffer {
           break;
 
         case "add_check": {
-          if (alt.constraint.name) {
-            b.p("ADD CONSTRAINT")
-              .ident(alt.constraint.name)
-              .p(`CHECK (${alt.constraint.expression})`);
-          } else {
-            b.p(`ADD CHECK (${alt.constraint.expression})`);
-          }
+          b.p("ADD").p(
+            generateCheckConstraintClause(alt.constraint, table.name)
+          );
           break;
         }
 
         case "drop_check":
           b.p("DROP CONSTRAINT").ident(alt.constraintName);
+          break;
+
+        case "validate_check":
+          b.p("VALIDATE CONSTRAINT").ident(alt.constraintName);
           break;
 
         case "add_foreign_key": {
@@ -2979,6 +3048,7 @@ export class SchemaDiffer {
       case "add_check":
         return alteration.constraint.name || alteration.constraint.expression;
       case "drop_check":
+      case "validate_check":
         return alteration.constraintName;
       case "add_foreign_key":
         return (

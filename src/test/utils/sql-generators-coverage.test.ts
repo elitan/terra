@@ -147,6 +147,16 @@ describe("SQL generators coverage", () => {
     ).toContain('VALIDATE CONSTRAINT "fk_orders_users"');
 
     expect(generateAddCheckConstraintSQL("users", { expression: "age > 0" })).toContain("CHECK (age > 0)");
+    expect(
+      generateAddCheckConstraintSQL("public.users", {
+        name: "users_age_check",
+        expression: "age > 0",
+        noInherit: true,
+        notValid: true,
+      })
+    ).toContain(
+      'ADD CONSTRAINT "users_age_check" CHECK (age > 0) NO INHERIT NOT VALID'
+    );
     expect(generateDropCheckConstraintSQL("users", "users_check")).toContain("DROP CONSTRAINT");
     const uniqueSQL = generateAddUniqueConstraintSQL("users", {
       columns: ["email"],

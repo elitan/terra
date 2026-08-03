@@ -29,6 +29,14 @@ describe("Constraint parser coverage", () => {
     const parsed = parseCheckConstraint(checkNode);
     expect(parsed?.expression).toContain("x > 0");
 
+    const metadata = parseCheckConstraint({
+      ...checkNode,
+      is_no_inherit: true,
+      skip_validation: true,
+    });
+    expect(metadata?.noInherit).toBe(true);
+    expect(metadata?.notValid).toBe(true);
+
     expect(parseCheckConstraint({ raw_expr: null })).toBeNull();
 
     const badNode: any = {};

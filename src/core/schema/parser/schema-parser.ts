@@ -19,17 +19,28 @@ import { parseCreateTrigger } from "./trigger-parser";
 import { parseCreateSequence } from "./sequence-parser";
 import { parseCreateExtension } from "./extension-parser";
 import { parseCreateSchema } from "./schema-definition-parser";
-import { parseForeignKey } from "./tables/constraint-parser";
+import {
+  parseCheckConstraint,
+  parseForeignKey,
+} from "./tables/constraint-parser";
 import type { Table, Index, EnumType, CompositeType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment, SqlObject } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
 let wasmInitialized = false;
 
-type PendingForeignKey = {
+type PendingTableConstraint = {
   tableName: string;
   schemaName?: string;
-  foreignKey: NonNullable<Table["foreignKeys"]>[number];
-};
+} & (
+  | {
+      kind: "foreign_key";
+      constraint: NonNullable<Table["foreignKeys"]>[number];
+    }
+  | {
+      kind: "check";
+      constraint: NonNullable<Table["checkConstraints"]>[number];
+    }
+);
 
 export class SchemaParser {
   private async ensureWasmLoaded() {
@@ -261,7 +272,7 @@ export class SchemaParser {
     const schemas: SchemaDefinition[] = [];
     const comments: Comment[] = [];
     const sqlObjects: SqlObject[] = [];
-    const pendingForeignKeys: PendingForeignKey[] = [];
+    const pendingTableConstraints: PendingTableConstraint[] = [];
 
     // Auto-quote reserved keywords that are commonly used as column names
     sql = this.autoQuoteReservedKeywords(sql);
@@ -413,7 +424,9 @@ export class SchemaParser {
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           } else {
-            pendingForeignKeys.push(...this.parseAlterTableForeignKeys(stmt.AlterTableStmt, filePath));
+            pendingTableConstraints.push(
+              ...this.parseAlterTableConstraints(stmt.AlterTableStmt, filePath)
+            );
           }
         } else if (stmt.DropStmt) {
           throw new ParserError(
@@ -458,12 +471,15 @@ export class SchemaParser {
       );
     }
 
-    this.mergePendingForeignKeys(tables, pendingForeignKeys, filePath);
+    this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
 
     return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects };
   }
 
-  private parseAlterTableForeignKeys(stmt: any, filePath?: string): PendingForeignKey[] {
+  private parseAlterTableConstraints(
+    stmt: any,
+    filePath?: string
+  ): PendingTableConstraint[] {
     const relation = stmt?.relation;
     const tableName = relation?.relname;
     const schemaName = relation?.schemaname;
@@ -473,7 +489,7 @@ export class SchemaParser {
       throw this.unsupportedAlterTableError(filePath);
     }
 
-    const pending: PendingForeignKey[] = [];
+    const pending: PendingTableConstraint[] = [];
 
     for (const commandWrapper of commands) {
       const command = commandWrapper?.AlterTableCmd;
@@ -482,31 +498,46 @@ export class SchemaParser {
       }
 
       const constraint = command.def.Constraint;
-      if (constraint.contype !== "CONSTR_FOREIGN") {
-        throw this.unsupportedAlterTableError(filePath);
+      if (constraint.contype === "CONSTR_FOREIGN") {
+        const foreignKey = parseForeignKey(constraint);
+        if (!foreignKey) {
+          throw this.unsupportedAlterTableError(filePath);
+        }
+        pending.push({
+          tableName,
+          schemaName,
+          kind: "foreign_key",
+          constraint: foreignKey,
+        });
+        continue;
       }
 
-      const foreignKey = parseForeignKey(constraint);
-      if (!foreignKey) {
-        throw this.unsupportedAlterTableError(filePath);
+      if (constraint.contype === "CONSTR_CHECK") {
+        const checkConstraint = parseCheckConstraint(constraint);
+        if (!checkConstraint) {
+          throw this.unsupportedAlterTableError(filePath);
+        }
+        pending.push({
+          tableName,
+          schemaName,
+          kind: "check",
+          constraint: checkConstraint,
+        });
+        continue;
       }
 
-      pending.push({
-        tableName,
-        schemaName,
-        foreignKey,
-      });
+      throw this.unsupportedAlterTableError(filePath);
     }
 
     return pending;
   }
 
-  private mergePendingForeignKeys(
+  private mergePendingTableConstraints(
     tables: Table[],
-    pendingForeignKeys: PendingForeignKey[],
+    pendingConstraints: PendingTableConstraint[],
     filePath?: string
   ): void {
-    if (pendingForeignKeys.length === 0) {
+    if (pendingConstraints.length === 0) {
       return;
     }
 
@@ -516,7 +547,7 @@ export class SchemaParser {
       })
     );
 
-    for (const pending of pendingForeignKeys) {
+    for (const pending of pendingConstraints) {
       const table = tableMap.get(SchemaParser.tableKey(pending.tableName, pending.schemaName));
 
       if (!table) {
@@ -526,20 +557,26 @@ export class SchemaParser {
         );
       }
 
-      if (!table.foreignKeys) {
-        table.foreignKeys = [];
+      if (pending.kind === "foreign_key") {
+        if (!table.foreignKeys) {
+          table.foreignKeys = [];
+        }
+        table.foreignKeys.push(pending.constraint);
+      } else {
+        if (!table.checkConstraints) {
+          table.checkConstraints = [];
+        }
+        table.checkConstraints.push(pending.constraint);
       }
-
-      table.foreignKeys.push(pending.foreignKey);
     }
   }
 
   private unsupportedAlterTableError(filePath?: string): ParserError {
     return new ParserError(
-      "ALTER TABLE statements are not supported in schema definitions. " +
-        "Terra is a declarative schema tool - please define your complete desired schema " +
-        "using CREATE TABLE statements with inline constraints. " +
-        "For circular foreign keys, use inline CONSTRAINT syntax.",
+      "This ALTER TABLE statement is not supported in schema definitions. " +
+        "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
+        "ADD FOREIGN KEY and ADD CHECK constraints; " +
+        "define all other desired table state with CREATE TABLE.",
       filePath
     );
   }

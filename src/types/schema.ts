@@ -62,6 +62,8 @@ export interface ForeignKeyConstraint {
 export interface CheckConstraint {
   name?: string;
   expression: string;
+  noInherit?: boolean;
+  notValid?: boolean;
 }
 
 export interface UniqueConstraint {

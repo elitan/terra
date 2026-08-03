@@ -134,8 +134,14 @@
         "foreignKeys": [],
         "checkConstraints": [
           {
+            "name": "users_created_at_check",
+            "expression": "(created_at IS NOT NULL)",
+            "notValid": true
+          },
+          {
             "name": "users_score_check",
-            "expression": "(score >= 0)"
+            "expression": "(score >= 0)",
+            "noInherit": true
           }
         ],
         "uniqueConstraints": [
@@ -495,8 +501,14 @@
         "foreignKeys": [],
         "checkConstraints": [
           {
+            "name": "users_created_at_check",
+            "expression": "(created_at IS NOT NULL)",
+            "notValid": true
+          },
+          {
             "name": "users_score_check",
-            "expression": "(score >= 0)"
+            "expression": "(score >= 0)",
+            "noInherit": true
           }
         ],
         "uniqueConstraints": [
@@ -856,8 +868,14 @@
         "foreignKeys": [],
         "checkConstraints": [
           {
+            "name": "users_created_at_check",
+            "expression": "(created_at IS NOT NULL)",
+            "notValid": true
+          },
+          {
             "name": "users_score_check",
-            "expression": "(score >= 0)"
+            "expression": "(score >= 0)",
+            "noInherit": true
           }
         ],
         "uniqueConstraints": [
@@ -1217,8 +1235,14 @@
         "foreignKeys": [],
         "checkConstraints": [
           {
+            "name": "users_created_at_check",
+            "expression": "(created_at IS NOT NULL)",
+            "notValid": true
+          },
+          {
             "name": "users_score_check",
-            "expression": "(score >= 0)"
+            "expression": "(score >= 0)",
+            "noInherit": true
           }
         ],
         "uniqueConstraints": [

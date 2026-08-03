@@ -115,7 +115,7 @@ describe("Parser Error Handling", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(ParserError);
         const parserError = error as ParserError;
-        expect(parserError.message).toContain("ALTER TABLE statements are not supported");
+        expect(parserError.message).toContain("This ALTER TABLE statement is not supported");
         expect(parserError.message).toContain("declarative schema tool");
       }
     });

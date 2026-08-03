@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { loadModule } from "pgsql-parser";
 import { SchemaDiffer } from "../core/schema/differ";
 import type {
+  CheckConstraint,
   Column,
   ExclusionConstraint,
   ForeignKeyConstraint,
@@ -993,6 +994,127 @@ describe("SchemaDiffer private coverage", () => {
     expect(legacyStatements).toHaveLength(1);
     expect(legacyStatements[0]).toContain(
       'VALIDATE CONSTRAINT "users_profile_fkey"'
+    );
+  });
+
+  test("check metadata chooses validate, replace, and post-create add transitions", function () {
+    const differ = new SchemaDiffer();
+    const valid: CheckConstraint = {
+      name: "users_id_check",
+      expression: "id > 0",
+      noInherit: true,
+    };
+    const notValid = { ...valid, notValid: true };
+
+    const validatePlan = differ.generateMigrationPlan(
+      [makeTable({ checkConstraints: [valid] })],
+      [makeTable({ checkConstraints: [notValid] })]
+    );
+    expect(validatePlan.transactional.join("\n")).toContain(
+      'VALIDATE CONSTRAINT "users_id_check"'
+    );
+    expect(validatePlan.transactional.join("\n")).not.toContain(
+      "DROP CONSTRAINT"
+    );
+
+    const replaceSql = differ
+      .generateMigrationPlan(
+        [makeTable({ checkConstraints: [notValid] })],
+        [makeTable({ checkConstraints: [valid] })]
+      )
+      .transactional.join("\n");
+    expect(replaceSql).toContain('DROP CONSTRAINT "users_id_check"');
+    expect(replaceSql).toContain("NO INHERIT NOT VALID");
+
+    const inheritanceSql = differ
+      .generateMigrationPlan(
+        [makeTable({ checkConstraints: [valid] })],
+        [
+          makeTable({
+            checkConstraints: [
+              { ...valid, noInherit: undefined },
+            ],
+          }),
+        ]
+      )
+      .transactional.join("\n");
+    expect(inheritanceSql).toContain("DROP CONSTRAINT");
+    expect(inheritanceSql).toContain("NO INHERIT");
+
+    const createPlan = differ.generateMigrationPlan(
+      [makeTable({ checkConstraints: [notValid] })],
+      []
+    );
+    expect(createPlan.transactional).toHaveLength(2);
+    expect(createPlan.transactional[0]).not.toContain("CHECK");
+    expect(createPlan.transactional[1]).toContain("NOT VALID");
+
+    expect(
+      differ.generateMigrationPlan(
+        [makeTable({ checkConstraints: [notValid] })],
+        [makeTable({ checkConstraints: [notValid] })]
+      ).hasChanges
+    ).toBe(false);
+
+    const legacyStatements = (differ as any).generateCheckConstraintStatements(
+      "public.users",
+      [{ ...valid, name: undefined }],
+      [notValid]
+    ) as string[];
+    expect(legacyStatements).toEqual([
+      'ALTER TABLE "public"."users" VALIDATE CONSTRAINT "users_id_check";',
+    ]);
+
+    const duplicateExpressionCurrent: CheckConstraint[] = [
+      { name: "users_id_local", expression: "id > 0", noInherit: true },
+      { name: "users_id_inherited", expression: "id > 0" },
+    ];
+    expect(
+      differ.generateMigrationPlan(
+        [
+          makeTable({
+            checkConstraints: [...duplicateExpressionCurrent].reverse(),
+          }),
+        ],
+        [makeTable({ checkConstraints: duplicateExpressionCurrent })]
+      ).hasChanges
+    ).toBe(false);
+
+    expect(
+      differ.generateMigrationPlan(
+        [
+          makeTable({
+            checkConstraints: [
+              { expression: "id > 0" },
+              { expression: "id > 0", noInherit: true },
+            ],
+          }),
+        ],
+        [makeTable({ checkConstraints: duplicateExpressionCurrent })]
+      ).hasChanges
+    ).toBe(false);
+
+    const duplicateChangeSql = differ
+      .generateMigrationPlan(
+        [
+          makeTable({
+            checkConstraints: [
+              duplicateExpressionCurrent[0]!,
+              {
+                ...duplicateExpressionCurrent[1]!,
+                noInherit: true,
+              },
+            ],
+          }),
+        ],
+        [makeTable({ checkConstraints: duplicateExpressionCurrent })]
+      )
+      .transactional.join("\n");
+    expect(duplicateChangeSql).toContain(
+      'DROP CONSTRAINT "users_id_inherited"'
+    );
+    expect(duplicateChangeSql).not.toContain(
+      'DROP CONSTRAINT "users_id_local"'
     );
   });
 

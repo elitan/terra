@@ -752,6 +752,13 @@ export function generateValidateForeignKeySQL(
   tableName: string,
   constraintName: string
 ): string {
+  return generateValidateConstraintSQL(tableName, constraintName);
+}
+
+export function generateValidateConstraintSQL(
+  tableName: string,
+  constraintName: string
+): string {
   const [targetTable, targetSchema] = splitSchemaTable(tableName);
   return new SQLBuilder()
     .p("ALTER TABLE")
@@ -769,18 +776,13 @@ export function generateAddCheckConstraintSQL(
   checkConstraint: CheckConstraint
 ): string {
   const [targetTable, targetSchema] = splitSchemaTable(tableName);
-  const builder = new SQLBuilder()
+  return new SQLBuilder()
     .p("ALTER TABLE")
-    .table(targetTable, targetSchema);
-
-  if (checkConstraint.name) {
-    builder.p("ADD CONSTRAINT").ident(checkConstraint.name);
-  } else {
-    builder.p("ADD");
-  }
-
-  builder.p(`CHECK (${checkConstraint.expression});`);
-  return builder.build();
+    .table(targetTable, targetSchema)
+    .p("ADD")
+    .p(generateCheckConstraintClause(checkConstraint, tableName))
+    .p(";")
+    .build();
 }
 
 export function generateDropCheckConstraintSQL(
@@ -808,6 +810,14 @@ export function generateCheckConstraintClause(
   }
 
   builder.p(`CHECK (${checkConstraint.expression})`);
+
+  if (checkConstraint.noInherit) {
+    builder.p("NO INHERIT");
+  }
+
+  if (checkConstraint.notValid) {
+    builder.p("NOT VALID");
+  }
 
   return builder.build();
 }

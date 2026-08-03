@@ -811,21 +811,21 @@ describe("Parser edge coverage", () => {
       ).toBe("audit");
     });
 
-    test("covers alter table foreign key error branches", function () {
+    test("covers alter table constraint error branches", function () {
       const parser = new SchemaParser() as any;
 
       expect(function () {
-        parser.parseAlterTableForeignKeys(
+        parser.parseAlterTableConstraints(
           {
             relation: { relname: "users" },
             cmds: [],
           },
           "schema.sql"
         );
-      }).toThrow("ALTER TABLE statements are not supported");
+      }).toThrow("This ALTER TABLE statement is not supported");
 
       expect(function () {
-        parser.parseAlterTableForeignKeys(
+        parser.parseAlterTableConstraints(
           {
             relation: { relname: "users" },
             cmds: [
@@ -839,10 +839,10 @@ describe("Parser edge coverage", () => {
           },
           "schema.sql"
         );
-      }).toThrow("ALTER TABLE statements are not supported");
+      }).toThrow("This ALTER TABLE statement is not supported");
 
       expect(function () {
-        parser.parseAlterTableForeignKeys(
+        parser.parseAlterTableConstraints(
           {
             relation: { relname: "users" },
             cmds: [
@@ -856,16 +856,17 @@ describe("Parser edge coverage", () => {
           },
           "schema.sql"
         );
-      }).toThrow("ALTER TABLE statements are not supported");
+      }).toThrow("This ALTER TABLE statement is not supported");
 
       expect(function () {
-        parser.mergePendingForeignKeys(
+        parser.mergePendingTableConstraints(
           [],
           [
             {
               tableName: "users",
               schemaName: "public",
-              foreignKey: {
+              kind: "foreign_key",
+              constraint: {
                 columns: ["account_id"],
                 referencedTable: "accounts",
                 referencedColumns: ["id"],

@@ -271,6 +271,8 @@ function parseCheckConstraintFromNode(constraint: any): CheckConstraint | null {
     return {
       name: constraint.conname,
       expression,
+      ...(constraint.is_no_inherit === true ? { noInherit: true } : {}),
+      ...(constraint.skip_validation === true ? { notValid: true } : {}),
     };
   } catch (error) {
     Logger.warning(

@@ -16,6 +16,28 @@ describe("DatabaseInspector coverage", () => {
     expect(inspector.mapPostgreSQLIndexType("CUSTOM_TYPE")).toBe("custom_type");
   });
 
+  test("parses check expressions and catalog metadata", function () {
+    const inspector = new DatabaseInspector() as any;
+    expect(
+      inspector.parseCheckConstraintRows([
+        {
+          constraint_name: "positive_amount",
+          expression: "amount > 0",
+          no_inherit: true,
+          validated: false,
+        },
+        { constraint_name: "missing_expression", expression: null },
+      ])
+    ).toEqual([
+      {
+        name: "positive_amount",
+        expression: "amount > 0",
+        noInherit: true,
+        notValid: true,
+      },
+    ]);
+  });
+
   test("maps unlogged table persistence", async function () {
     const inspector = new DatabaseInspector() as any;
     inspector.getPrimaryKeyConstraint = async function () { return undefined; };

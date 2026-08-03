@@ -46,7 +46,7 @@ describe("Error Integration Tests", () => {
 
         // Check formatted output contains suggestion
         expect(formatted).toContain("Parser Error");
-        expect(formatted).toContain("ALTER TABLE statements are not supported");
+        expect(formatted).toContain("This ALTER TABLE statement is not supported");
         expect(formatted).toContain("Suggestion");
         expect(formatted).toContain("CREATE TABLE");
       }

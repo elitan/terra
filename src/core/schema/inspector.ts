@@ -677,7 +677,9 @@ export class DatabaseInspector {
       `
       SELECT
         conname as constraint_name,
-        pg_get_constraintdef(c.oid) as constraint_def
+        pg_get_expr(c.conbin, c.conrelid) as expression,
+        c.connoinherit as no_inherit,
+        c.convalidated as validated
       FROM pg_constraint c
       JOIN pg_class t ON c.conrelid = t.oid
       JOIN pg_namespace n ON t.relnamespace = n.oid
@@ -706,7 +708,9 @@ export class DatabaseInspector {
       `
       SELECT
         conname as constraint_name,
-        pg_get_constraintdef(c.oid) as constraint_def
+        pg_get_expr(c.conbin, c.conrelid) as expression,
+        c.connoinherit as no_inherit,
+        c.convalidated as validated
       FROM pg_constraint c
       JOIN pg_class t ON c.conrelid = t.oid
       JOIN pg_namespace n ON t.relnamespace = n.oid
@@ -725,11 +729,12 @@ export class DatabaseInspector {
   private parseCheckConstraintRows(rows: any[]): CheckConstraint[] {
     const constraints: CheckConstraint[] = [];
     for (const row of rows) {
-      const match = row.constraint_def?.match(/^CHECK \((.+)\)$/);
-      if (match) {
+      if (row.expression) {
         constraints.push({
           name: row.constraint_name,
-          expression: match[1],
+          expression: row.expression,
+          ...(row.no_inherit === true ? { noInherit: true } : {}),
+          ...(row.validated === false ? { notValid: true } : {}),
         });
       }
     }
