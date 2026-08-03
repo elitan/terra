@@ -814,6 +814,41 @@ describe("Parser edge coverage", () => {
     test("covers alter table constraint error branches", function () {
       const parser = new SchemaParser() as any;
 
+      expect(
+        parser.parseAlterTableConstraints(
+          {
+            relation: { relname: "users" },
+            cmds: [
+              {
+                AlterTableCmd: {
+                  subtype: "AT_AddConstraint",
+                  def: {
+                    Constraint: {
+                      contype: "CONSTR_FOREIGN",
+                      fk_attrs: [{ String: { sval: "account_id" } }],
+                      pktable: { relname: "accounts" },
+                      pk_attrs: [],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          "schema.sql"
+        )
+      ).toEqual([
+        {
+          tableName: "users",
+          schemaName: undefined,
+          kind: "foreign_key",
+          constraint: expect.objectContaining({
+            columns: ["account_id"],
+            referencedTable: "accounts",
+            referencedColumns: [],
+          }),
+        },
+      ]);
+
       expect(function () {
         parser.parseAlterTableConstraints(
           {

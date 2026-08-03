@@ -26,7 +26,7 @@ import {
 import type { Table, Index, EnumType, CompositeType, View, Function, Procedure, Trigger, Sequence, Extension, SchemaDefinition, Comment, SqlObject } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 
-let wasmInitialized = false;
+let wasmInitialization: Promise<void> | undefined;
 
 type PendingTableConstraint = {
   tableName: string;
@@ -44,10 +44,10 @@ type PendingTableConstraint = {
 
 export class SchemaParser {
   private async ensureWasmLoaded() {
-    if (!wasmInitialized) {
-      await loadModule();
-      wasmInitialized = true;
+    if (!wasmInitialization) {
+      wasmInitialization = loadModule();
     }
+    await wasmInitialization;
   }
 
   /**
@@ -472,6 +472,7 @@ export class SchemaParser {
     }
 
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
+    this.resolveImplicitForeignKeyColumns(tables, filePath);
 
     return { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects };
   }
@@ -561,12 +562,74 @@ export class SchemaParser {
         if (!table.foreignKeys) {
           table.foreignKeys = [];
         }
+        if (
+          pending.schemaName &&
+          pending.schemaName !== "public" &&
+          !pending.constraint.referencedTable.includes(".")
+        ) {
+          pending.constraint.referencedTable =
+            `${pending.schemaName}.${pending.constraint.referencedTable}`;
+        }
         table.foreignKeys.push(pending.constraint);
       } else {
         if (!table.checkConstraints) {
           table.checkConstraints = [];
         }
         table.checkConstraints.push(pending.constraint);
+      }
+    }
+  }
+
+  private resolveImplicitForeignKeyColumns(
+    tables: Table[],
+    filePath?: string
+  ): void {
+    const tableMap = new Map(
+      tables.map(function mapTable(table) {
+        return [SchemaParser.tableKey(table.name, table.schema), table] as const;
+      })
+    );
+
+    for (const table of tables) {
+      for (const foreignKey of table.foreignKeys || []) {
+        if (foreignKey.referencedColumns.length > 0) {
+          continue;
+        }
+
+        const referencedTableKey = SchemaParser.referencedTableKey(
+          foreignKey.referencedTable
+        );
+        const sourceTableKey = SchemaParser.tableKey(table.name, table.schema);
+        const errorPrefix =
+          `Cannot resolve implicit referenced columns for foreign key on ${sourceTableKey}`;
+        const referencedTable = tableMap.get(referencedTableKey);
+        if (!referencedTable) {
+          throw new ParserError(
+            `${errorPrefix}: referenced table ${referencedTableKey} is not defined in the desired schema; specify referenced columns explicitly for external or unmanaged tables`,
+            filePath
+          );
+        }
+
+        const primaryKeyColumns = referencedTable.primaryKey?.columns || [];
+        if (primaryKeyColumns.length === 0) {
+          throw new ParserError(
+            `${errorPrefix}: referenced table ${referencedTableKey} has no primary key`,
+            filePath
+          );
+        }
+
+        if (foreignKey.columns.length !== primaryKeyColumns.length) {
+          const referencingLabel =
+            foreignKey.columns.length === 1 ? "column" : "columns";
+          const primaryKeyLabel =
+            primaryKeyColumns.length === 1 ? "column" : "columns";
+          throw new ParserError(
+            `${errorPrefix}: it has ${foreignKey.columns.length} referencing ${referencingLabel} but the primary key has ${primaryKeyColumns.length} ${primaryKeyLabel}`,
+            filePath
+          );
+        }
+
+        foreignKey.referencedColumns = [...primaryKeyColumns];
       }
     }
   }
@@ -583,6 +646,12 @@ export class SchemaParser {
 
   private static tableKey(name: string, schema?: string): string {
     return `${schema || "public"}.${name}`;
+  }
+
+  private static referencedTableKey(referencedTable: string): string {
+    return referencedTable.includes(".")
+      ? referencedTable
+      : SchemaParser.tableKey(referencedTable);
   }
 
   private statementToSql(stmt: any): string {

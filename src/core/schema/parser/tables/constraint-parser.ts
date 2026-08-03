@@ -291,9 +291,11 @@ function parseForeignKeyFromNode(constraint: any, columns: string[]): ForeignKey
 
     const referencedTable = constraint.pktable.relname;
     const referencedSchema = constraint.pktable.schemaname;
+    // An empty list represents PostgreSQL's primary-key shorthand until the
+    // schema parser has seen every table and can resolve it canonically.
     const referencedColumns = extractColumnNames(constraint.pk_attrs || []);
 
-    if (!referencedTable || columns.length === 0 || referencedColumns.length === 0) {
+    if (!referencedTable || columns.length === 0) {
       return null;
     }
 

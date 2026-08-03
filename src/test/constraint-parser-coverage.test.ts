@@ -55,7 +55,10 @@ describe("Constraint parser coverage", () => {
         pktable: { relname: "users" },
         pk_attrs: [],
       })
-    ).toBeNull();
+    ).toMatchObject({
+      referencedTable: "users",
+      referencedColumns: [],
+    });
 
     const badNode: any = {};
     Object.defineProperty(badNode, "pktable", {
