@@ -38,6 +38,11 @@ export interface Column {
 export interface PrimaryKeyConstraint {
   name?: string;
   columns: string[];
+  include?: string[];
+  storageParameters?: Record<string, string>;
+  tablespace?: string;
+  deferrable?: boolean;
+  initiallyDeferred?: boolean;
 }
 
 export interface ForeignKeyConstraint {

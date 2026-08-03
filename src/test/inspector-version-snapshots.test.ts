@@ -227,6 +227,13 @@ function normalizeSnapshot(input: any): unknown {
         ? {
             name: table.primaryKey.name,
             columns: [...(table.primaryKey.columns || [])],
+            include: table.primaryKey.include
+              ? [...table.primaryKey.include]
+              : undefined,
+            storageParameters: table.primaryKey.storageParameters,
+            tablespace: table.primaryKey.tablespace,
+            deferrable: table.primaryKey.deferrable,
+            initiallyDeferred: table.primaryKey.initiallyDeferred,
           }
         : undefined,
       foreignKeys: (table.foreignKeys || []).map(function mapForeignKey(foreignKey: any) {

@@ -446,6 +446,41 @@ describe("DatabaseInspector coverage", () => {
     ]);
   });
 
+  test("parses primary key index and timing metadata", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function handleQuery(sql, params) {
+      expect(sql).toContain("constraint_catalog.contype = 'p'");
+      expect(params).toEqual(["accounts", "public"]);
+      return {
+        rows: [{
+          constraint_name: "accounts_pkey",
+          columns: ["tenant_id", "id"],
+          included_columns: ["display_name"],
+          storage_options: ["fillfactor=75"],
+          tablespace_name: "fastspace",
+          deferrable: true,
+          initially_deferred: true,
+        }],
+      };
+    });
+
+    expect(
+      await (inspector as any).getPrimaryKeyConstraint(
+        client,
+        "accounts",
+        "public"
+      )
+    ).toEqual({
+      name: "accounts_pkey",
+      columns: ["tenant_id", "id"],
+      include: ["display_name"],
+      storageParameters: { fillfactor: "75" },
+      tablespace: "fastspace",
+      deferrable: true,
+      initiallyDeferred: true,
+    });
+  });
+
   test("parses table index opclass and storage metadata", async () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql, params) => {

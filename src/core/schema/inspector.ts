@@ -289,18 +289,44 @@ export class DatabaseInspector {
     const result = await client.query(
       `
       SELECT
-        tc.constraint_name,
-        kcu.column_name,
-        kcu.ordinal_position
-      FROM information_schema.table_constraints tc
-      JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-        AND tc.table_name = kcu.table_name
-      WHERE tc.table_name = $1
-        AND tc.table_schema = $2
-        AND tc.constraint_type = 'PRIMARY KEY'
-      ORDER BY kcu.ordinal_position
+        constraint_catalog.conname AS constraint_name,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM unnest(constraint_catalog.conkey) WITH ORDINALITY
+            AS key_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = constraint_catalog.conrelid
+            AND attribute.attnum = key_column.attnum
+          ORDER BY key_column.position
+        ) AS columns,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM unnest(index_catalog.indkey) WITH ORDINALITY
+            AS included_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = index_catalog.indrelid
+            AND attribute.attnum = included_column.attnum
+          WHERE included_column.position > index_catalog.indnkeyatts
+          ORDER BY included_column.position
+        ) AS included_columns,
+        index_relation.reloptions AS storage_options,
+        tablespace.spcname AS tablespace_name,
+        constraint_catalog.condeferrable AS deferrable,
+        constraint_catalog.condeferred AS initially_deferred
+      FROM pg_constraint constraint_catalog
+      JOIN pg_class table_relation
+        ON table_relation.oid = constraint_catalog.conrelid
+      JOIN pg_namespace table_namespace
+        ON table_namespace.oid = table_relation.relnamespace
+      JOIN pg_index index_catalog
+        ON index_catalog.indexrelid = constraint_catalog.conindid
+      JOIN pg_class index_relation
+        ON index_relation.oid = constraint_catalog.conindid
+      LEFT JOIN pg_tablespace tablespace
+        ON tablespace.oid = index_relation.reltablespace
+      WHERE constraint_catalog.contype = 'p'
+        AND table_relation.relname = $1
+        AND table_namespace.nspname = $2
       `,
       [tableName, tableSchema]
     );
@@ -309,13 +335,20 @@ export class DatabaseInspector {
       return undefined;
     }
 
-    // Extract constraint name and columns
-    const constraintName = result.rows[0].constraint_name;
-    const columns = result.rows.map((row: any) => row.column_name);
+    const row = result.rows[0];
 
     return {
-      name: constraintName,
-      columns,
+      name: row.constraint_name,
+      columns: row.columns || [],
+      ...(row.included_columns?.length > 0
+        ? { include: row.included_columns }
+        : {}),
+      ...(row.storage_options
+        ? { storageParameters: this.parseStorageOptions(row.storage_options) }
+        : {}),
+      ...(row.tablespace_name ? { tablespace: row.tablespace_name } : {}),
+      ...(row.deferrable ? { deferrable: true } : {}),
+      ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
     };
   }
 

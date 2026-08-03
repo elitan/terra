@@ -213,6 +213,33 @@ describe("Table parser coverage", () => {
     ]);
   });
 
+  test("parses primary key index and timing options", async function () {
+    const ast = await parse(`
+      CREATE TABLE primary_options (
+        id integer,
+        tenant_id integer,
+        display_name text,
+        CONSTRAINT primary_options_pkey
+          PRIMARY KEY (tenant_id, id)
+          INCLUDE (display_name)
+          WITH (fillfactor=75)
+          USING INDEX TABLESPACE pg_default
+          DEFERRABLE INITIALLY DEFERRED
+      );
+    `);
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.primaryKey).toEqual({
+      name: "primary_options_pkey",
+      columns: ["tenant_id", "id"],
+      include: ["display_name"],
+      storageParameters: { fillfactor: "75" },
+      tablespace: "pg_default",
+      deferrable: true,
+      initiallyDeferred: true,
+    });
+  });
+
   test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
     const ast = await parse(`
       CREATE TABLE MixedCaseTable (

@@ -39,6 +39,7 @@ export function extractAllConstraints(
   const uniqueConstraints: UniqueConstraint[] = [];
   const exclusionConstraints: ExclusionConstraint[] = [];
   const columnPrimaryKeys: string[] = [];
+  let columnPrimaryKeyOptions: Partial<PrimaryKeyConstraint> = {};
   let tableLevelPrimaryKey: PrimaryKeyConstraint | undefined;
 
   try {
@@ -52,6 +53,17 @@ export function extractAllConstraints(
             const contype = c.Constraint.contype;
             if (contype === "CONSTR_PRIMARY") {
               columnPrimaryKeys.push(colName);
+              const options = getDeferrableOptions(c.Constraint);
+              columnPrimaryKeyOptions = {
+                name: c.Constraint.conname,
+                ...getConstraintIndexOptions(c.Constraint),
+                ...(options.deferrable === undefined
+                  ? {}
+                  : { deferrable: options.deferrable }),
+                ...(options.initiallyDeferred === undefined
+                  ? {}
+                  : { initiallyDeferred: options.initiallyDeferred }),
+              };
             } else if (contype === "CONSTR_CHECK") {
               const check = parseCheckConstraintFromNode(c.Constraint);
               if (check) checkConstraints.push(check);
@@ -63,7 +75,7 @@ export function extractAllConstraints(
                 ...(c.Constraint.nulls_not_distinct
                   ? { nullsNotDistinct: true }
                   : {}),
-                ...getUniqueIndexOptions(c.Constraint),
+                ...getConstraintIndexOptions(c.Constraint),
                 ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
                 ...(options.initiallyDeferred === undefined
                   ? {}
@@ -78,9 +90,17 @@ export function extractAllConstraints(
       } else if (elt.Constraint) {
         const contype = elt.Constraint.contype;
         if (contype === "CONSTR_PRIMARY") {
+          const options = getDeferrableOptions(elt.Constraint);
           tableLevelPrimaryKey = {
             name: elt.Constraint.conname,
             columns: extractColumnNames(elt.Constraint.keys || []),
+            ...getConstraintIndexOptions(elt.Constraint),
+            ...(options.deferrable === undefined
+              ? {}
+              : { deferrable: options.deferrable }),
+            ...(options.initiallyDeferred === undefined
+              ? {}
+              : { initiallyDeferred: options.initiallyDeferred }),
           };
         } else if (contype === "CONSTR_FOREIGN") {
           const columns = extractColumnNames(elt.Constraint.fk_attrs || []);
@@ -97,7 +117,7 @@ export function extractAllConstraints(
             ...(elt.Constraint.nulls_not_distinct
               ? { nullsNotDistinct: true }
               : {}),
-            ...getUniqueIndexOptions(elt.Constraint),
+            ...getConstraintIndexOptions(elt.Constraint),
             ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
             ...(options.initiallyDeferred === undefined
               ? {}
@@ -115,7 +135,11 @@ export function extractAllConstraints(
     );
   }
 
-  const primaryKey = tableLevelPrimaryKey || (columnPrimaryKeys.length > 0 ? { columns: columnPrimaryKeys } : undefined);
+  const primaryKey =
+    tableLevelPrimaryKey ||
+    (columnPrimaryKeys.length > 0
+      ? { columns: columnPrimaryKeys, ...columnPrimaryKeyOptions }
+      : undefined);
   const filteredUniqueConstraints = uniqueConstraints.filter(function (constraint) {
     if (!primaryKey) {
       return true;
@@ -146,7 +170,7 @@ function extractColumnNames(keys: any[]): string[] {
   return keys.map(k => k.String?.sval || '').filter(Boolean);
 }
 
-function getUniqueIndexOptions(constraint: any): Partial<UniqueConstraint> {
+function getConstraintIndexOptions(constraint: any): Partial<UniqueConstraint> {
   const include = extractColumnNames(constraint.including || []);
   const storageParameters = parseStorageParameterOptions(constraint.options);
   return {
@@ -320,7 +344,7 @@ export function parseUniqueConstraint(node: any): UniqueConstraint | null {
       name: node.conname,
       columns: extractColumnNames(node.keys || []),
       ...(node.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
-      ...getUniqueIndexOptions(node),
+      ...getConstraintIndexOptions(node),
       ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
       ...(options.initiallyDeferred === undefined
         ? {}
@@ -333,9 +357,17 @@ export function parseUniqueConstraint(node: any): UniqueConstraint | null {
 
 export function parseTablePrimaryKey(node: any): PrimaryKeyConstraint | null {
   try {
+    const options = getDeferrableOptions(node);
     return {
       name: node.conname,
       columns: extractColumnNames(node.keys || []),
+      ...getConstraintIndexOptions(node),
+      ...(options.deferrable === undefined
+        ? {}
+        : { deferrable: options.deferrable }),
+      ...(options.initiallyDeferred === undefined
+        ? {}
+        : { initiallyDeferred: options.initiallyDeferred }),
     };
   } catch (error) {
     return null;

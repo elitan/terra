@@ -99,7 +99,19 @@ describe("SQL generators coverage", () => {
 
   test("builds key and constraint SQL", () => {
     expect(generatePrimaryKeyClause({ columns: ["id"] })).toBe("PRIMARY KEY (\"id\")");
-    expect(generateAddPrimaryKeySQL("public.users", { columns: ["id"] })).toContain("ADD CONSTRAINT");
+    const primaryKeySQL = generateAddPrimaryKeySQL("public.users", {
+      columns: ["id"],
+      include: ["display_name"],
+      storageParameters: { fillfactor: "75" },
+      tablespace: "Fast Indexes",
+      deferrable: true,
+      initiallyDeferred: true,
+    });
+    expect(primaryKeySQL).toContain("ADD CONSTRAINT");
+    expect(primaryKeySQL).toContain('INCLUDE ("display_name")');
+    expect(primaryKeySQL).toContain("WITH (fillfactor=75)");
+    expect(primaryKeySQL).toContain('USING INDEX TABLESPACE "Fast Indexes"');
+    expect(primaryKeySQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(generateDropPrimaryKeySQL("public.users", "users_pkey")).toContain("DROP CONSTRAINT \"users_pkey\"");
 
     const fkSQL = generateAddForeignKeySQL("orders", {

@@ -26,6 +26,7 @@ import {
   normalizeExpression,
   generateAddPrimaryKeySQL,
   generateDropPrimaryKeySQL,
+  generatePrimaryKeyClause,
   generateAddCheckConstraintSQL,
   generateDropCheckConstraintSQL,
   generateAddForeignKeySQL,
@@ -1185,6 +1186,20 @@ export class SchemaDiffer {
       if (pk1.columns[i] !== pk2.columns[i]) {
         return false;
       }
+    }
+
+    if (!stringArraysEqual(pk1.include, pk2.include)) return false;
+    if (!stringRecordsEqual(pk1.storageParameters, pk2.storageParameters)) {
+      return false;
+    }
+    if ((pk1.tablespace || "pg_default") !== (pk2.tablespace || "pg_default")) {
+      return false;
+    }
+    if (Boolean(pk1.deferrable) !== Boolean(pk2.deferrable)) return false;
+    if (
+      Boolean(pk1.initiallyDeferred) !== Boolean(pk2.initiallyDeferred)
+    ) {
+      return false;
     }
 
     // Note: We don't compare constraint names because they might be auto-generated
@@ -2717,12 +2732,7 @@ export class SchemaDiffer {
           break;
 
         case "add_primary_key": {
-          const bareTable = getBareTableName(table.name);
-          const constraintName = alt.constraint.name || `${bareTable}_pkey`;
-          const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-          b.p("ADD CONSTRAINT")
-            .ident(constraintName)
-            .p(`PRIMARY KEY (${columns})`);
+          b.p("ADD").p(generatePrimaryKeyClause(alt.constraint, table.name));
           break;
         }
 

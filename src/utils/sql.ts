@@ -552,32 +552,41 @@ export function generatePrimaryKeyClause(
     ? primaryKey.name
     : (bareTable ? `${bareTable}_pkey` : undefined);
 
+  const builder = new SQLBuilder();
   if (constraintName) {
-    const builder = new SQLBuilder()
-      .p("CONSTRAINT")
-      .ident(constraintName)
-      .p(`PRIMARY KEY (${columns})`);
-    return builder.build();
-  } else {
-    return `PRIMARY KEY (${columns})`;
+    builder.p("CONSTRAINT").ident(constraintName);
   }
+  builder.p(`PRIMARY KEY (${columns})`);
+  if (primaryKey.include && primaryKey.include.length > 0) {
+    const includedColumns = primaryKey.include.map(function quoteColumn(column) {
+      return new SQLBuilder().ident(column).build();
+    });
+    builder.p(`INCLUDE (${includedColumns.join(", ")})`);
+  }
+  if (primaryKey.storageParameters) {
+    builder.p(
+      `WITH (${renderStorageParameterAssignments(primaryKey.storageParameters)})`
+    );
+  }
+  if (primaryKey.tablespace) {
+    builder.p("USING INDEX TABLESPACE").ident(primaryKey.tablespace);
+  }
+  appendDeferrableOptions(builder, primaryKey);
+  return builder.build();
 }
 
 export function generateAddPrimaryKeySQL(
   tableName: string,
   primaryKey: PrimaryKeyConstraint
 ): string {
-  const bareTable = getBareTableName(tableName);
-  const constraintName = primaryKey.name || `${bareTable}_pkey`;
-  const columns = primaryKey.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
   const [targetTable, targetSchema] = splitSchemaTable(tableName);
 
   return new SQLBuilder()
     .p("ALTER TABLE")
     .table(targetTable, targetSchema)
-    .p("ADD CONSTRAINT")
-    .ident(constraintName)
-    .p(`PRIMARY KEY (${columns});`)
+    .p("ADD")
+    .p(generatePrimaryKeyClause(primaryKey, tableName))
+    .p(";")
     .build();
 }
 
