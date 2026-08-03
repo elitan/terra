@@ -6,6 +6,7 @@ import type {
   ForeignKeyConstraint,
   CheckConstraint,
   UniqueConstraint,
+  ExclusionConstraint,
   Index,
   EnumType,
   CompositeType,
@@ -242,6 +243,13 @@ export class DatabaseInspector {
       // Get unique constraints for this table
       const uniqueConstraints = await this.getUniqueConstraints(client, tableName, tableSchema);
 
+      // Get exclusion constraints and their supporting-index properties
+      const exclusionConstraints = await this.getExclusionConstraints(
+        client,
+        tableName,
+        tableSchema
+      );
+
       // Get indexes for this table
       const indexes = await this.getTableIndexes(client, tableName, tableSchema);
 
@@ -264,6 +272,8 @@ export class DatabaseInspector {
         foreignKeys: foreignKeys.length > 0 ? foreignKeys : undefined,
         checkConstraints: checkConstraints.length > 0 ? checkConstraints : undefined,
         uniqueConstraints: uniqueConstraints.length > 0 ? uniqueConstraints : undefined,
+        exclusionConstraints:
+          exclusionConstraints.length > 0 ? exclusionConstraints : undefined,
         indexes,
       });
     }
@@ -394,13 +404,13 @@ export class DatabaseInspector {
       WHERE i.tablename = $1
         AND i.schemaname = $2
         AND NOT ix.indisprimary  -- Exclude primary key indexes
-        -- Exclude unique constraint indexes - these are handled via uniqueConstraints
+        -- Exclude constraint-owned indexes - these are handled as constraints
         -- This ensures proper distinction: constraints use ALTER TABLE ADD CONSTRAINT,
         -- while indexes use CREATE INDEX CONCURRENTLY for production safety
         AND NOT EXISTS (
           SELECT 1 FROM pg_constraint con
           WHERE con.conindid = ix.indexrelid
-          AND con.contype = 'u'
+          AND con.contype IN ('u', 'x')
         )
       ORDER BY i.indexname
       `,
@@ -678,6 +688,89 @@ export class DatabaseInspector {
     return result.rows.map((row) => ({
       name: row.constraint_name,
       columns: parseArrayLiteral(row.columns),
+      ...(row.deferrable ? { deferrable: true } : {}),
+      ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
+    }));
+  }
+
+  async getExclusionConstraints(
+    client: Client,
+    tableName: string,
+    tableSchema: string
+  ): Promise<ExclusionConstraint[]> {
+    const result = await client.query(
+      `
+      SELECT
+        c.conname AS constraint_name,
+        c.condeferrable AS deferrable,
+        c.condeferred AS initially_deferred,
+        am.amname AS access_method,
+        ic.reloptions AS storage_options,
+        tablespace.spcname AS tablespace_name,
+        pg_get_expr(ix.indpred, ix.indrelid) AS where_clause,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM unnest(ix.indkey) WITH ORDINALITY AS key_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = ix.indrelid
+            AND attribute.attnum = key_column.attnum
+          WHERE key_column.position > ix.indnkeyatts
+          ORDER BY key_column.position
+        ) AS included_columns,
+        exclusion.elements
+      FROM pg_constraint c
+      JOIN pg_class table_relation ON table_relation.oid = c.conrelid
+      JOIN pg_namespace table_namespace
+        ON table_namespace.oid = table_relation.relnamespace
+      JOIN pg_class ic ON ic.oid = c.conindid
+      JOIN pg_index ix ON ix.indexrelid = c.conindid
+      JOIN pg_am am ON am.oid = ic.relam
+      LEFT JOIN pg_tablespace tablespace ON tablespace.oid = ic.reltablespace
+      LEFT JOIN LATERAL (
+        SELECT json_agg(
+          json_build_object(
+            'definition', pg_get_indexdef(c.conindid, operator_element.position::int, true),
+            'operator_name', operator_relation.oprname,
+            'operator_schema', operator_namespace.nspname
+          )
+          ORDER BY operator_element.position
+        ) AS elements
+        FROM unnest(c.conexclop) WITH ORDINALITY
+          AS operator_element(operator_oid, position)
+        JOIN pg_operator operator_relation
+          ON operator_relation.oid = operator_element.operator_oid
+        JOIN pg_namespace operator_namespace
+          ON operator_namespace.oid = operator_relation.oprnamespace
+      ) exclusion ON true
+      WHERE c.contype = 'x'
+        AND table_relation.relname = $1
+        AND table_namespace.nspname = $2
+      ORDER BY c.conname
+      `,
+      [tableName, tableSchema]
+    );
+
+    return result.rows.map((row: any) => ({
+      name: row.constraint_name,
+      method: row.access_method,
+      elements: (row.elements || []).map(function mapElement(element: any) {
+        const operatorSchema =
+          element.operator_schema === "pg_catalog"
+            ? undefined
+            : element.operator_schema;
+        return {
+          definition: element.definition,
+          operator: {
+            name: element.operator_name,
+            ...(operatorSchema ? { schema: operatorSchema } : {}),
+          },
+        };
+      }),
+      include:
+        row.included_columns?.length > 0 ? row.included_columns : undefined,
+      storageParameters: this.parseStorageOptions(row.storage_options),
+      ...(row.tablespace_name ? { tablespace: row.tablespace_name } : {}),
+      where: row.where_clause || undefined,
       ...(row.deferrable ? { deferrable: true } : {}),
       ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
     }));

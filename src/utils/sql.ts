@@ -1,4 +1,20 @@
-import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType, CompositeType } from "../types/schema";
+import type {
+  Table,
+  Column,
+  PrimaryKeyConstraint,
+  ForeignKeyConstraint,
+  CheckConstraint,
+  UniqueConstraint,
+  ExclusionConstraint,
+  QualifiedName,
+  View,
+  Function,
+  Procedure,
+  Trigger,
+  Sequence,
+  EnumType,
+  CompositeType,
+} from "../types/schema";
 import { SQLBuilder } from "./sql-builder";
 import { expressionsEqual } from "./expression-comparator";
 import { identityColumnsAreDifferent, renderIdentityClause } from "./identity";
@@ -496,6 +512,12 @@ export function generateCreateTableStatement(table: Table): string {
     }
   }
 
+  if (table.exclusionConstraints) {
+    for (const exclusionConstraint of table.exclusionConstraints) {
+      columnDefs.push(generateExclusionConstraintClause(exclusionConstraint));
+    }
+  }
+
   const builder = new SQLBuilder()
     .p(table.unlogged ? "CREATE UNLOGGED TABLE" : "CREATE TABLE")
     .table(table.name, table.schema)
@@ -583,6 +605,58 @@ function appendDeferrableOptions(
       builder.p("INITIALLY DEFERRED");
     }
   }
+}
+
+function renderExclusionOperator(operator: QualifiedName): string {
+  if (!operator.schema) return operator.name;
+
+  const schema = new SQLBuilder().ident(operator.schema).build();
+  return `OPERATOR(${schema}.${operator.name})`;
+}
+
+export function generateExclusionConstraintClause(
+  exclusionConstraint: ExclusionConstraint
+): string {
+  const builder = new SQLBuilder();
+  if (exclusionConstraint.name) {
+    builder.p("CONSTRAINT").ident(exclusionConstraint.name);
+  }
+
+  builder.p("EXCLUDE");
+  if (exclusionConstraint.method) {
+    builder.p("USING").ident(exclusionConstraint.method);
+  }
+
+  const elements = exclusionConstraint.elements.map(function renderElement(element) {
+    return `${element.definition} WITH ${renderExclusionOperator(element.operator)}`;
+  });
+  builder.p(`(${elements.join(", ")})`);
+
+  if (exclusionConstraint.include && exclusionConstraint.include.length > 0) {
+    const columns = exclusionConstraint.include.map(function quoteColumn(column) {
+      return new SQLBuilder().ident(column).build();
+    });
+    builder.p(`INCLUDE (${columns.join(", ")})`);
+  }
+
+  if (exclusionConstraint.storageParameters) {
+    builder.p(
+      `WITH (${renderStorageParameterAssignments(exclusionConstraint.storageParameters)})`
+    );
+  }
+
+  if (exclusionConstraint.tablespace) {
+    builder
+      .p("USING INDEX TABLESPACE")
+      .ident(exclusionConstraint.tablespace);
+  }
+
+  if (exclusionConstraint.where) {
+    builder.p(`WHERE (${exclusionConstraint.where})`);
+  }
+
+  appendDeferrableOptions(builder, exclusionConstraint);
+  return builder.build();
 }
 
 // Foreign Key SQL generation

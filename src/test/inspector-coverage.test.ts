@@ -25,6 +25,7 @@ describe("DatabaseInspector coverage", () => {
       return [{ name: "parent_check", expression: "id > 0" }];
     };
     inspector.getUniqueConstraints = async function () { return []; };
+    inspector.getExclusionConstraints = async function () { return []; };
     inspector.getTableIndexes = async function () { return []; };
     const client = createClient((sql) => {
       if (sql.includes("FROM information_schema.tables")) {
@@ -441,6 +442,7 @@ describe("DatabaseInspector coverage", () => {
     const client = createClient((sql, params) => {
       if (sql.includes("FROM pg_indexes i")) {
         expect(params).toEqual(["users", "public"]);
+        expect(sql).toContain("con.contype IN ('u', 'x')");
         return {
           rows: [
             {
@@ -482,6 +484,66 @@ describe("DatabaseInspector coverage", () => {
         expression: undefined,
         storageParameters: { fillfactor: "70", note: "abc" },
         tablespace: "fastspace",
+      },
+    ]);
+  });
+
+  test("parses exclusion constraints and supporting index metadata", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function handleQuery(sql, params) {
+      expect(sql).toContain("WHERE c.contype = 'x'");
+      expect(sql).toContain("exclusion ON true");
+      expect(params).toEqual(["bookings", "public"]);
+      return {
+        rows: [
+          {
+            constraint_name: "bookings_no_overlap",
+            deferrable: true,
+            initially_deferred: true,
+            access_method: "gist",
+            storage_options: ["fillfactor=80"],
+            tablespace_name: "fast_indexes",
+            where_clause: "NOT isempty(during)",
+            included_columns: ["id"],
+            elements: [
+              {
+                definition: "during",
+                operator_name: "&&",
+                operator_schema: "pg_catalog",
+              },
+              {
+                definition: "tenant_id",
+                operator_name: "=",
+                operator_schema: "custom_ops",
+              },
+            ],
+          },
+        ],
+      };
+    });
+
+    const constraints = await inspector.getExclusionConstraints(
+      client,
+      "bookings",
+      "public"
+    );
+    expect(constraints).toEqual([
+      {
+        name: "bookings_no_overlap",
+        method: "gist",
+        elements: [
+          { definition: "during", operator: { name: "&&" } },
+          {
+            definition: "tenant_id",
+            operator: { name: "=", schema: "custom_ops" },
+          },
+        ],
+        include: ["id"],
+        storageParameters: { fillfactor: "80" },
+        tablespace: "fast_indexes",
+        where: "NOT isempty(during)",
+        deferrable: true,
+        initiallyDeferred: true,
       },
     ]);
   });

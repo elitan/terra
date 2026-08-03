@@ -63,6 +63,23 @@ export interface UniqueConstraint {
   initiallyDeferred?: boolean;
 }
 
+export interface ExclusionConstraintElement {
+  definition: string;
+  operator: QualifiedName;
+}
+
+export interface ExclusionConstraint {
+  name?: string;
+  method?: string;
+  elements: ExclusionConstraintElement[];
+  include?: string[];
+  storageParameters?: Record<string, string>;
+  tablespace?: string;
+  where?: string;
+  deferrable?: boolean;
+  initiallyDeferred?: boolean;
+}
+
 export interface IndexTerm {
   column?: string;
   expression?: string;
@@ -250,6 +267,7 @@ export interface Table {
   foreignKeys?: ForeignKeyConstraint[];
   checkConstraints?: CheckConstraint[];
   uniqueConstraints?: UniqueConstraint[];
+  exclusionConstraints?: ExclusionConstraint[];
   indexes?: Index[];
 }
 

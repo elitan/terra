@@ -127,6 +127,60 @@ describe("Table parser coverage", () => {
     ]);
   });
 
+  test("parses exclusion constraint index and timing options", async function () {
+    const ast = await parse(`
+      CREATE TABLE bookings (
+        id integer,
+        label text,
+        during int4range,
+        CONSTRAINT bookings_no_overlap
+          EXCLUDE USING gist (
+            during WITH &&,
+            (lower(label)) COLLATE "C" gist_trgm_ops
+              WITH OPERATOR(custom_ops.=)
+          )
+          INCLUDE (id)
+          WITH (fillfactor=80)
+          USING INDEX TABLESPACE "Fast Indexes"
+          WHERE (NOT isempty(during))
+          DEFERRABLE INITIALLY DEFERRED
+      );
+    `);
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.exclusionConstraints).toEqual([
+      {
+        name: "bookings_no_overlap",
+        method: "gist",
+        elements: [
+          { definition: "during", operator: { name: "&&" } },
+          {
+            definition: '(lower(label)) COLLATE "C" gist_trgm_ops',
+            operator: { name: "=", schema: "custom_ops" },
+          },
+        ],
+        include: ["id"],
+        storageParameters: { fillfactor: "80" },
+        tablespace: "Fast Indexes",
+        where: "NOT (isempty(during))",
+        deferrable: true,
+        initiallyDeferred: true,
+      },
+    ]);
+  });
+
+  test("keeps a unique constraint when the table has no primary key", async function () {
+    const ast = await parse(`
+      CREATE TABLE unique_only (email text UNIQUE);
+    `);
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.primaryKey).toBeUndefined();
+    expect(parsed?.uniqueConstraints).toEqual([
+      { columns: ["email"], name: undefined },
+    ]);
+  });
+
   test("normalizes unquoted mixed-case identifiers to lowercase while keeping quoted case", async function () {
     const ast = await parse(`
       CREATE TABLE MixedCaseTable (

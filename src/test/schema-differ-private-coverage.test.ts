@@ -1,7 +1,12 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { loadModule } from "pgsql-parser";
 import { SchemaDiffer } from "../core/schema/differ";
-import type { Column, PrimaryKeyConstraint, Table } from "../types/schema";
+import type {
+  Column,
+  ExclusionConstraint,
+  PrimaryKeyConstraint,
+  Table,
+} from "../types/schema";
 
 function makeColumn(overrides: Partial<Column> = {}): Column {
   return {
@@ -23,6 +28,18 @@ function makeTable(overrides: Partial<Table> = {}): Table {
 
 function makePrimaryKey(columns: string[], name?: string): PrimaryKeyConstraint {
   return { columns, name };
+}
+
+function makeExclusion(
+  overrides: Partial<ExclusionConstraint> = {}
+): ExclusionConstraint {
+  return {
+    name: "users_no_overlap",
+    method: "gist",
+    elements: [{ definition: "during", operator: { name: "&&" } }],
+    where: "id > 0",
+    ...overrides,
+  };
 }
 
 function reverseCopy<T>(items: T[]): T[] {
@@ -372,6 +389,115 @@ describe("SchemaDiffer private coverage", () => {
         [inherited]
       );
     }).toThrow("separate detach and attach migrations");
+  });
+
+  test("generateMigrationPlan handles exclusion constraint equivalence and replacement", function () {
+    const differ = new SchemaDiffer();
+    const current = makeExclusion();
+    const equivalentUnnamed = makeExclusion({
+      name: undefined,
+      elements: [
+        {
+          definition: "(during)",
+          operator: { name: "&&", schema: "pg_catalog" },
+        },
+      ],
+      where: "(id > 0)",
+    });
+    expect(
+      differ.generateMigrationPlan(
+        [makeTable({ exclusionConstraints: [equivalentUnnamed] })],
+        [makeTable({ exclusionConstraints: [current] })]
+      ).hasChanges
+    ).toBe(false);
+
+    const expressionCurrent = makeExclusion({
+      elements: [
+        {
+          definition: "int4range(lower(during), upper(during))",
+          operator: { name: "&&" },
+        },
+      ],
+    });
+    const expressionDesired = makeExclusion({
+      elements: [
+        {
+          definition: "(int4range(lower(during), upper(during)))",
+          operator: { name: "&&" },
+        },
+      ],
+    });
+    expect(
+      differ.generateMigrationPlan(
+        [makeTable({ exclusionConstraints: [expressionDesired] })],
+        [makeTable({ exclusionConstraints: [expressionCurrent] })]
+      ).hasChanges
+    ).toBe(false);
+
+    const unnamedAddSql = differ
+      .generateMigrationPlan(
+        [
+          makeTable({
+            exclusionConstraints: [
+              makeExclusion({ name: undefined }),
+              makeExclusion({
+                name: undefined,
+                elements: [
+                  {
+                    definition: "other_range",
+                    operator: { name: "&&" },
+                  },
+                ],
+              }),
+            ],
+          }),
+        ],
+        [makeTable()]
+      )
+      .transactional.join("\n");
+    expect(unnamedAddSql).toContain("ADD EXCLUDE");
+
+    const replacements: ExclusionConstraint[] = [
+      makeExclusion({ method: "spgist" }),
+      makeExclusion({
+        elements: [
+          { definition: "during", operator: { name: "&&" } },
+          { definition: "other_range", operator: { name: "&&" } },
+        ],
+      }),
+      makeExclusion({
+        elements: [{ definition: "other_range", operator: { name: "&&" } }],
+      }),
+      makeExclusion({
+        elements: [{ definition: "during", operator: { name: "-|-" } }],
+      }),
+      makeExclusion({
+        elements: [
+          {
+            definition: "during",
+            operator: { name: "&&", schema: "custom_ops" },
+          },
+        ],
+      }),
+      makeExclusion({ include: ["id"] }),
+      makeExclusion({ storageParameters: { fillfactor: "80" } }),
+      makeExclusion({ tablespace: "fast_indexes" }),
+      makeExclusion({ deferrable: true }),
+      makeExclusion({ deferrable: true, initiallyDeferred: true }),
+      makeExclusion({ where: undefined }),
+      makeExclusion({ where: "id >= 0" }),
+    ];
+
+    for (const replacement of replacements) {
+      const sql = differ
+        .generateMigrationPlan(
+          [makeTable({ exclusionConstraints: [replacement] })],
+          [makeTable({ exclusionConstraints: [current] })]
+        )
+        .transactional.join("\n");
+      expect(sql).toContain('DROP CONSTRAINT "users_no_overlap"');
+      expect(sql).toContain("ADD CONSTRAINT \"users_no_overlap\" EXCLUDE");
+    }
   });
 
   test("primary key helpers cover add drop modify and none", () => {

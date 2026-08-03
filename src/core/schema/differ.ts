@@ -6,6 +6,7 @@ import type {
   CheckConstraint,
   ForeignKeyConstraint,
   UniqueConstraint,
+  ExclusionConstraint,
   IdentityColumn,
   QualifiedName,
   ColumnStorage,
@@ -36,6 +37,7 @@ import {
   splitSchemaTable,
   getBareTableName,
   generateColumnDefinition,
+  generateExclusionConstraintClause,
 } from "../../utils/sql";
 import { expressionsEqual } from "../../utils/expression-comparator";
 import { SQLBuilder } from "../../utils/sql-builder";
@@ -56,6 +58,137 @@ import { DependencyResolver } from "./dependency-resolver";
 function normalizeReferencedTableName(referencedTable: string): string {
   const [name, schema] = splitSchemaTable(referencedTable);
   return `${schema || "public"}.${name}`;
+}
+
+function findOuterClosingParenthesis(value: string): number {
+  let depth = 0;
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (character === "(") depth++;
+    if (character === ")") depth--;
+    if (depth === 0) return index;
+  }
+  return -1;
+}
+
+function stripBalancedOuterParentheses(value: string): string {
+  let normalized = value.trim();
+  while (
+    normalized.startsWith("(") &&
+    normalized.endsWith(")") &&
+    findOuterClosingParenthesis(normalized) === normalized.length - 1
+  ) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized;
+}
+
+function exclusionElementDefinitionsEqual(
+  desired: string,
+  current: string
+): boolean {
+  const normalize = function normalizeDefinition(value: string): string {
+    return stripBalancedOuterParentheses(
+      value.replace(/\bpg_catalog\./gi, "").replace(/\s+/g, " ").trim()
+    );
+  };
+  const normalizedDesired = normalize(desired);
+  const normalizedCurrent = normalize(current);
+  return (
+    normalizedDesired === normalizedCurrent ||
+    expressionsEqual(normalizedDesired, normalizedCurrent)
+  );
+}
+
+function stringArraysEqual(
+  desired: string[] | undefined,
+  current: string[] | undefined
+): boolean {
+  const desiredValues = desired || [];
+  const currentValues = current || [];
+  return (
+    desiredValues.length === currentValues.length &&
+    desiredValues.every(function hasSameValue(value, index) {
+      return currentValues[index] === value;
+    })
+  );
+}
+
+function stringRecordsEqual(
+  desired: Record<string, string> | undefined,
+  current: Record<string, string> | undefined
+): boolean {
+  const desiredEntries = Object.entries(desired || {}).sort();
+  const currentEntries = Object.entries(current || {}).sort();
+  return (
+    desiredEntries.length === currentEntries.length &&
+    desiredEntries.every(function hasSameEntry(entry, index) {
+      return (
+        currentEntries[index]?.[0] === entry[0] &&
+        currentEntries[index]?.[1] === entry[1]
+      );
+    })
+  );
+}
+
+function normalizeExclusionOperatorSchema(
+  schema: string | undefined
+): string | undefined {
+  return schema === "pg_catalog" ? undefined : schema;
+}
+
+function exclusionConstraintsDiffer(
+  desired: ExclusionConstraint,
+  current: ExclusionConstraint
+): boolean {
+  if (
+    (desired.method || "btree").toLowerCase() !==
+    (current.method || "btree").toLowerCase()
+  ) {
+    return true;
+  }
+  if (desired.elements.length !== current.elements.length) return true;
+
+  for (let index = 0; index < desired.elements.length; index++) {
+    const desiredElement = desired.elements[index]!;
+    const currentElement = current.elements[index]!;
+    if (
+      !exclusionElementDefinitionsEqual(
+        desiredElement.definition,
+        currentElement.definition
+      )
+    ) {
+      return true;
+    }
+    if (desiredElement.operator.name !== currentElement.operator.name) return true;
+
+    const desiredSchema = normalizeExclusionOperatorSchema(
+      desiredElement.operator.schema
+    );
+    const currentSchema = normalizeExclusionOperatorSchema(
+      currentElement.operator.schema
+    );
+    if (desiredSchema && desiredSchema !== currentSchema) {
+      return true;
+    }
+  }
+
+  if (!stringArraysEqual(desired.include, current.include)) return true;
+  if (!stringRecordsEqual(desired.storageParameters, current.storageParameters)) {
+    return true;
+  }
+  if ((desired.tablespace || "pg_default") !== (current.tablespace || "pg_default")) {
+    return true;
+  }
+  if (Boolean(desired.deferrable) !== Boolean(current.deferrable)) return true;
+  if (Boolean(desired.initiallyDeferred) !== Boolean(current.initiallyDeferred)) {
+    return true;
+  }
+
+  if (desired.where && current.where) {
+    return !expressionsEqual(desired.where, current.where);
+  }
+  return desired.where !== current.where;
 }
 
 /**
@@ -118,7 +251,9 @@ type TableAlteration =
   | { type: "add_foreign_key"; constraint: ForeignKeyConstraint }
   | { type: "drop_foreign_key"; constraintName: string }
   | { type: "add_unique"; constraint: UniqueConstraint }
-  | { type: "drop_unique"; constraintName: string };
+  | { type: "drop_unique"; constraintName: string }
+  | { type: "add_exclusion"; constraint: ExclusionConstraint }
+  | { type: "drop_exclusion"; constraintName: string };
 
 export class SchemaDiffer {
   private options: MigrationOptions;
@@ -1652,6 +1787,12 @@ export class SchemaDiffer {
       alterations
     );
 
+    this.collectExclusionConstraintAlterations(
+      desiredTable.exclusionConstraints || [],
+      currentTable.exclusionConstraints || [],
+      alterations
+    );
+
     return alterations;
   }
 
@@ -2187,6 +2328,58 @@ export class SchemaDiffer {
     }
   }
 
+  private collectExclusionConstraintAlterations(
+    desiredConstraints: ExclusionConstraint[],
+    currentConstraints: ExclusionConstraint[],
+    alterations: TableAlteration[]
+  ): void {
+    const unmatchedCurrent = new Set(currentConstraints);
+
+    for (const desired of desiredConstraints) {
+      let current: ExclusionConstraint | undefined;
+      if (desired.name) {
+        current = currentConstraints.find(function findByName(constraint) {
+          return (
+            unmatchedCurrent.has(constraint) &&
+            constraint.name === desired.name
+          );
+        });
+      } else {
+        current = currentConstraints.find(function findByDefinition(constraint) {
+          return (
+            unmatchedCurrent.has(constraint) &&
+            !exclusionConstraintsDiffer(desired, constraint)
+          );
+        });
+      }
+
+      if (!current) {
+        alterations.push({ type: "add_exclusion", constraint: desired });
+        continue;
+      }
+
+      unmatchedCurrent.delete(current);
+      if (exclusionConstraintsDiffer(desired, current)) {
+        if (current.name) {
+          alterations.push({
+            type: "drop_exclusion",
+            constraintName: current.name,
+          });
+        }
+        alterations.push({ type: "add_exclusion", constraint: desired });
+      }
+    }
+
+    for (const current of unmatchedCurrent) {
+      if (current.name) {
+        alterations.push({
+          type: "drop_exclusion",
+          constraintName: current.name,
+        });
+      }
+    }
+  }
+
   /**
    * Batches multiple ALTER TABLE alterations into a single statement.
    * This improves performance by reducing database round trips.
@@ -2206,6 +2399,7 @@ export class SchemaDiffer {
       inherit_parent: 0,
       no_inherit_parent: 0,
       drop_foreign_key: 0,
+      drop_exclusion: 1,
       drop_unique: 1,
       drop_check: 2,
       drop_primary_key: 3,
@@ -2225,11 +2419,12 @@ export class SchemaDiffer {
       add_primary_key: 21,
       add_check: 22,
       add_unique: 23,
-      add_foreign_key: 24,
-      reset_table_storage_parameters: 25,
-      set_table_storage_parameters: 26,
-      set_table_access_method: 27,
-      set_table_tablespace: 28,
+      add_exclusion: 24,
+      add_foreign_key: 25,
+      reset_table_storage_parameters: 26,
+      set_table_storage_parameters: 27,
+      set_table_access_method: 28,
+      set_table_tablespace: 29,
     };
 
     const sorted = [...alterations].sort((a, b) => {
@@ -2434,6 +2629,14 @@ export class SchemaDiffer {
         case "drop_unique":
           b.p("DROP CONSTRAINT").ident(alt.constraintName);
           break;
+
+        case "add_exclusion":
+          b.p("ADD").p(generateExclusionConstraintClause(alt.constraint));
+          break;
+
+        case "drop_exclusion":
+          b.p("DROP CONSTRAINT").ident(alt.constraintName);
+          break;
       }
     });
     builder.indentOut();
@@ -2489,6 +2692,15 @@ export class SchemaDiffer {
       case "add_unique":
         return alteration.constraint.name || alteration.constraint.columns.join(",");
       case "drop_unique":
+        return alteration.constraintName;
+      case "add_exclusion":
+        return alteration.constraint.name ||
+          alteration.constraint.elements
+            .map(function getDefinition(element) {
+              return `${element.definition}:${element.operator.name}`;
+            })
+            .join(",");
+      case "drop_exclusion":
         return alteration.constraintName;
       default:
         return "";

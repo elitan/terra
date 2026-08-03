@@ -255,6 +255,23 @@ function normalizeSnapshot(input: any): unknown {
           initiallyDeferred: unique.initiallyDeferred,
         };
       }),
+      exclusionConstraints: table.exclusionConstraints?.map(
+        function mapExclusion(exclusion: any) {
+          return {
+            name: exclusion.name,
+            method: exclusion.method,
+            elements: exclusion.elements,
+            include: exclusion.include,
+            storageParameters: exclusion.storageParameters
+              ? normalizeObject(exclusion.storageParameters)
+              : undefined,
+            tablespace: exclusion.tablespace,
+            where: normalizeMaybeText(exclusion.where),
+            deferrable: exclusion.deferrable,
+            initiallyDeferred: exclusion.initiallyDeferred,
+          };
+        }
+      ),
       indexes: (table.indexes || []).map(function mapIndex(index: any) {
         return {
           name: index.name,
@@ -425,6 +442,9 @@ function sortSnapshot(input: any): unknown {
       return (a.name || "").localeCompare(b.name || "");
     });
     table.uniqueConstraints.sort(function sortUniques(a: any, b: any) {
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    table.exclusionConstraints?.sort(function sortExclusions(a: any, b: any) {
       return (a.name || "").localeCompare(b.name || "");
     });
     table.indexes.sort(function sortIndexes(a: any, b: any) {

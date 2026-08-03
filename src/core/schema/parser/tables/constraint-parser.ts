@@ -6,6 +6,7 @@
  * - FOREIGN KEY
  * - CHECK
  * - UNIQUE
+ * - EXCLUDE
  */
 
 import { Logger } from "../../../../utils/logger";
@@ -15,7 +16,10 @@ import type {
   ForeignKeyConstraint,
   CheckConstraint,
   UniqueConstraint,
+  ExclusionConstraint,
+  QualifiedName,
 } from "../../../../types/schema";
+import { parseStorageParameterOptions } from "../../../../utils/storage-parameters";
 
 /**
  * Extract all constraints from CREATE TABLE tableElts array
@@ -28,10 +32,12 @@ export function extractAllConstraints(
   foreignKeys: ForeignKeyConstraint[];
   checkConstraints: CheckConstraint[];
   uniqueConstraints: UniqueConstraint[];
+  exclusionConstraints: ExclusionConstraint[];
 } {
   const foreignKeys: ForeignKeyConstraint[] = [];
   const checkConstraints: CheckConstraint[] = [];
   const uniqueConstraints: UniqueConstraint[] = [];
+  const exclusionConstraints: ExclusionConstraint[] = [];
   const columnPrimaryKeys: string[] = [];
   let tableLevelPrimaryKey: PrimaryKeyConstraint | undefined;
 
@@ -89,6 +95,9 @@ export function extractAllConstraints(
               ? {}
               : { initiallyDeferred: options.initiallyDeferred }),
           });
+        } else if (contype === "CONSTR_EXCLUSION") {
+          const exclusion = parseExclusionConstraintFromNode(elt.Constraint);
+          if (exclusion) exclusionConstraints.push(exclusion);
         }
       }
     }
@@ -118,6 +127,7 @@ export function extractAllConstraints(
     foreignKeys,
     checkConstraints,
     uniqueConstraints: filteredUniqueConstraints,
+    exclusionConstraints,
   };
 }
 
@@ -126,6 +136,66 @@ export function extractAllConstraints(
  */
 function extractColumnNames(keys: any[]): string[] {
   return keys.map(k => k.String?.sval || '').filter(Boolean);
+}
+
+function parseOperatorName(operatorNode: any): QualifiedName | undefined {
+  const parts = (operatorNode?.List?.items || [])
+    .map(function getOperatorPart(item: any) {
+      return item?.String?.sval;
+    })
+    .filter(Boolean);
+  const name = parts.at(-1);
+  if (!name) return undefined;
+
+  const schema = parts.length > 1 ? parts.slice(0, -1).join(".") : undefined;
+  return { name, ...(schema ? { schema } : {}) };
+}
+
+function parseExclusionConstraintFromNode(
+  constraint: any
+): ExclusionConstraint | null {
+  try {
+    const elements = (constraint.exclusions || [])
+      .map(function parseElement(item: any) {
+        const parts = item?.List?.items || [];
+        const indexElement = parts[0];
+        const operator = parseOperatorName(parts[1]);
+        if (!indexElement?.IndexElem || !operator) return undefined;
+
+        const definition = deparseSync([indexElement]).trim();
+        if (!definition) return undefined;
+        return { definition, operator };
+      })
+      .filter(Boolean);
+    if (elements.length === 0) return null;
+
+    const options = getDeferrableOptions(constraint);
+    const include = extractColumnNames(constraint.including || []);
+    const where = constraint.where_clause
+      ? deparseSync([constraint.where_clause]).trim()
+      : undefined;
+
+    return {
+      name: constraint.conname,
+      method: constraint.access_method || undefined,
+      elements,
+      include: include.length > 0 ? include : undefined,
+      storageParameters: parseStorageParameterOptions(constraint.options),
+      tablespace: constraint.indexspace || undefined,
+      where,
+      ...(options.deferrable === undefined
+        ? {}
+        : { deferrable: options.deferrable }),
+      ...(options.initiallyDeferred === undefined
+        ? {}
+        : { initiallyDeferred: options.initiallyDeferred }),
+    };
+  } catch (error) {
+    Logger.warning(
+      `Failed to parse exclusion constraint: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return null;
+  }
 }
 
 function getDeferrableOptions(constraint: any): {

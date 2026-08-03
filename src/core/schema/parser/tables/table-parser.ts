@@ -81,6 +81,10 @@ export function parseCreateTable(stmt: any): Table | null {
         constraints.uniqueConstraints.length > 0
           ? constraints.uniqueConstraints
           : undefined,
+      exclusionConstraints:
+        constraints.exclusionConstraints.length > 0
+          ? constraints.exclusionConstraints
+          : undefined,
     };
   } catch (error) {
     Logger.warning(
