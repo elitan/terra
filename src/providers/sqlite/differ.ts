@@ -14,6 +14,7 @@ interface TableChanges {
   indexesToDrop: Index[];
   foreignKeysChanged: boolean;
   checkConstraintsChanged: boolean;
+  uniqueConstraintsChanged: boolean;
 }
 
 export class SQLiteDiffer {
@@ -75,6 +76,7 @@ export class SQLiteDiffer {
       indexesToDrop: [],
       foreignKeysChanged: false,
       checkConstraintsChanged: false,
+      uniqueConstraintsChanged: false,
     };
 
     const currentColMap = new Map(current.columns.map(c => [c.name, c]));
@@ -109,6 +111,11 @@ export class SQLiteDiffer {
     if (this.checkConstraintsDiffer(desired.checkConstraints, current.checkConstraints)) {
       changes.requiresRecreate = true;
       changes.checkConstraintsChanged = true;
+    }
+
+    if (this.uniqueConstraintsDiffer(desired.uniqueConstraints, current.uniqueConstraints)) {
+      changes.requiresRecreate = true;
+      changes.uniqueConstraintsChanged = true;
     }
 
     const currentIndexMap = new Map((current.indexes || []).map(i => [i.name, i]));
@@ -188,6 +195,29 @@ export class SQLiteDiffer {
     return dExprs.some((expr, i) => expr !== cExprs[i]);
   }
 
+  private uniqueConstraintsDiffer(
+    desired: Table["uniqueConstraints"],
+    current: Table["uniqueConstraints"]
+  ): boolean {
+    const desiredColumns = (desired || [])
+      .map(function (constraint) {
+        return constraint.columns.join("\0");
+      })
+      .sort();
+    const currentColumns = (current || [])
+      .map(function (constraint) {
+        return constraint.columns.join("\0");
+      })
+      .sort();
+
+    if (desiredColumns.length !== currentColumns.length) {
+      return true;
+    }
+    return desiredColumns.some(function (columns, index) {
+      return columns !== currentColumns[index];
+    });
+  }
+
   private indexesDiffer(desired: Index, current: Index): boolean {
     if (desired.columns.join(',') !== current.columns.join(',')) return true;
     if (desired.unique !== current.unique) return true;
@@ -229,7 +259,8 @@ export class SQLiteDiffer {
 
     for (const uc of table.uniqueConstraints || []) {
       const ucCols = uc.columns.map(c => `"${c}"`).join(', ');
-      parts.push(`UNIQUE (${ucCols})`);
+      const name = uc.name ? `CONSTRAINT "${uc.name}" ` : "";
+      parts.push(`${name}UNIQUE (${ucCols})`);
     }
 
     for (const cc of table.checkConstraints || []) {

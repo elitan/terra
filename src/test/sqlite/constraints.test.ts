@@ -168,6 +168,104 @@ describe("SQLite Unique Constraints", () => {
     const uniqueIndexes = tables[0].indexes?.filter(i => i.unique) || [];
     expect(uniqueIndexes.length).toBeGreaterThanOrEqual(2);
   });
+
+  test("preserves inline UNIQUE constraints across the full lifecycle", async function () {
+    const initialSql = `
+      CREATE TABLE accounts (
+        id INTEGER PRIMARY KEY,
+        email TEXT UNIQUE,
+        tenant TEXT NOT NULL,
+        username TEXT NOT NULL,
+        CONSTRAINT accounts_tenant_username_unique UNIQUE (tenant, username)
+      );
+    `;
+
+    const parsed = await provider.parseSchema(initialSql);
+    expect(parsed.tables[0].uniqueConstraints).toEqual([
+      { columns: ["email"] },
+      { columns: ["tenant", "username"] },
+    ]);
+
+    await schemaService.apply(initialSql, ["public"], true);
+    expect((await schemaService.plan(initialSql, ["public"])).hasChanges).toBe(false);
+
+    const seedClient = await provider.createClient(config);
+    try {
+      await seedClient.query(
+        "INSERT INTO accounts (id, email, tenant, username) VALUES (1, 'one@example.com', 'acme', 'one')"
+      );
+      await expect(
+        seedClient.query(
+          "INSERT INTO accounts (id, email, tenant, username) VALUES (2, 'one@example.com', 'other', 'two')"
+        )
+      ).rejects.toThrow();
+      await expect(
+        seedClient.query(
+          "INSERT INTO accounts (id, email, tenant, username) VALUES (3, 'three@example.com', 'acme', 'one')"
+        )
+      ).rejects.toThrow();
+    } finally {
+      await seedClient.end();
+    }
+
+    const recreationSql = initialSql.replace(
+      "CONSTRAINT accounts_tenant_username_unique UNIQUE (tenant, username)",
+      "CHECK (length(email) > 0),\n        CONSTRAINT accounts_tenant_username_unique UNIQUE (tenant, username)"
+    );
+    await schemaService.apply(recreationSql, ["public"], true);
+    expect((await schemaService.plan(recreationSql, ["public"])).hasChanges).toBe(false);
+
+    const recreatedClient = await provider.createClient(config);
+    try {
+      const rows = await recreatedClient.query<{ id: number; email: string }>(
+        "SELECT id, email FROM accounts ORDER BY id"
+      );
+      expect(rows.rows).toEqual([{ id: 1, email: "one@example.com" }]);
+      await expect(
+        recreatedClient.query(
+          "INSERT INTO accounts (id, email, tenant, username) VALUES (4, 'one@example.com', 'other', 'four')"
+        )
+      ).rejects.toThrow();
+    } finally {
+      await recreatedClient.end();
+    }
+
+    const removalSql = recreationSql.replace("email TEXT UNIQUE", "email TEXT");
+    await schemaService.apply(removalSql, ["public"], true);
+    expect((await schemaService.plan(removalSql, ["public"])).hasChanges).toBe(false);
+
+    const removalClient = await provider.createClient(config);
+    try {
+      await removalClient.query(
+        "INSERT INTO accounts (id, email, tenant, username) VALUES (5, 'one@example.com', 'other', 'five')"
+      );
+      const tables = await provider.getCurrentSchema(removalClient);
+      expect(tables[0].uniqueConstraints).toEqual([
+        { columns: ["tenant", "username"] },
+      ]);
+    } finally {
+      await removalClient.end();
+    }
+
+    await expect(
+      schemaService.apply(recreationSql, ["public"], true)
+    ).rejects.toThrow();
+
+    const rollbackClient = await provider.createClient(config);
+    try {
+      const duplicateRows = await rollbackClient.query<{ id: number }>(
+        "SELECT id FROM accounts WHERE email = 'one@example.com' ORDER BY id"
+      );
+      expect(duplicateRows.rows).toEqual([{ id: 1 }, { id: 5 }]);
+
+      const tempTables = await rollbackClient.query<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_accounts_new'"
+      );
+      expect(tempTables.rows).toEqual([]);
+    } finally {
+      await rollbackClient.end();
+    }
+  });
 });
 
 describe("SQLite Check Constraints", () => {

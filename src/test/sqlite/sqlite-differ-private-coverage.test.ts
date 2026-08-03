@@ -25,6 +25,18 @@ describe("SQLiteDiffer private coverage", () => {
     expect(changes.checkConstraintsChanged).toBe(true);
   });
 
+  test("detectChanges marks unique constraint changes for recreation", function () {
+    const differ = new SQLiteDiffer() as any;
+    const desired = makeTable({
+      uniqueConstraints: [{ columns: ["id"] }],
+    });
+    const current = makeTable();
+
+    const changes = differ.detectChanges(desired, current);
+    expect(changes.requiresRecreate).toBe(true);
+    expect(changes.uniqueConstraintsChanged).toBe(true);
+  });
+
   test("private SQL builders include unique where not-null and default branches", () => {
     const differ = new SQLiteDiffer() as any;
 
@@ -35,10 +47,10 @@ describe("SQLiteDiffer private coverage", () => {
 
     const createTable = differ.generateCreateTable(
       makeTable({
-        uniqueConstraints: [{ columns: ["id"] }],
+        uniqueConstraints: [{ name: "users_id_unique", columns: ["id"] }],
       })
     ) as string;
-    expect(createTable).toContain("UNIQUE (\"id\")");
+    expect(createTable).toContain("CONSTRAINT \"users_id_unique\" UNIQUE (\"id\")");
 
     const createIndex = differ.generateCreateIndex({
       name: "idx_users_active",

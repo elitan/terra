@@ -24,7 +24,7 @@
 |---|---|---|---|
 | tables | covered | covered | broad base tests present |
 | columns | covered | covered | includes many conversion cases |
-| constraints | covered | partial | nested check create/alter/enforce/idempotency covered; names and conflict clauses remain under audit |
+| constraints | covered | partial | nested checks and unique-constraint lifecycle/rollback covered; names and conflict clauses remain under audit |
 | indexes | covered | covered | includes partial/expression in pg |
 | views | covered | covered | sqlite view coverage exists |
 | schemas | covered | gap | sqlite unsupported by design |

@@ -66,11 +66,15 @@ describe("SQLiteInspector unit coverage", () => {
         return {
           rows: [
             { seq: 0, name: "sqlite_autoindex_users_1", unique: 1, origin: "u", partial: 0 },
-            { seq: 1, name: "idx_users_email", unique: 1, origin: "u", partial: 0 },
+            { seq: 1, name: "idx_users_email", unique: 1, origin: "c", partial: 0 },
             { seq: 2, name: "idx_users_pk_custom", unique: 1, origin: "pk", partial: 0 },
             { seq: 3, name: "idx_users_partial", unique: 0, origin: "c", partial: 1 },
           ],
         };
+      }
+
+      if (sql.includes('PRAGMA index_info("sqlite_autoindex_users_1")')) {
+        return { rows: [{ seqno: 0, cid: 1, name: "email" }] };
       }
 
       if (sql.includes('PRAGMA index_info("idx_users_email")')) {
@@ -127,8 +131,15 @@ describe("SQLiteInspector unit coverage", () => {
     expect(users.foreignKeys?.[0]?.onDelete).toBe("SET DEFAULT");
     expect(users.foreignKeys?.[0]?.onUpdate).toBe("RESTRICT");
     expect(users.foreignKeys?.[1]?.onUpdate).toBe("NO ACTION");
-    expect(users.uniqueConstraints).toEqual([{ name: "idx_users_email", columns: ["email"] }]);
+    expect(users.uniqueConstraints).toEqual([{ columns: ["email"] }]);
     expect(users.indexes).toEqual([
+      {
+        name: "idx_users_email",
+        tableName: "users",
+        columns: ["email"],
+        unique: true,
+        type: "btree",
+      },
       {
         name: "idx_users_partial",
         tableName: "users",

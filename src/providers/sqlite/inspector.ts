@@ -79,7 +79,7 @@ export class SQLiteInspector {
     const foreignKeys = await this.getForeignKeys(client, tableName);
     const indexes = await this.getIndexes(client, tableName);
     const checkConstraints = await this.getCheckConstraints(client, tableName);
-    const uniqueConstraints = await this.getUniqueConstraints(client, tableName, indexes);
+    const uniqueConstraints = await this.getUniqueConstraints(client, tableName);
 
     return {
       name: tableName,
@@ -212,15 +212,32 @@ export class SQLiteInspector {
 
   private async getUniqueConstraints(
     client: SQLiteClient,
-    tableName: string,
-    indexes: Index[]
+    tableName: string
   ): Promise<UniqueConstraint[]> {
-    return indexes
-      .filter(idx => idx.unique && idx.constraint?.type === 'u')
-      .map(idx => ({
-        name: idx.name,
-        columns: idx.columns,
-      }));
+    const indexList = await client.query<IndexInfo>(`PRAGMA index_list("${tableName}")`);
+    const constraints: UniqueConstraint[] = [];
+
+    for (const index of indexList.rows) {
+      if (index.origin !== "u") {
+        continue;
+      }
+
+      const indexInfo = await client.query<IndexColumnInfo>(
+        `PRAGMA index_info("${index.name}")`
+      );
+      const columns = indexInfo.rows
+        .sort(function (left, right) {
+          return left.seqno - right.seqno;
+        })
+        .map(function (column) {
+          return column.name;
+        });
+      constraints.push({ columns });
+    }
+
+    return constraints.sort(function (left, right) {
+      return left.columns.join("\0").localeCompare(right.columns.join("\0"));
+    });
   }
 
   async getCurrentViews(client: SQLiteClient): Promise<View[]> {
