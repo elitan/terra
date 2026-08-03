@@ -63,6 +63,7 @@ export function extractAllConstraints(
                 ...(c.Constraint.nulls_not_distinct
                   ? { nullsNotDistinct: true }
                   : {}),
+                ...getUniqueIndexOptions(c.Constraint),
                 ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
                 ...(options.initiallyDeferred === undefined
                   ? {}
@@ -96,6 +97,7 @@ export function extractAllConstraints(
             ...(elt.Constraint.nulls_not_distinct
               ? { nullsNotDistinct: true }
               : {}),
+            ...getUniqueIndexOptions(elt.Constraint),
             ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
             ...(options.initiallyDeferred === undefined
               ? {}
@@ -142,6 +144,16 @@ export function extractAllConstraints(
  */
 function extractColumnNames(keys: any[]): string[] {
   return keys.map(k => k.String?.sval || '').filter(Boolean);
+}
+
+function getUniqueIndexOptions(constraint: any): Partial<UniqueConstraint> {
+  const include = extractColumnNames(constraint.including || []);
+  const storageParameters = parseStorageParameterOptions(constraint.options);
+  return {
+    ...(include.length > 0 ? { include } : {}),
+    ...(storageParameters ? { storageParameters } : {}),
+    ...(constraint.indexspace ? { tablespace: constraint.indexspace } : {}),
+  };
 }
 
 function parseOperatorName(operatorNode: any): QualifiedName | undefined {
@@ -308,6 +320,7 @@ export function parseUniqueConstraint(node: any): UniqueConstraint | null {
       name: node.conname,
       columns: extractColumnNames(node.keys || []),
       ...(node.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
+      ...getUniqueIndexOptions(node),
       ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
       ...(options.initiallyDeferred === undefined
         ? {}

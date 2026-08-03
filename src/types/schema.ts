@@ -59,6 +59,9 @@ export interface CheckConstraint {
 export interface UniqueConstraint {
   name?: string;
   columns: string[];
+  include?: string[];
+  storageParameters?: Record<string, string>;
+  tablespace?: string;
   nullsNotDistinct?: boolean;
   deferrable?: boolean;
   initiallyDeferred?: boolean;

@@ -251,6 +251,9 @@ function normalizeSnapshot(input: any): unknown {
         return {
           name: unique.name,
           columns: [...(unique.columns || [])],
+          include: unique.include ? [...unique.include] : undefined,
+          storageParameters: unique.storageParameters,
+          tablespace: unique.tablespace,
           nullsNotDistinct: unique.nullsNotDistinct,
           deferrable: unique.deferrable,
           initiallyDeferred: unique.initiallyDeferred,

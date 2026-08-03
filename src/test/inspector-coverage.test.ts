@@ -403,6 +403,9 @@ describe("DatabaseInspector coverage", () => {
             {
               constraint_name: "uq_external",
               columns: ["external_id"],
+              included_columns: ["display_name", "updated_at"],
+              storage_options: ["fillfactor=75"],
+              tablespace_name: "fastspace",
               nulls_not_distinct: true,
               deferrable: true,
               initially_deferred: true,
@@ -433,6 +436,9 @@ describe("DatabaseInspector coverage", () => {
       {
         name: "uq_external",
         columns: ["external_id"],
+        include: ["display_name", "updated_at"],
+        storageParameters: { fillfactor: "75" },
+        tablespace: "fastspace",
         nullsNotDistinct: true,
         deferrable: true,
         initiallyDeferred: true,

@@ -32,6 +32,7 @@ import {
   generateDropForeignKeySQL,
   generateAddUniqueConstraintSQL,
   generateDropUniqueConstraintSQL,
+  generateUniqueConstraintClause,
   getQualifiedTableName,
   getForeignKeyConstraintName,
   splitSchemaTable,
@@ -2475,6 +2476,13 @@ export class SchemaDiffer {
     current: UniqueConstraint
   ): boolean {
     return (
+      !stringArraysEqual(desired.include, current.include) ||
+      !stringRecordsEqual(
+        desired.storageParameters,
+        current.storageParameters
+      ) ||
+      (desired.tablespace || "pg_default") !==
+        (current.tablespace || "pg_default") ||
       Boolean(desired.nullsNotDistinct) !==
         Boolean(current.nullsNotDistinct) ||
       Boolean(desired.deferrable) !== Boolean(current.deferrable) ||
@@ -2766,22 +2774,9 @@ export class SchemaDiffer {
           break;
 
         case "add_unique": {
-          const bareTable = getBareTableName(table.name);
-          const constraintName = alt.constraint.name || `${bareTable}_${alt.constraint.columns.join('_')}_unique`;
-          const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
-          b.p("ADD CONSTRAINT")
-            .ident(constraintName)
-            .p("UNIQUE");
-          if (alt.constraint.nullsNotDistinct) {
-            b.p("NULLS NOT DISTINCT");
-          }
-          b.p(`(${columns})`);
-          if (alt.constraint.deferrable) {
-            b.p("DEFERRABLE");
-            if (alt.constraint.initiallyDeferred) {
-              b.p("INITIALLY DEFERRED");
-            }
-          }
+          b.p("ADD").p(
+            generateUniqueConstraintClause(alt.constraint, table.name)
+          );
           break;
         }
 

@@ -122,11 +122,17 @@ describe("SQL generators coverage", () => {
     expect(generateDropCheckConstraintSQL("users", "users_check")).toContain("DROP CONSTRAINT");
     const uniqueSQL = generateAddUniqueConstraintSQL("users", {
       columns: ["email"],
+      include: ["display_name", "updated_at"],
+      storageParameters: { fillfactor: "75" },
+      tablespace: "Fast Indexes",
       nullsNotDistinct: true,
       deferrable: true,
       initiallyDeferred: true,
     });
     expect(uniqueSQL).toContain("UNIQUE NULLS NOT DISTINCT (\"email\")");
+    expect(uniqueSQL).toContain('INCLUDE ("display_name", "updated_at")');
+    expect(uniqueSQL).toContain("WITH (fillfactor=75)");
+    expect(uniqueSQL).toContain('USING INDEX TABLESPACE "Fast Indexes"');
     expect(uniqueSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(generateDropUniqueConstraintSQL("users", "users_email_unique")).toContain("DROP CONSTRAINT");
   });

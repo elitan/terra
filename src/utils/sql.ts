@@ -760,22 +760,12 @@ export function generateAddUniqueConstraintSQL(
   tableName: string,
   uniqueConstraint: UniqueConstraint
 ): string {
-  const bareTable = getBareTableName(tableName);
-  const constraintName = uniqueConstraint.name || `${bareTable}_${uniqueConstraint.columns.join('_')}_unique`;
-  const columns = uniqueConstraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
   const [targetTable, targetSchema] = splitSchemaTable(tableName);
   const builder = new SQLBuilder()
     .p("ALTER TABLE")
     .table(targetTable, targetSchema)
-    .p("ADD CONSTRAINT")
-    .ident(constraintName)
-    .p("UNIQUE");
-  if (uniqueConstraint.nullsNotDistinct) {
-    builder.p("NULLS NOT DISTINCT");
-  }
-  builder.p(`(${columns})`);
-
-  appendDeferrableOptions(builder, uniqueConstraint);
+    .p("ADD")
+    .p(generateUniqueConstraintClause(uniqueConstraint, tableName));
 
   return builder.p(";").build();
 }
@@ -815,6 +805,24 @@ export function generateUniqueConstraintClause(
     builder.p("NULLS NOT DISTINCT");
   }
   builder.p(`(${columns})`);
+  if (uniqueConstraint.include && uniqueConstraint.include.length > 0) {
+    const includedColumns = uniqueConstraint.include.map(
+      function quoteColumn(column) {
+        return new SQLBuilder().ident(column).build();
+      }
+    );
+    builder.p(`INCLUDE (${includedColumns.join(", ")})`);
+  }
+  if (uniqueConstraint.storageParameters) {
+    builder.p(
+      `WITH (${renderStorageParameterAssignments(uniqueConstraint.storageParameters)})`
+    );
+  }
+  if (uniqueConstraint.tablespace) {
+    builder
+      .p("USING INDEX TABLESPACE")
+      .ident(uniqueConstraint.tablespace);
+  }
   appendDeferrableOptions(builder, uniqueConstraint);
 
   return builder.build();

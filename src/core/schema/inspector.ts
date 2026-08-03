@@ -697,12 +697,27 @@ export class DatabaseInspector {
           (to_jsonb(index_catalog) ->> 'indnullsnotdistinct')::boolean,
           false
         ) AS nulls_not_distinct,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM unnest(index_catalog.indkey) WITH ORDINALITY
+            AS included_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = index_catalog.indrelid
+            AND attribute.attnum = included_column.attnum
+          WHERE included_column.position > index_catalog.indnkeyatts
+          ORDER BY included_column.position
+        ) AS included_columns,
+        index_relation.reloptions AS storage_options,
+        tablespace.spcname AS tablespace_name,
         c.condeferrable AS deferrable,
         c.condeferred AS initially_deferred
       FROM pg_constraint c
       JOIN pg_class cl ON cl.oid = c.conrelid
       JOIN pg_namespace ns ON ns.oid = cl.relnamespace
       JOIN pg_index index_catalog ON index_catalog.indexrelid = c.conindid
+      JOIN pg_class index_relation ON index_relation.oid = c.conindid
+      LEFT JOIN pg_tablespace tablespace
+        ON tablespace.oid = index_relation.reltablespace
       WHERE c.contype = 'u'
         AND cl.relname = $1
         AND ns.nspname = $2
@@ -724,6 +739,13 @@ export class DatabaseInspector {
     return result.rows.map((row) => ({
       name: row.constraint_name,
       columns: parseArrayLiteral(row.columns),
+      ...(row.included_columns?.length > 0
+        ? { include: row.included_columns }
+        : {}),
+      ...(row.storage_options
+        ? { storageParameters: this.parseStorageOptions(row.storage_options) }
+        : {}),
+      ...(row.tablespace_name ? { tablespace: row.tablespace_name } : {}),
       ...(row.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
       ...(row.deferrable ? { deferrable: true } : {}),
       ...(row.initially_deferred ? { initiallyDeferred: true } : {}),

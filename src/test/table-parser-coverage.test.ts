@@ -190,8 +190,13 @@ describe("Table parser coverage", () => {
       CREATE TABLE unique_table_level (
         tenant_id integer,
         email text,
+        display_name text,
+        updated_at timestamp,
         CONSTRAINT unique_tenant_email
           UNIQUE NULLS NOT DISTINCT (tenant_id, email)
+          INCLUDE (display_name, updated_at)
+          WITH (fillfactor=75)
+          USING INDEX TABLESPACE pg_default
       );
     `);
     const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
@@ -200,6 +205,9 @@ describe("Table parser coverage", () => {
       {
         columns: ["tenant_id", "email"],
         name: "unique_tenant_email",
+        include: ["display_name", "updated_at"],
+        storageParameters: { fillfactor: "75" },
+        tablespace: "pg_default",
         nullsNotDistinct: true,
       },
     ]);

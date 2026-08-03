@@ -382,6 +382,9 @@ describe("SchemaDiffer private coverage", () => {
         {
           name: "users_email_key",
           columns: ["email"],
+          include: ["id"],
+          storageParameters: { fillfactor: "75" },
+          tablespace: "fastspace",
           nullsNotDistinct: true,
         },
       ],
@@ -397,6 +400,9 @@ describe("SchemaDiffer private coverage", () => {
       .transactional.join("\n");
     expect(constraintSql).toContain('DROP CONSTRAINT "users_email_key"');
     expect(constraintSql).toContain("UNIQUE NULLS NOT DISTINCT");
+    expect(constraintSql).toContain('INCLUDE ("id")');
+    expect(constraintSql).toContain("WITH (fillfactor=75)");
+    expect(constraintSql).toContain('USING INDEX TABLESPACE "fastspace"');
     expect(function rejectPostgres14() {
       differ.generateMigrationPlan([strictConstraint], [ordinaryConstraint], {
         postgresVersionNum: 140000,
