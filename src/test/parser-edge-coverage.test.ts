@@ -337,6 +337,22 @@ describe("Parser edge coverage", () => {
       expect(parsed?.nullable).toBe(false);
     });
 
+    test("distinguishes unconstrained and primary-key nullability", function () {
+      const unconstrained = parseColumn({
+        colname: "optional_value",
+        typeName: { names: [{ String: { sval: "integer" } }] },
+        constraints: [],
+      });
+      const primaryKey = parseColumn({
+        colname: "id",
+        typeName: { names: [{ String: { sval: "integer" } }] },
+        constraints: [{ Constraint: { contype: "CONSTR_PRIMARY" } }],
+      });
+
+      expect(unconstrained?.nullable).toBe(true);
+      expect(primaryKey?.nullable).toBe(false);
+    });
+
     test("parses schema qualified type and columnref typmod", () => {
       const parsed = parseColumn({
         colname: "metric",

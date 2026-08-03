@@ -20,6 +20,35 @@ import type {
   Comment,
   SqlObject,
 } from "../../types/schema";
+import { renderIdentityClause } from "../../utils/identity";
+
+const IDENTITY_SEQUENCE_JOIN_SQL = `
+  LEFT JOIN LATERAL (
+    SELECT
+      sequence_namespace.nspname as sequence_schema,
+      sequence_class.relname as sequence_name,
+      sequence_catalog.seqstart,
+      sequence_catalog.seqincrement,
+      sequence_catalog.seqmin,
+      sequence_catalog.seqmax,
+      sequence_catalog.seqcache,
+      sequence_catalog.seqcycle
+    FROM pg_depend dependency
+    JOIN pg_class sequence_class
+      ON sequence_class.oid = dependency.objid
+      AND sequence_class.relkind = 'S'
+    JOIN pg_namespace sequence_namespace
+      ON sequence_namespace.oid = sequence_class.relnamespace
+    JOIN pg_sequence sequence_catalog
+      ON sequence_catalog.seqrelid = sequence_class.oid
+    WHERE dependency.refobjid = a.attrelid
+      AND dependency.refobjsubid = a.attnum
+      AND dependency.classid = 'pg_class'::regclass
+      AND dependency.refclassid = 'pg_class'::regclass
+      AND dependency.deptype = 'i'
+    LIMIT 1
+  ) identity_sequence ON a.attidentity != ''
+`;
 
 export class DatabaseInspector {
   async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
@@ -58,14 +87,24 @@ export class DatabaseInspector {
           NOT a.attnotnull as is_nullable,
           pg_get_expr(ad.adbin, ad.adrelid) as column_default,
           a.attgenerated,
+          a.attidentity,
           CASE
             WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
             ELSE NULL
-          END as generation_expression
+          END as generation_expression,
+          identity_sequence.sequence_schema as identity_sequence_schema,
+          identity_sequence.sequence_name as identity_sequence_name,
+          identity_sequence.seqstart as identity_start,
+          identity_sequence.seqincrement as identity_increment,
+          identity_sequence.seqmin as identity_min_value,
+          identity_sequence.seqmax as identity_max_value,
+          identity_sequence.seqcache as identity_cache,
+          identity_sequence.seqcycle as identity_cycle
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = cls.relnamespace
+        ${IDENTITY_SEQUENCE_JOIN_SQL}
         WHERE cls.relname = $1 AND n.nspname = $2 AND a.attnum > 0 AND NOT a.attisdropped
         ORDER BY a.attnum
       `,
@@ -77,6 +116,7 @@ export class DatabaseInspector {
 
         // Parse generated column info
         let generated: Column['generated'] | undefined = undefined;
+        const identity = this.buildIdentityColumn(col);
         let defaultValue = col.column_default;
 
         if (col.attgenerated && col.attgenerated !== '') {
@@ -94,11 +134,16 @@ export class DatabaseInspector {
           defaultValue = undefined;
         }
 
+        if (identity) {
+          defaultValue = undefined;
+        }
+
         return {
           name: col.column_name,
           type: type,
           nullable: col.is_nullable,
           default: defaultValue,
+          identity,
           generated,
         };
       });
@@ -985,6 +1030,11 @@ export class DatabaseInspector {
       JOIN pg_namespace n ON c.relnamespace = n.oid
       LEFT JOIN pg_sequence s ON s.seqrelid = c.oid
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
+      LEFT JOIN pg_depend identity_dependency
+        ON identity_dependency.objid = c.oid
+        AND identity_dependency.classid = 'pg_class'::regclass
+        AND identity_dependency.refclassid = 'pg_class'::regclass
+        AND identity_dependency.deptype = 'i'
       LEFT JOIN pg_depend de ON de.objid = c.oid AND de.deptype = 'e'
       LEFT JOIN pg_class c2 ON c2.oid = d.refobjid
       LEFT JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
@@ -992,6 +1042,7 @@ export class DatabaseInspector {
       WHERE c.relkind = 'S'
         AND n.nspname = ANY($1::text[])
         AND de.objid IS NULL  -- Exclude extension-owned sequences
+        AND identity_dependency.objid IS NULL  -- Managed through the identity column
       ORDER BY n.nspname, c.relname
     `, [schemas]);
 
@@ -1952,14 +2003,24 @@ export class DatabaseInspector {
           NOT a.attnotnull as is_nullable,
           pg_get_expr(ad.adbin, ad.adrelid) as column_default,
           a.attgenerated,
+          a.attidentity,
           CASE
             WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
             ELSE NULL
-          END as generation_expression
+          END as generation_expression,
+          identity_sequence.sequence_schema as identity_sequence_schema,
+          identity_sequence.sequence_name as identity_sequence_name,
+          identity_sequence.seqstart as identity_start,
+          identity_sequence.seqincrement as identity_increment,
+          identity_sequence.seqmin as identity_min_value,
+          identity_sequence.seqmax as identity_max_value,
+          identity_sequence.seqcache as identity_cache,
+          identity_sequence.seqcycle as identity_cycle
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
         JOIN pg_class cls ON cls.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = cls.relnamespace
+        ${IDENTITY_SEQUENCE_JOIN_SQL}
         WHERE cls.relname = $1
           AND n.nspname = $2
           AND a.attnum > 0
@@ -1990,6 +2051,12 @@ export class DatabaseInspector {
   private buildColumnDefinition(row: any): string {
     const parts = [this.quoteIdent(row.column_name), row.pg_type];
 
+    const identity = this.buildIdentityColumn(row);
+    if (identity) {
+      parts.push(renderIdentityClause(identity));
+      return parts.join(" ");
+    }
+
     if (row.attgenerated && row.attgenerated !== "") {
       const always = row.attgenerated === "s" || row.attgenerated === "a" ? "ALWAYS" : "BY DEFAULT";
       const stored = row.attgenerated === "s" ? "STORED" : "VIRTUAL";
@@ -2005,6 +2072,38 @@ export class DatabaseInspector {
     }
 
     return parts.join(" ");
+  }
+
+  private buildIdentityColumn(row: any): Column['identity'] | undefined {
+    if (!row.attidentity) return undefined;
+
+    const toOptionalString = function toOptionalString(
+      value: unknown
+    ): string | undefined {
+      return value === null || value === undefined ? undefined : String(value);
+    };
+    const sequenceName = row.identity_sequence_name
+      ? {
+          name: String(row.identity_sequence_name),
+          schema: row.identity_sequence_schema
+            ? String(row.identity_sequence_schema)
+            : undefined,
+        }
+      : undefined;
+
+    return {
+      generation: row.attidentity === 'a' ? 'ALWAYS' : 'BY DEFAULT',
+      sequenceName,
+      start: toOptionalString(row.identity_start),
+      increment: toOptionalString(row.identity_increment),
+      minValue: toOptionalString(row.identity_min_value),
+      maxValue: toOptionalString(row.identity_max_value),
+      cache: toOptionalString(row.identity_cache),
+      cycle:
+        row.identity_cycle === null || row.identity_cycle === undefined
+          ? undefined
+          : Boolean(row.identity_cycle),
+    };
   }
 
   private buildGrantObject(

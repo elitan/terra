@@ -1,6 +1,7 @@
 import type { Table, Column, PrimaryKeyConstraint, ForeignKeyConstraint, CheckConstraint, UniqueConstraint, View, Function, Procedure, Trigger, Sequence, EnumType, CompositeType } from "../types/schema";
 import { SQLBuilder } from "./sql-builder";
 import { expressionsEqual } from "./expression-comparator";
+import { identityColumnsAreDifferent, renderIdentityClause } from "./identity";
 
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
@@ -432,23 +433,30 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
     }
   }
 
+  if (identityColumnsAreDifferent(desired.identity, current.identity)) {
+    return true;
+  }
+
   return false;
 }
 
+export function generateColumnDefinition(column: Column): string {
+  const builder = new SQLBuilder().ident(column.name).p(column.type);
+
+  if (column.identity) {
+    builder.p(renderIdentityClause(column.identity));
+  } else if (column.generated) {
+    builder.p(`GENERATED ${column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${column.generated.expression}) ${column.generated.stored ? 'STORED' : 'VIRTUAL'}`);
+  } else {
+    if (!column.nullable) builder.p("NOT NULL");
+    if (column.default) builder.p(`DEFAULT ${column.default}`);
+  }
+
+  return builder.build();
+}
+
 export function generateCreateTableStatement(table: Table): string {
-  const columnDefs = table.columns.map((col) => {
-    const builder = new SQLBuilder();
-    builder.ident(col.name).p(col.type);
-
-    if (col.generated) {
-      builder.p(`GENERATED ${col.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${col.generated.expression}) ${col.generated.stored ? 'STORED' : 'VIRTUAL'}`);
-    } else {
-      if (!col.nullable) builder.p("NOT NULL");
-      if (col.default) builder.p(`DEFAULT ${col.default}`);
-    }
-
-    return builder.build();
-  });
+  const columnDefs = table.columns.map(generateColumnDefinition);
 
   // Add primary key constraint if it exists
   if (table.primaryKey) {

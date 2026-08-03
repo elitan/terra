@@ -1,8 +1,25 @@
+export interface IdentitySequenceName {
+  name: string;
+  schema?: string;
+}
+
+export interface IdentityColumn {
+  generation: 'ALWAYS' | 'BY DEFAULT';
+  sequenceName?: IdentitySequenceName;
+  start?: string;
+  increment?: string;
+  minValue?: string;
+  maxValue?: string;
+  cache?: string;
+  cycle?: boolean;
+}
+
 export interface Column {
   name: string;
   type: string;
   nullable: boolean;
   default?: string;
+  identity?: IdentityColumn;
   generated?: {
     always: boolean;
     expression: string;

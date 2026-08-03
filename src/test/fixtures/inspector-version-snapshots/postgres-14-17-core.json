@@ -8,7 +8,20 @@
           {
             "name": "id",
             "type": "bigint",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "audit_log_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "9223372036854775807",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "payload",
@@ -66,7 +79,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "score",
@@ -149,7 +175,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "tenant_a",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           }
         ],
         "primaryKey": {
@@ -250,15 +289,6 @@
     "sequences": [
       {
         "schema": "public",
-        "name": "audit_log_id_seq",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "9223372036854775807",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "public",
         "name": "audit_seq",
         "dataType": "INTEGER",
         "increment": "2",
@@ -267,26 +297,6 @@
         "start": "10",
         "cache": "5",
         "cycle": true
-      },
-      {
-        "schema": "public",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "tenant_a",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
       }
     ],
     "extensions": [],
@@ -340,7 +350,20 @@
           {
             "name": "id",
             "type": "bigint",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "audit_log_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "9223372036854775807",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "payload",
@@ -398,7 +421,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "score",
@@ -481,7 +517,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "tenant_a",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           }
         ],
         "primaryKey": {
@@ -582,15 +631,6 @@
     "sequences": [
       {
         "schema": "public",
-        "name": "audit_log_id_seq",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "9223372036854775807",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "public",
         "name": "audit_seq",
         "dataType": "INTEGER",
         "increment": "2",
@@ -599,26 +639,6 @@
         "start": "10",
         "cache": "5",
         "cycle": true
-      },
-      {
-        "schema": "public",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "tenant_a",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
       }
     ],
     "extensions": [],
@@ -672,7 +692,20 @@
           {
             "name": "id",
             "type": "bigint",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "audit_log_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "9223372036854775807",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "payload",
@@ -730,7 +763,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "score",
@@ -813,7 +859,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "tenant_a",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           }
         ],
         "primaryKey": {
@@ -914,15 +973,6 @@
     "sequences": [
       {
         "schema": "public",
-        "name": "audit_log_id_seq",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "9223372036854775807",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "public",
         "name": "audit_seq",
         "dataType": "INTEGER",
         "increment": "2",
@@ -931,26 +981,6 @@
         "start": "10",
         "cache": "5",
         "cycle": true
-      },
-      {
-        "schema": "public",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "tenant_a",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
       }
     ],
     "extensions": [],
@@ -1004,7 +1034,20 @@
           {
             "name": "id",
             "type": "bigint",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "audit_log_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "9223372036854775807",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "payload",
@@ -1062,7 +1105,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "public",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           },
           {
             "name": "score",
@@ -1145,7 +1201,20 @@
           {
             "name": "id",
             "type": "integer",
-            "nullable": false
+            "nullable": false,
+            "identity": {
+              "generation": "ALWAYS",
+              "sequenceName": {
+                "schema": "tenant_a",
+                "name": "users_id_seq"
+              },
+              "start": "1",
+              "increment": "1",
+              "minValue": "1",
+              "maxValue": "2147483647",
+              "cache": "1",
+              "cycle": false
+            }
           }
         ],
         "primaryKey": {
@@ -1246,15 +1315,6 @@
     "sequences": [
       {
         "schema": "public",
-        "name": "audit_log_id_seq",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "9223372036854775807",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "public",
         "name": "audit_seq",
         "dataType": "INTEGER",
         "increment": "2",
@@ -1263,26 +1323,6 @@
         "start": "10",
         "cache": "5",
         "cycle": true
-      },
-      {
-        "schema": "public",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
-      },
-      {
-        "schema": "tenant_a",
-        "name": "users_id_seq",
-        "dataType": "INTEGER",
-        "increment": "1",
-        "minValue": "1",
-        "maxValue": "2147483647",
-        "start": "1",
-        "cache": "1"
       }
     ],
     "extensions": [],

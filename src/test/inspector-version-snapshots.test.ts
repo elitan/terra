@@ -177,6 +177,23 @@ function normalizeSnapshot(input: any): unknown {
           type: normalizeSpace(String(column.type)),
           nullable: Boolean(column.nullable),
           default: normalizeMaybeText(column.default),
+          identity: column.identity
+            ? {
+                generation: column.identity.generation,
+                sequenceName: column.identity.sequenceName
+                  ? {
+                      schema: column.identity.sequenceName.schema,
+                      name: column.identity.sequenceName.name,
+                    }
+                  : undefined,
+                start: toStringOrUndefined(column.identity.start),
+                increment: toStringOrUndefined(column.identity.increment),
+                minValue: toStringOrUndefined(column.identity.minValue),
+                maxValue: toStringOrUndefined(column.identity.maxValue),
+                cache: toStringOrUndefined(column.identity.cache),
+                cycle: Boolean(column.identity.cycle),
+              }
+            : undefined,
           generated: column.generated
             ? {
                 always: Boolean(column.generated.always),

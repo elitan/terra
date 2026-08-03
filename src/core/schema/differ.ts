@@ -6,6 +6,7 @@ import type {
   CheckConstraint,
   ForeignKeyConstraint,
   UniqueConstraint,
+  IdentityColumn,
 } from "../../types/schema";
 import type { MigrationPlan, MigrationOptions } from "../../types/migration";
 import { DEFAULT_MIGRATION_OPTIONS } from "../../types/migration";
@@ -27,9 +28,15 @@ import {
   getForeignKeyConstraintName,
   splitSchemaTable,
   getBareTableName,
+  generateColumnDefinition,
 } from "../../utils/sql";
 import { expressionsEqual } from "../../utils/expression-comparator";
 import { SQLBuilder } from "../../utils/sql-builder";
+import {
+  getIdentityOptionChanges,
+  identitySequenceNamesDiffer,
+  renderIdentityClause,
+} from "../../utils/identity";
 import { DependencyResolver } from "./dependency-resolver";
 
 /**
@@ -43,6 +50,23 @@ type TableAlteration =
   | { type: "alter_column_drop_default"; columnName: string }
   | { type: "alter_column_set_not_null"; columnName: string }
   | { type: "alter_column_drop_not_null"; columnName: string }
+  | {
+      type: "alter_column_add_identity";
+      columnName: string;
+      identity: IdentityColumn;
+    }
+  | { type: "alter_column_drop_identity"; columnName: string }
+  | {
+      type: "alter_column_set_identity_generation";
+      columnName: string;
+      generation: IdentityColumn['generation'];
+    }
+  | {
+      type: "alter_column_set_identity_option";
+      columnName: string;
+      clause: string;
+      order: number;
+    }
   | { type: "add_primary_key"; constraint: PrimaryKeyConstraint }
   | { type: "drop_primary_key"; constraintName: string }
   | { type: "add_check"; constraint: CheckConstraint }
@@ -121,6 +145,10 @@ export class SchemaDiffer {
       } else {
         // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(tableKey)!;
+
+        statements.push(
+          ...this.generateIdentitySequenceRenameStatements(table, currentTable)
+        );
 
         // Collect all table alterations (columns, constraints, etc.)
         const alterations = this.collectTableAlterations(table, currentTable);
@@ -333,15 +361,7 @@ export class SchemaDiffer {
           .p("ALTER TABLE")
           .table(desiredTable.name, desiredTable.schema)
           .p("ADD COLUMN")
-          .ident(column.name)
-          .p(column.type);
-
-        if (column.generated) {
-          builder.p(`GENERATED ${column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${column.generated.expression}) ${column.generated.stored ? 'STORED' : 'VIRTUAL'}`);
-        } else {
-          if (!column.nullable) builder.p("NOT NULL");
-          if (column.default) builder.p(`DEFAULT ${column.default}`);
-        }
+          .p(generateColumnDefinition(column));
 
         statements.push(builder.p(";").build());
       } else {
@@ -407,15 +427,7 @@ export class SchemaDiffer {
         .p("ALTER TABLE")
         .p(tableName)
         .p("ADD COLUMN")
-        .ident(desiredColumn.name)
-        .p(desiredColumn.type);
-
-      if (desiredColumn.generated) {
-        addBuilder.p(`GENERATED ${desiredColumn.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${desiredColumn.generated.expression}) ${desiredColumn.generated.stored ? 'STORED' : 'VIRTUAL'}`);
-      } else {
-        if (!desiredColumn.nullable) addBuilder.p("NOT NULL");
-        if (desiredColumn.default) addBuilder.p(`DEFAULT ${desiredColumn.default}`);
-      }
+        .p(generateColumnDefinition(desiredColumn));
 
       statements.push(addBuilder.p(";").build());
 
@@ -1377,6 +1389,8 @@ export class SchemaDiffer {
       return;
     }
 
+    this.collectIdentityAlterations(desiredColumn, currentColumn, alterations);
+
     const normalizedDesiredType = normalizeType(desiredColumn.type);
     const normalizedCurrentType = normalizeType(currentColumn.type);
     const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
@@ -1442,6 +1456,103 @@ export class SchemaDiffer {
         });
       }
     }
+  }
+
+  private collectIdentityAlterations(
+    desiredColumn: Column,
+    currentColumn: Column,
+    alterations: TableAlteration[]
+  ): void {
+    const desiredIdentity = desiredColumn.identity;
+    const currentIdentity = currentColumn.identity;
+
+    if (currentIdentity && !desiredIdentity) {
+      alterations.push({
+        type: "alter_column_drop_identity",
+        columnName: desiredColumn.name,
+      });
+      return;
+    }
+
+    if (desiredIdentity && !currentIdentity) {
+      alterations.push({
+        type: "alter_column_add_identity",
+        columnName: desiredColumn.name,
+        identity: desiredIdentity,
+      });
+      return;
+    }
+
+    if (!desiredIdentity || !currentIdentity) return;
+
+    if (desiredIdentity.generation !== currentIdentity.generation) {
+      alterations.push({
+        type: "alter_column_set_identity_generation",
+        columnName: desiredColumn.name,
+        generation: desiredIdentity.generation,
+      });
+    }
+
+    const optionChanges = getIdentityOptionChanges(
+      desiredIdentity,
+      currentIdentity
+    );
+    for (const change of optionChanges) {
+      alterations.push({
+        type: "alter_column_set_identity_option",
+        columnName: desiredColumn.name,
+        clause: change.clause,
+        order: change.order,
+      });
+    }
+  }
+
+  private generateIdentitySequenceRenameStatements(
+    desiredTable: Table,
+    currentTable: Table
+  ): string[] {
+    const statements: string[] = [];
+    const currentColumns = new Map(
+      currentTable.columns.map(function mapColumn(column) {
+        return [column.name, column] as const;
+      })
+    );
+
+    for (const desiredColumn of desiredTable.columns) {
+      const desiredName = desiredColumn.identity?.sequenceName;
+      const currentName = currentColumns.get(desiredColumn.name)?.identity
+        ?.sequenceName;
+      if (!identitySequenceNamesDiffer(desiredName, currentName)) continue;
+      if (!desiredName || !currentName) continue;
+
+      let currentSchema = currentName.schema;
+      if (desiredName.schema && desiredName.schema !== currentSchema) {
+        statements.push(
+          new SQLBuilder()
+            .p("ALTER SEQUENCE")
+            .table(currentName.name, currentSchema)
+            .p("SET SCHEMA")
+            .ident(desiredName.schema)
+            .p(";")
+            .build()
+        );
+        currentSchema = desiredName.schema;
+      }
+
+      if (desiredName.name !== currentName.name) {
+        statements.push(
+          new SQLBuilder()
+            .p("ALTER SEQUENCE")
+            .table(currentName.name, currentSchema)
+            .p("RENAME TO")
+            .ident(desiredName.name)
+            .p(";")
+            .build()
+        );
+      }
+    }
+
+    return statements;
   }
 
   /**
@@ -1618,11 +1729,15 @@ export class SchemaDiffer {
       drop_check: 2,
       drop_primary_key: 3,
       drop_column: 4,
+      alter_column_drop_identity: 5,
       alter_column_type: 10,
       alter_column_set_default: 11,
       alter_column_drop_default: 12,
       alter_column_set_not_null: 13,
-      alter_column_drop_not_null: 14,
+      alter_column_add_identity: 14,
+      alter_column_set_identity_generation: 15,
+      alter_column_set_identity_option: 16,
+      alter_column_drop_not_null: 18,
       add_column: 20,
       add_primary_key: 21,
       add_check: 22,
@@ -1651,14 +1766,7 @@ export class SchemaDiffer {
       switch (alt.type) {
         case "add_column":
           b.p("ADD COLUMN")
-            .ident(alt.column.name)
-            .p(alt.column.type);
-          if (alt.column.generated) {
-            b.p(`GENERATED ${alt.column.generated.always ? 'ALWAYS' : 'BY DEFAULT'} AS (${alt.column.generated.expression}) ${alt.column.generated.stored ? 'STORED' : 'VIRTUAL'}`);
-          } else {
-            if (!alt.column.nullable) b.p("NOT NULL");
-            if (alt.column.default) b.p(`DEFAULT ${alt.column.default}`);
-          }
+            .p(generateColumnDefinition(alt.column));
           break;
 
         case "drop_column":
@@ -1696,6 +1804,30 @@ export class SchemaDiffer {
           b.p("ALTER COLUMN")
             .ident(alt.columnName)
             .p("DROP NOT NULL");
+          break;
+
+        case "alter_column_add_identity":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`ADD ${renderIdentityClause(alt.identity)}`);
+          break;
+
+        case "alter_column_drop_identity":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p("DROP IDENTITY");
+          break;
+
+        case "alter_column_set_identity_generation":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`SET GENERATED ${alt.generation}`);
+          break;
+
+        case "alter_column_set_identity_option":
+          b.p("ALTER COLUMN")
+            .ident(alt.columnName)
+            .p(`SET ${alt.clause}`);
           break;
 
         case "add_primary_key": {
@@ -1792,7 +1924,12 @@ export class SchemaDiffer {
       case "alter_column_drop_default":
       case "alter_column_set_not_null":
       case "alter_column_drop_not_null":
+      case "alter_column_add_identity":
+      case "alter_column_drop_identity":
+      case "alter_column_set_identity_generation":
         return alteration.columnName;
+      case "alter_column_set_identity_option":
+        return `${alteration.columnName}:${String(alteration.order).padStart(2, "0")}:${alteration.clause}`;
       case "add_primary_key":
         return alteration.constraint.name || alteration.constraint.columns.join(",");
       case "drop_primary_key":

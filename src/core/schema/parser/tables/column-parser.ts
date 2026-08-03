@@ -7,6 +7,7 @@
 import { Logger } from "../../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { Column } from "../../../../types/schema";
+import { normalizeIdentityColumn } from "../../../../utils/identity";
 
 /**
  * Extract all columns from CREATE TABLE tableElts array
@@ -48,12 +49,15 @@ export function parseColumn(columnDef: any): Column | null {
 
     const generated = extractGeneratedColumn(columnDef.constraints || []);
 
+    const identity = extractIdentityColumn(columnDef.constraints || [], type);
+
     const isSerial = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"].includes(type.toUpperCase());
     return {
       name,
       type,
-      nullable: !constraints.notNull && !constraints.primary && !isSerial,
+      nullable: !constraints.notNull && !constraints.primary && !isSerial && !identity,
       default: defaultValue,
+      identity,
       generated,
     };
   } catch (error) {
@@ -209,6 +213,91 @@ function extractGeneratedColumn(constraints: any[]): Column['generated'] | undef
   } catch (error) {
     Logger.warning(
       `Failed to extract generated column info: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  return undefined;
+}
+
+function extractIdentityOptionValue(arg: any): string | undefined {
+  const value =
+    arg?.Integer?.ival ??
+    arg?.Float?.fval ??
+    arg?.A_Const?.ival?.ival ??
+    arg?.A_Const?.fval?.fval;
+  return value === undefined ? undefined : String(value);
+}
+
+function extractIdentitySequenceName(
+  arg: any
+): NonNullable<Column['identity']>['sequenceName'] {
+  const names = (arg?.List?.items || [])
+    .map(function getNamePart(item: any) {
+      return item?.String?.sval;
+    })
+    .filter(function hasNamePart(value: unknown): value is string {
+      return typeof value === "string" && value.length > 0;
+    });
+
+  const name = names.at(-1);
+  if (!name) return undefined;
+  return {
+    name,
+    schema: names.length > 1 ? names.at(-2) : undefined,
+  };
+}
+
+function extractIdentityColumn(
+  constraints: any[],
+  columnType: string
+): Column['identity'] | undefined {
+  try {
+    for (const constraint of constraints) {
+      const definition = constraint.Constraint;
+      if (definition?.contype !== "CONSTR_IDENTITY") continue;
+
+      const generatedWhen = definition.generated_when;
+      const identity: NonNullable<Column['identity']> = {
+        generation:
+          generatedWhen === "a" || generatedWhen === 97
+            ? "ALWAYS"
+            : "BY DEFAULT",
+      };
+
+      for (const option of definition.options || []) {
+        const element = option.DefElem;
+        if (!element) continue;
+
+        switch (element.defname) {
+          case "sequence_name":
+            identity.sequenceName = extractIdentitySequenceName(element.arg);
+            break;
+          case "start":
+            identity.start = extractIdentityOptionValue(element.arg);
+            break;
+          case "increment":
+            identity.increment = extractIdentityOptionValue(element.arg);
+            break;
+          case "minvalue":
+            identity.minValue = extractIdentityOptionValue(element.arg);
+            break;
+          case "maxvalue":
+            identity.maxValue = extractIdentityOptionValue(element.arg);
+            break;
+          case "cache":
+            identity.cache = extractIdentityOptionValue(element.arg);
+            break;
+          case "cycle":
+            identity.cycle = Boolean(element.arg?.Boolean?.boolval);
+            break;
+        }
+      }
+
+      return normalizeIdentityColumn(columnType, identity);
+    }
+  } catch (error) {
+    Logger.warning(
+      `Failed to extract identity column info: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 
