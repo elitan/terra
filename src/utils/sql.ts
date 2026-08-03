@@ -769,7 +769,11 @@ export function generateAddUniqueConstraintSQL(
     .table(targetTable, targetSchema)
     .p("ADD CONSTRAINT")
     .ident(constraintName)
-    .p(`UNIQUE (${columns})`);
+    .p("UNIQUE");
+  if (uniqueConstraint.nullsNotDistinct) {
+    builder.p("NULLS NOT DISTINCT");
+  }
+  builder.p(`(${columns})`);
 
   appendDeferrableOptions(builder, uniqueConstraint);
 
@@ -806,7 +810,11 @@ export function generateUniqueConstraintClause(
     builder.p("CONSTRAINT").ident(constraintName);
   }
 
-  builder.p(`UNIQUE (${columns})`);
+  builder.p("UNIQUE");
+  if (uniqueConstraint.nullsNotDistinct) {
+    builder.p("NULLS NOT DISTINCT");
+  }
+  builder.p(`(${columns})`);
   appendDeferrableOptions(builder, uniqueConstraint);
 
   return builder.build();

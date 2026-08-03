@@ -328,6 +328,10 @@ export class DatabaseInspector {
         i.schemaname as table_schema,
         i.indexdef as index_definition,
         ix.indisunique as is_unique,
+        COALESCE(
+          (to_jsonb(ix) ->> 'indnullsnotdistinct')::boolean,
+          false
+        ) as nulls_not_distinct,
         am.amname as access_method,
         ix.indexprs IS NOT NULL as has_expressions,
         -- Extract tablespace information
@@ -440,6 +444,7 @@ export class DatabaseInspector {
         ...(row.expression_opclass_name ? { expressionOpclass: row.expression_opclass_name } : {}),
         type: this.mapPostgreSQLIndexType(row.access_method),
         unique: row.is_unique,
+        ...(row.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
         concurrent: false,
         where: row.where_clause || undefined,
         expression: row.has_expressions ? row.expression_def : undefined,
@@ -662,11 +667,16 @@ export class DatabaseInspector {
           FROM unnest(c.conkey) WITH ORDINALITY AS ord(col, n)
           JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ord.col
         ) AS columns,
+        COALESCE(
+          (to_jsonb(index_catalog) ->> 'indnullsnotdistinct')::boolean,
+          false
+        ) AS nulls_not_distinct,
         c.condeferrable AS deferrable,
         c.condeferred AS initially_deferred
       FROM pg_constraint c
       JOIN pg_class cl ON cl.oid = c.conrelid
       JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+      JOIN pg_index index_catalog ON index_catalog.indexrelid = c.conindid
       WHERE c.contype = 'u'
         AND cl.relname = $1
         AND ns.nspname = $2
@@ -688,6 +698,7 @@ export class DatabaseInspector {
     return result.rows.map((row) => ({
       name: row.constraint_name,
       columns: parseArrayLiteral(row.columns),
+      ...(row.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
       ...(row.deferrable ? { deferrable: true } : {}),
       ...(row.initially_deferred ? { initiallyDeferred: true } : {}),
     }));

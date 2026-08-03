@@ -59,6 +59,7 @@ export interface CheckConstraint {
 export interface UniqueConstraint {
   name?: string;
   columns: string[];
+  nullsNotDistinct?: boolean;
   deferrable?: boolean;
   initiallyDeferred?: boolean;
 }
@@ -99,6 +100,7 @@ export interface Index {
   expressionOpclass?: string;
   type?: "btree" | "hash" | "gist" | "spgist" | "gin" | "brin" | (string & {});
   unique?: boolean;
+  nullsNotDistinct?: boolean;
   concurrent?: boolean;
   where?: string; // For partial indexes
   expression?: string; // For expression indexes

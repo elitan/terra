@@ -276,6 +276,7 @@ export class SchemaDiffer {
     currentSchema: Table[],
     context: MigrationContext = {}
   ): MigrationPlan {
+    this.validateNullsNotDistinctSupport(desiredSchema, context);
     const statements: string[] = [];
     const deferred: string[] = [];
     const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
@@ -484,6 +485,59 @@ export class SchemaDiffer {
       deferred,
       hasChanges: transactional.length > 0 || concurrent.length > 0 || deferred.length > 0,
     };
+  }
+
+  private validateNullsNotDistinctSupport(
+    desiredSchema: Table[],
+    context: MigrationContext
+  ): void {
+    const invalidIndexTable = desiredSchema.find(
+      function hasNonUniqueNullsNotDistinct(candidate) {
+        return candidate.indexes?.some(function hasInvalidIndex(index) {
+          return index.nullsNotDistinct && !index.unique;
+        });
+      }
+    );
+    if (invalidIndexTable) {
+      const tableName = getQualifiedTableName(invalidIndexTable);
+      throw new ValidationError(
+        `NULLS NOT DISTINCT requires a UNIQUE index on ${tableName}`,
+        tableName,
+        "nullsNotDistinct",
+        true
+      );
+    }
+
+    const table = desiredSchema.find(function usesNullsNotDistinct(candidate) {
+      return (
+        candidate.uniqueConstraints?.some(function hasConstraint(constraint) {
+          return constraint.nullsNotDistinct;
+        }) ||
+        candidate.indexes?.some(function hasIndex(index) {
+          return index.nullsNotDistinct;
+        })
+      );
+    });
+    if (!table) return;
+
+    const tableName = getQualifiedTableName(table);
+    if (context.postgresVersionNum === undefined) {
+      throw new ValidationError(
+        `Cannot safely use NULLS NOT DISTINCT on ${tableName} without the PostgreSQL server version`,
+        tableName,
+        "nullsNotDistinct",
+        true
+      );
+    }
+    if (context.postgresVersionNum < 150000) {
+      const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+      throw new ValidationError(
+        `PostgreSQL ${serverMajor} does not support NULLS NOT DISTINCT; PostgreSQL 15 or newer is required`,
+        tableName,
+        "nullsNotDistinct",
+        true
+      );
+    }
   }
 
   private getTableKey(table: Pick<Table, "name" | "schema">): string {
@@ -1249,6 +1303,11 @@ export class SchemaDiffer {
     if (index1.tableName !== index2.tableName) return false;
     if (index1.type !== index2.type) return false;
     if (index1.unique !== index2.unique) return false;
+    if (
+      Boolean(index1.nullsNotDistinct) !== Boolean(index2.nullsNotDistinct)
+    ) {
+      return false;
+    }
 
     const expr1 = index1.expression;
     const expr2 = index2.expression;
@@ -1406,8 +1465,8 @@ export class SchemaDiffer {
       builder.p(`(${quotedColumns})`);
     }
 
-    if (index.where) {
-      builder.p(`WHERE ${index.where}`);
+    if (index.nullsNotDistinct) {
+      builder.p("NULLS NOT DISTINCT");
     }
 
     if (
@@ -1422,6 +1481,10 @@ export class SchemaDiffer {
 
     if (index.tablespace) {
       builder.p(`TABLESPACE ${index.tablespace}`);
+    }
+
+    if (index.where) {
+      builder.p(`WHERE ${index.where}`);
     }
 
     return builder.build() + ";";
@@ -1643,7 +1706,15 @@ export class SchemaDiffer {
     }
 
     for (const [key, constraint] of desiredMap) {
-      if (!currentMap.has(key)) {
+      const current = currentMap.get(key);
+      if (!current) {
+        statements.push(generateAddUniqueConstraintSQL(tableName, constraint));
+      } else if (this.uniqueConstraintsDiffer(constraint, current)) {
+        if (current.name) {
+          statements.push(
+            generateDropUniqueConstraintSQL(tableName, current.name)
+          );
+        }
         statements.push(generateAddUniqueConstraintSQL(tableName, constraint));
       }
     }
@@ -2319,13 +2390,35 @@ export class SchemaDiffer {
     }
 
     for (const [key, constraint] of desiredMap) {
-      if (!currentMap.has(key)) {
+      const current = currentMap.get(key);
+      if (!current) {
         alterations.push({
           type: "add_unique",
           constraint,
         });
+      } else if (this.uniqueConstraintsDiffer(constraint, current)) {
+        if (current.name) {
+          alterations.push({
+            type: "drop_unique",
+            constraintName: current.name,
+          });
+        }
+        alterations.push({ type: "add_unique", constraint });
       }
     }
+  }
+
+  private uniqueConstraintsDiffer(
+    desired: UniqueConstraint,
+    current: UniqueConstraint
+  ): boolean {
+    return (
+      Boolean(desired.nullsNotDistinct) !==
+        Boolean(current.nullsNotDistinct) ||
+      Boolean(desired.deferrable) !== Boolean(current.deferrable) ||
+      Boolean(desired.initiallyDeferred) !==
+        Boolean(current.initiallyDeferred)
+    );
   }
 
   private collectExclusionConstraintAlterations(
@@ -2616,7 +2709,11 @@ export class SchemaDiffer {
           const columns = alt.constraint.columns.map(col => `"${col.replace(/"/g, '""')}"`).join(", ");
           b.p("ADD CONSTRAINT")
             .ident(constraintName)
-            .p(`UNIQUE (${columns})`);
+            .p("UNIQUE");
+          if (alt.constraint.nullsNotDistinct) {
+            b.p("NULLS NOT DISTINCT");
+          }
+          b.p(`(${columns})`);
           if (alt.constraint.deferrable) {
             b.p("DEFERRABLE");
             if (alt.constraint.initiallyDeferred) {

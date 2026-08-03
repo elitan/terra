@@ -60,6 +60,9 @@ export function extractAllConstraints(
               uniqueConstraints.push({
                 name: c.Constraint.conname,
                 columns: [colName],
+                ...(c.Constraint.nulls_not_distinct
+                  ? { nullsNotDistinct: true }
+                  : {}),
                 ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
                 ...(options.initiallyDeferred === undefined
                   ? {}
@@ -90,6 +93,9 @@ export function extractAllConstraints(
           uniqueConstraints.push({
             name: elt.Constraint.conname,
             columns: extractColumnNames(elt.Constraint.keys || []),
+            ...(elt.Constraint.nulls_not_distinct
+              ? { nullsNotDistinct: true }
+              : {}),
             ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
             ...(options.initiallyDeferred === undefined
               ? {}
@@ -301,6 +307,7 @@ export function parseUniqueConstraint(node: any): UniqueConstraint | null {
     return {
       name: node.conname,
       columns: extractColumnNames(node.keys || []),
+      ...(node.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
       ...(options.deferrable === undefined ? {} : { deferrable: options.deferrable }),
       ...(options.initiallyDeferred === undefined
         ? {}

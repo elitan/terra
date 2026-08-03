@@ -116,6 +116,7 @@ export function parseCreateIndex(stmt: any): Index | null {
       ...(expressionOpclass ? { expressionOpclass } : {}),
       type,
       unique,
+      ...(stmt.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
       concurrent,
       where: whereClause,
       expression,

@@ -651,10 +651,13 @@ describe("Parser edge coverage", () => {
           { DefElem: { defname: "count", arg: { A_Const: { Integer: { ival: 3 } } } } },
         ],
         tableSpace: { String: { sval: "Fast Space" } },
+        unique: true,
+        nulls_not_distinct: true,
       });
 
       expect(index?.sortOrders).toEqual(["DESC"]);
-      expect(index?.unique).toBe(false);
+      expect(index?.unique).toBe(true);
+      expect(index?.nullsNotDistinct).toBe(true);
       expect(index?.concurrent).toBe(false);
       expect(index?.storageParameters).toEqual({ fillfactor: "70", note: "x", count: "3" });
       expect(index?.tablespace).toBe("\"Fast Space\"");
@@ -680,6 +683,7 @@ describe("Parser edge coverage", () => {
         options: [{ DefElem: { defname: "unused", arg: { TypeName: { names: [] } } } }],
       });
 
+      expect(index?.unique).toBe(false);
       expect(index?.expression?.toLowerCase()).toContain("lower");
       expect(index?.storageParameters).toBeUndefined();
       expect(index?.sortOrders).toEqual(["DESC"]);

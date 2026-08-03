@@ -122,10 +122,11 @@ describe("SQL generators coverage", () => {
     expect(generateDropCheckConstraintSQL("users", "users_check")).toContain("DROP CONSTRAINT");
     const uniqueSQL = generateAddUniqueConstraintSQL("users", {
       columns: ["email"],
+      nullsNotDistinct: true,
       deferrable: true,
       initiallyDeferred: true,
     });
-    expect(uniqueSQL).toContain("UNIQUE (\"email\")");
+    expect(uniqueSQL).toContain("UNIQUE NULLS NOT DISTINCT (\"email\")");
     expect(uniqueSQL).toContain("DEFERRABLE INITIALLY DEFERRED");
     expect(generateDropUniqueConstraintSQL("users", "users_email_unique")).toContain("DROP CONSTRAINT");
   });

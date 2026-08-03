@@ -251,6 +251,7 @@ function normalizeSnapshot(input: any): unknown {
         return {
           name: unique.name,
           columns: [...(unique.columns || [])],
+          nullsNotDistinct: unique.nullsNotDistinct,
           deferrable: unique.deferrable,
           initiallyDeferred: unique.initiallyDeferred,
         };
@@ -277,6 +278,7 @@ function normalizeSnapshot(input: any): unknown {
           name: index.name,
           type: index.type,
           unique: Boolean(index.unique),
+          nullsNotDistinct: index.nullsNotDistinct,
           columns: [...(index.columns || [])],
           sortOrders: index.sortOrders ? [...index.sortOrders] : undefined,
           where: normalizeMaybeText(index.where),

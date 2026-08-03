@@ -366,6 +366,105 @@ describe("SchemaDiffer private coverage", () => {
     }).toThrow("without the PostgreSQL server version");
   });
 
+  test("generateMigrationPlan preserves null uniqueness semantics", function () {
+    const differ = new SchemaDiffer();
+    const columns = [
+      makeColumn(),
+      makeColumn({ name: "email", type: "TEXT", nullable: true }),
+    ];
+    const ordinaryConstraint = makeTable({
+      columns,
+      uniqueConstraints: [{ name: "users_email_key", columns: ["email"] }],
+    });
+    const strictConstraint = makeTable({
+      columns,
+      uniqueConstraints: [
+        {
+          name: "users_email_key",
+          columns: ["email"],
+          nullsNotDistinct: true,
+        },
+      ],
+    });
+    const postgres15 = { postgresVersionNum: 150000 };
+
+    const constraintSql = differ
+      .generateMigrationPlan(
+        [strictConstraint],
+        [ordinaryConstraint],
+        postgres15
+      )
+      .transactional.join("\n");
+    expect(constraintSql).toContain('DROP CONSTRAINT "users_email_key"');
+    expect(constraintSql).toContain("UNIQUE NULLS NOT DISTINCT");
+    expect(function rejectPostgres14() {
+      differ.generateMigrationPlan([strictConstraint], [ordinaryConstraint], {
+        postgresVersionNum: 140000,
+      });
+    }).toThrow("PostgreSQL 15 or newer is required");
+    expect(function rejectUnknownVersion() {
+      differ.generateMigrationPlan([strictConstraint], [ordinaryConstraint]);
+    }).toThrow("without the PostgreSQL server version");
+    expect(function rejectNonUniqueIndex() {
+      differ.generateMigrationPlan(
+        [
+          makeTable({
+            indexes: [
+              {
+                name: "users_email_idx",
+                tableName: "users",
+                columns: ["email"],
+                nullsNotDistinct: true,
+              },
+            ],
+          }),
+        ],
+        [makeTable()],
+        postgres15
+      );
+    }).toThrow("requires a UNIQUE index");
+
+    const ordinaryIndex = makeTable({
+      columns,
+      indexes: [
+        {
+          name: "users_email_idx",
+          tableName: "users",
+          columns: ["email"],
+          unique: true,
+          type: "btree",
+        },
+      ],
+    });
+    const strictIndex = makeTable({
+      columns,
+      indexes: [
+        {
+          name: "users_email_idx",
+          tableName: "users",
+          columns: ["email"],
+          unique: true,
+          nullsNotDistinct: true,
+          type: "btree",
+        },
+      ],
+    });
+    const indexPlan = differ.generateMigrationPlan(
+      [strictIndex],
+      [ordinaryIndex],
+      postgres15
+    );
+    expect([...indexPlan.transactional, ...indexPlan.concurrent].join("\n"))
+      .toContain("NULLS NOT DISTINCT");
+    expect(
+      differ.generateMigrationPlan(
+        [ordinaryIndex],
+        [strictIndex],
+        postgres15
+      ).hasChanges
+    ).toBe(true);
+  });
+
   test("generateMigrationPlan handles inheritance transitions", function () {
     const differ = new SchemaDiffer();
     const parent = { name: "parent", schema: "public" };

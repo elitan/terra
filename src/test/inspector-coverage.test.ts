@@ -397,11 +397,13 @@ describe("DatabaseInspector coverage", () => {
       }
 
       if (sql.includes("WHERE c.contype = 'u'")) {
+        expect(sql).toContain("to_jsonb(index_catalog)");
         return {
           rows: [
             {
               constraint_name: "uq_external",
               columns: ["external_id"],
+              nulls_not_distinct: true,
               deferrable: true,
               initially_deferred: true,
             },
@@ -431,6 +433,7 @@ describe("DatabaseInspector coverage", () => {
       {
         name: "uq_external",
         columns: ["external_id"],
+        nullsNotDistinct: true,
         deferrable: true,
         initiallyDeferred: true,
       },
@@ -443,6 +446,7 @@ describe("DatabaseInspector coverage", () => {
       if (sql.includes("FROM pg_indexes i")) {
         expect(params).toEqual(["users", "public"]);
         expect(sql).toContain("con.contype IN ('u', 'x')");
+        expect(sql).toContain("to_jsonb(ix)");
         return {
           rows: [
             {
@@ -450,7 +454,8 @@ describe("DatabaseInspector coverage", () => {
               table_name: "users",
               table_schema: "public",
               index_definition: "CREATE INDEX idx_users_email ON users USING btree (email DESC, created_at)",
-              is_unique: false,
+              is_unique: true,
+              nulls_not_distinct: true,
               access_method: "btree",
               has_expressions: false,
               tablespace_name: "fastspace",
@@ -478,7 +483,8 @@ describe("DatabaseInspector coverage", () => {
         sortOrders: ["DESC", "ASC"],
         opclasses: { email: "text_pattern_ops" },
         type: "btree",
-        unique: false,
+        unique: true,
+        nullsNotDistinct: true,
         concurrent: false,
         where: "active = true",
         expression: undefined,

@@ -171,13 +171,37 @@ describe("Table parser coverage", () => {
 
   test("keeps a unique constraint when the table has no primary key", async function () {
     const ast = await parse(`
-      CREATE TABLE unique_only (email text UNIQUE);
+      CREATE TABLE unique_only (email text UNIQUE NULLS NOT DISTINCT);
     `);
     const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
 
     expect(parsed?.primaryKey).toBeUndefined();
     expect(parsed?.uniqueConstraints).toEqual([
-      { columns: ["email"], name: undefined },
+      {
+        columns: ["email"],
+        name: undefined,
+        nullsNotDistinct: true,
+      },
+    ]);
+  });
+
+  test("parses table-level null uniqueness semantics", async function () {
+    const ast = await parse(`
+      CREATE TABLE unique_table_level (
+        tenant_id integer,
+        email text,
+        CONSTRAINT unique_tenant_email
+          UNIQUE NULLS NOT DISTINCT (tenant_id, email)
+      );
+    `);
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.uniqueConstraints).toEqual([
+      {
+        columns: ["tenant_id", "email"],
+        name: "unique_tenant_email",
+        nullsNotDistinct: true,
+      },
     ]);
   });
 
