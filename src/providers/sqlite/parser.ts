@@ -2,7 +2,10 @@ import type { ParsedSchema } from "../types";
 import { ParserError } from "../../types/errors";
 import { SQLiteClient } from "./client";
 import { SQLiteInspector } from "./inspector";
-import { findSQLiteStatementStartKeyword } from "./sql-parser-utils";
+import {
+  findSQLiteStatementStartKeyword,
+  hasSQLiteQueryDerivedTable,
+} from "./sql-parser-utils";
 
 interface SQLiteSchemaObjectRow {
   type: string;
@@ -53,6 +56,13 @@ export class SQLiteParser {
         throw new ParserError(
           `${unsupportedKeyword} is not supported in SQLite desired schemas. ` +
             "Use CREATE statements to describe the objects that should exist",
+          filePath
+        );
+      }
+      if (hasSQLiteQueryDerivedTable(sql)) {
+        throw new ParserError(
+          "CREATE TABLE AS SELECT is not supported in SQLite desired schemas. " +
+            "Define table columns explicitly and load data separately",
           filePath
         );
       }

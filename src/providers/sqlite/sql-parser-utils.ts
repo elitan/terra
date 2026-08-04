@@ -1187,3 +1187,72 @@ export function findSQLiteStatementStartKeyword(
 
   return undefined;
 }
+
+function isSQLiteQueryDerivedTableAt(
+  sql: string,
+  createTokenEnd: number
+): boolean {
+  let token = readSQLiteToken(sql, createTokenEnd);
+  if (isWord(token, "TEMP") || isWord(token, "TEMPORARY")) {
+    token = readSQLiteToken(sql, token.end);
+  }
+  if (!isWord(token, "TABLE")) {
+    return false;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (isWord(token, "IF")) {
+    const notToken = readExpectedWord(sql, token.end, "NOT");
+    const existsToken = notToken
+      ? readExpectedWord(sql, notToken.end, "EXISTS")
+      : undefined;
+    if (!existsToken) {
+      return false;
+    }
+    token = readSQLiteToken(sql, existsToken.end);
+  }
+  if (!token || token.kind === "symbol") {
+    return false;
+  }
+
+  token = readSQLiteToken(sql, token.end);
+  if (token?.kind === "symbol" && token.value === ".") {
+    const tableName = readSQLiteToken(sql, token.end);
+    if (!tableName || tableName.kind === "symbol") {
+      return false;
+    }
+    token = readSQLiteToken(sql, tableName.end);
+  }
+
+  return isWord(token, "AS");
+}
+
+export function hasSQLiteQueryDerivedTable(sql: string): boolean {
+  let cursor = 0;
+  let atStatementStart = true;
+
+  while (cursor < sql.length) {
+    const token = readSQLiteToken(sql, cursor);
+    if (!token) {
+      break;
+    }
+    cursor = token.end;
+
+    if (token.kind === "symbol" && token.value === ";") {
+      atStatementStart = true;
+      continue;
+    }
+    if (!atStatementStart) {
+      continue;
+    }
+    atStatementStart = false;
+    if (
+      isWord(token, "CREATE") &&
+      isSQLiteQueryDerivedTableAt(sql, token.end)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}

@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { SchemaService } from "../../core/schema/service";
+import { SQLiteProvider } from "../../providers/sqlite";
 import { SQLiteParser } from "../../providers/sqlite/parser";
+import type { SQLiteConnectionConfig } from "../../providers/types";
 import { ParserError } from "../../types/errors";
 
 describe("SQLiteParser execution-runtime parity", function () {
@@ -194,6 +197,113 @@ describe("SQLiteParser execution-runtime parity", function () {
       await expect(parser.parseSchema(sql, "imperative.sql")).rejects.toThrow(
         `${keyword} is not supported in SQLite desired schemas`
       );
+    }
+  });
+
+  test("rejects every query-derived table spelling", async function () {
+    const parser = new SQLiteParser();
+    const schemas = [
+      "CREATE TABLE derived AS SELECT 1 AS id;",
+      `CREATE TABLE IF NOT EXISTS main."Derived Table"
+         AS WITH seed(value) AS (VALUES (2)) SELECT value FROM seed;`,
+      "CREATE TABLE [values table] AS VALUES (3), (4);",
+      `CREATE /* comment */ TEMPORARY TABLE \`session derived\`
+         AS SELECT 5 UNION ALL SELECT 6;`,
+    ];
+
+    for (const sql of schemas) {
+      await expect(
+        parser.parseSchema(sql, "query-derived.sql")
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        filePath: "query-derived.sql",
+        message: expect.stringContaining(
+          "CREATE TABLE AS SELECT is not supported"
+        ),
+      });
+    }
+  });
+
+  test("does not mistake valid AS clauses, comments, or literals for query-derived tables", async function () {
+    const parser = new SQLiteParser();
+    const schema = await parser.parseSchema(`
+      -- CREATE TABLE ignored AS SELECT 1;
+      CREATE TABLE ordinary (
+        id INTEGER,
+        "as" TEXT DEFAULT 'CREATE TABLE literal AS SELECT 1'
+      );
+      CREATE TABLE generated_values (
+        base INTEGER,
+        derived INTEGER AS (base + 1)
+      );
+      CREATE TABLE audit_log (message TEXT);
+      CREATE VIEW ordinary_view AS SELECT id FROM ordinary;
+      CREATE TRIGGER ordinary_insert AFTER INSERT ON ordinary BEGIN
+        INSERT INTO audit_log(message)
+        VALUES ('CREATE TABLE trigger_literal AS SELECT 1');
+      END;
+    `);
+
+    expect(schema.tables.map(function getTableName(table) {
+      return table.name;
+    })).toEqual(["audit_log", "generated_values", "ordinary"]);
+    expect(schema.views.map(function getViewName(view) {
+      return view.name;
+    })).toEqual(["ordinary_view"]);
+    expect(schema.triggers.map(function getTriggerName(trigger) {
+      return trigger.name;
+    })).toEqual(["ordinary_insert"]);
+  });
+
+  test("rejects query-derived tables before mutating file and shared-memory targets", async function () {
+    const filePath = path.join(
+      os.tmpdir(),
+      `terradb-query-derived-${Date.now()}.db`
+    );
+    const memoryName = `terradb-query-derived-${Date.now()}`;
+    const configs: SQLiteConnectionConfig[] = [
+      { dialect: "sqlite", filename: filePath },
+      {
+        dialect: "sqlite",
+        filename: `file:${memoryName}?mode=memory&cache=shared`,
+      },
+    ];
+
+    try {
+      for (const config of configs) {
+        const provider = new SQLiteProvider();
+        const keeper = await provider.createClient(config);
+        try {
+          await keeper.query(
+            "CREATE TABLE marker (id INTEGER PRIMARY KEY, value TEXT)"
+          );
+          await keeper.query(
+            "INSERT INTO marker(id, value) VALUES (1, 'preserved')"
+          );
+          const service = new SchemaService(provider, config);
+
+          await expect(service.apply(`
+            CREATE TABLE should_not_exist (id INTEGER);
+            CREATE TABLE derived AS SELECT 7 AS id;
+          `, ["public"], true)).rejects.toMatchObject({
+            code: "PARSER_ERROR",
+          });
+
+          const tables = await provider.getCurrentSchema(keeper);
+          expect(tables.map(function getTableName(table) {
+            return table.name;
+          })).toEqual(["marker"]);
+          expect(
+            (await keeper.query("SELECT id, value FROM marker")).rows
+          ).toEqual([{ id: 1, value: "preserved" }]);
+        } finally {
+          await keeper.end();
+        }
+      }
+    } finally {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
     }
   });
 });

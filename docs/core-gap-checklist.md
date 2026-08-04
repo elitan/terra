@@ -213,7 +213,8 @@
 - done: preserve PostgreSQL per-column statistics targets plus `n_distinct` and `n_distinct_inherited` overrides for ordinary/inherited tables and materialized views; canonicalize PostgreSQL 14-16 negative versus PostgreSQL 17-18 null defaults, expand desired non-`ONLY` targets across declared inheritance descendants while generating relation-local changes, preserve metadata through type and materialized-view column renames, reset external drift in place, and support expression-index statistics targets with concurrent-build ordering on PostgreSQL 14-18.
 - done: reject invalid targets and attribute values, duplicate or unknown options, missing columns, implicit materialized-view output names, and partition statistics catalog drift before mutation.
 - done: model PostgreSQL index keys as one lossless ordered sequence across mixed column/expression and multiple-expression indexes; preserve per-key collation, effective operator class and options, sort/null ordering, and every expression statistics target; validate catalog alignment and converge across PostgreSQL 14-18 without default-opclass drift.
-- next: audit the remaining PostgreSQL 14-18 and SQLite grammar/catalog surface against official documentation, then select the highest-impact lossless schema gap for the next lifecycle milestone.
+- done: reject SQLite query-derived `CREATE TABLE ... AS SELECT`, `VALUES`, and CTE forms before target mutation; distinguish valid view/generated-column `AS` clauses plus comments, literals, and trigger bodies; prove file and shared-memory target state remains unchanged.
+- next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser
 
