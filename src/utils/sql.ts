@@ -1202,11 +1202,10 @@ function getIdentityRoutineParamTypes(parameters: Array<{ type: string; mode?: s
 
 export function generateDropFunctionSQL(func: Function): string {
   const paramTypes = getIdentityRoutineParamTypes(func.parameters);
-  // Use CASCADE to automatically drop dependent triggers
   const builder = new SQLBuilder();
   builder.p('DROP FUNCTION IF EXISTS').table(func.name, func.schema);
   builder.rewriteLastChar('(');
-  builder.p(`${paramTypes}) CASCADE;`);
+  builder.p(`${paramTypes});`);
   return builder.build();
 }
 

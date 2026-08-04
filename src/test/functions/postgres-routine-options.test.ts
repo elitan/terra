@@ -29,13 +29,15 @@ describe("PostgreSQL routine security options", function () {
     oid: number;
     leakproof: boolean;
     configuration: string[] | null;
+    argumentNames: string[] | null;
   }> {
     const result = await client.query(
       `
         SELECT
           p.oid::integer AS oid,
           p.proleakproof AS leakproof,
-          p.proconfig AS configuration
+          p.proconfig AS configuration,
+          p.proargnames AS "argumentNames"
         FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'public'
@@ -404,5 +406,115 @@ describe("PostgreSQL routine security options", function () {
 
     const plan = await createTestSchemaService().plan(desiredSchema, ["public"]);
     expect(plan.hasChanges).toBe(false);
+  });
+
+  test("adds input parameter names without dropping routine dependents", async function () {
+    const initialSchema = `
+      CREATE FUNCTION public.nameable_function(integer)
+      RETURNS integer LANGUAGE sql
+      AS $$ SELECT $1 $$;
+
+      CREATE PROCEDURE public.nameable_procedure(integer)
+      LANGUAGE plpgsql
+      AS $$ BEGIN NULL; END $$;
+
+      CREATE VIEW public.nameable_function_view AS
+        SELECT public.nameable_function(1) AS value;
+    `;
+    const desiredSchema = `
+      CREATE FUNCTION public.nameable_function(value integer)
+      RETURNS integer LANGUAGE sql
+      AS $$ SELECT $1 $$;
+
+      CREATE PROCEDURE public.nameable_procedure(value integer)
+      LANGUAGE plpgsql
+      AS $$ BEGIN NULL; END $$;
+
+      CREATE VIEW public.nameable_function_view AS
+        SELECT public.nameable_function(1) AS value;
+    `;
+    const service = createTestSchemaService();
+    await service.apply(initialSchema, ["public"], true);
+    const initialFunction = await getRoutineMetadata("nameable_function");
+    const initialProcedure = await getRoutineMetadata("nameable_procedure");
+
+    const plan = await service.plan(desiredSchema, ["public"]);
+    expect(plan.transactional).toHaveLength(2);
+    expect(plan.transactional[0]).toStartWith("CREATE OR REPLACE FUNCTION");
+    expect(plan.transactional[1]).toStartWith("CREATE OR REPLACE PROCEDURE");
+    expect(plan.transactional.join("\n")).not.toContain("DROP");
+    await service.apply(desiredSchema, ["public"], true);
+
+    expect(await getRoutineMetadata("nameable_function")).toMatchObject({
+      oid: initialFunction.oid,
+      argumentNames: ["value"],
+    });
+    expect(await getRoutineMetadata("nameable_procedure")).toMatchObject({
+      oid: initialProcedure.oid,
+      argumentNames: ["value"],
+    });
+    expect(
+      (await client.query("SELECT value FROM public.nameable_function_view"))
+        .rows
+    ).toEqual([{ value: 1 }]);
+    expect((await service.plan(desiredSchema, ["public"])).hasChanges).toBe(
+      false
+    );
+  });
+
+  test("rejects dependency-breaking routine recreation before mutation", async function () {
+    const initialSchema = `
+      CREATE TABLE public.dependent_return_change_rows (value integer);
+      CREATE FUNCTION public.dependent_return_change(value integer)
+      RETURNS integer LANGUAGE sql IMMUTABLE
+      AS $$ SELECT value $$;
+      CREATE INDEX dependent_return_change_index
+        ON public.dependent_return_change_rows
+        (public.dependent_return_change(value));
+      CREATE VIEW public.dependent_return_change_view AS
+        SELECT public.dependent_return_change(1) AS value;
+    `;
+    const desiredSchema = `
+      CREATE TABLE public.dependent_return_change_rows (value integer);
+      CREATE FUNCTION public.dependent_return_change(value integer)
+      RETURNS text LANGUAGE sql IMMUTABLE
+      AS $$ SELECT value::text $$;
+      CREATE INDEX dependent_return_change_index
+        ON public.dependent_return_change_rows
+        (public.dependent_return_change(value));
+      CREATE VIEW public.dependent_return_change_view AS
+        SELECT public.dependent_return_change(1) AS value;
+    `;
+    const service = createTestSchemaService();
+    await client.query(initialSchema);
+    const initialFunction = await getRoutineMetadata("dependent_return_change");
+
+    try {
+      await service.plan(desiredSchema, ["public"]);
+      throw new Error("Expected dependent routine recreation to be rejected");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "VALIDATION_ERROR",
+        field: "dependentObjects",
+      });
+      expect((error as Error).message).toContain(
+        "index dependent_return_change_index"
+      );
+      expect((error as Error).message).toContain(
+        "rule _RETURN on view dependent_return_change_view"
+      );
+    }
+
+    expect(await getRoutineMetadata("dependent_return_change")).toEqual(
+      initialFunction
+    );
+    expect(
+      (await client.query("SELECT value FROM public.dependent_return_change_view"))
+        .rows
+    ).toEqual([{ value: 1 }]);
+    expect(
+      (await client.query("SELECT to_regclass('public.dependent_return_change_index') AS name"))
+        .rows[0]?.name
+    ).toBe("dependent_return_change_index");
   });
 });

@@ -6,8 +6,10 @@ import {
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import {
+  assertRoutineHasNoDependents,
+  retainBlockingRoutineDependents,
   routineConfigurationsEqual,
-  routineParameterIdentitiesEqual,
+  routineParametersCanBeReplaced,
 } from "./routine-handler-utils";
 
 function normalizeBody(body: string): string {
@@ -98,12 +100,21 @@ function procedureCanBeReplaced(
   desired: Procedure,
   current: Procedure
 ): boolean {
-  return routineParameterIdentitiesEqual(
+  return routineParametersCanBeReplaced(
     desired.parameters,
     current.parameters,
     normalizeParameterType,
     normalizeParameterMode
   );
+}
+
+function generateProcedureDrop(current: Procedure): string {
+  assertRoutineHasNoDependents(
+    "procedure",
+    getProcedureKey(current),
+    current.dependentObjects
+  );
+  return generateDropProcedureSQL(current);
 }
 
 function generateProcedureUpdate(
@@ -114,7 +125,7 @@ function generateProcedureUpdate(
     return generateCreateOrReplaceProcedureSQL(desired);
   }
   return [
-    generateDropProcedureSQL(current),
+    generateProcedureDrop(current),
     generateCreateProcedureSQL(desired),
   ];
 }
@@ -122,7 +133,7 @@ function generateProcedureUpdate(
 const config: HandlerConfig<Procedure> = {
   name: "procedure",
   getKey: getProcedureKey,
-  generateDrop: generateDropProcedureSQL,
+  generateDrop: generateProcedureDrop,
   generateCreate: generateCreateProcedureSQL,
   generateUpdate: generateProcedureUpdate,
   needsUpdate: function procedureNeedsUpdate(desired, current) {
@@ -140,7 +151,15 @@ const config: HandlerConfig<Procedure> = {
 };
 
 export class ProcedureHandler {
-  generateStatements(desiredProcedures: Procedure[], currentProcedures: Procedure[]): string[] {
-    return generateStatements(desiredProcedures, currentProcedures, config);
+  generateStatements(
+    desiredProcedures: Procedure[],
+    currentProcedures: Procedure[],
+    plannedDependentRemovals: ReadonlySet<string> = new Set()
+  ): string[] {
+    const current = retainBlockingRoutineDependents(
+      currentProcedures,
+      plannedDependentRemovals
+    );
+    return generateStatements(desiredProcedures, current, config);
   }
 }

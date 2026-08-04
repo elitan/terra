@@ -339,6 +339,45 @@ describe("SchemaService private coverage", function () {
     })).toEqual([scopedPolicy.key, desiredRole.key]);
   });
 
+  test("orders planned trigger removal before its dependent function", async function () {
+    const mock = createMockProvider({
+      features: new Set(["stored_functions", "triggers"]),
+    });
+    mock.provider.getCurrentFunctions = async function () {
+      return [
+        {
+          name: "audit_trigger",
+          schema: "public",
+          parameters: [],
+          returnType: "trigger",
+          language: "plpgsql",
+          body: "BEGIN RETURN NEW; END",
+          dependentObjects: ["trigger audit_trigger on table users"],
+        },
+      ];
+    };
+    mock.provider.getCurrentTriggers = async function () {
+      return [
+        {
+          name: "audit_trigger",
+          tableName: "users",
+          schema: "public",
+          timing: "BEFORE" as const,
+          events: ["INSERT" as const],
+          functionName: "audit_trigger",
+          functionSchema: "public",
+        },
+      ];
+    };
+
+    const plan = await createService(mock.provider).plan("");
+
+    expect(plan.transactional).toEqual([
+      'DROP TRIGGER IF EXISTS "audit_trigger" ON "public"."users";',
+      'DROP FUNCTION IF EXISTS "public"."audit_trigger"();',
+    ]);
+  });
+
   test("promptForConfirmation accepts yes and y only", async function () {
     const mock = createMockProvider();
     const service = createService(mock.provider);

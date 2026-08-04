@@ -189,6 +189,7 @@ export interface Function {
   cost?: number;
   rows?: number;
   configuration?: Record<string, string>;
+  dependentObjects?: string[];
 }
 
 export interface Procedure {
@@ -199,6 +200,7 @@ export interface Procedure {
   body: string;
   securityDefiner?: boolean;
   configuration?: Record<string, string>;
+  dependentObjects?: string[];
 }
 
 export interface Trigger {

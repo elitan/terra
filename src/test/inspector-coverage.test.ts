@@ -476,6 +476,39 @@ describe("DatabaseInspector coverage", () => {
     expect(functions[1]?.cost).toBe(100);
   });
 
+  test("inspects routine dependent objects deterministically", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function query(sql) {
+      expect(sql).toContain("pg_describe_object");
+      return {
+        rows: [
+          {
+            function_name: "dependent_function",
+            schema_name: "public",
+            arguments: "integer",
+            return_type: "integer",
+            language: "sql",
+            source_code: "SELECT $1",
+            volatility: "VOLATILE",
+            parallel: "UNSAFE",
+            cost: 100,
+            rows: 0,
+            dependent_objects: [
+              "index dependent_function_index",
+              "rule _RETURN on view dependent_function_view",
+            ],
+          },
+        ],
+      };
+    });
+
+    const functions = await inspector.getCurrentFunctions(client, ["public"]);
+    expect(functions[0]?.dependentObjects).toEqual([
+      "index dependent_function_index",
+      "rule _RETURN on view dependent_function_view",
+    ]);
+  });
+
   test("parses trigger when clause and function args from trigger definition", async () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql, params) => {

@@ -6,8 +6,10 @@ import {
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import {
+  assertRoutineHasNoDependents,
+  retainBlockingRoutineDependents,
   routineConfigurationsEqual,
-  routineParameterIdentitiesEqual,
+  routineParametersCanBeReplaced,
 } from "./routine-handler-utils";
 import { getDefaultFunctionCost } from "../../../utils/function-cost";
 
@@ -158,12 +160,21 @@ function functionCanBeReplaced(desired: Function, current: Function): boolean {
   ) {
     return false;
   }
-  return routineParameterIdentitiesEqual(
+  return routineParametersCanBeReplaced(
     desired.parameters,
     current.parameters,
     normalizeParameterType,
     normalizeParameterMode
   );
+}
+
+function generateFunctionDrop(current: Function): string {
+  assertRoutineHasNoDependents(
+    "function",
+    getFunctionKey(current),
+    current.dependentObjects
+  );
+  return generateDropFunctionSQL(current);
 }
 
 function generateFunctionUpdate(
@@ -174,7 +185,7 @@ function generateFunctionUpdate(
     return generateCreateOrReplaceFunctionSQL(desired);
   }
   return [
-    generateDropFunctionSQL(current),
+    generateFunctionDrop(current),
     generateCreateFunctionSQL(desired),
   ];
 }
@@ -182,7 +193,7 @@ function generateFunctionUpdate(
 const config: HandlerConfig<Function> = {
   name: "function",
   getKey: getFunctionKey,
-  generateDrop: generateDropFunctionSQL,
+  generateDrop: generateFunctionDrop,
   generateCreate: generateCreateFunctionSQL,
   generateUpdate: generateFunctionUpdate,
   needsUpdate: function functionNeedsUpdate(desired, current) {
@@ -210,7 +221,15 @@ const config: HandlerConfig<Function> = {
 };
 
 export class FunctionHandler {
-  generateStatements(desiredFunctions: Function[], currentFunctions: Function[]): string[] {
-    return generateStatements(dedupeFunctions(desiredFunctions), currentFunctions, config);
+  generateStatements(
+    desiredFunctions: Function[],
+    currentFunctions: Function[],
+    plannedDependentRemovals: ReadonlySet<string> = new Set()
+  ): string[] {
+    const current = retainBlockingRoutineDependents(
+      currentFunctions,
+      plannedDependentRemovals
+    );
+    return generateStatements(dedupeFunctions(desiredFunctions), current, config);
   }
 }

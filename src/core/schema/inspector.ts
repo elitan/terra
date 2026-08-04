@@ -102,6 +102,38 @@ function parseRoutineConfiguration(
   return Object.keys(configuration).length > 0 ? configuration : undefined;
 }
 
+const ROUTINE_DEPENDENT_OBJECTS_SQL = `
+  ARRAY(
+    SELECT dependent_object.description
+    FROM (
+      SELECT DISTINCT
+        pg_describe_object(
+          dependency.classid,
+          dependency.objid,
+          dependency.objsubid
+        ) AS description
+      FROM pg_depend dependency
+      WHERE dependency.refclassid = 'pg_proc'::regclass
+        AND dependency.refobjid = p.oid
+    ) dependent_object
+    WHERE dependent_object.description IS NOT NULL
+    ORDER BY dependent_object.description
+  )
+`;
+
+function parseRoutineDependentObjects(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const objects = value
+    .filter(function isDescription(item): item is string {
+      return typeof item === "string" && item.length > 0;
+    })
+    .sort();
+  return objects.length > 0 ? objects : undefined;
+}
+
 export class DatabaseInspector {
   async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
     const tables: Table[] = [];
@@ -1243,7 +1275,8 @@ export class DatabaseInspector {
         p.proisstrict as is_strict,
         p.procost as cost,
         p.prorows as rows,
-        p.proconfig as configuration
+        p.proconfig as configuration,
+        ${ROUTINE_DEPENDENT_OBJECTS_SQL} as dependent_objects
       FROM pg_proc p
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
@@ -1254,24 +1287,30 @@ export class DatabaseInspector {
       ORDER BY n.nspname, p.proname
     `, [schemas]);
 
-    return result.rows.map((row: any) => ({
-      name: row.function_name,
-      schema: row.schema_name,
-      parameters: this.parseFunctionArguments(row.arguments),
-      returnType: row.return_type,
-      language: row.language,
-      body: row.source_code,
-      volatility: row.volatility,
-      parallel: row.parallel,
-      leakproof: row.leakproof || undefined,
-      securityDefiner: row.security_definer || undefined,
-      strict: row.is_strict || undefined,
-      cost: row.cost !== getDefaultFunctionCost(row.language)
-        ? row.cost
-        : undefined,
-      rows: row.rows !== 1000 ? row.rows : undefined,
-      configuration: parseRoutineConfiguration(row.configuration),
-    }));
+    return result.rows.map((row: any) => {
+      const dependentObjects = parseRoutineDependentObjects(
+        row.dependent_objects
+      );
+      return {
+        name: row.function_name,
+        schema: row.schema_name,
+        parameters: this.parseFunctionArguments(row.arguments),
+        returnType: row.return_type,
+        language: row.language,
+        body: row.source_code,
+        volatility: row.volatility,
+        parallel: row.parallel,
+        leakproof: row.leakproof || undefined,
+        securityDefiner: row.security_definer || undefined,
+        strict: row.is_strict || undefined,
+        cost: row.cost !== getDefaultFunctionCost(row.language)
+          ? row.cost
+          : undefined,
+        rows: row.rows !== 1000 ? row.rows : undefined,
+        configuration: parseRoutineConfiguration(row.configuration),
+        ...(dependentObjects ? { dependentObjects } : {}),
+      };
+    });
   }
 
   // Get all procedures from the database
@@ -1284,7 +1323,8 @@ export class DatabaseInspector {
         l.lanname as language,
         p.prosrc as source_code,
         p.prosecdef as security_definer,
-        p.proconfig as configuration
+        p.proconfig as configuration,
+        ${ROUTINE_DEPENDENT_OBJECTS_SQL} as dependent_objects
       FROM pg_proc p
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
@@ -1295,15 +1335,21 @@ export class DatabaseInspector {
       ORDER BY n.nspname, p.proname
     `, [schemas]);
 
-    return result.rows.map((row: any) => ({
-      name: row.procedure_name,
-      schema: row.schema_name,
-      parameters: this.parseFunctionArguments(row.arguments),
-      language: row.language,
-      body: row.source_code,
-      securityDefiner: row.security_definer || undefined,
-      configuration: parseRoutineConfiguration(row.configuration),
-    }));
+    return result.rows.map((row: any) => {
+      const dependentObjects = parseRoutineDependentObjects(
+        row.dependent_objects
+      );
+      return {
+        name: row.procedure_name,
+        schema: row.schema_name,
+        parameters: this.parseFunctionArguments(row.arguments),
+        language: row.language,
+        body: row.source_code,
+        securityDefiner: row.security_definer || undefined,
+        configuration: parseRoutineConfiguration(row.configuration),
+        ...(dependentObjects ? { dependentObjects } : {}),
+      };
+    });
   }
 
   // Get all triggers from the database

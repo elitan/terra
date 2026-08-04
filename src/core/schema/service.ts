@@ -7,7 +7,7 @@ import type {
   AdvisoryLockOptions,
   ParsedSchema,
 } from "../../providers/types";
-import type { View } from "../../types/schema";
+import type { Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import { isDestructiveStatement } from "../../utils/statement-classifier";
 import {
@@ -480,13 +480,25 @@ export class SchemaService {
     const postSequenceStatements = sequenceStatements.filter(
       statement => /\bOWNED\s+BY\b/i.test(statement)
     );
+    const plannedTriggerRemovals = this.getRemovedTriggerDescriptions(
+      desiredTriggers,
+      currentTriggers
+    );
 
     if (this.provider.supportsFeature("stored_functions")) {
-      functionStatements = this.functionHandler.generateStatements(desiredFunctions, currentFunctions);
+      functionStatements = this.functionHandler.generateStatements(
+        desiredFunctions,
+        currentFunctions,
+        plannedTriggerRemovals
+      );
     }
 
     if (this.provider.supportsFeature("stored_procedures")) {
-      procedureStatements = this.procedureHandler.generateStatements(desiredProcedures, currentProcedures);
+      procedureStatements = this.procedureHandler.generateStatements(
+        desiredProcedures,
+        currentProcedures,
+        plannedTriggerRemovals
+      );
     }
 
     const normalizedDesiredViews = await this.canonicalizeDesiredViews(
@@ -527,6 +539,17 @@ export class SchemaService {
         preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);
         triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, []);
       }
+    } else if (this.provider.dialect === "postgres") {
+      preTableTriggerStatements = triggerStatements.filter(function isDrop(
+        statement
+      ) {
+        return /^DROP\s+TRIGGER\b/i.test(statement.trim());
+      });
+      triggerStatements = triggerStatements.filter(function isNotDrop(
+        statement
+      ) {
+        return !/^DROP\s+TRIGGER\b/i.test(statement.trim());
+      });
     }
 
     commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
@@ -710,6 +733,61 @@ export class SchemaService {
 
   private getViewKey(view: View): string {
     return `${view.schema || "public"}.${view.name}`;
+  }
+
+  private getRemovedTriggerDescriptions(
+    desiredTriggers: Trigger[],
+    currentTriggers: Trigger[]
+  ): Set<string> {
+    const desiredKeys = new Set(desiredTriggers.map(function getKey(trigger) {
+      return `${trigger.schema || "public"}.${trigger.tableName}.${trigger.name}`;
+    }));
+    const descriptions = new Set<string>();
+
+    for (const trigger of currentTriggers) {
+      const schema = trigger.schema || "public";
+      const key = `${schema}.${trigger.tableName}.${trigger.name}`;
+      if (desiredKeys.has(key)) {
+        continue;
+      }
+
+      const triggerNames = this.getDescriptionIdentifiers(trigger.name);
+      const tableNames = this.getDescriptionQualifiedNames(
+        schema,
+        trigger.tableName
+      );
+      for (const triggerName of triggerNames) {
+        for (const tableName of tableNames) {
+          descriptions.add(`trigger ${triggerName} on table ${tableName}`);
+        }
+      }
+    }
+
+    return descriptions;
+  }
+
+  private getDescriptionIdentifiers(value: string): string[] {
+    return Array.from(new Set([value, this.quoteIdentifier(value)]));
+  }
+
+  private getDescriptionQualifiedNames(
+    schema: string,
+    name: string
+  ): string[] {
+    const schemaNames = this.getDescriptionIdentifiers(schema);
+    const objectNames = this.getDescriptionIdentifiers(name);
+    const values = new Set<string>();
+    if (schema === "public") {
+      for (const objectName of objectNames) {
+        values.add(objectName);
+      }
+    }
+    for (const schemaName of schemaNames) {
+      for (const objectName of objectNames) {
+        values.add(`${schemaName}.${objectName}`);
+      }
+    }
+    return Array.from(values);
   }
 
   private quoteIdentifier(value: string): string {

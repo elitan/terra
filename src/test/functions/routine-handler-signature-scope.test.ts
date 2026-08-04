@@ -39,7 +39,7 @@ describe("routine handler signature scope", function () {
     );
 
     expect(statements).toHaveLength(1);
-    expect(statements[0]).toContain('DROP FUNCTION IF EXISTS "public"."compute"(text) CASCADE;');
+    expect(statements[0]).toBe('DROP FUNCTION IF EXISTS "public"."compute"(text);');
     expect(statements[0]).not.toContain('(integer)');
   });
 
@@ -91,6 +91,24 @@ describe("routine handler signature scope", function () {
     ).toStartWith("CREATE OR REPLACE FUNCTION");
   });
 
+  test("adds names to unnamed input parameters with replacement", function () {
+    const functionHandler = new FunctionHandler();
+    const procedureHandler = new ProcedureHandler();
+
+    expect(
+      functionHandler.generateStatements(
+        [makeFunction()],
+        [makeFunction({ parameters: [{ type: "integer" }] })]
+      )[0]
+    ).toStartWith("CREATE OR REPLACE FUNCTION");
+    expect(
+      procedureHandler.generateStatements(
+        [makeProcedure()],
+        [makeProcedure({ parameters: [{ type: "integer" }] })]
+      )[0]
+    ).toStartWith("CREATE OR REPLACE PROCEDURE");
+  });
+
   test("recreates a function when its return type cannot be replaced", function () {
     const handler = new FunctionHandler();
     const statements = handler.generateStatements(
@@ -101,6 +119,44 @@ describe("routine handler signature scope", function () {
     expect(statements).toHaveLength(2);
     expect(statements[0]).toContain("DROP FUNCTION");
     expect(statements[1]).toStartWith("CREATE FUNCTION");
+  });
+
+  test("rejects function and procedure drops with dependent objects", function () {
+    const functionHandler = new FunctionHandler();
+    const procedureHandler = new ProcedureHandler();
+
+    expect(function dropDependentFunction() {
+      return functionHandler.generateStatements(
+        [],
+        [
+          makeFunction({
+            dependentObjects: ["rule _RETURN on view compute_view"],
+          }),
+        ]
+      );
+    }).toThrow("rule _RETURN on view compute_view");
+    expect(function dropDependentProcedure() {
+      return procedureHandler.generateStatements(
+        [],
+        [
+          makeProcedure({
+            dependentObjects: ["procedure public.wrapper(integer)"],
+          }),
+        ]
+      );
+    }).toThrow("procedure public.wrapper(integer)");
+
+    expect(
+      functionHandler.generateStatements(
+        [],
+        [
+          makeFunction({
+            dependentObjects: ["trigger compute_trigger on table users"],
+          }),
+        ],
+        new Set(["trigger compute_trigger on table users"])
+      )
+    ).toEqual(['DROP FUNCTION IF EXISTS "public"."compute"(integer);']);
   });
 
   test("drops only removed procedure overload when names match", function () {

@@ -270,6 +270,7 @@ describe("SQL generators coverage", () => {
       'CREATE OR REPLACE FUNCTION "audit"."compute"'
     );
     expect(generateDropFunctionSQL(fn)).toContain('DROP FUNCTION IF EXISTS "audit"."compute"');
+    expect(generateDropFunctionSQL(fn)).not.toContain("CASCADE");
 
     expect(generateDropForeignKeySQL("x", "y")).toContain("ALTER TABLE");
 
