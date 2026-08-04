@@ -539,7 +539,7 @@ describe("Parser edge coverage", () => {
       Object.defineProperty(node, "options", {
         get() {
           calls += 1;
-          if (calls <= 6) {
+          if (calls <= 8) {
             return [
               { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
               { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },

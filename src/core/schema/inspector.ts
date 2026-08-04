@@ -83,6 +83,24 @@ function parseBooleanRelationOption(
   return option.slice(name.length + 1) === "true";
 }
 
+function parseRoutineConfiguration(
+  settings: string[] | null
+): Record<string, string> | undefined {
+  if (!Array.isArray(settings)) {
+    return undefined;
+  }
+
+  const configuration: Record<string, string> = {};
+  for (const setting of settings) {
+    const separator = setting.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    configuration[setting.slice(0, separator)] = setting.slice(separator + 1);
+  }
+  return Object.keys(configuration).length > 0 ? configuration : undefined;
+}
+
 export class DatabaseInspector {
   async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
     const tables: Table[] = [];
@@ -1219,10 +1237,12 @@ export class DatabaseInspector {
           WHEN 'u' THEN 'UNSAFE'
           WHEN 'r' THEN 'RESTRICTED'
         END as parallel,
+        p.proleakproof as leakproof,
         p.prosecdef as security_definer,
         p.proisstrict as is_strict,
         p.procost as cost,
-        p.prorows as rows
+        p.prorows as rows,
+        p.proconfig as configuration
       FROM pg_proc p
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
@@ -1242,10 +1262,12 @@ export class DatabaseInspector {
       body: row.source_code,
       volatility: row.volatility,
       parallel: row.parallel,
+      leakproof: row.leakproof || undefined,
       securityDefiner: row.security_definer || undefined,
       strict: row.is_strict || undefined,
       cost: row.cost !== 100 ? row.cost : undefined,
       rows: row.rows !== 1000 ? row.rows : undefined,
+      configuration: parseRoutineConfiguration(row.configuration),
     }));
   }
 
@@ -1258,7 +1280,8 @@ export class DatabaseInspector {
         pg_get_function_arguments(p.oid) as arguments,
         l.lanname as language,
         p.prosrc as source_code,
-        p.prosecdef as security_definer
+        p.prosecdef as security_definer,
+        p.proconfig as configuration
       FROM pg_proc p
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
@@ -1276,6 +1299,7 @@ export class DatabaseInspector {
       language: row.language,
       body: row.source_code,
       securityDefiner: row.security_definer || undefined,
+      configuration: parseRoutineConfiguration(row.configuration),
     }));
   }
 

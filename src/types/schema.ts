@@ -183,10 +183,12 @@ export interface Function {
   body: string;
   volatility?: 'VOLATILE' | 'STABLE' | 'IMMUTABLE';
   parallel?: 'SAFE' | 'UNSAFE' | 'RESTRICTED';
+  leakproof?: boolean;
   securityDefiner?: boolean;
   strict?: boolean;
   cost?: number;
   rows?: number;
+  configuration?: Record<string, string>;
 }
 
 export interface Procedure {
@@ -196,6 +198,7 @@ export interface Procedure {
   language: string;
   body: string;
   securityDefiner?: boolean;
+  configuration?: Record<string, string>;
 }
 
 export interface Trigger {

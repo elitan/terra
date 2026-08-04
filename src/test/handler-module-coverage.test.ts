@@ -280,9 +280,8 @@ describe("Handler module coverage", () => {
       const desired = makeProcedure({ body: "BEGIN SELECT 2; END" });
       const statements = handler.generateStatements([desired], [current]);
 
-      expect(statements).toHaveLength(2);
-      expect(statements[0]).toContain("DROP PROCEDURE IF EXISTS");
-      expect(statements[1]).toContain("CREATE PROCEDURE");
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).toContain("CREATE OR REPLACE PROCEDURE");
     });
 
     test("updates when language changes", () => {
@@ -291,9 +290,9 @@ describe("Handler module coverage", () => {
       const desired = makeProcedure({ language: "plpgsql" });
       const statements = handler.generateStatements([desired], [current]);
 
-      expect(statements).toHaveLength(2);
-      expect(statements[0]).toContain("DROP PROCEDURE IF EXISTS");
-      expect(statements[1]).toContain("LANGUAGE plpgsql");
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).toContain("CREATE OR REPLACE PROCEDURE");
+      expect(statements[0]).toContain("LANGUAGE plpgsql");
     });
   });
 

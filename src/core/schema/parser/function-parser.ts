@@ -7,12 +7,41 @@
 import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { Function, FunctionParameter } from "../../../types/schema";
+import { ParserError } from "../../../types/errors";
+import {
+  extractRoutineConfiguration,
+  validateRoutineDefinition,
+} from "./routine-option-parser";
+
+const SUPPORTED_FUNCTION_OPTIONS = new Set([
+  "as",
+  "cost",
+  "language",
+  "leakproof",
+  "parallel",
+  "rows",
+  "security",
+  "set",
+  "strict",
+  "volatility",
+]);
 
 /**
  * Parse CREATE FUNCTION statement from pgsql-parser AST
  */
-export function parseCreateFunction(node: any): Function | null {
+export function parseCreateFunction(
+  node: any,
+  originalSql: string = "",
+  filePath?: string
+): Function | null {
   try {
+    validateRoutineDefinition(
+      node,
+      "function",
+      SUPPORTED_FUNCTION_OPTIONS,
+      originalSql,
+      filePath
+    );
     const name = extractFunctionName(node);
     if (!name) {
       Logger.warning("Function missing name");
@@ -41,10 +70,17 @@ export function parseCreateFunction(node: any): Function | null {
 
     const volatility = extractVolatility(node);
     const parallel = extractParallel(node);
+    const leakproof = extractLeakproof(node);
     const securityDefiner = extractSecurityDefiner(node);
     const strict = extractStrict(node);
     const cost = extractCost(node);
     const rows = extractRows(node);
+    const configuration = extractRoutineConfiguration(
+      node,
+      "function",
+      originalSql,
+      filePath
+    );
 
     return {
       name,
@@ -55,16 +91,43 @@ export function parseCreateFunction(node: any): Function | null {
       body,
       volatility,
       parallel,
+      leakproof,
       securityDefiner,
       strict,
       cost,
       rows,
+      configuration,
     };
   } catch (error) {
+    if (error instanceof ParserError) {
+      throw error;
+    }
     Logger.warning(
       `Failed to parse CREATE FUNCTION: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
+  }
+}
+
+function extractLeakproof(node: any): boolean | undefined {
+  try {
+    if (!node.options || !Array.isArray(node.options)) return undefined;
+
+    for (const option of node.options) {
+      const defElem = option.DefElem;
+      if (defElem?.defname !== "leakproof") {
+        continue;
+      }
+      if (typeof defElem.arg?.Boolean?.boolval === "boolean") {
+        return defElem.arg.Boolean.boolval;
+      }
+      if (typeof defElem.arg?.Integer?.ival === "number") {
+        return defElem.arg.Integer.ival === 1;
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
   }
 }
 

@@ -144,10 +144,15 @@ async function prepareSchema(client: Client): Promise<void> {
     CREATE FUNCTION public.touch_user(p_id integer)
       RETURNS integer
       LANGUAGE sql
+      IMMUTABLE
+      LEAKPROOF
+      SET search_path = pg_catalog, pg_temp
+      SET application_name = 'snapshot function'
       AS $$ SELECT p_id $$;
 
     CREATE PROCEDURE public.touch_user_proc(p_id integer)
       LANGUAGE sql
+      SET application_name = 'snapshot procedure'
       AS $$ SELECT p_id $$;
 
     CREATE FUNCTION public.users_guard_fn()
@@ -377,10 +382,12 @@ function normalizeSnapshot(input: any): unknown {
       body: normalizeSpace(String(fn.body || "")),
       volatility: fn.volatility,
       parallel: fn.parallel,
+      leakproof: fn.leakproof,
       securityDefiner: fn.securityDefiner,
       strict: fn.strict,
       cost: fn.cost,
       rows: fn.rows,
+      configuration: fn.configuration,
     };
   });
 
@@ -399,6 +406,7 @@ function normalizeSnapshot(input: any): unknown {
       language: procedure.language,
       body: normalizeSpace(String(procedure.body || "")),
       securityDefiner: procedure.securityDefiner,
+      configuration: procedure.configuration,
     };
   });
 

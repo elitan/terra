@@ -1,9 +1,32 @@
 import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { Procedure, FunctionParameter } from "../../../types/schema";
+import { ParserError } from "../../../types/errors";
+import {
+  extractRoutineConfiguration,
+  validateRoutineDefinition,
+} from "./routine-option-parser";
 
-export function parseCreateProcedure(node: any): Procedure | null {
+const SUPPORTED_PROCEDURE_OPTIONS = new Set([
+  "as",
+  "language",
+  "security",
+  "set",
+]);
+
+export function parseCreateProcedure(
+  node: any,
+  originalSql: string = "",
+  filePath?: string
+): Procedure | null {
   try {
+    validateRoutineDefinition(
+      node,
+      "procedure",
+      SUPPORTED_PROCEDURE_OPTIONS,
+      originalSql,
+      filePath
+    );
     const { name, schema } = extractProcedureNameAndSchema(node);
     if (!name) return null;
 
@@ -22,6 +45,12 @@ export function parseCreateProcedure(node: any): Procedure | null {
     }
 
     const securityDefiner = extractSecurityDefiner(node);
+    const configuration = extractRoutineConfiguration(
+      node,
+      "procedure",
+      originalSql,
+      filePath
+    );
 
     return {
       name,
@@ -30,8 +59,12 @@ export function parseCreateProcedure(node: any): Procedure | null {
       language: language as string,
       body: body as string,
       securityDefiner,
+      configuration,
     };
   } catch (error) {
+    if (error instanceof ParserError) {
+      throw error;
+    }
     Logger.warning(
       `Failed to parse CREATE PROCEDURE from CST: ${error instanceof Error ? error.message : String(error)}`
     );

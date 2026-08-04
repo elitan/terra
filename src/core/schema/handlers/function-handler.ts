@@ -1,9 +1,14 @@
 import type { Function } from "../../../types/schema";
 import {
   generateCreateFunctionSQL,
+  generateCreateOrReplaceFunctionSQL,
   generateDropFunctionSQL,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
+import {
+  routineConfigurationsEqual,
+  routineParameterIdentitiesEqual,
+} from "./routine-handler-utils";
 
 function normalizeBody(body: string): string {
   return body.replace(/\s+/g, ' ').trim();
@@ -15,6 +20,10 @@ function normalizeVolatility(v: Function['volatility']): string {
 
 function normalizeParallel(p: Function['parallel']): string {
   return p || 'UNSAFE';
+}
+
+function normalizeLeakproof(value: Function['leakproof']): boolean {
+  return Boolean(value);
 }
 
 function normalizeSecurityDefiner(value: Function['securityDefiner']): boolean {
@@ -141,25 +150,61 @@ function dedupeFunctions(functions: Function[]): Function[] {
   return Array.from(deduped.values());
 }
 
+function functionCanBeReplaced(desired: Function, current: Function): boolean {
+  if (
+    normalizeReturnType(desired.returnType) !==
+    normalizeReturnType(current.returnType)
+  ) {
+    return false;
+  }
+  return routineParameterIdentitiesEqual(
+    desired.parameters,
+    current.parameters,
+    normalizeParameterType,
+    normalizeParameterMode
+  );
+}
+
+function generateFunctionUpdate(
+  desired: Function,
+  current: Function
+): string | string[] {
+  if (functionCanBeReplaced(desired, current)) {
+    return generateCreateOrReplaceFunctionSQL(desired);
+  }
+  return [
+    generateDropFunctionSQL(current),
+    generateCreateFunctionSQL(desired),
+  ];
+}
+
 const config: HandlerConfig<Function> = {
   name: "function",
   getKey: getFunctionKey,
   generateDrop: generateDropFunctionSQL,
   generateCreate: generateCreateFunctionSQL,
-  needsUpdate: (desired, current) =>
-    JSON.stringify(normalizeFunctionParameters(desired)) !==
+  generateUpdate: generateFunctionUpdate,
+  needsUpdate: function functionNeedsUpdate(desired, current) {
+    return JSON.stringify(normalizeFunctionParameters(desired)) !==
       JSON.stringify(normalizeFunctionParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
     normalizeReturnType(desired.returnType) !== normalizeReturnType(current.returnType) ||
     desired.language !== current.language ||
     normalizeVolatility(desired.volatility) !== normalizeVolatility(current.volatility) ||
     normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel) ||
+    normalizeLeakproof(desired.leakproof) !==
+      normalizeLeakproof(current.leakproof) ||
     normalizeSecurityDefiner(desired.securityDefiner) !==
       normalizeSecurityDefiner(current.securityDefiner) ||
     normalizeStrict(desired.strict) !== normalizeStrict(current.strict) ||
     normalizeCost(desired.cost) !== normalizeCost(current.cost) ||
     normalizeRows(desired.rows, desired.returnType) !==
-      normalizeRows(current.rows, current.returnType),
+      normalizeRows(current.rows, current.returnType) ||
+    !routineConfigurationsEqual(
+      desired.configuration,
+      current.configuration
+    );
+  },
 };
 
 export class FunctionHandler {

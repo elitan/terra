@@ -513,18 +513,30 @@ export class SchemaParser {
           throw this.unsupportedDerivedTableError("SELECT INTO", filePath);
         } else if (stmt.CreateFunctionStmt) {
           if (stmt.CreateFunctionStmt.is_procedure) {
-            const proc = parseCreateProcedure(stmt.CreateFunctionStmt);
+            const proc = parseCreateProcedure(
+              stmt.CreateFunctionStmt,
+              sql,
+              filePath
+            );
             if (proc) {
               procedures.push(proc);
             }
           } else {
-            const func = parseCreateFunction(stmt.CreateFunctionStmt);
+            const func = parseCreateFunction(
+              stmt.CreateFunctionStmt,
+              sql,
+              filePath
+            );
             if (func) {
               functions.push(func);
             }
           }
         } else if (stmt.CreateProcedureStmt) {
-          const proc = parseCreateProcedure(stmt.CreateProcedureStmt);
+          const proc = parseCreateProcedure(
+            stmt.CreateProcedureStmt,
+            sql,
+            filePath
+          );
           if (proc) {
             procedures.push(proc);
           }

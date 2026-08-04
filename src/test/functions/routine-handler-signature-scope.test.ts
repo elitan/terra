@@ -59,6 +59,29 @@ describe("routine handler signature scope", function () {
     expect(statements[0]).not.toContain("DROP FUNCTION");
   });
 
+  test("replaces compatible function changes without dropping dependents", function () {
+    const handler = new FunctionHandler();
+    const statements = handler.generateStatements(
+      [makeFunction({ body: "SELECT value + 1" })],
+      [makeFunction()]
+    );
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toStartWith("CREATE OR REPLACE FUNCTION");
+  });
+
+  test("recreates a function when its return type cannot be replaced", function () {
+    const handler = new FunctionHandler();
+    const statements = handler.generateStatements(
+      [makeFunction({ returnType: "text" })],
+      [makeFunction()]
+    );
+
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toContain("DROP FUNCTION");
+    expect(statements[1]).toStartWith("CREATE FUNCTION");
+  });
+
   test("drops only removed procedure overload when names match", function () {
     const handler = new ProcedureHandler();
 
@@ -89,5 +112,17 @@ describe("routine handler signature scope", function () {
     expect(statements).toHaveLength(1);
     expect(statements[0]).toContain('CREATE PROCEDURE "public"."sync_data"("value" text )');
     expect(statements[0]).not.toContain("DROP PROCEDURE");
+  });
+
+  test("recreates a procedure when an existing parameter name changes", function () {
+    const handler = new ProcedureHandler();
+    const statements = handler.generateStatements(
+      [makeProcedure({ parameters: [{ name: "desired", type: "integer" }] })],
+      [makeProcedure({ parameters: [{ name: "current", type: "integer" }] })]
+    );
+
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toContain("DROP PROCEDURE");
+    expect(statements[1]).toStartWith("CREATE PROCEDURE");
   });
 });

@@ -1,9 +1,14 @@
 import type { Procedure } from "../../../types/schema";
 import {
   generateCreateProcedureSQL,
+  generateCreateOrReplaceProcedureSQL,
   generateDropProcedureSQL,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
+import {
+  routineConfigurationsEqual,
+  routineParameterIdentitiesEqual,
+} from "./routine-handler-utils";
 
 function normalizeBody(body: string): string {
   return body.replace(/\s+/g, ' ').trim();
@@ -89,18 +94,49 @@ function normalizeSecurityDefiner(value: Procedure['securityDefiner']): boolean 
   return Boolean(value);
 }
 
+function procedureCanBeReplaced(
+  desired: Procedure,
+  current: Procedure
+): boolean {
+  return routineParameterIdentitiesEqual(
+    desired.parameters,
+    current.parameters,
+    normalizeParameterType,
+    normalizeParameterMode
+  );
+}
+
+function generateProcedureUpdate(
+  desired: Procedure,
+  current: Procedure
+): string | string[] {
+  if (procedureCanBeReplaced(desired, current)) {
+    return generateCreateOrReplaceProcedureSQL(desired);
+  }
+  return [
+    generateDropProcedureSQL(current),
+    generateCreateProcedureSQL(desired),
+  ];
+}
+
 const config: HandlerConfig<Procedure> = {
   name: "procedure",
   getKey: getProcedureKey,
   generateDrop: generateDropProcedureSQL,
   generateCreate: generateCreateProcedureSQL,
-  needsUpdate: (desired, current) =>
-    JSON.stringify(normalizeProcedureParameters(desired)) !==
+  generateUpdate: generateProcedureUpdate,
+  needsUpdate: function procedureNeedsUpdate(desired, current) {
+    return JSON.stringify(normalizeProcedureParameters(desired)) !==
       JSON.stringify(normalizeProcedureParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
     desired.language !== current.language ||
     normalizeSecurityDefiner(desired.securityDefiner) !==
-      normalizeSecurityDefiner(current.securityDefiner),
+      normalizeSecurityDefiner(current.securityDefiner) ||
+    !routineConfigurationsEqual(
+      desired.configuration,
+      current.configuration
+    );
+  },
 };
 
 export class ProcedureHandler {

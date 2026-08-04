@@ -21,6 +21,7 @@ import { identityColumnsAreDifferent, renderIdentityClause } from "./identity";
 import { collationsAreDifferent, renderCollationName } from "./collation";
 import { getColumnPhysicalChanges } from "./column-physical";
 import { renderStorageParameterAssignments } from "./storage-parameters";
+import { renderRoutineConfigurationValue } from "./routine-configuration";
 
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
@@ -1097,16 +1098,36 @@ export function generateRefreshMaterializedViewSQL(
   return builder.p(";").build();
 }
 
-// FUNCTION SQL generation functions
-export function generateCreateFunctionSQL(func: Function): string {
+function appendRoutineConfiguration(
+  builder: SQLBuilder,
+  configuration: Record<string, string> | undefined
+): void {
+  const entries = Object.entries(configuration || {}).sort(function sortByName(
+    first,
+    second
+  ) {
+    return first[0].localeCompare(second[0]);
+  });
+  for (const [name, value] of entries) {
+    if (!name.split(".").every(function isIdentifier(part) {
+      return /^[a-z_][a-z0-9_]*$/.test(part);
+    })) {
+      throw new Error(`Invalid PostgreSQL routine configuration name "${name}"`);
+    }
+    builder.p(`SET ${name} TO ${renderRoutineConfigurationValue(name, value)}`);
+  }
+}
+
+function generateFunctionSQL(func: Function, orReplace: boolean): string {
   const builder = new SQLBuilder();
 
-  builder.p('CREATE FUNCTION').table(func.name, func.schema);
+  builder.p(orReplace ? 'CREATE OR REPLACE FUNCTION' : 'CREATE FUNCTION')
+    .table(func.name, func.schema);
   builder.rewriteLastChar('(');
 
   // Add parameters
   if (func.parameters.length > 0) {
-    const params = func.parameters.map(p => {
+    const params = func.parameters.map(function renderParameter(p) {
       const parts: string[] = [];
       if (p.mode) parts.push(p.mode);
       if (p.name) parts.push(`"${p.name.replace(/"/g, '""')}"`);
@@ -1130,6 +1151,10 @@ export function generateCreateFunctionSQL(func: Function): string {
     builder.p(`PARALLEL ${func.parallel}`);
   }
 
+  if (func.leakproof !== undefined) {
+    builder.p(func.leakproof ? 'LEAKPROOF' : 'NOT LEAKPROOF');
+  }
+
   if (func.securityDefiner) {
     builder.p('SECURITY DEFINER');
   }
@@ -1146,7 +1171,18 @@ export function generateCreateFunctionSQL(func: Function): string {
     builder.p(`ROWS ${func.rows}`);
   }
 
+  appendRoutineConfiguration(builder, func.configuration);
+
   return builder.build() + ';';
+}
+
+// FUNCTION SQL generation functions
+export function generateCreateFunctionSQL(func: Function): string {
+  return generateFunctionSQL(func, false);
+}
+
+export function generateCreateOrReplaceFunctionSQL(func: Function): string {
+  return generateFunctionSQL(func, true);
 }
 
 function isIdentityRoutineParameterMode(mode: string | undefined): boolean {
@@ -1174,16 +1210,16 @@ export function generateDropFunctionSQL(func: Function): string {
   return builder.build();
 }
 
-// PROCEDURE SQL generation functions
-export function generateCreateProcedureSQL(proc: Procedure): string {
+function generateProcedureSQL(proc: Procedure, orReplace: boolean): string {
   const builder = new SQLBuilder();
 
-  builder.p('CREATE PROCEDURE').table(proc.name, proc.schema);
+  builder.p(orReplace ? 'CREATE OR REPLACE PROCEDURE' : 'CREATE PROCEDURE')
+    .table(proc.name, proc.schema);
   builder.rewriteLastChar('(');
 
   // Add parameters
   if (proc.parameters.length > 0) {
-    const params = proc.parameters.map(p => {
+    const params = proc.parameters.map(function renderParameter(p) {
       const parts: string[] = [];
       if (p.mode) parts.push(p.mode);
       if (p.name) parts.push(`"${p.name.replace(/"/g, '""')}"`);
@@ -1202,7 +1238,18 @@ export function generateCreateProcedureSQL(proc: Procedure): string {
     builder.p('SECURITY DEFINER');
   }
 
+  appendRoutineConfiguration(builder, proc.configuration);
+
   return builder.build() + ';';
+}
+
+// PROCEDURE SQL generation functions
+export function generateCreateProcedureSQL(proc: Procedure): string {
+  return generateProcedureSQL(proc, false);
+}
+
+export function generateCreateOrReplaceProcedureSQL(proc: Procedure): string {
+  return generateProcedureSQL(proc, true);
 }
 
 export function generateDropProcedureSQL(proc: Procedure): string {

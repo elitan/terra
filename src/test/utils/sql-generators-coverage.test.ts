@@ -6,8 +6,10 @@ import {
   generateAddPrimaryKeySQL,
   generateAddUniqueConstraintSQL,
   generateCreateFunctionSQL,
+  generateCreateOrReplaceFunctionSQL,
   generateCreateOrReplaceViewSQL,
   generateCreateProcedureSQL,
+  generateCreateOrReplaceProcedureSQL,
   generateCreateSequenceSQL,
   generateCreateTriggerSQL,
   generateCreateTypeSQL,
@@ -243,19 +245,30 @@ describe("SQL generators coverage", () => {
       body: "BEGIN RETURN 1; END",
       volatility: "STABLE",
       parallel: "SAFE",
+      leakproof: true,
       securityDefiner: true,
       strict: true,
       cost: 3,
       rows: 5,
+      configuration: {
+        application_name: "routine's app",
+        search_path: 'pg_catalog, "Case Schema"',
+      },
     };
     const fnSQL = generateCreateFunctionSQL(fn);
     expect(fnSQL).toContain('CREATE FUNCTION "audit"."compute"');
     expect(fnSQL).toContain("STABLE");
     expect(fnSQL).toContain("PARALLEL SAFE");
+    expect(fnSQL).toContain("LEAKPROOF");
     expect(fnSQL).toContain("SECURITY DEFINER");
     expect(fnSQL).toContain("STRICT");
     expect(fnSQL).toContain("COST 3");
     expect(fnSQL).toContain("ROWS 5");
+    expect(fnSQL).toContain("SET application_name TO 'routine''s app'");
+    expect(fnSQL).toContain("SET search_path TO 'pg_catalog', 'Case Schema'");
+    expect(generateCreateOrReplaceFunctionSQL(fn)).toStartWith(
+      'CREATE OR REPLACE FUNCTION "audit"."compute"'
+    );
     expect(generateDropFunctionSQL(fn)).toContain('DROP FUNCTION IF EXISTS "audit"."compute"');
 
     expect(generateDropForeignKeySQL("x", "y")).toContain("ALTER TABLE");
@@ -267,12 +280,23 @@ describe("SQL generators coverage", () => {
       language: "sql",
       body: "SELECT 1",
       securityDefiner: true,
+      configuration: { application_name: "procedure app" },
     };
     const procSQL = generateCreateProcedureSQL(proc);
     expect(procSQL).toContain('CREATE PROCEDURE "audit"."sync_users"');
     expect(procSQL).toContain("INOUT");
     expect(procSQL).toContain("DEFAULT 0");
     expect(procSQL).toContain("SECURITY DEFINER");
+    expect(procSQL).toContain("SET application_name TO 'procedure app'");
+    expect(generateCreateOrReplaceProcedureSQL(proc)).toStartWith(
+      'CREATE OR REPLACE PROCEDURE "audit"."sync_users"'
+    );
+    expect(function invalidConfigurationName() {
+      return generateCreateProcedureSQL({
+        ...proc,
+        configuration: { "invalid-name": "value" },
+      });
+    }).toThrow('Invalid PostgreSQL routine configuration name "invalid-name"');
     expect(generateDropProcedureSQL(proc)).toContain('DROP PROCEDURE IF EXISTS "audit"."sync_users"');
   });
 

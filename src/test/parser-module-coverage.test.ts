@@ -243,7 +243,7 @@ describe("Parser module coverage", () => {
               defname: "as",
               arg: {
                 List: {
-                  items: [{ String: { sval: "SELECT 1" } }, { String: { sval: "RETURN 1" } }],
+                  items: [{ String: { sval: "SELECT 1" } }],
                 },
               },
             },
@@ -267,13 +267,15 @@ describe("Parser module coverage", () => {
         ],
         returnType: "integer",
         language: "sql",
-        body: "SELECT 1\nRETURN 1",
+        body: "SELECT 1",
         volatility: "STABLE",
         parallel: "RESTRICTED",
+        leakproof: undefined,
         securityDefiner: true,
         strict: true,
         cost: 4.2,
         rows: 25,
+        configuration: undefined,
       });
     });
 
@@ -365,7 +367,7 @@ describe("Parser module coverage", () => {
               defname: "as",
               arg: {
                 List: {
-                  items: [{ String: { sval: "BEGIN" } }, { String: { sval: "END" } }],
+                  items: [{ String: { sval: "BEGIN END" } }],
                 },
               },
             },
@@ -378,7 +380,7 @@ describe("Parser module coverage", () => {
       expect(proc?.name).toBe("sync_users");
       expect(proc?.schema).toBe("public");
       expect(proc?.language).toBe("plpgsql");
-      expect(proc?.body).toBe("BEGIN\nEND");
+      expect(proc?.body).toBe("BEGIN END");
       expect(proc?.securityDefiner).toBe(true);
       expect(proc?.parameters).toEqual([
         { name: "p_id", type: "integer", mode: "IN" },
@@ -457,7 +459,7 @@ describe("Parser module coverage", () => {
       Object.defineProperty(badSecurityNode, "options", {
         get() {
           optionsGetterCount += 1;
-          if (optionsGetterCount <= 6) {
+          if (optionsGetterCount <= 8) {
             return [
               { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
               { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } } } },

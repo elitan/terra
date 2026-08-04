@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { parseCreateFunction } from "../core/schema/parser/function-parser";
+import { parseCreateIndex } from "../core/schema/parser/index-parser";
 import { parseCreateProcedure } from "../core/schema/parser/procedure-parser";
+import {
+  extractRoutineConfiguration,
+  validateRoutineDefinition,
+} from "../core/schema/parser/routine-option-parser";
 import { parseCreateSequence } from "../core/schema/parser/sequence-parser";
 import { parseColumn } from "../core/schema/parser/tables/column-parser";
 import { parseCreateView } from "../core/schema/parser/view-parser";
@@ -39,6 +44,257 @@ function makeViewStmt(arg: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("Parser gap coverage", function () {
+  test("covers routine configuration scalar AST variants", function () {
+    const configuration = extractRoutineConfiguration(
+      {
+        options: [
+          {
+            DefElem: {
+              defname: "set",
+              arg: {
+                VariableSetStmt: {
+                  kind: "VAR_SET_VALUE",
+                  name: "integer_values",
+                  args: [
+                    { A_Const: { ival: { ival: -1 } } },
+                    { A_Const: { Integer: { ival: 2 } } },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            DefElem: {
+              defname: "set",
+              arg: {
+                VariableSetStmt: {
+                  kind: "VAR_SET_VALUE",
+                  name: "float_values",
+                  args: [
+                    { A_Const: { fval: { fval: "1.25" } } },
+                    { A_Const: { Float: { fval: 2.5 } } },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            DefElem: {
+              defname: "set",
+              arg: {
+                VariableSetStmt: {
+                  kind: "VAR_SET_VALUE",
+                  name: "boolean_values",
+                  args: [
+                    { A_Const: { boolval: { boolval: true } } },
+                    { A_Const: { Boolean: { boolval: false } } },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            DefElem: {
+              defname: "set",
+              arg: {
+                VariableSetStmt: {
+                  kind: "VAR_SET_VALUE",
+                  name: "direct_string",
+                  args: [{ String: { sval: "value" } }],
+                },
+              },
+            },
+          },
+        ],
+      },
+      "function",
+      ""
+    );
+
+    expect(configuration).toEqual({
+      integer_values: "-1, 2",
+      float_values: "1.25, 2.5",
+      boolean_values: "true, false",
+      direct_string: "value",
+    });
+  });
+
+  test("covers defensive routine option validation errors", function () {
+    expect(
+      extractRoutineConfiguration({ options: "invalid" }, "function", "")
+    ).toBeUndefined();
+    expect(
+      extractRoutineConfiguration(
+        {
+          get options() {
+            throw new Error("bad options");
+          },
+        },
+        "procedure",
+        ""
+      )
+    ).toBeUndefined();
+    expect(function missingSettingName() {
+      return extractRoutineConfiguration(
+        {
+          options: [
+            {
+              DefElem: {
+                defname: "set",
+                arg: { VariableSetStmt: { kind: "VAR_SET_VALUE", args: [] } },
+              },
+            },
+          ],
+        },
+        "function",
+        ""
+      );
+    }).toThrow("missing a configuration parameter name");
+    expect(function unsupportedSettingKind() {
+      return extractRoutineConfiguration(
+        {
+          options: [
+            {
+              DefElem: {
+                defname: "set",
+                arg: {
+                  VariableSetStmt: { kind: "VAR_RESET", name: "work_mem" },
+                },
+              },
+            },
+          ],
+        },
+        "function",
+        ""
+      );
+    }).toThrow("uses an unsupported value form");
+    expect(function unrepresentableSettingValue() {
+      return extractRoutineConfiguration(
+        {
+          options: [
+            {
+              DefElem: {
+                defname: "set",
+                arg: {
+                  VariableSetStmt: {
+                    kind: "VAR_SET_VALUE",
+                    name: "work_mem",
+                    args: [{}],
+                  },
+                },
+              },
+            },
+          ],
+        },
+        "procedure",
+        ""
+      );
+    }).toThrow("cannot be represented safely");
+
+    expect(function validateMissingOptions() {
+      validateRoutineDefinition({}, "function", new Set(["as"]), "");
+      validateRoutineDefinition(
+        { options: [{}] },
+        "procedure",
+        new Set(["as"]),
+        ""
+      );
+    }).not.toThrow();
+  });
+
+  test("covers the integer leakproof parser form", function () {
+    const parsed = parseCreateFunction(
+      makeFunctionBase({
+        options: [
+          {
+            DefElem: {
+              defname: "language",
+              arg: { String: { sval: "sql" } },
+            },
+          },
+          {
+            DefElem: {
+              defname: "as",
+              arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } },
+            },
+          },
+          {
+            DefElem: {
+              defname: "leakproof",
+              arg: { Integer: { ival: 1 } },
+            },
+          },
+        ],
+      })
+    );
+
+    expect(parsed?.leakproof).toBe(true);
+  });
+
+  test("preserves set-returning and bare strict function options", function () {
+    const parsed = parseCreateFunction(
+      makeFunctionBase({
+        returnType: {
+          names: [{ String: { sval: "int4" } }],
+          setof: true,
+        },
+        options: [
+          {
+            DefElem: {
+              defname: "language",
+              arg: { String: { sval: "sql" } },
+            },
+          },
+          {
+            DefElem: {
+              defname: "as",
+              arg: { List: { items: [{ String: { sval: "SELECT 1" } }] } },
+            },
+          },
+          { DefElem: { defname: "strict" } },
+        ],
+      })
+    );
+
+    expect(parsed?.returnType).toBe("SETOF integer");
+    expect(parsed?.strict).toBe(true);
+  });
+
+  test("covers expression keys after ordinary index keys", function () {
+    const parsed = parseCreateIndex({
+      idxname: "idx_gap_mixed",
+      relation: { relname: "users" },
+      indexParams: [
+        { IndexElem: { name: "tenant_id" } },
+        {
+          IndexElem: {
+            expr: {
+              FuncCall: {
+                funcname: [{ String: { sval: "lower" } }],
+                args: [
+                  {
+                    ColumnRef: {
+                      fields: [{ String: { sval: "email" } }],
+                    },
+                  },
+                ],
+              },
+            },
+            opclass: [{ String: { sval: "text_pattern_ops" } }],
+            ordering: "SORTBY_DESC",
+            nulls_ordering: "SORTBY_NULLS_LAST",
+          },
+        },
+      ],
+    });
+
+    expect(parsed?.columns).toEqual(["tenant_id"]);
+    expect(parsed?.expression?.toLowerCase()).toContain("lower");
+    expect(parsed?.expressionOpclass).toBe("text_pattern_ops");
+    expect(parsed?.sortOrders).toEqual(["ASC", "DESC"]);
+    expect(parsed?.nullsOrders).toEqual(["LAST", "LAST"]);
+  });
+
   test("covers function schema catch and fallback branches", function () {
     const node: any = makeFunctionBase({
       parameters: [

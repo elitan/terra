@@ -288,9 +288,14 @@
         "returnType": "integer",
         "language": "sql",
         "body": "SELECT p_id",
-        "volatility": "VOLATILE",
+        "volatility": "IMMUTABLE",
         "parallel": "UNSAFE",
-        "rows": 0
+        "leakproof": true,
+        "rows": 0,
+        "configuration": {
+          "search_path": "pg_catalog, pg_temp",
+          "application_name": "snapshot function"
+        }
       },
       {
         "schema": "public",
@@ -316,7 +321,10 @@
           }
         ],
         "language": "sql",
-        "body": "SELECT p_id"
+        "body": "SELECT p_id",
+        "configuration": {
+          "application_name": "snapshot procedure"
+        }
       }
     ],
     "triggers": [
@@ -683,9 +691,14 @@
         "returnType": "integer",
         "language": "sql",
         "body": "SELECT p_id",
-        "volatility": "VOLATILE",
+        "volatility": "IMMUTABLE",
         "parallel": "UNSAFE",
-        "rows": 0
+        "leakproof": true,
+        "rows": 0,
+        "configuration": {
+          "search_path": "pg_catalog, pg_temp",
+          "application_name": "snapshot function"
+        }
       },
       {
         "schema": "public",
@@ -711,7 +724,10 @@
           }
         ],
         "language": "sql",
-        "body": "SELECT p_id"
+        "body": "SELECT p_id",
+        "configuration": {
+          "application_name": "snapshot procedure"
+        }
       }
     ],
     "triggers": [
@@ -1078,9 +1094,14 @@
         "returnType": "integer",
         "language": "sql",
         "body": "SELECT p_id",
-        "volatility": "VOLATILE",
+        "volatility": "IMMUTABLE",
         "parallel": "UNSAFE",
-        "rows": 0
+        "leakproof": true,
+        "rows": 0,
+        "configuration": {
+          "search_path": "pg_catalog, pg_temp",
+          "application_name": "snapshot function"
+        }
       },
       {
         "schema": "public",
@@ -1106,7 +1127,10 @@
           }
         ],
         "language": "sql",
-        "body": "SELECT p_id"
+        "body": "SELECT p_id",
+        "configuration": {
+          "application_name": "snapshot procedure"
+        }
       }
     ],
     "triggers": [
@@ -1473,9 +1497,14 @@
         "returnType": "integer",
         "language": "sql",
         "body": "SELECT p_id",
-        "volatility": "VOLATILE",
+        "volatility": "IMMUTABLE",
         "parallel": "UNSAFE",
-        "rows": 0
+        "leakproof": true,
+        "rows": 0,
+        "configuration": {
+          "search_path": "pg_catalog, pg_temp",
+          "application_name": "snapshot function"
+        }
       },
       {
         "schema": "public",
@@ -1501,7 +1530,10 @@
           }
         ],
         "language": "sql",
-        "body": "SELECT p_id"
+        "body": "SELECT p_id",
+        "configuration": {
+          "application_name": "snapshot procedure"
+        }
       }
     ],
     "triggers": [

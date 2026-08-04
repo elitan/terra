@@ -41,7 +41,7 @@ describe("Function parser private coverage", () => {
         ],
         options: [
           languageOption("sql"),
-          asOption("BEGIN", "END"),
+          asOption("BEGIN END"),
           { DefElem: { defname: "security", arg: { Integer: { ival: 1 } } } },
         ],
       })
@@ -50,7 +50,7 @@ describe("Function parser private coverage", () => {
     expect(parsed).not.toBeNull();
     expect(parsed?.parameters[0].type).toBe("unknown");
     expect(parsed?.parameters[0].default).toBe("");
-    expect(parsed?.body).toBe("BEGIN\nEND");
+    expect(parsed?.body).toBe("BEGIN END");
     expect(parsed?.securityDefiner).toBe(true);
   });
 

@@ -341,6 +341,7 @@ describe("DatabaseInspector coverage", () => {
         language: "plpgsql",
         body: "BEGIN NULL; END",
         securityDefiner: undefined,
+        configuration: undefined,
       },
     ]);
 
@@ -413,10 +414,12 @@ describe("DatabaseInspector coverage", () => {
         body: "SELECT 1",
         volatility: "VOLATILE",
         parallel: "UNSAFE",
+        leakproof: undefined,
         securityDefiner: undefined,
         strict: undefined,
         cost: undefined,
         rows: undefined,
+        configuration: undefined,
       },
     ]);
 
@@ -429,6 +432,7 @@ describe("DatabaseInspector coverage", () => {
         language: "sql",
         body: "SELECT 1",
         securityDefiner: undefined,
+        configuration: undefined,
       },
     ]);
   });
