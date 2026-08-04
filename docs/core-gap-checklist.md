@@ -207,7 +207,8 @@
 - done: apply machine-readable catalog dependency inspection and one shared retained-owner classifier across enums, composites, domains, and ranges; retained routines, policies, triggers, casts, relation expressions, and unmanaged objects reject replacement/removal during planning, while modeled policy/trigger removal is coordinated in the same apply.
 - done: model PostgreSQL row-level security as independent ENABLE/FORCE flags and policies as complete semantic CREATE POLICY definitions; cover all commands, modes, role forms, expressions, external convergence, enforcement behavior, mixed ALTER TABLE constraints, transactional replacement/removal, idempotency, and pre-mutation rejection of ALTER POLICY or negative RLS mutations on PostgreSQL 14-18.
 - done: preserve PostgreSQL standalone and identity-sequence logged/unlogged persistence with PostgreSQL 14 versus 15-18 semantics; replace destructive option and ownership recreation with native ALTER operations that preserve OIDs, dependents, live counter state, schema-qualified ownership, and idempotency.
-- next: audit remaining PostgreSQL 18 DDL and catalog additions for attributes that the canonical model could silently discard.
+- done: preserve PostgreSQL ordinary trigger `UPDATE OF` columns, transition tables, default statement timing, and origin/disabled/replica/always firing modes; apply mode-only changes natively, preserve constraint/event trigger modes and qualified functions, ignore matching partition clones, reject divergent clone state plus bulk/ONLY mutations, and converge idempotently on PostgreSQL 14-18.
+- next: complete the remaining managed-relation metadata audit, beginning with PostgreSQL replica identity and its index dependency semantics.
 
 ## parser
 

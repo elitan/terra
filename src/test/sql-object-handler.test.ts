@@ -657,4 +657,64 @@ describe("SqlObjectHandler", function () {
     expect(plan.earlyDrop).toEqual([]);
     expect(plan.postTableCreate).toEqual([]);
   });
+
+  test("alters constraint and event trigger firing modes without replacement", async function () {
+    const handler = new SqlObjectHandler();
+    const constraint = makeSqlObject({
+      kind: "constraint-trigger",
+      key: "constraint-trigger:audit.Orders.constraint_audit",
+      name: "constraint_audit",
+      schema: "audit",
+      createStatement:
+        'CREATE CONSTRAINT TRIGGER constraint_audit AFTER INSERT ON audit."Orders" FOR EACH ROW EXECUTE FUNCTION public.audit_row();',
+      dropStatement:
+        'DROP TRIGGER IF EXISTS "constraint_audit" ON "audit"."Orders";',
+      triggerTable: { name: "Orders", schema: "audit" },
+      triggerEnabled: "disabled",
+    });
+    const event = makeSqlObject({
+      kind: "event-trigger",
+      key: "event-trigger:ddl_audit",
+      name: "ddl_audit",
+      schema: undefined,
+      createStatement:
+        "CREATE EVENT TRIGGER ddl_audit ON ddl_command_end EXECUTE FUNCTION public.audit_ddl();",
+      dropStatement: 'DROP EVENT TRIGGER IF EXISTS "ddl_audit";',
+      triggerEnabled: "replica",
+    });
+
+    const plan = await handler.generateStatements(
+      [
+        { ...constraint, triggerEnabled: "always" },
+        { ...event, triggerEnabled: "disabled" },
+      ],
+      [constraint, event]
+    );
+
+    expect(plan.earlyDrop).toEqual([]);
+    expect(plan.postRoutineCreate).toEqual([
+      'ALTER TABLE "audit"."Orders" ENABLE ALWAYS TRIGGER "constraint_audit";',
+      'ALTER EVENT TRIGGER "ddl_audit" DISABLE;',
+    ]);
+  });
+
+  test("sets a non-default firing mode after creating a SQL trigger object", async function () {
+    const handler = new SqlObjectHandler();
+    const event = makeSqlObject({
+      kind: "event-trigger",
+      key: "event-trigger:ddl_audit",
+      name: "ddl_audit",
+      schema: undefined,
+      createStatement:
+        "CREATE EVENT TRIGGER ddl_audit ON ddl_command_end EXECUTE FUNCTION public.audit_ddl();",
+      triggerEnabled: "always",
+    });
+
+    const plan = await handler.generateStatements([event], []);
+
+    expect(plan.postRoutineCreate).toEqual([
+      event.createStatement,
+      'ALTER EVENT TRIGGER "ddl_audit" ENABLE ALWAYS;',
+    ]);
+  });
 });

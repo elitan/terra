@@ -24,6 +24,11 @@ import {
   type PostgresTypeObjectContext,
 } from "./postgres-type-object-handler";
 import type { PostgresTypeStatement } from "./postgres-type-ordering";
+import {
+  effectivePostgresTriggerMode,
+  renderPostgresEventTriggerMode,
+  renderPostgresTableTriggerMode,
+} from "../../../utils/postgres-trigger";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -266,6 +271,9 @@ function normalizePartitionStatementForComparison(statement: any): string {
 }
 
 async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObject> {
+  if (isSqlTriggerObject(object)) {
+    return canonicalizeSqlTriggerObject(object);
+  }
   if (object.kind !== "partition") {
     const normalized = normalizeSql(object.createStatement);
     return { normalized, comparisonNormalized: normalized };
@@ -315,6 +323,68 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
     const normalized = normalizeSql(object.createStatement);
     return { normalized, comparisonNormalized: normalized };
   }
+}
+
+async function canonicalizeSqlTriggerObject(
+  object: SqlObject
+): Promise<CanonicalSqlObject> {
+  try {
+    const parsed = await parse(object.createStatement);
+    const statements = (parsed.stmts || []).flatMap(function (item) {
+      if (!item.stmt) {
+        return [];
+      }
+      const statement: any = item.stmt;
+      const trigger = statement.CreateTrigStmt;
+      if (trigger) {
+        trigger.relation = {
+          ...trigger.relation,
+          schemaname:
+            object.triggerTable?.schema || object.schema || "public",
+        };
+        const functionName = qualifiedNameToStringNodes(
+          object.triggerFunction
+        );
+        if (functionName) {
+          trigger.funcname = functionName;
+        }
+      }
+      const eventTrigger = statement.CreateEventTrigStmt;
+      if (eventTrigger) {
+        const functionName = qualifiedNameToStringNodes(
+          object.triggerFunction
+        );
+        if (functionName) {
+          eventTrigger.funcname = functionName;
+        }
+      }
+      return [statement];
+    });
+    if (statements.length === 0) {
+      const normalized = normalizeSql(object.createStatement);
+      return { normalized, comparisonNormalized: normalized };
+    }
+    const normalized = normalizeSql(deparseSync(statements));
+    return { normalized, comparisonNormalized: normalized };
+  } catch {
+    const normalized = normalizeSql(object.createStatement);
+    return { normalized, comparisonNormalized: normalized };
+  }
+}
+
+function qualifiedNameToStringNodes(
+  name: SqlObject["triggerFunction"]
+): Array<{ String: { sval: string } }> | undefined {
+  if (!name) {
+    return undefined;
+  }
+  return [name.schema, name.name]
+    .filter(function isName(value): value is string {
+      return typeof value === "string";
+    })
+    .map(function makeStringNode(value) {
+      return { String: { sval: value } };
+    });
 }
 
 function getDirectPartitionCreate(statement: any): any | undefined {
@@ -483,6 +553,12 @@ function pushStatements(
       continue;
     }
     target[bucket].push(statement);
+    if (!useDrop) {
+      const modeStatement = renderNonDefaultSqlTriggerMode(item);
+      if (modeStatement) {
+        target[bucket].push(modeStatement);
+      }
+    }
     operations.push({
       name: item.name,
       schema: item.schema,
@@ -490,6 +566,53 @@ function pushStatements(
     });
   }
   return operations;
+}
+
+function isSqlTriggerObject(object: SqlObject): boolean {
+  return object.kind === "constraint-trigger" ||
+    object.kind === "event-trigger";
+}
+
+function sqlTriggerModesAreEqual(
+  desired: SqlObject,
+  current: SqlObject
+): boolean {
+  if (!isSqlTriggerObject(desired) || !isSqlTriggerObject(current)) {
+    return true;
+  }
+  return effectivePostgresTriggerMode(desired.triggerEnabled) ===
+    effectivePostgresTriggerMode(current.triggerEnabled);
+}
+
+function renderSqlTriggerMode(object: SqlObject): string {
+  const mode = effectivePostgresTriggerMode(object.triggerEnabled);
+  if (object.kind === "event-trigger") {
+    return renderPostgresEventTriggerMode(object.name, mode);
+  }
+  if (object.kind === "constraint-trigger" && object.triggerTable) {
+    return renderPostgresTableTriggerMode(
+      object.triggerTable,
+      object.name,
+      mode
+    );
+  }
+  throw new ValidationError(
+    `PostgreSQL constraint trigger '${object.key}' is missing its table identity`,
+    "constraint-trigger",
+    object.key
+  );
+}
+
+function renderNonDefaultSqlTriggerMode(
+  object: SqlObject
+): string | undefined {
+  if (
+    !isSqlTriggerObject(object) ||
+    effectivePostgresTriggerMode(object.triggerEnabled) === "origin"
+  ) {
+    return undefined;
+  }
+  return renderSqlTriggerMode(object);
 }
 
 export class SqlObjectHandler {
@@ -639,6 +762,11 @@ export class SqlObjectHandler {
         currentCanonical.comparisonNormalized ===
         desiredCanonical.comparisonNormalized
       ) {
+        if (!sqlTriggerModesAreEqual(desiredObject, currentObject)) {
+          plan.postRoutineCreate.push(
+            renderSqlTriggerMode(desiredObject)
+          );
+        }
         continue;
       }
 

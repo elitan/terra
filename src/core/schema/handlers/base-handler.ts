@@ -4,7 +4,7 @@ export interface HandlerConfig<T> {
   name: string;
   getKey: (obj: T) => string;
   generateDrop: (obj: T) => string;
-  generateCreate: (obj: T) => string;
+  generateCreate: (obj: T) => string | string[];
   needsUpdate: (desired: T, current: T) => boolean;
   shouldManage?: (obj: T) => boolean;
   generateUpdate?: (desired: T, current: T) => string | string[];
@@ -40,19 +40,15 @@ export function generateStatements<T>(
     }
 
     if (!curr) {
-      statements.push(config.generateCreate(des));
+      appendGeneratedStatements(statements, config.generateCreate(des));
       Logger.info(`Creating ${config.name} '${getLogName(des)}'`);
     } else if (config.needsUpdate(des, curr)) {
       if (config.generateUpdate) {
         const updateStatements = config.generateUpdate(des, curr);
-        statements.push(
-          ...(Array.isArray(updateStatements)
-            ? updateStatements
-            : [updateStatements])
-        );
+        appendGeneratedStatements(statements, updateStatements);
       } else {
         statements.push(config.generateDrop(curr));
-        statements.push(config.generateCreate(des));
+        appendGeneratedStatements(statements, config.generateCreate(des));
       }
       Logger.info(`Updating ${config.name} '${getLogName(des)}'`);
     } else {
@@ -61,4 +57,11 @@ export function generateStatements<T>(
   }
 
   return statements;
+}
+
+function appendGeneratedStatements(
+  target: string[],
+  generated: string | string[]
+): void {
+  target.push(...(Array.isArray(generated) ? generated : [generated]));
 }

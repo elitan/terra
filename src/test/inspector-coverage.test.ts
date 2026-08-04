@@ -824,6 +824,10 @@ describe("DatabaseInspector coverage", () => {
               on_truncate: false,
               function_name: "sync_order",
               function_schema: "public",
+              update_columns: ["status", "priority"],
+              old_transition_table: "old_rows",
+              new_transition_table: "new_rows",
+              trigger_enabled: "A",
               trigger_def: "CREATE TRIGGER trg_orders BEFORE INSERT ON public.orders FOR EACH ROW WHEN ((new.id > 0 AND new.status <> 'x')) EXECUTE FUNCTION public.sync_order('1', 'a,b', 'it''s')",
             },
           ],
@@ -846,6 +850,10 @@ describe("DatabaseInspector coverage", () => {
         functionName: "sync_order",
         functionSchema: "public",
         functionArgs: ["'1'", "'a,b'", "'it''s'"],
+        updateColumns: ["status", "priority"],
+        oldTransitionTable: "old_rows",
+        newTransitionTable: "new_rows",
+        enabled: "always",
       },
     ]);
   });

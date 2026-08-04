@@ -141,6 +141,13 @@ identity-sequence `LOGGED`/`UNLOGGED` overrides are supported on PostgreSQL
 15–18 and rejected before mutation on PostgreSQL 14. An implicit identity
 sequence follows its table's persistence on PostgreSQL 15–18; PostgreSQL 14's
 version-specific logged identity-sequence behavior is preserved.
+PostgreSQL triggers preserve `UPDATE OF` column lists, `OLD TABLE`/`NEW TABLE`
+transition names, `WHEN` expressions, function arguments, and origin, disabled,
+replica-only, or always firing modes. Named `ALTER TABLE ... TRIGGER` and
+`ALTER EVENT TRIGGER` firing modes are declarative and use native alterations;
+bulk `ALL`/`USER` mutations and `ALTER TABLE ONLY` mode changes are rejected.
+Partition-created trigger clones are managed through their parent trigger, and
+externally diverged clone modes stop planning instead of being ignored.
 PostgreSQL row-level security is declared with positive `ALTER TABLE ... ENABLE
 ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` state plus complete `CREATE
 POLICY` definitions. TerraDB preserves policy command, permissive/restrictive

@@ -24,6 +24,7 @@ import type {
   SqlObject,
   PostgresPolicyDefinition,
   IdentityColumn,
+  PostgresTriggerEnabledMode,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
@@ -34,6 +35,7 @@ import {
   columnStorageFromCatalog,
 } from "../../utils/column-physical";
 import { getDefaultFunctionCost } from "../../utils/function-cost";
+import { postgresTriggerModeFromCatalogCode } from "../../utils/postgres-trigger";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -70,6 +72,25 @@ function getIdentitySequencePersistence(
   if (persistence === "u") return "unlogged";
   if (persistence === "p") return "logged";
   return undefined;
+}
+
+function getPostgresTriggerMode(
+  code: unknown,
+  identity: string
+): PostgresTriggerEnabledMode | undefined {
+  if (code === undefined || code === null) {
+    return undefined;
+  }
+  const mode = postgresTriggerModeFromCatalogCode(code);
+  if (!mode) {
+    throw new ValidationError(
+      `Unsupported PostgreSQL trigger firing mode '${String(code)}' is present on ${identity}`,
+      identity,
+      "enabled",
+      code
+    );
+  }
+  return mode === "origin" ? undefined : mode;
 }
 
 const COLUMN_COLLATION_JOIN_SQL = `
@@ -2165,6 +2186,25 @@ export class DatabaseInspector {
         CASE WHEN t.tgtype & 32 = 32 THEN true ELSE false END as on_truncate,
         p.proname as function_name,
         fn.nspname as function_schema,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY
+            AS trigger_column(attnum, position)
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = t.tgrelid
+            AND attribute.attnum = trigger_column.attnum
+          ORDER BY trigger_column.position
+        ) as update_columns,
+        t.tgoldtable as old_transition_table,
+        t.tgnewtable as new_transition_table,
+        t.tgenabled as trigger_enabled,
+        ARRAY(
+          SELECT DISTINCT clone.tgenabled::text
+          FROM pg_trigger clone
+          WHERE clone.tgparentid = t.oid
+            AND clone.tgenabled <> t.tgenabled
+          ORDER BY clone.tgenabled::text
+        ) as divergent_clone_modes,
         pg_get_triggerdef(t.oid) as trigger_def
       FROM pg_trigger t
       JOIN pg_class c ON t.tgrelid = c.oid
@@ -2174,27 +2214,50 @@ export class DatabaseInspector {
       WHERE n.nspname = ANY($1::text[])
         AND NOT t.tgisinternal
         AND t.tgconstraint = 0
-      ORDER BY c.relname, t.tgname
+        AND t.tgparentid = 0
+      ORDER BY n.nspname, c.relname, t.tgname
     `, [schemas]);
 
     return result.rows.map((row: any) => {
+      if (row.divergent_clone_modes?.length > 0) {
+        throw new ValidationError(
+          `PostgreSQL partition trigger clones for ${row.schema_name}.${row.table_name}.${row.trigger_name} have firing modes that differ from their parent trigger. TerraDB manages partition clones through the parent; restore the parent mode without ALTER TABLE ONLY before planning`,
+          `trigger ${row.schema_name}.${row.table_name}.${row.trigger_name}`,
+          "enabled",
+          row.divergent_clone_modes
+        );
+      }
       const events: Trigger['events'] = [];
       if (row.on_insert) events.push('INSERT');
       if (row.on_update) events.push('UPDATE');
       if (row.on_delete) events.push('DELETE');
       if (row.on_truncate) events.push('TRUNCATE');
 
+      const enabled = getPostgresTriggerMode(
+        row.trigger_enabled,
+        `trigger ${row.schema_name}.${row.table_name}.${row.trigger_name}`
+      );
       return {
         name: row.trigger_name,
         tableName: row.table_name,
         schema: row.schema_name,
         timing: row.timing,
         events,
+        ...(row.update_columns?.length > 0
+          ? { updateColumns: row.update_columns }
+          : {}),
         forEach: row.for_each,
+        ...(row.old_transition_table
+          ? { oldTransitionTable: row.old_transition_table }
+          : {}),
+        ...(row.new_transition_table
+          ? { newTransitionTable: row.new_transition_table }
+          : {}),
         when: this.parseTriggerWhenClause(row.trigger_def),
         functionName: row.function_name,
         functionSchema: row.function_schema,
         functionArgs: this.parseTriggerFunctionArgs(row.trigger_def),
+        ...(enabled ? { enabled } : {}),
       };
     });
   }
@@ -3654,24 +3717,51 @@ export class DatabaseInspector {
         t.tgname as trigger_name,
         c.relname as table_name,
         n.nspname as schema_name,
+        t.tgenabled as trigger_enabled,
+        p.proname as function_name,
+        fn.nspname as function_schema,
         pg_get_triggerdef(t.oid) as trigger_definition
       FROM pg_trigger t
       JOIN pg_class c ON c.oid = t.tgrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_proc p ON p.oid = t.tgfoid
+      JOIN pg_namespace fn ON fn.oid = p.pronamespace
       WHERE n.nspname = ANY($1::text[])
         AND NOT t.tgisinternal
         AND t.tgconstraint <> 0
+        AND t.tgparentid = 0
       ORDER BY n.nspname, c.relname, t.tgname
     `, [schemas]);
 
-    return result.rows.map((row: any) => ({
-      kind: "constraint-trigger" as const,
-      key: `constraint-trigger:${row.schema_name}.${row.table_name}.${row.trigger_name}`,
-      name: row.trigger_name,
-      schema: row.schema_name,
-      createStatement: this.ensureStatement(row.trigger_definition),
-      dropStatement: `DROP TRIGGER IF EXISTS ${this.quoteIdent(row.trigger_name)} ON ${this.qualifyName(row.table_name, row.schema_name)};`,
-    }));
+    return result.rows.map((row: any) => {
+      const enabled = getPostgresTriggerMode(
+        row.trigger_enabled,
+        `constraint trigger ${row.schema_name}.${row.table_name}.${row.trigger_name}`
+      );
+      return {
+        kind: "constraint-trigger" as const,
+        key: `constraint-trigger:${row.schema_name}.${row.table_name}.${row.trigger_name}`,
+        name: row.trigger_name,
+        schema: row.schema_name,
+        createStatement: this.ensureStatement(row.trigger_definition),
+        dropStatement: `DROP TRIGGER IF EXISTS ${this.quoteIdent(row.trigger_name)} ON ${this.qualifyName(row.table_name, row.schema_name)};`,
+        triggerTable: {
+          name: row.table_name,
+          schema: row.schema_name,
+        },
+        ...(row.function_name
+          ? {
+              triggerFunction: {
+                name: row.function_name,
+                ...(row.function_schema
+                  ? { schema: row.function_schema }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(enabled ? { triggerEnabled: enabled } : {}),
+      };
+    });
   }
 
   private async getCurrentEventTriggerObjects(client: Client): Promise<SqlObject[]> {
@@ -3680,6 +3770,7 @@ export class DatabaseInspector {
         e.evtname as trigger_name,
         e.evtevent as event_name,
         e.evttags as trigger_tags,
+        e.evtenabled as trigger_enabled,
         p.proname as function_name,
         n.nspname as function_schema
       FROM pg_event_trigger e
@@ -3692,12 +3783,27 @@ export class DatabaseInspector {
       const tagClause = Array.isArray(row.trigger_tags) && row.trigger_tags.length > 0
         ? ` WHEN TAG IN (${row.trigger_tags.map((tag: string) => this.quoteLiteral(tag)).join(", ")})`
         : "";
+      const enabled = getPostgresTriggerMode(
+        row.trigger_enabled,
+        `event trigger ${row.trigger_name}`
+      );
       return {
         kind: "event-trigger" as const,
         key: `event-trigger:${row.trigger_name}`,
         name: row.trigger_name,
         createStatement: `CREATE EVENT TRIGGER ${this.quoteIdent(row.trigger_name)} ON ${row.event_name}${tagClause} EXECUTE FUNCTION ${this.qualifyName(row.function_name, row.function_schema)}();`,
         dropStatement: `DROP EVENT TRIGGER IF EXISTS ${this.quoteIdent(row.trigger_name)};`,
+        ...(row.function_name
+          ? {
+              triggerFunction: {
+                name: row.function_name,
+                ...(row.function_schema
+                  ? { schema: row.function_schema }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(enabled ? { triggerEnabled: enabled } : {}),
       };
     });
   }

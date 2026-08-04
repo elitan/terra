@@ -427,6 +427,79 @@ describe("Handler module coverage", () => {
       expect(statements).toEqual([]);
     });
 
+    test("renders complete trigger definitions", function () {
+      const handler = new TriggerHandler();
+      const updateTrigger = makeTrigger({
+        events: ["UPDATE"],
+        updateColumns: ["name", 'Status"Text'],
+      });
+      const transitionTrigger = makeTrigger({
+        timing: "AFTER",
+        events: ["UPDATE"],
+        forEach: "STATEMENT",
+        oldTransitionTable: "old_rows",
+        newTransitionTable: 'New "Rows"',
+      });
+
+      expect(handler.generateStatements([updateTrigger], [])[0]).toContain(
+        'UPDATE OF "name", "Status""Text"'
+      );
+      expect(handler.generateStatements([transitionTrigger], [])[0]).toContain(
+        'REFERENCING OLD TABLE AS "old_rows" NEW TABLE AS "New ""Rows"""'
+      );
+    });
+
+    test("alters only the trigger firing mode when its definition is unchanged", function () {
+      const handler = new TriggerHandler();
+      const statements = handler.generateStatements(
+        [makeTrigger({ enabled: "always" })],
+        [makeTrigger({ enabled: "disabled" })]
+      );
+
+      expect(statements).toEqual([
+        'ALTER TABLE "public"."orders" ENABLE ALWAYS TRIGGER "trg_orders";',
+      ]);
+    });
+
+    test("sets non-default firing modes after trigger creation or replacement", function () {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        timing: "AFTER",
+        enabled: "replica",
+      });
+
+      expect(handler.generateStatements([desired], [])).toEqual([
+        expect.stringContaining('CREATE TRIGGER "trg_orders"'),
+        'ALTER TABLE "public"."orders" ENABLE REPLICA TRIGGER "trg_orders";',
+      ]);
+      expect(
+        handler.generateStatements(
+          [desired],
+          [makeTrigger({ timing: "BEFORE", enabled: "always" })]
+        )
+      ).toEqual([
+        expect.stringContaining('DROP TRIGGER IF EXISTS "trg_orders"'),
+        expect.stringContaining('CREATE TRIGGER "trg_orders"'),
+        'ALTER TABLE "public"."orders" ENABLE REPLICA TRIGGER "trg_orders";',
+      ]);
+    });
+
+    test("normalizes default statement firing and unordered update columns", function () {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        events: ["UPDATE"],
+        forEach: undefined,
+        updateColumns: ["status", "name"],
+      });
+      const current = makeTrigger({
+        events: ["UPDATE"],
+        forEach: "STATEMENT",
+        updateColumns: ["name", "status"],
+      });
+
+      expect(handler.generateStatements([desired], [current])).toEqual([]);
+    });
+
     test("uses sqlite trigger definition for create and drop statements", () => {
       const handler = new TriggerHandler();
       const sqliteTrigger = makeTrigger({

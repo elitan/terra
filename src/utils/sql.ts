@@ -1272,8 +1272,18 @@ export function generateCreateTriggerSQL(trigger: Trigger): string {
 
   builder.p('CREATE TRIGGER').ident(trigger.name);
   builder.p(trigger.timing);
-  builder.p(trigger.events.join(" OR "));
+  builder.p(renderTriggerEvents(trigger));
   builder.p('ON').table(trigger.tableName, trigger.schema);
+
+  if (trigger.oldTransitionTable || trigger.newTransitionTable) {
+    builder.p("REFERENCING");
+    if (trigger.oldTransitionTable) {
+      builder.p("OLD TABLE AS").ident(trigger.oldTransitionTable);
+    }
+    if (trigger.newTransitionTable) {
+      builder.p("NEW TABLE AS").ident(trigger.newTransitionTable);
+    }
+  }
 
   if (trigger.forEach) {
     builder.p(`FOR EACH ${trigger.forEach}`);
@@ -1293,6 +1303,20 @@ export function generateCreateTriggerSQL(trigger: Trigger): string {
   }
 
   return builder.build() + ';';
+}
+
+function renderTriggerEvents(trigger: Trigger): string {
+  return trigger.events.map(function renderTriggerEvent(event) {
+    if (event !== "UPDATE" || !trigger.updateColumns?.length) {
+      return event;
+    }
+    const columns = trigger.updateColumns.map(function quoteUpdateColumn(
+      column
+    ) {
+      return new SQLBuilder().ident(column).build();
+    });
+    return `UPDATE OF ${columns.join(", ")}`;
+  }).join(" OR ");
 }
 
 export function generateDropTriggerSQL(trigger: Trigger): string {

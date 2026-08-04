@@ -3,9 +3,12 @@ import { readFile, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { SchemaService } from "../core/schema/service";
+import { generateStatements } from "../core/schema/handlers/base-handler";
+import { TriggerHandler } from "../core/schema/handlers/trigger-handler";
 import type { DatabaseClient, DatabaseProvider, ParsedSchema, ValidationResult } from "../providers/types";
 import { StrictModeError } from "../types/errors";
 import type { MigrationContext, MigrationPlan } from "../types/migration";
+import type { Trigger } from "../types/schema";
 
 let promptAnswer = "yes";
 
@@ -183,6 +186,61 @@ function createService(provider: DatabaseProvider): SchemaService {
 }
 
 describe("SchemaService private coverage", function () {
+  test("generateStatements preserves array creates and matching managed objects", function () {
+    interface Item {
+      name: string;
+    }
+
+    const config = {
+      name: "item",
+      getKey: function getKey(item: Item) {
+        return item.name;
+      },
+      generateDrop: function generateDrop(item: Item) {
+        return `DROP ${item.name}`;
+      },
+      generateCreate: function generateCreate(item: Item) {
+        return [`CREATE ${item.name}`, `ALTER ${item.name}`];
+      },
+      needsUpdate: function needsUpdate() {
+        return false;
+      },
+    };
+
+    expect(generateStatements([{ name: "new" }], [], config)).toEqual([
+      "CREATE new",
+      "ALTER new",
+    ]);
+    expect(generateStatements(
+      [{ name: "existing" }],
+      [{ name: "existing" }],
+      config
+    )).toEqual([]);
+  });
+
+  test("trigger comparison distinguishes equal arrays from changed arguments", function () {
+    const handler = new TriggerHandler();
+    const current: Trigger = {
+      name: "audit_orders",
+      tableName: "orders",
+      schema: "public",
+      timing: "AFTER",
+      events: ["INSERT", "UPDATE"],
+      updateColumns: ["status", "name"],
+      functionName: "audit_row",
+      functionSchema: "public",
+      functionArgs: ["current"],
+    };
+
+    expect(handler.generateStatements([{ ...current }], [current])).toEqual([]);
+    expect(handler.generateStatements([
+      { ...current, functionArgs: ["desired"] },
+    ], [current])).toEqual([
+      'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
+      expect.stringContaining("CREATE TRIGGER"),
+    ]);
+  });
+
   test("parseSchemaInput reads file path input", async function () {
     const mock = createMockProvider();
     const service = createService(mock.provider);

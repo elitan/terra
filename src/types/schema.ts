@@ -228,17 +228,27 @@ export interface Procedure {
   dependentObjects?: string[];
 }
 
+export type PostgresTriggerEnabledMode =
+  | 'origin'
+  | 'disabled'
+  | 'replica'
+  | 'always';
+
 export interface Trigger {
   name: string;
   tableName: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   timing: 'BEFORE' | 'AFTER' | 'INSTEAD OF';
   events: ('INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE')[];
+  updateColumns?: string[];
   forEach?: 'ROW' | 'STATEMENT';
+  oldTransitionTable?: string;
+  newTransitionTable?: string;
   when?: string;
   functionName: string;
   functionSchema?: string;
   functionArgs?: string[];
+  enabled?: PostgresTriggerEnabledMode;
   definition?: string;
 }
 
@@ -358,6 +368,9 @@ export interface SqlObject {
   partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
   typeDefinition?: PostgresTypeDefinition;
   policyDefinition?: PostgresPolicyDefinition;
+  triggerTable?: QualifiedName;
+  triggerFunction?: QualifiedName;
+  triggerEnabled?: PostgresTriggerEnabledMode;
   attributeDependents?: CompositeTypeAttributeDependent[];
   typeDependents?: CompositeTypeTypeDependent[];
   routineDependents?: PostgresTypeRoutineDependent[];

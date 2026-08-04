@@ -6,6 +6,10 @@ import {
 } from "../../../utils/sql";
 import { normalizeSQLiteIdentifier } from "../../../utils/sqlite-identifier";
 import { normalizeSQLiteSchemaDefinition } from "../../../providers/sqlite/sql-parser-utils";
+import {
+  effectivePostgresTriggerMode,
+  renderPostgresTableTriggerMode,
+} from "../../../utils/postgres-trigger";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 
 function getTriggerKey(trigger: Trigger): string {
@@ -40,28 +44,11 @@ function createConfig(
         return desiredDefinition !== currentDefinition;
       }
 
-      const desiredWhen = desired.when
-        ? normalizeExpression(desired.when)
-        : undefined;
-      const currentWhen = current.when
-        ? normalizeExpression(current.when)
-        : undefined;
-      const desiredEvents = normalizeTriggerEvents(desired.events);
-      const currentEvents = normalizeTriggerEvents(current.events);
-      const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
-      const currentArgs = normalizeTriggerArgs(current.functionArgs);
-
-      return (
-        desired.timing !== current.timing ||
-        desired.forEach !== current.forEach ||
-        desired.functionName !== current.functionName ||
-        (desired.functionSchema || "public") !==
-          (current.functionSchema || "public") ||
-        JSON.stringify(desiredEvents) !== JSON.stringify(currentEvents) ||
-        desiredWhen !== currentWhen ||
-        JSON.stringify(desiredArgs) !== JSON.stringify(currentArgs)
-      );
+      return postgresTriggerDefinitionsDiffer(desired, current) ||
+        effectivePostgresTriggerMode(desired.enabled) !==
+          effectivePostgresTriggerMode(current.enabled);
     },
+    generateUpdate: generateUpdateTriggerStatements,
   };
 }
 
@@ -81,12 +68,109 @@ function generateDropTriggerStatement(trigger: Trigger): string {
   return generateDropTriggerSQL(trigger);
 }
 
-function generateCreateTriggerStatement(trigger: Trigger): string {
+function generateCreateTriggerStatement(trigger: Trigger): string | string[] {
   if (hasSqliteDefinition(trigger)) {
     return `${cleanTriggerDefinition(trigger.definition || "")};`;
   }
 
-  return generateCreateTriggerSQL(trigger);
+  return appendNonDefaultTriggerMode(
+    [generateCreateTriggerSQL(trigger)],
+    trigger
+  );
+}
+
+function generateUpdateTriggerStatements(
+  desired: Trigger,
+  current: Trigger
+): string[] {
+  if (hasSqliteDefinition(desired) || hasSqliteDefinition(current)) {
+    return [
+      generateDropTriggerStatement(current),
+      ...toStatementArray(generateCreateTriggerStatement(desired)),
+    ];
+  }
+
+  if (triggerDefinitionsAreEqual(desired, current)) {
+    return [generateTriggerModeStatement(desired)];
+  }
+
+  return [
+    generateDropTriggerStatement(current),
+    ...toStatementArray(generateCreateTriggerStatement(desired)),
+  ];
+}
+
+function triggerDefinitionsAreEqual(
+  desired: Trigger,
+  current: Trigger
+): boolean {
+  return !postgresTriggerDefinitionsDiffer(desired, current);
+}
+
+function postgresTriggerDefinitionsDiffer(
+  desired: Trigger,
+  current: Trigger
+): boolean {
+  const desiredWhen = desired.when
+    ? normalizeExpression(desired.when)
+    : undefined;
+  const currentWhen = current.when
+    ? normalizeExpression(current.when)
+    : undefined;
+  return (
+    desired.timing !== current.timing ||
+    (desired.forEach || "STATEMENT") !==
+      (current.forEach || "STATEMENT") ||
+    desired.functionName !== current.functionName ||
+    (desired.functionSchema || "public") !==
+      (current.functionSchema || "public") ||
+    !arraysAreEqual(
+      normalizeTriggerEvents(desired.events),
+      normalizeTriggerEvents(current.events)
+    ) ||
+    !arraysAreEqual(
+      normalizeUpdateColumns(desired.updateColumns),
+      normalizeUpdateColumns(current.updateColumns)
+    ) ||
+    desired.oldTransitionTable !== current.oldTransitionTable ||
+    desired.newTransitionTable !== current.newTransitionTable ||
+    desiredWhen !== currentWhen ||
+    !arraysAreEqual(
+      normalizeTriggerArgs(desired.functionArgs),
+      normalizeTriggerArgs(current.functionArgs)
+    )
+  );
+}
+
+function arraysAreEqual<T>(left: T[], right: T[]): boolean {
+  return left.length === right.length && left.every(function isEqual(
+    value,
+    index
+  ) {
+    return value === right[index];
+  });
+}
+
+function appendNonDefaultTriggerMode(
+  statements: string[],
+  trigger: Trigger
+): string[] {
+  if (effectivePostgresTriggerMode(trigger.enabled) !== "origin") {
+    statements.push(generateTriggerModeStatement(trigger));
+  }
+  return statements;
+}
+
+function generateTriggerModeStatement(trigger: Trigger): string {
+  return renderPostgresTableTriggerMode(
+    { name: trigger.tableName, schema: trigger.schema },
+    trigger.name,
+    effectivePostgresTriggerMode(trigger.enabled)
+  );
+}
+
+function toStatementArray(statement: string | string[]): string[] {
+  return Array.isArray(statement) ? statement : [statement];
 }
 
 function normalizeTriggerArgs(args: string[] | undefined): string[] {
@@ -108,6 +192,10 @@ function normalizeTriggerEvents(events: Trigger["events"]): Trigger["events"] {
   return [...events].sort(function sortEvents(a, b) {
     return eventOrder[a] - eventOrder[b];
   });
+}
+
+function normalizeUpdateColumns(columns: string[] | undefined): string[] {
+  return [...new Set(columns || [])].sort();
 }
 
 function normalizeTriggerArg(arg: string): string {

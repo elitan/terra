@@ -44,6 +44,8 @@ export function parseCreateTrigger(node: any): Trigger | null {
     }
 
     const forEach = extractForEach(node);
+    const updateColumns = extractUpdateColumns(node);
+    const transitionTables = extractTransitionTables(node);
     const when = extractWhen(node);
     const functionArgs = extractFunctionArgs(node);
 
@@ -53,7 +55,9 @@ export function parseCreateTrigger(node: any): Trigger | null {
       schema: extractTriggerSchema(node),
       timing,
       events,
+      ...(updateColumns ? { updateColumns } : {}),
       forEach,
+      ...transitionTables,
       when,
       functionName: functionRef.name,
       functionSchema: functionRef.schema,
@@ -65,6 +69,47 @@ export function parseCreateTrigger(node: any): Trigger | null {
     );
     return null;
   }
+}
+
+function extractUpdateColumns(node: any): string[] | undefined {
+  if (!Array.isArray(node.columns) || node.columns.length === 0) {
+    return undefined;
+  }
+
+  const columns = node.columns
+    .map(function mapColumn(column: any) {
+      return column?.String?.sval;
+    })
+    .filter(function isColumnName(column: unknown): column is string {
+      return typeof column === "string";
+    });
+  return columns.length > 0 ? columns : undefined;
+}
+
+function extractTransitionTables(node: any): Pick<
+  Trigger,
+  "oldTransitionTable" | "newTransitionTable"
+> {
+  const result: Pick<
+    Trigger,
+    "oldTransitionTable" | "newTransitionTable"
+  > = {};
+  if (!Array.isArray(node.transitionRels)) {
+    return result;
+  }
+
+  for (const item of node.transitionRels) {
+    const transition = item?.TriggerTransition;
+    if (!transition?.isTable || typeof transition.name !== "string") {
+      continue;
+    }
+    if (transition.isNew) {
+      result.newTransitionTable = transition.name;
+    } else {
+      result.oldTransitionTable = transition.name;
+    }
+  }
+  return result;
 }
 
 function extractTriggerSchema(node: any): string | undefined {

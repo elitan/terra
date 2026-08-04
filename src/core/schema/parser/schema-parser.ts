@@ -49,6 +49,15 @@ import { ParserError } from "../../../types/errors";
 import { DEFAULT_COLLATION } from "../../../utils/collation";
 import { qualifyDeclaredRoutineTypes } from "./routine-type-canonicalizer";
 import { toPgAstNode } from "./pgsql-ast";
+import {
+  isTableTriggerModeSubtype,
+  mergePendingTriggerModes,
+  parseAlterEventTriggerMode,
+  parseAlterTableTriggerModes,
+  rejectDuplicateTriggerDeclarations,
+  rejectUnsupportedBulkTriggerAlter,
+  type PendingTriggerMode,
+} from "./trigger-mode-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -75,6 +84,23 @@ const ROW_SECURITY_SUBTYPES = new Set([
 
 function isRowSecuritySubtype(subtype: unknown): boolean {
   return typeof subtype === "string" && ROW_SECURITY_SUBTYPES.has(subtype);
+}
+
+function qualifiedNameFromStringNodes(
+  nodes: any[] | undefined,
+  defaultSchema?: string
+): QualifiedName | undefined {
+  const names = (nodes || []).map(function getName(item: any) {
+    return item?.String?.sval;
+  }).filter(function isName(value: unknown): value is string {
+    return typeof value === "string";
+  });
+  const name = names.at(-1);
+  if (!name) {
+    return undefined;
+  }
+  const schema = names.length > 1 ? names.at(-2) : defaultSchema;
+  return { name, ...(schema ? { schema } : {}) };
 }
 
 function isCanonicalPartitionBoundDatum(datum: any, strategy: string): boolean {
@@ -490,6 +516,7 @@ export class SchemaParser {
     const comments: Comment[] = [];
     const sqlObjects: SqlObject[] = [];
     const pendingTableConstraints: PendingTableConstraint[] = [];
+    const pendingTriggerModes: PendingTriggerMode[] = [];
 
     // Auto-quote reserved keywords that are commonly used as column names
     sql = this.autoQuoteReservedKeywords(sql);
@@ -678,16 +705,31 @@ export class SchemaParser {
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
+        } else if (stmt.AlterEventTrigStmt) {
+          pendingTriggerModes.push(
+            parseAlterEventTriggerMode(stmt.AlterEventTrigStmt, filePath)
+          );
         } else if (stmt.AlterTableStmt) {
           this.rejectUnsupportedPartitionAlter(stmt.AlterTableStmt, filePath);
+          rejectUnsupportedBulkTriggerAlter(
+            stmt.AlterTableStmt,
+            filePath
+          );
           const rowSecurityObjects = this.parseAlterTableSqlObjects(
             stmt,
             filePath
           );
           sqlObjects.push(...rowSecurityObjects);
+          const triggerModes = parseAlterTableTriggerModes(
+            stmt.AlterTableStmt,
+            filePath
+          );
+          pendingTriggerModes.push(...triggerModes);
           const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
-            function isNotRowSecurityCommand(item: any) {
-              return !isRowSecuritySubtype(item?.AlterTableCmd?.subtype);
+            function isNotDeclarativeStateCommand(item: any) {
+              const subtype = item?.AlterTableCmd?.subtype;
+              return !isRowSecuritySubtype(subtype) &&
+                !isTableTriggerModeSubtype(subtype);
             }
           );
           if (remainingCommands.length > 0) {
@@ -697,7 +739,10 @@ export class SchemaParser {
                 filePath
               )
             );
-          } else if (rowSecurityObjects.length === 0) {
+          } else if (
+            rowSecurityObjects.length === 0 &&
+            triggerModes.length === 0
+          ) {
             throw this.unsupportedAlterTableError(filePath);
           }
         } else if (stmt.DropStmt) {
@@ -746,6 +791,13 @@ export class SchemaParser {
     }
 
     this.rejectDuplicateDeclarativeSqlObjects(sqlObjects, filePath);
+    rejectDuplicateTriggerDeclarations(triggers, sqlObjects, filePath);
+    mergePendingTriggerModes(
+      triggers,
+      sqlObjects,
+      pendingTriggerModes,
+      filePath
+    );
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
     this.resolveImplicitForeignKeyColumns(tables, filePath);
 
@@ -1264,7 +1316,8 @@ export class SchemaParser {
     return new ParserError(
       "This ALTER TABLE statement is not supported in schema definitions. " +
         "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
-        "ADD FOREIGN KEY and ADD CHECK constraints; " +
+        "ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
+        "named trigger firing modes; " +
         "define all other desired table state with CREATE TABLE.",
       filePath
     );
@@ -1684,13 +1737,19 @@ export class SchemaParser {
     }
 
     const schema = relation?.schemaname;
-    return this.buildSqlObject(
+    const object = this.buildSqlObject(
       "constraint-trigger",
       stmt,
       name,
       schema,
       `constraint-trigger:${schema || "public"}.${tableName}.${name}`
     );
+    object.triggerTable = { name: tableName, ...(schema ? { schema } : {}) };
+    object.triggerFunction = qualifiedNameFromStringNodes(
+      node.funcname,
+      "public"
+    );
+    return object;
   }
 
   private parseEventTriggerSqlObject(stmt: any): SqlObject | null {
@@ -1698,7 +1757,18 @@ export class SchemaParser {
     if (!name) {
       return null;
     }
-    return this.buildSqlObject("event-trigger", stmt, name, undefined, `event-trigger:${name}`);
+    const object = this.buildSqlObject(
+      "event-trigger",
+      stmt,
+      name,
+      undefined,
+      `event-trigger:${name}`
+    );
+    object.triggerFunction = qualifiedNameFromStringNodes(
+      stmt.CreateEventTrigStmt.funcname,
+      "public"
+    );
+    return object;
   }
 
   private parseRoleSqlObject(stmt: any): SqlObject | null {

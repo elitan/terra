@@ -131,6 +131,127 @@ describe("Advanced SQL object parsing", function () {
     ]);
   });
 
+  test("preserves trigger definition fields and declarative firing modes", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE TRIGGER update_audit
+        BEFORE UPDATE OF name, "Status" ON "audit"."Orders"
+        FOR EACH ROW
+        EXECUTE FUNCTION public.audit_row();
+      ALTER TABLE "audit"."Orders"
+        ENABLE ALWAYS TRIGGER update_audit;
+
+      CREATE TRIGGER transition_audit
+        AFTER UPDATE ON "audit"."Orders"
+        REFERENCING OLD TABLE AS old_rows NEW TABLE AS "New Rows"
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION public.audit_statement();
+
+      CREATE CONSTRAINT TRIGGER constraint_audit
+        AFTER INSERT ON "audit"."Orders"
+        DEFERRABLE INITIALLY DEFERRED
+        FOR EACH ROW
+        EXECUTE FUNCTION public.audit_row();
+      ALTER TABLE "audit"."Orders"
+        DISABLE TRIGGER constraint_audit;
+
+      CREATE EVENT TRIGGER ddl_audit
+        ON ddl_command_end
+        EXECUTE FUNCTION public.audit_ddl();
+      ALTER EVENT TRIGGER ddl_audit ENABLE REPLICA;
+    `);
+
+    expect(parsed.triggers).toEqual([
+      expect.objectContaining({
+        name: "update_audit",
+        updateColumns: ["name", "Status"],
+        enabled: "always",
+      }),
+      expect.objectContaining({
+        name: "transition_audit",
+        oldTransitionTable: "old_rows",
+        newTransitionTable: "New Rows",
+      }),
+    ]);
+    expect(parsed.sqlObjects?.find(function findConstraintTrigger(object) {
+      return object.key ===
+        "constraint-trigger:audit.Orders.constraint_audit";
+    })).toMatchObject({
+      triggerTable: { name: "Orders", schema: "audit" },
+      triggerEnabled: "disabled",
+    });
+    expect(parsed.sqlObjects?.find(function findEventTrigger(object) {
+      return object.key === "event-trigger:ddl_audit";
+    })).toMatchObject({
+      triggerEnabled: "replica",
+    });
+  });
+
+  test("rejects ambiguous or unbound trigger firing mutations", async function () {
+    const parser = new SchemaParser();
+
+    await expect(
+      parser.parseSchema(
+        "ALTER TABLE public.orders DISABLE TRIGGER USER;"
+      )
+    ).rejects.toThrow(/bulk trigger firing mutations.*not supported/i);
+    await expect(
+      parser.parseSchema(
+        "ALTER TABLE public.orders DISABLE TRIGGER missing_trigger;"
+      )
+    ).rejects.toThrow(/target trigger.*not declared/i);
+    await expect(
+      parser.parseSchema(`
+        CREATE TRIGGER audit
+          AFTER INSERT ON public.orders
+          EXECUTE FUNCTION public.audit_row();
+        ALTER TABLE ONLY public.orders DISABLE TRIGGER audit;
+      `)
+    ).rejects.toThrow(/ALTER TABLE ONLY.*unmodeled state/i);
+    await expect(
+      parser.parseSchema(`
+        CREATE TRIGGER audit
+          AFTER INSERT ON public.orders
+          EXECUTE FUNCTION public.audit_row();
+        ALTER TABLE public.orders DISABLE TRIGGER audit;
+        ALTER TABLE public.orders ENABLE TRIGGER audit;
+      `)
+    ).rejects.toThrow(/firing mode.*more than once/i);
+  });
+
+  test("rejects duplicate declarations across every trigger family", async function () {
+    const parser = new SchemaParser();
+
+    await expect(parser.parseSchema(`
+      CREATE TRIGGER audit
+        AFTER INSERT ON public.orders
+        EXECUTE FUNCTION public.audit_row();
+      CREATE TRIGGER audit
+        AFTER INSERT ON public.orders
+        EXECUTE FUNCTION public.audit_row();
+    `)).rejects.toThrow(/trigger.*orders\.audit.*declared more than once/i);
+
+    await expect(parser.parseSchema(`
+      CREATE CONSTRAINT TRIGGER audit
+        AFTER INSERT ON public.orders
+        FOR EACH ROW
+        EXECUTE FUNCTION public.audit_row();
+      CREATE CONSTRAINT TRIGGER audit
+        AFTER INSERT ON public.orders
+        FOR EACH ROW
+        EXECUTE FUNCTION public.audit_row();
+    `)).rejects.toThrow(/trigger.*orders\.audit.*declared more than once/i);
+
+    await expect(parser.parseSchema(`
+      CREATE EVENT TRIGGER audit_ddl
+        ON ddl_command_end
+        EXECUTE FUNCTION public.audit_ddl();
+      CREATE EVENT TRIGGER audit_ddl
+        ON ddl_command_end
+        EXECUTE FUNCTION public.audit_ddl();
+    `)).rejects.toThrow(/trigger.*audit_ddl.*declared more than once/i);
+  });
+
   test("rejects imperative policy and negative row security mutations", async function () {
     const parser = new SchemaParser();
 
