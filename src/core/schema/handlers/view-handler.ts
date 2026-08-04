@@ -15,6 +15,8 @@ import {
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import { SchemaDiffer } from "../differ";
+import { normalizeSQLiteIdentifier } from "../../../utils/sqlite-identifier";
+import { normalizeSQLiteSchemaDefinition } from "../../../providers/sqlite/sql-parser-utils";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -491,9 +493,30 @@ function generateSQLiteCreateView(view: View): string {
   return `${cleanCreateStatement(view.createStatement || "")};`;
 }
 
-function sqliteViewNeedsUpdate(desired: View, current: View): boolean {
-  return cleanCreateStatement(desired.createStatement || "") !==
-    cleanCreateStatement(current.createStatement || "");
+function getSQLiteViewKey(view: View): string {
+  return [view.schema || "public", view.name]
+    .map(normalizeSQLiteIdentifier)
+    .join(".");
+}
+
+function createSQLiteConfig(
+  identifiers: readonly string[]
+): HandlerConfig<View> {
+  return {
+    name: "view",
+    getKey: getSQLiteViewKey,
+    generateDrop: generateSQLiteDropView,
+    generateCreate: generateSQLiteCreateView,
+    needsUpdate: function sqliteViewNeedsUpdate(desired, current) {
+      return normalizeSQLiteSchemaDefinition(
+        desired.createStatement || "",
+        identifiers
+      ) !== normalizeSQLiteSchemaDefinition(
+        current.createStatement || "",
+        identifiers
+      );
+    },
+  };
 }
 
 function createPostgresConfig(
@@ -520,14 +543,6 @@ function createPostgresConfig(
     },
   };
 }
-
-const sqliteConfig: HandlerConfig<View> = {
-  name: "view",
-  getKey: getViewKey,
-  generateDrop: generateSQLiteDropView,
-  generateCreate: generateSQLiteCreateView,
-  needsUpdate: sqliteViewNeedsUpdate,
-};
 
 const materializedViewIndexDiffer = new SchemaDiffer({
   useConcurrentIndexes: false,
@@ -600,7 +615,8 @@ export class ViewHandler {
   generateStatements(
     desiredViews: View[],
     currentViews: View[],
-    context: MigrationContext = {}
+    context: MigrationContext = {},
+    sqliteIdentifiers: readonly string[] = []
   ): string[] {
     const usesCreateStatements = desiredViews.some(hasCreateStatement) ||
       currentViews.some(hasCreateStatement);
@@ -610,7 +626,9 @@ export class ViewHandler {
     const statements = generateStatements(
       desiredViews,
       currentViews,
-      usesCreateStatements ? sqliteConfig : createPostgresConfig(context)
+      usesCreateStatements
+        ? createSQLiteConfig(sqliteIdentifiers)
+        : createPostgresConfig(context)
     );
     if (usesCreateStatements) {
       return statements;

@@ -343,6 +343,24 @@ describe("SQLiteInspector unit coverage", () => {
         };
       }
 
+      if (sql.includes('PRAGMA table_xinfo("v_users")')) {
+        return {
+          rows: [{
+            cid: 0,
+            name: "id",
+            type: "INTEGER",
+            notnull: 0,
+            dflt_value: null,
+            pk: 0,
+            hidden: 0,
+          }],
+        };
+      }
+
+      if (sql.includes('PRAGMA table_xinfo("v_empty")')) {
+        return { rows: [] };
+      }
+
       throw new Error(`Unhandled SQL: ${sql}`);
     });
 
@@ -352,8 +370,14 @@ describe("SQLiteInspector unit coverage", () => {
         name: "v_users",
         definition: "SELECT id FROM users",
         createStatement: "CREATE VIEW v_users AS SELECT id FROM users",
+        columnNames: ["id"],
       },
-      { name: "v_empty", definition: "", createStatement: undefined },
+      {
+        name: "v_empty",
+        definition: "",
+        createStatement: undefined,
+        columnNames: [],
+      },
     ]);
 
     const triggers = await inspector.getCurrentTriggers(client);

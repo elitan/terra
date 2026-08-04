@@ -6,13 +6,17 @@ import {
   hasSQLiteTableRecreation,
   isSQLiteRecreationTableStatement,
 } from "../../utils/sqlite-recreation";
-import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
+import {
+  collectSQLiteSchemaIdentifiers,
+  normalizeSQLiteIdentifier,
+} from "../../utils/sqlite-identifier";
 import {
   canonicalizeSQLiteDefinitionIdentifiers,
   extractSQLiteColumnCollations,
   extractSQLiteForeignKeyMatchClauses,
   removeSQLiteForeignKeyMatchSimpleClauses,
   removeSQLiteForeignKeyTargetColumns,
+  normalizeSQLiteSchemaDefinition,
 } from "../../providers/sqlite/sql-parser-utils";
 
 function makeTable(overrides: Partial<Table> = {}): Table {
@@ -133,6 +137,61 @@ describe("SQLiteDiffer private coverage", () => {
     ).toBe(
       `references "Äccounts"("id") references "äccounts"("id")`
     );
+    expect(
+      normalizeSQLiteSchemaDefinition(
+        `CREATE  VIEW "StatusView" AS -- comment with 'quote'\n` +
+          ` SELECT "ID", 'A   B' FROM "Users"`,
+        ["statusview", "id", "users"]
+      )
+    ).toBe(
+      `create view "statusview" as select "id", 'A   B' from "users"`
+    );
+  });
+
+  test("collects identifiers used by SQLite schema objects", function () {
+    const identifiers = collectSQLiteSchemaIdentifiers(
+      [makeTable({
+        name: "Users",
+        columns: [{
+          name: "ID",
+          type: "INTEGER",
+          nullable: false,
+          collation: { name: "NoCase" },
+        }],
+        primaryKey: { name: "Users_PK", columns: ["ID"] },
+        indexes: [{
+          name: "Users_ID_IDX",
+          tableName: "Users",
+          columns: ["ID"],
+          terms: [{ column: "ID", collation: "NoCase" }],
+        }],
+      })],
+      [{
+        name: "ActiveUsers",
+        definition: "SELECT ID FROM Users",
+        columnNames: ["SelectedUser"],
+      }],
+      [{
+        name: "Users_Insert",
+        tableName: "Users",
+        timing: "AFTER",
+        events: ["INSERT"],
+        functionName: "",
+      }]
+    );
+
+    expect(identifiers).toEqual(expect.arrayContaining([
+      "new",
+      "old",
+      "Users",
+      "ID",
+      "NoCase",
+      "Users_PK",
+      "Users_ID_IDX",
+      "ActiveUsers",
+      "SelectedUser",
+      "Users_Insert",
+    ]));
   });
 
   test("detectChanges marks check constraint changes for recreation", () => {

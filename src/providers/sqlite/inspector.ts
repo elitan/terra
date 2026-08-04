@@ -436,14 +436,22 @@ export class SQLiteInspector {
       ORDER BY name
     `);
 
-    return views.rows.map(function (row) {
+    const inspectedViews: View[] = [];
+    for (const row of views.rows) {
       const createStatement = row.sql?.trim().replace(/;+\s*$/g, "") || "";
-      return {
+      const columns = await client.query<TableInfo>(
+        `PRAGMA table_xinfo(${this.quoteIdentifier(row.name)})`
+      );
+      inspectedViews.push({
         name: row.name,
         definition: extractSQLiteViewDefinition(createStatement),
         createStatement: createStatement || undefined,
-      };
-    });
+        columnNames: columns.rows.map(function (column) {
+          return column.name;
+        }),
+      });
+    }
+    return inspectedViews;
   }
 
   async getCurrentTriggers(client: SQLiteClient): Promise<Trigger[]> {

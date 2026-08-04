@@ -16,7 +16,10 @@ import {
   replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
 import { chooseSQLiteRecreationTableName } from "../../utils/sqlite-recreation";
-import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
+import {
+  collectSQLiteSchemaIdentifiers,
+  normalizeSQLiteIdentifier,
+} from "../../utils/sqlite-identifier";
 
 interface ColumnChange {
   type: 'add' | 'drop' | 'modify';
@@ -121,7 +124,11 @@ export class SQLiteDiffer {
       checkConstraintsChanged: false,
       uniqueConstraintsChanged: false,
     };
-    const identifiers = SQLiteDiffer.collectTableIdentifiers(desired, current);
+    const identifiers = collectSQLiteSchemaIdentifiers(
+      [desired, current],
+      [],
+      []
+    );
 
     const currentColMap = indexBySQLiteIdentifier(current.columns);
     const desiredColMap = indexBySQLiteIdentifier(desired.columns);
@@ -467,45 +474,6 @@ export class SQLiteDiffer {
       identifiers
     );
     return desiredConstraints.join("\0") !== currentConstraints.join("\0");
-  }
-
-  private static collectTableIdentifiers(
-    desired: Table,
-    current: Table
-  ): string[] {
-    const identifiers = [desired.name, current.name];
-    for (const table of [desired, current]) {
-      for (const column of table.columns) {
-        identifiers.push(column.name);
-        if (column.collation) {
-          identifiers.push(column.collation.name);
-        }
-      }
-      for (const foreignKey of table.foreignKeys || []) {
-        if (foreignKey.name) {
-          identifiers.push(foreignKey.name);
-        }
-        identifiers.push(
-          ...foreignKey.columns,
-          foreignKey.referencedTable,
-          ...foreignKey.referencedColumns
-        );
-      }
-      for (const constraint of table.checkConstraints || []) {
-        if (constraint.name) {
-          identifiers.push(constraint.name);
-        }
-      }
-      for (const constraint of table.uniqueConstraints || []) {
-        if (constraint.name) {
-          identifiers.push(constraint.name);
-        }
-      }
-      if (table.primaryKey?.name) {
-        identifiers.push(table.primaryKey.name);
-      }
-    }
-    return identifiers;
   }
 
   private normalizeDefinitions(

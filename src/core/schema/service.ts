@@ -11,6 +11,7 @@ import type { Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import { isDestructiveStatement } from "../../utils/statement-classifier";
 import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
+import { collectSQLiteSchemaIdentifiers } from "../../utils/sqlite-identifier";
 import {
   CommentHandler,
   CompositeTypeHandler,
@@ -424,6 +425,13 @@ export class SchemaService {
       await this.provider.getCurrentSqlObjects?.(client, schemas) || [],
       desiredSqlObjects
     );
+    const sqliteIdentifiers = this.provider.dialect === "sqlite"
+      ? collectSQLiteSchemaIdentifiers(
+        [...desiredSchema, ...currentSchema],
+        [...desiredViews, ...currentViews],
+        [...desiredTriggers, ...currentTriggers]
+      )
+      : [];
 
     let schemaStatements: string[] = [];
     let extensionCreateStatements: string[] = [];
@@ -510,11 +518,16 @@ export class SchemaService {
     let viewStatements = this.viewHandler.generateStatements(
       normalizedDesiredViews,
       currentViews,
-      migrationContext
+      migrationContext,
+      sqliteIdentifiers
     );
 
     if (this.provider.supportsFeature("triggers")) {
-      triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
+      triggerStatements = this.triggerHandler.generateStatements(
+        desiredTriggers,
+        currentTriggers,
+        sqliteIdentifiers
+      );
     }
 
     let preTableTriggerStatements: string[] = [];
@@ -526,17 +539,39 @@ export class SchemaService {
       });
 
       if (recreatesTable) {
-        preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);
-        preTableViewStatements = this.viewHandler.generateStatements([], currentViews);
+        preTableTriggerStatements = this.triggerHandler.generateStatements(
+          [],
+          currentTriggers,
+          sqliteIdentifiers
+        );
+        preTableViewStatements = this.viewHandler.generateStatements(
+          [],
+          currentViews,
+          migrationContext,
+          sqliteIdentifiers
+        );
         viewStatements = this.viewHandler.generateStatements(
           normalizedDesiredViews,
           [],
-          migrationContext
+          migrationContext,
+          sqliteIdentifiers
         );
-        triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, []);
+        triggerStatements = this.triggerHandler.generateStatements(
+          desiredTriggers,
+          [],
+          sqliteIdentifiers
+        );
       } else if (replacesOrDropsView && this.provider.supportsFeature("triggers")) {
-        preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);
-        triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, []);
+        preTableTriggerStatements = this.triggerHandler.generateStatements(
+          [],
+          currentTriggers,
+          sqliteIdentifiers
+        );
+        triggerStatements = this.triggerHandler.generateStatements(
+          desiredTriggers,
+          [],
+          sqliteIdentifiers
+        );
       }
     } else if (this.provider.dialect === "postgres") {
       preTableTriggerStatements = triggerStatements.filter(function isDrop(

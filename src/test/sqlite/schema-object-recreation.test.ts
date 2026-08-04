@@ -219,4 +219,85 @@ describe("SQLite table recreation schema objects", function () {
       }
     }
   });
+
+  test("matches identifier case across views and triggers", async function () {
+    const config: SQLiteConnectionConfig = {
+      dialect: "sqlite",
+      filename: `file:terradb-schema-object-case-${Date.now()}?mode=memory&cache=shared`,
+    };
+    const provider = new SQLiteProvider();
+    const anchor = await provider.createClient(config);
+    const service = new SchemaService(provider, config);
+
+    try {
+      await anchor.query(`
+        CREATE TABLE "Users" (
+          "ID" INTEGER PRIMARY KEY,
+          "Active" INTEGER NOT NULL
+        )
+      `);
+      await anchor.query(`
+        CREATE TABLE "AuditLog" ("UserID" INTEGER NOT NULL)
+      `);
+      await anchor.query(`
+        CREATE VIEW "ActiveUsers"("SelectedUser") AS
+        SELECT "ID" FROM "Users" WHERE "Active" = 1
+      `);
+      await anchor.query(`
+        CREATE TRIGGER "Users_Insert_Audit"
+        AFTER INSERT ON "Users"
+        BEGIN
+          INSERT INTO "AuditLog"("UserID") VALUES (NEW."ID");
+        END
+      `);
+      await anchor.query(`
+        INSERT INTO "Users"("ID", "Active") VALUES (7, 1)
+      `);
+
+      const equivalentSchema = `
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY,
+          active INTEGER NOT NULL
+        );
+        CREATE TABLE auditlog (userid INTEGER NOT NULL);
+        CREATE VIEW activeusers(selecteduser) AS
+          SELECT id FROM users WHERE active = 1;
+        CREATE TRIGGER users_insert_audit
+        AFTER INSERT ON users
+        BEGIN
+          INSERT INTO auditlog(userid) VALUES (new.id);
+        END;
+      `;
+      const plan = await service.plan(equivalentSchema, ["public"]);
+      expect(plan.hasChanges).toBe(false);
+      expect(plan.transactional).toEqual([]);
+
+      const activeUsers = await anchor.query(`
+        SELECT "SelectedUser" AS userid
+        FROM activeusers
+        ORDER BY "SelectedUser"
+      `);
+      const auditRows = await anchor.query(`
+        SELECT "UserID" AS userid FROM auditlog ORDER BY "UserID"
+      `);
+      expect(activeUsers.rows).toEqual([{ userid: 7 }]);
+      expect(auditRows.rows).toEqual([{ userid: 7 }]);
+
+      const changedView = equivalentSchema.replace(
+        "WHERE active = 1",
+        "WHERE active >= 0"
+      );
+      expect((await service.plan(changedView, ["public"])).hasChanges)
+        .toBe(true);
+
+      const changedTrigger = equivalentSchema.replace(
+        "VALUES (new.id)",
+        "VALUES (new.id + 1)"
+      );
+      expect((await service.plan(changedTrigger, ["public"])).hasChanges)
+        .toBe(true);
+    } finally {
+      await anchor.end();
+    }
+  });
 });

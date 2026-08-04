@@ -357,6 +357,20 @@ describe("Handler module coverage", () => {
       expect(dropStatements[0]).toBe('DROP TRIGGER IF EXISTS "trg_users_insert";');
     });
 
+    test("quotes sqlite trigger names when dropping", function () {
+      const handler = new TriggerHandler();
+      const trigger = makeTrigger({
+        name: 'trg"users',
+        schema: undefined,
+        functionName: "",
+        definition: 'CREATE TRIGGER "trg""users" AFTER INSERT ON users BEGIN SELECT 1; END',
+      });
+
+      expect(handler.generateStatements([], [trigger])).toEqual([
+        'DROP TRIGGER IF EXISTS "trg""users";',
+      ]);
+    });
+
     test("does not update sqlite trigger for whitespace-only definition differences", () => {
       const handler = new TriggerHandler();
       const desired = makeTrigger({

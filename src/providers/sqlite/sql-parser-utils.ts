@@ -837,6 +837,65 @@ export function canonicalizeSQLiteDefinitionIdentifiers(
   return result;
 }
 
+export function normalizeSQLiteSchemaDefinition(
+  definition: string,
+  identifiers: readonly string[]
+): string {
+  const cleaned = definition.trim().replace(/;+\s*$/g, "");
+  const canonical = canonicalizeSQLiteDefinitionIdentifiers(
+    cleaned,
+    identifiers
+  );
+  let result = "";
+  let cursor = 0;
+
+  function appendSeparator(): void {
+    if (result.length > 0 && !result.endsWith(" ")) {
+      result += " ";
+    }
+  }
+
+  while (cursor < canonical.length) {
+    if (canonical[cursor] === "'") {
+      const end = skipQuoted(canonical, cursor, "'");
+      result += canonical.slice(cursor, end);
+      cursor = end;
+      continue;
+    }
+    if (
+      canonical.startsWith("--", cursor) ||
+      canonical.startsWith("/*", cursor)
+    ) {
+      cursor = canonical.startsWith("--", cursor)
+        ? skipLineComment(canonical, cursor)
+        : skipBlockComment(canonical, cursor);
+      appendSeparator();
+      continue;
+    }
+    if (
+      canonical[cursor] === '"' ||
+      canonical[cursor] === "`" ||
+      canonical[cursor] === "["
+    ) {
+      const identifier = readSQLiteIdentifier(canonical.slice(cursor));
+      if (identifier) {
+        result += canonical.slice(cursor, cursor + identifier.end);
+        cursor += identifier.end;
+        continue;
+      }
+    }
+    if (/\s/u.test(canonical[cursor] || "")) {
+      appendSeparator();
+      cursor += 1;
+      continue;
+    }
+    result += canonical[cursor];
+    cursor += 1;
+  }
+
+  return result.trim();
+}
+
 export function removeSQLiteForeignKeyTargetColumns(
   definition: string
 ): string {

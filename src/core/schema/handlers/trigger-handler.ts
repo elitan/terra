@@ -4,39 +4,66 @@ import {
   generateDropTriggerSQL,
   normalizeExpression,
 } from "../../../utils/sql";
+import { normalizeSQLiteIdentifier } from "../../../utils/sqlite-identifier";
+import { normalizeSQLiteSchemaDefinition } from "../../../providers/sqlite/sql-parser-utils";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 
-const config: HandlerConfig<Trigger> = {
-  name: "trigger",
-  getKey: (t) => `${t.schema || "public"}.${t.tableName}.${t.name}`,
-  getLogName: (t) => `${t.name}' on '${t.schema || "public"}.${t.tableName}`,
-  generateDrop: generateDropTriggerStatement,
-  generateCreate: generateCreateTriggerStatement,
-  needsUpdate: (desired, current) => {
-    if (hasSqliteDefinition(desired) || hasSqliteDefinition(current)) {
-      const desiredDefinition = normalizeTriggerDefinition(desired.definition || "");
-      const currentDefinition = normalizeTriggerDefinition(current.definition || "");
-      return desiredDefinition !== currentDefinition;
-    }
+function getTriggerKey(trigger: Trigger): string {
+  const parts = [trigger.schema || "public", trigger.tableName, trigger.name];
+  if (hasSqliteDefinition(trigger)) {
+    return parts.map(normalizeSQLiteIdentifier).join(".");
+  }
+  return parts.join(".");
+}
 
-    const desiredWhen = desired.when ? normalizeExpression(desired.when) : undefined;
-    const currentWhen = current.when ? normalizeExpression(current.when) : undefined;
-    const desiredEvents = normalizeTriggerEvents(desired.events);
-    const currentEvents = normalizeTriggerEvents(current.events);
-    const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
-    const currentArgs = normalizeTriggerArgs(current.functionArgs);
+function createConfig(
+  sqliteIdentifiers: readonly string[]
+): HandlerConfig<Trigger> {
+  return {
+    name: "trigger",
+    getKey: getTriggerKey,
+    getLogName: function getLogName(trigger) {
+      return `${trigger.name}' on '${trigger.schema || "public"}.${trigger.tableName}`;
+    },
+    generateDrop: generateDropTriggerStatement,
+    generateCreate: generateCreateTriggerStatement,
+    needsUpdate: function needsUpdate(desired, current) {
+      if (hasSqliteDefinition(desired) || hasSqliteDefinition(current)) {
+        const desiredDefinition = normalizeSQLiteSchemaDefinition(
+          desired.definition || "",
+          sqliteIdentifiers
+        );
+        const currentDefinition = normalizeSQLiteSchemaDefinition(
+          current.definition || "",
+          sqliteIdentifiers
+        );
+        return desiredDefinition !== currentDefinition;
+      }
 
-    return (
-      desired.timing !== current.timing ||
-      desired.forEach !== current.forEach ||
-      desired.functionName !== current.functionName ||
-      (desired.functionSchema || "public") !== (current.functionSchema || "public") ||
-      JSON.stringify(desiredEvents) !== JSON.stringify(currentEvents) ||
-      desiredWhen !== currentWhen ||
-      JSON.stringify(desiredArgs) !== JSON.stringify(currentArgs)
-    );
-  },
-};
+      const desiredWhen = desired.when
+        ? normalizeExpression(desired.when)
+        : undefined;
+      const currentWhen = current.when
+        ? normalizeExpression(current.when)
+        : undefined;
+      const desiredEvents = normalizeTriggerEvents(desired.events);
+      const currentEvents = normalizeTriggerEvents(current.events);
+      const desiredArgs = normalizeTriggerArgs(desired.functionArgs);
+      const currentArgs = normalizeTriggerArgs(current.functionArgs);
+
+      return (
+        desired.timing !== current.timing ||
+        desired.forEach !== current.forEach ||
+        desired.functionName !== current.functionName ||
+        (desired.functionSchema || "public") !==
+          (current.functionSchema || "public") ||
+        JSON.stringify(desiredEvents) !== JSON.stringify(currentEvents) ||
+        desiredWhen !== currentWhen ||
+        JSON.stringify(desiredArgs) !== JSON.stringify(currentArgs)
+      );
+    },
+  };
+}
 
 function hasSqliteDefinition(trigger: Trigger): boolean {
   return typeof trigger.definition === "string" && trigger.definition.trim().length > 0;
@@ -46,53 +73,9 @@ function cleanTriggerDefinition(definition: string): string {
   return definition.trim().replace(/;+\s*$/g, "");
 }
 
-function normalizeTriggerDefinition(definition: string): string {
-  const cleaned = cleanTriggerDefinition(definition);
-  let normalized = "";
-  let quote: string | undefined;
-
-  for (let index = 0; index < cleaned.length; index += 1) {
-    const character = cleaned[index] || "";
-
-    if (quote) {
-      normalized += character;
-      if (character === quote) {
-        if (cleaned[index + 1] === quote) {
-          normalized += quote;
-          index += 1;
-        } else {
-          quote = undefined;
-        }
-      }
-      continue;
-    }
-
-    if (character === "'" || character === '"' || character === "`") {
-      quote = character;
-      normalized += character;
-      continue;
-    }
-    if (character === "[") {
-      quote = "]";
-      normalized += character;
-      continue;
-    }
-    if (/\s/u.test(character)) {
-      if (normalized.length > 0 && !normalized.endsWith(" ")) {
-        normalized += " ";
-      }
-      continue;
-    }
-
-    normalized += character;
-  }
-
-  return normalized.trim();
-}
-
 function generateDropTriggerStatement(trigger: Trigger): string {
   if (hasSqliteDefinition(trigger)) {
-    return `DROP TRIGGER IF EXISTS "${trigger.name}";`;
+    return `DROP TRIGGER IF EXISTS "${trigger.name.replace(/"/g, '""')}";`;
   }
 
   return generateDropTriggerSQL(trigger);
@@ -140,7 +123,15 @@ function normalizeTriggerArg(arg: string): string {
 }
 
 export class TriggerHandler {
-  generateStatements(desiredTriggers: Trigger[], currentTriggers: Trigger[]): string[] {
-    return generateStatements(desiredTriggers, currentTriggers, config);
+  generateStatements(
+    desiredTriggers: Trigger[],
+    currentTriggers: Trigger[],
+    sqliteIdentifiers: readonly string[] = []
+  ): string[] {
+    return generateStatements(
+      desiredTriggers,
+      currentTriggers,
+      createConfig(sqliteIdentifiers)
+    );
   }
 }
