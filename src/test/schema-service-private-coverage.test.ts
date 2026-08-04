@@ -471,6 +471,27 @@ describe("SchemaService private coverage", function () {
     expect(mock.state.clientEndCalls).toBe(1);
   });
 
+  test("apply defaults to requiring approval", async function () {
+    const mock = createMockProvider({
+      parsedSchema: createParsedSchema({ tables: [{ name: "users", columns: [] }] }),
+      plan: createPlan({
+        transactional: ["CREATE TABLE users (id INT);"],
+        hasChanges: true,
+      }),
+    });
+
+    const service = createService(mock.provider);
+    (service as unknown as { canPromptForConfirmation: () => boolean }).canPromptForConfirmation = function () {
+      return false;
+    };
+
+    await expect(
+      service.apply("CREATE TABLE users (id INT);", ["public"])
+    ).rejects.toThrow("Confirmation prompt requires interactive terminal");
+    expect(mock.state.executeInTransactionCalls).toHaveLength(0);
+    expect(mock.state.clientEndCalls).toBe(1);
+  });
+
   test("apply dry run skips advisory lock and does not execute plan", async function () {
     const mock = createMockProvider({
       parsedSchema: createParsedSchema({ tables: [{ name: "users", columns: [] }] }),

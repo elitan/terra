@@ -631,8 +631,8 @@ export class SchemaService {
         continue;
       }
 
-      const definition = await this.canonicalizeViewDefinition(client, view);
-      normalizedViews.push(definition ? { ...view, definition } : view);
+      const canonical = await this.canonicalizeViewDefinition(client, view);
+      normalizedViews.push(canonical ? { ...view, ...canonical } : view);
     }
 
     return normalizedViews;
@@ -641,23 +641,47 @@ export class SchemaService {
   private async canonicalizeViewDefinition(
     client: DatabaseClient,
     view: View
-  ): Promise<string | undefined> {
+  ): Promise<{ definition: string; columnNames: string[] } | undefined> {
     const schemaName = view.schema || "public";
     const tempViewName = `terradb_view_compare_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+    const columnList = view.columnNames && view.columnNames.length > 0
+      ? ` (${view.columnNames.map(this.quoteIdentifier).join(", ")})`
+      : "";
 
     try {
       await client.query("BEGIN");
       await client.query(`SET LOCAL search_path TO ${this.buildViewSearchPath(schemaName)}`);
       await client.query(
-        `CREATE TEMP VIEW ${this.quoteIdentifier(tempViewName)} AS ${view.definition}`
+        `CREATE TEMP VIEW ${this.quoteIdentifier(tempViewName)}${columnList} AS ${view.definition}`
       );
 
-      const result = await client.query<{ definition: string }>(
-        "SELECT pg_get_viewdef($1::regclass, false) AS definition",
+      const result = await client.query<{
+        definition: string;
+        column_names: string[];
+      }>(
+        `
+          SELECT
+            pg_get_viewdef($1::regclass, false) AS definition,
+            ARRAY(
+              SELECT attribute.attname::text
+              FROM pg_attribute attribute
+              WHERE attribute.attrelid = $1::regclass
+                AND attribute.attnum > 0
+                AND NOT attribute.attisdropped
+              ORDER BY attribute.attnum
+            ) AS column_names
+        `,
         [`pg_temp.${tempViewName}`]
       );
 
-      return result.rows[0]?.definition?.trim();
+      const row = result.rows[0];
+      if (!row?.definition) {
+        return undefined;
+      }
+      return {
+        definition: row.definition.trim(),
+        columnNames: row.column_names,
+      };
     } catch {
       return undefined;
     } finally {

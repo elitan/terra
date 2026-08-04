@@ -896,6 +896,20 @@ export function generateUniqueConstraintClause(
 }
 
 // VIEW SQL generation functions
+function cleanViewDefinition(definition: string): string {
+  return definition.trim().replace(/;+\s*$/g, "");
+}
+
+function appendViewColumnNames(builder: SQLBuilder, view: View): void {
+  if (!view.columnNames || view.columnNames.length === 0) {
+    return;
+  }
+  const columnNames = view.columnNames.map(function quoteViewColumn(name) {
+    return `"${name.replace(/"/g, '""')}"`;
+  });
+  builder.p(`(${columnNames.join(", ")})`);
+}
+
 export function generateCreateViewSQL(view: View): string {
   const builder = new SQLBuilder();
 
@@ -906,12 +920,13 @@ export function generateCreateViewSQL(view: View): string {
   }
 
   builder.table(view.name, view.schema);
+  appendViewColumnNames(builder, view);
 
   if (!view.materialized && view.securityBarrier !== undefined) {
     builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
   }
 
-  builder.p(`AS ${view.definition}`);
+  builder.p(`AS ${cleanViewDefinition(view.definition)}`);
 
   // Add WITH CHECK OPTION if specified (not for materialized views)
   if (view.checkOption && !view.materialized) {
@@ -947,18 +962,31 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
   const builder = new SQLBuilder()
     .p("CREATE OR REPLACE VIEW")
     .table(view.name, view.schema);
+  appendViewColumnNames(builder, view);
 
   if (view.securityBarrier !== undefined) {
     builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
   }
 
-  builder.p(`AS ${view.definition}`);
+  builder.p(`AS ${cleanViewDefinition(view.definition)}`);
 
   // Add WITH CHECK OPTION if specified
   if (view.checkOption) {
     builder.p(`WITH ${view.checkOption} CHECK OPTION`);
   }
 
+  return builder.p(";").build();
+}
+
+export function generateRenameViewColumnSQL(
+  view: View,
+  currentName: string,
+  desiredName: string
+): string {
+  const builder = new SQLBuilder();
+  builder.p(view.materialized ? "ALTER MATERIALIZED VIEW" : "ALTER VIEW");
+  builder.table(view.name, view.schema);
+  builder.p("RENAME COLUMN").ident(currentName).p("TO").ident(desiredName);
   return builder.p(";").build();
 }
 

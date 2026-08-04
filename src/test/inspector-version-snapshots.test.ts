@@ -329,6 +329,9 @@ function normalizeSnapshot(input: any): unknown {
       schema: view.schema,
       name: view.name,
       materialized: Boolean(view.materialized),
+      columnNames: view.columnNames
+        ? [...view.columnNames]
+        : undefined,
       populated: view.populated,
       definition: normalizeSpace(String(view.definition || "")),
       checkOption: view.checkOption,

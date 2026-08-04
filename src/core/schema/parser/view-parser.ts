@@ -8,6 +8,19 @@ import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { View } from "../../../types/schema";
 
+function parseColumnNames(nodes: any[] | undefined): string[] | undefined {
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return undefined;
+  }
+
+  const names = nodes.map(function parseColumnName(node) {
+    return node.String?.sval;
+  }).filter(function hasColumnName(name): name is string {
+    return typeof name === "string";
+  });
+  return names.length > 0 ? names : undefined;
+}
+
 function parseBooleanOption(value: any): boolean | undefined {
   if (!value) {
     return true;
@@ -76,6 +89,7 @@ export function parseCreateView(stmt: any, originalSql: string): View | null {
     if (!definition) return null;
 
     const materialized = false;
+    const columnNames = parseColumnNames(stmt.aliases);
 
     let checkOption: 'CASCADED' | 'LOCAL' | undefined = undefined;
     if (stmt.withCheckOption) {
@@ -100,6 +114,7 @@ export function parseCreateView(stmt: any, originalSql: string): View | null {
       schema,
       definition,
       materialized,
+      ...(columnNames ? { columnNames } : {}),
       checkOption,
       securityBarrier,
     };
@@ -125,12 +140,14 @@ export function parseCreateMaterializedView(stmt: any): View | null {
 
     const definition = stmt.query ? deparseSync([stmt.query]).trim() : '';
     if (!definition) return null;
+    const columnNames = parseColumnNames(into.colNames);
 
     return {
       name: viewName,
       schema,
       definition,
       materialized: true,
+      ...(columnNames ? { columnNames } : {}),
       populated: !Boolean(into.skipData),
     };
   } catch (error) {

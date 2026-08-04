@@ -7,7 +7,7 @@ export interface HandlerConfig<T> {
   generateCreate: (obj: T) => string;
   needsUpdate: (desired: T, current: T) => boolean;
   shouldManage?: (obj: T) => boolean;
-  generateUpdate?: (desired: T) => string;
+  generateUpdate?: (desired: T, current: T) => string | string[];
   getLogName?: (obj: T) => string;
 }
 
@@ -44,7 +44,12 @@ export function generateStatements<T>(
       Logger.info(`Creating ${config.name} '${getLogName(des)}'`);
     } else if (config.needsUpdate(des, curr)) {
       if (config.generateUpdate) {
-        statements.push(config.generateUpdate(des));
+        const updateStatements = config.generateUpdate(des, curr);
+        statements.push(
+          ...(Array.isArray(updateStatements)
+            ? updateStatements
+            : [updateStatements])
+        );
       } else {
         statements.push(config.generateDrop(curr));
         statements.push(config.generateCreate(des));

@@ -114,6 +114,7 @@ describe("DatabaseInspector coverage", () => {
               view_name: "v_users",
               schema_name: "public",
               view_definition: " SELECT id FROM users ",
+              column_names: ["id"],
               check_option: "LOCAL",
               reloptions: ["security_barrier=true"],
               is_updatable: "YES",
@@ -123,6 +124,7 @@ describe("DatabaseInspector coverage", () => {
               view_name: "v_orders",
               schema_name: "tenant_a",
               view_definition: " SELECT id FROM orders ",
+              column_names: ["id"],
               check_option: "NONE",
               reloptions: null,
               is_updatable: "YES",
@@ -141,12 +143,14 @@ describe("DatabaseInspector coverage", () => {
               schema_name: "public",
               definition: " SELECT id FROM users ",
               ispopulated: true,
+              column_names: ["id"],
             },
             {
               view_name: "mv_orders",
               schema_name: "tenant_a",
               definition: " SELECT id FROM orders ",
               ispopulated: false,
+              column_names: ["id"],
             },
           ],
         };
@@ -214,6 +218,7 @@ describe("DatabaseInspector coverage", () => {
         schema: "public",
         definition: "SELECT id FROM users",
         materialized: false,
+        columnNames: ["id"],
         checkOption: "LOCAL",
         securityBarrier: true,
       },
@@ -222,12 +227,14 @@ describe("DatabaseInspector coverage", () => {
         schema: "tenant_a",
         definition: "SELECT id FROM orders",
         materialized: false,
+        columnNames: ["id"],
       },
       {
         name: "mv_users",
         schema: "public",
         definition: "SELECT id FROM users",
         materialized: true,
+        columnNames: ["id"],
         populated: true,
         indexes: [
           {
@@ -250,6 +257,7 @@ describe("DatabaseInspector coverage", () => {
         schema: "tenant_a",
         definition: "SELECT id FROM orders",
         materialized: true,
+        columnNames: ["id"],
         populated: false,
         indexes: [
           {

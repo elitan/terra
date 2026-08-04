@@ -1,9 +1,11 @@
 import type { View } from "../../../types/schema";
+import { deparseSync, parseSync } from "pgsql-parser";
 import {
   generateCreateViewSQL,
   generateDropViewSQL,
   generateCreateOrReplaceViewSQL,
   generateRefreshMaterializedViewSQL,
+  generateRenameViewColumnSQL,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import { SchemaDiffer } from "../differ";
@@ -122,6 +124,167 @@ function normalizeDefinition(def: string, schema?: string): string {
   return normalized;
 }
 
+function clearOutputAliases(selectStatement: any): void {
+  if (Array.isArray(selectStatement?.targetList)) {
+    for (const target of selectStatement.targetList) {
+      if (target.ResTarget) {
+        delete target.ResTarget.name;
+      }
+    }
+  }
+  if (selectStatement?.larg?.SelectStmt) {
+    clearOutputAliases(selectStatement.larg.SelectStmt);
+  }
+  if (selectStatement?.rarg?.SelectStmt) {
+    clearOutputAliases(selectStatement.rarg.SelectStmt);
+  }
+}
+
+function definitionWithoutOutputAliases(definition: string): string {
+  try {
+    const parsed = parseSync(definition);
+    const selectStatement = parsed.stmts?.[0]?.stmt?.SelectStmt;
+    if (!selectStatement) {
+      return definition;
+    }
+    clearOutputAliases(selectStatement);
+    const statements = parsed.stmts.map(function getStatement(item: any) {
+      return item.stmt;
+    });
+    return deparseSync(statements).trim();
+  } catch {
+    return definition;
+  }
+}
+
+function haveSameColumnNames(desired: View, current: View): boolean {
+  if (!desired.columnNames || !current.columnNames) {
+    return true;
+  }
+  return desired.columnNames.length === current.columnNames.length &&
+    desired.columnNames.every(function hasSameName(name, index) {
+      return name === current.columnNames?.[index];
+    });
+}
+
+function postgresViewDefinitionNeedsUpdate(
+  desired: View,
+  current: View
+): boolean {
+  const compareAliasesSeparately = Boolean(
+    desired.columnNames && current.columnNames
+  );
+  const desiredDefinition = compareAliasesSeparately
+    ? definitionWithoutOutputAliases(desired.definition)
+    : desired.definition;
+  const currentDefinition = compareAliasesSeparately
+    ? definitionWithoutOutputAliases(current.definition)
+    : current.definition;
+
+  return desired.materialized !== current.materialized ||
+    normalizeDefinition(desiredDefinition, desired.schema) !==
+      normalizeDefinition(currentDefinition, current.schema) ||
+    desired.checkOption !== current.checkOption ||
+    desired.securityBarrier !== current.securityBarrier;
+}
+
+function postgresViewWillBeRecreated(desired: View, current: View): boolean {
+  if (desired.materialized !== current.materialized) {
+    return true;
+  }
+  if (
+    desired.columnNames &&
+    current.columnNames &&
+    desired.columnNames.length < current.columnNames.length
+  ) {
+    return true;
+  }
+  return Boolean(
+    desired.materialized && postgresViewDefinitionNeedsUpdate(desired, current)
+  );
+}
+
+function generateViewColumnRenameStatements(
+  desired: View,
+  current: View
+): string[] {
+  if (!desired.columnNames || !current.columnNames) {
+    return [];
+  }
+
+  const changes: Array<{
+    currentName: string;
+    desiredName: string;
+    temporaryName: string;
+  }> = [];
+  const reservedNames = new Set([
+    ...desired.columnNames,
+    ...current.columnNames,
+  ]);
+  const commonLength = Math.min(
+    desired.columnNames.length,
+    current.columnNames.length
+  );
+
+  for (let index = 0; index < commonLength; index++) {
+    const currentName = current.columnNames[index];
+    const desiredName = desired.columnNames[index];
+    if (!currentName || !desiredName || currentName === desiredName) {
+      continue;
+    }
+
+    let temporaryName = `__terradb_view_column_${index + 1}`;
+    let suffix = 1;
+    while (reservedNames.has(temporaryName)) {
+      temporaryName = `__terradb_view_column_${index + 1}_${suffix}`;
+      suffix++;
+    }
+    reservedNames.add(temporaryName);
+    changes.push({ currentName, desiredName, temporaryName });
+  }
+
+  const statements = changes.map(function renameToTemporary(change) {
+    return generateRenameViewColumnSQL(
+      current,
+      change.currentName,
+      change.temporaryName
+    );
+  });
+  statements.push(
+    ...changes.map(function renameToDesired(change) {
+      return generateRenameViewColumnSQL(
+        desired,
+        change.temporaryName,
+        change.desiredName
+      );
+    })
+  );
+  return statements;
+}
+
+function recreateView(desired: View, current: View): string {
+  return `${generateDropViewSQL(
+    current.name,
+    current.materialized,
+    current.schema
+  )}\n${generateCreateViewSQL(desired)}`;
+}
+
+function generatePostgresViewUpdateStatements(
+  desired: View,
+  current: View
+): string | string[] {
+  if (postgresViewWillBeRecreated(desired, current)) {
+    return recreateView(desired, current);
+  }
+
+  const statements = generateViewColumnRenameStatements(desired, current);
+  if (postgresViewDefinitionNeedsUpdate(desired, current)) {
+    statements.push(generateCreateOrReplaceViewSQL(desired));
+  }
+  return statements;
+}
+
 function getViewKey(view: View): string {
   return `${view.schema || "public"}.${view.name}`;
 }
@@ -162,15 +325,15 @@ function sqliteViewNeedsUpdate(desired: View, current: View): boolean {
 const config: HandlerConfig<View> = {
   name: "view",
   getKey: getViewKey,
-  generateDrop: (view) => generateDropViewSQL(view.name, view.materialized, view.schema),
+  generateDrop: function generatePostgresViewDrop(view) {
+    return generateDropViewSQL(view.name, view.materialized, view.schema);
+  },
   generateCreate: generateCreateViewSQL,
-  generateUpdate: generateCreateOrReplaceViewSQL,
-  needsUpdate: (desired, current) =>
-    desired.materialized !== current.materialized ||
-    normalizeDefinition(desired.definition, desired.schema) !==
-      normalizeDefinition(current.definition, current.schema) ||
-    desired.checkOption !== current.checkOption ||
-    desired.securityBarrier !== current.securityBarrier,
+  generateUpdate: generatePostgresViewUpdateStatements,
+  needsUpdate: function postgresViewNeedsUpdate(desired, current) {
+    return postgresViewDefinitionNeedsUpdate(desired, current) ||
+      !haveSameColumnNames(desired, current);
+  },
 };
 
 const sqliteConfig: HandlerConfig<View> = {
@@ -200,7 +363,7 @@ function generateMaterializedViewIndexStatements(
 
     const current = currentMap.get(getViewKey(desired));
     const currentIndexes =
-      current && !config.needsUpdate(desired, current)
+      current && !postgresViewWillBeRecreated(desired, current)
         ? current.indexes || []
         : [];
     statements.push(
@@ -230,7 +393,7 @@ function generateMaterializedViewPopulationStatements(
       !current ||
       current.populated === undefined ||
       current.populated === desired.populated ||
-      config.needsUpdate(desired, current)
+      postgresViewWillBeRecreated(desired, current)
     ) {
       continue;
     }

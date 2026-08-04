@@ -1017,6 +1017,14 @@ export class DatabaseInspector {
         v.table_name as view_name,
         v.table_schema as schema_name,
         pg_get_viewdef(c.oid, false) as view_definition,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM pg_attribute attribute
+          WHERE attribute.attrelid = c.oid
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+          ORDER BY attribute.attnum
+        ) as column_names,
         v.check_option,
         c.reloptions,
         v.is_updatable,
@@ -1036,6 +1044,7 @@ export class DatabaseInspector {
         schema: row.schema_name,
         definition: row.view_definition.trim(),
         materialized: false,
+        columnNames: row.column_names,
       };
 
       // Set check option if present
@@ -1062,7 +1071,15 @@ export class DatabaseInspector {
         m.matviewname as view_name,
         m.schemaname as schema_name,
         m.definition,
-        m.ispopulated
+        m.ispopulated,
+        ARRAY(
+          SELECT attribute.attname::text
+          FROM pg_attribute attribute
+          WHERE attribute.attrelid = c.oid
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+          ORDER BY attribute.attnum
+        ) as column_names
       FROM pg_matviews m
       JOIN pg_class c ON c.relname = m.matviewname
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = m.schemaname
@@ -1078,6 +1095,7 @@ export class DatabaseInspector {
         schema: row.schema_name,
         definition: row.definition.trim(),
         materialized: true,
+        columnNames: row.column_names,
         populated: row.ispopulated,
       };
 

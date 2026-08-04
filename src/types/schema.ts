@@ -154,6 +154,7 @@ export interface View {
   definition: string; // The SELECT statement
   createStatement?: string; // Complete CREATE VIEW statement when exact syntax must be preserved
   materialized?: boolean;
+  columnNames?: string[]; // Effective output names in ordinal order
   columns?: Column[]; // For typed views or materialized views
   indexes?: Index[]; // Only for materialized views
   populated?: boolean; // Materialized view scannability from WITH [NO] DATA
