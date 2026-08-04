@@ -826,7 +826,7 @@ export function canonicalizeSQLiteDefinitionIdentifiers(
       const normalized = normalizeSQLiteIdentifier(token);
       result += normalizedIdentifiers.has(normalized)
         ? quoteCanonicalSQLiteIdentifier(normalized)
-        : token;
+        : normalized;
       cursor = end;
       continue;
     }

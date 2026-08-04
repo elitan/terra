@@ -121,6 +121,7 @@ export class SQLiteDiffer {
       checkConstraintsChanged: false,
       uniqueConstraintsChanged: false,
     };
+    const identifiers = SQLiteDiffer.collectTableIdentifiers(desired, current);
 
     const currentColMap = indexBySQLiteIdentifier(current.columns);
     const desiredColMap = indexBySQLiteIdentifier(desired.columns);
@@ -132,7 +133,7 @@ export class SQLiteDiffer {
         if (col.generated?.stored) {
           changes.requiresRecreate = true;
         }
-      } else if (this.columnsDiffer(col, currentCol)) {
+      } else if (this.columnsDiffer(col, currentCol, identifiers)) {
         changes.requiresRecreate = true;
         changes.columnChanges.push({ type: 'modify', column: col, oldColumn: currentCol });
       }
@@ -154,7 +155,11 @@ export class SQLiteDiffer {
       changes.foreignKeysChanged = true;
     }
 
-    if (this.checkConstraintsDiffer(desired.checkConstraints, current.checkConstraints)) {
+    if (this.checkConstraintsDiffer(
+      desired.checkConstraints,
+      current.checkConstraints,
+      identifiers
+    )) {
       changes.requiresRecreate = true;
       changes.checkConstraintsChanged = true;
     }
@@ -168,7 +173,7 @@ export class SQLiteDiffer {
       changes.requiresRecreate = true;
     }
 
-    if (this.tableDefinitionsDiffer(desired, current)) {
+    if (this.tableDefinitionsDiffer(desired, current, identifiers)) {
       changes.requiresRecreate = true;
     }
 
@@ -180,7 +185,11 @@ export class SQLiteDiffer {
         const currentIndex = currentIndexMap.get(
           normalizeSQLiteIdentifier(index.name)
         );
-        if (!currentIndex || this.indexesDiffer(index, currentIndex)) {
+        if (!currentIndex || this.indexesDiffer(
+          index,
+          currentIndex,
+          identifiers
+        )) {
           changes.indexesToAdd.push(index);
           if (currentIndex) {
             changes.indexesToDrop.push(currentIndex);
@@ -201,7 +210,11 @@ export class SQLiteDiffer {
     return changes;
   }
 
-  private columnsDiffer(desired: Column, current: Column): boolean {
+  private columnsDiffer(
+    desired: Column,
+    current: Column,
+    identifiers: readonly string[]
+  ): boolean {
     if (this.normalizeType(desired.type) !== this.normalizeType(current.type)) {
       return true;
     }
@@ -223,7 +236,13 @@ export class SQLiteDiffer {
       }
       if (
         desired.generated.stored !== current.generated.stored ||
-        desired.generated.expression.trim() !== current.generated.expression.trim()
+        this.normalizeSQLiteExpression(
+          desired.generated.expression,
+          identifiers
+        ) !== this.normalizeSQLiteExpression(
+          current.generated.expression,
+          identifiers
+        )
       ) {
         return true;
       }
@@ -268,15 +287,32 @@ export class SQLiteDiffer {
     ].join("\u0001");
   }
 
-  private checkConstraintsDiffer(desired?: CheckConstraint[], current?: CheckConstraint[]): boolean {
+  private checkConstraintsDiffer(
+    desired: CheckConstraint[] | undefined,
+    current: CheckConstraint[] | undefined,
+    identifiers: readonly string[]
+  ): boolean {
     const d = desired || [];
     const c = current || [];
     if (d.length !== c.length) return true;
 
-    const dExprs = d.map(x => x.expression).sort();
-    const cExprs = c.map(x => x.expression).sort();
+    const differ = this;
+    const dExprs = d.map(function (constraint) {
+      return differ.normalizeSQLiteExpression(
+        constraint.expression,
+        identifiers
+      );
+    }).sort();
+    const cExprs = c.map(function (constraint) {
+      return differ.normalizeSQLiteExpression(
+        constraint.expression,
+        identifiers
+      );
+    }).sort();
 
-    return dExprs.some((expr, i) => expr !== cExprs[i]);
+    return dExprs.some(function (expression, index) {
+      return expression !== cExprs[index];
+    });
   }
 
   private uniqueConstraintsDiffer(
@@ -308,20 +344,27 @@ export class SQLiteDiffer {
     });
   }
 
-  private indexesDiffer(desired: Index, current: Index): boolean {
+  private indexesDiffer(
+    desired: Index,
+    current: Index,
+    identifiers: readonly string[]
+  ): boolean {
     if (desired.terms || current.terms) {
       if (!desired.terms || !current.terms) {
         return true;
       }
-      if (this.indexTermsDiffer(desired.terms, current.terms)) {
+      if (this.indexTermsDiffer(desired.terms, current.terms, identifiers)) {
         return true;
       }
-    } else if (desired.columns.join(',') !== current.columns.join(',')) {
+    } else if (
+      desired.columns.map(normalizeSQLiteIdentifier).join("\0") !==
+      current.columns.map(normalizeSQLiteIdentifier).join("\0")
+    ) {
       return true;
     }
     if (desired.unique !== current.unique) return true;
-    if (this.normalizeSql(desired.where) !== this.normalizeSql(current.where)) return true;
-    return false;
+    return this.normalizeSQLiteExpression(desired.where, identifiers) !==
+      this.normalizeSQLiteExpression(current.where, identifiers);
   }
 
   private tableOptionsDiffer(desired: Table, current: Table): boolean {
@@ -344,7 +387,11 @@ export class SQLiteDiffer {
     return desiredAutoincrement.join("\0") !== currentAutoincrement.join("\0");
   }
 
-  private tableDefinitionsDiffer(desired: Table, current: Table): boolean {
+  private tableDefinitionsDiffer(
+    desired: Table,
+    current: Table,
+    identifiers: readonly string[]
+  ): boolean {
     if (!desired.createStatement || !current.createStatement) {
       return false;
     }
@@ -358,13 +405,21 @@ export class SQLiteDiffer {
         current.createStatement,
         "__terradb_table__"
       ) || current.createStatement;
-      return this.normalizeSql(desiredStatement) !==
-        this.normalizeSql(currentStatement);
+      return this.normalizeSql(
+        canonicalizeSQLiteDefinitionIdentifiers(
+          desiredStatement,
+          identifiers
+        )
+      ) !== this.normalizeSql(
+        canonicalizeSQLiteDefinitionIdentifiers(
+          currentStatement,
+          identifiers
+        )
+      );
     }
 
     const desiredDefinition = parseSQLiteTableDefinition(desired.createStatement);
     const currentDefinition = parseSQLiteTableDefinition(current.createStatement);
-    const identifiers = SQLiteDiffer.collectTableIdentifiers(desired, current);
     const currentColumns = new Map(
       currentDefinition.columns.map(function (column) {
         return [
@@ -427,11 +482,27 @@ export class SQLiteDiffer {
         }
       }
       for (const foreignKey of table.foreignKeys || []) {
+        if (foreignKey.name) {
+          identifiers.push(foreignKey.name);
+        }
         identifiers.push(
           ...foreignKey.columns,
           foreignKey.referencedTable,
           ...foreignKey.referencedColumns
         );
+      }
+      for (const constraint of table.checkConstraints || []) {
+        if (constraint.name) {
+          identifiers.push(constraint.name);
+        }
+      }
+      for (const constraint of table.uniqueConstraints || []) {
+        if (constraint.name) {
+          identifiers.push(constraint.name);
+        }
+      }
+      if (table.primaryKey?.name) {
+        identifiers.push(table.primaryKey.name);
       }
     }
     return identifiers;
@@ -452,7 +523,11 @@ export class SQLiteDiffer {
     }).sort();
   }
 
-  private indexTermsDiffer(desired: IndexTerm[], current: IndexTerm[]): boolean {
+  private indexTermsDiffer(
+    desired: IndexTerm[],
+    current: IndexTerm[],
+    identifiers: readonly string[]
+  ): boolean {
     if (desired.length !== current.length) {
       return true;
     }
@@ -463,9 +538,10 @@ export class SQLiteDiffer {
       if (!currentTerm ||
         normalizeSQLiteIdentifier(term.column || "") !==
           normalizeSQLiteIdentifier(currentTerm.column || "") ||
-        this.normalizeSql(term.expression) !== this.normalizeSql(currentTerm.expression) ||
-        (term.collation || "BINARY").toUpperCase() !==
-          (currentTerm.collation || "BINARY").toUpperCase() ||
+        this.normalizeSQLiteExpression(term.expression, identifiers) !==
+          this.normalizeSQLiteExpression(currentTerm.expression, identifiers) ||
+        normalizeSQLiteIdentifier(term.collation || "BINARY") !==
+          normalizeSQLiteIdentifier(currentTerm.collation || "BINARY") ||
         (term.order || "ASC") !== (currentTerm.order || "ASC")) {
         return true;
       }
@@ -648,6 +724,18 @@ export class SQLiteDiffer {
   private normalizeDefault(value: string | undefined): string | undefined {
     if (value === undefined) return undefined;
     return value;
+  }
+
+  private normalizeSQLiteExpression(
+    value: string | undefined,
+    identifiers: readonly string[]
+  ): string | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    return this.normalizeSql(
+      canonicalizeSQLiteDefinitionIdentifiers(value, identifiers)
+    );
   }
 
   private normalizeSql(value: string | undefined): string | undefined {

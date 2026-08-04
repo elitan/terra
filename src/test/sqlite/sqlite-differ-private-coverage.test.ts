@@ -122,8 +122,8 @@ describe("SQLiteDiffer private coverage", () => {
         ["accountid", "accounts", "id", "note"]
       )
     ).toBe(
-      `FOREIGN KEY ("accountid") REFERENCES "accounts"("id") ` +
-      `CHECK ("note" <> 'ID' AND "note" <> "literal")`
+      `foreign key ("accountid") references "accounts"("id") ` +
+      `check ("note" <> 'ID' and "note" <> "literal")`
     );
     expect(
       canonicalizeSQLiteDefinitionIdentifiers(
@@ -131,7 +131,7 @@ describe("SQLiteDiffer private coverage", () => {
         ["Äccounts", "äccounts", "id"]
       )
     ).toBe(
-      `REFERENCES "Äccounts"("id") REFERENCES "äccounts"("id")`
+      `references "Äccounts"("id") references "äccounts"("id")`
     );
   });
 
@@ -166,7 +166,8 @@ describe("SQLiteDiffer private coverage", () => {
 
     expect(differ.columnsDiffer(
       { name: "value", type: "INTEGER", nullable: true, default: "1" },
-      { name: "value", type: "INTEGER", nullable: true, default: "2" }
+      { name: "value", type: "INTEGER", nullable: true, default: "2" },
+      ["value"]
     )).toBe(true);
 
     const createTable = differ.generateCreateTable(
@@ -275,7 +276,9 @@ describe("SQLiteDiffer private coverage", () => {
       },
     };
 
-    expect(differ.columnsDiffer(baseColumn, changedColumn)).toBe(true);
+    expect(
+      differ.columnsDiffer(baseColumn, changedColumn, ["display", "value"])
+    ).toBe(true);
   });
 
   test("compares structured index terms and reuses lossless index SQL", function () {
@@ -298,6 +301,7 @@ describe("SQLiteDiffer private coverage", () => {
     };
 
     expect(differ.generateCreateIndex(baseIndex)).toBe(`${createStatement};`);
+    const identifiers = ["users", "name", "active"];
     expect(differ.indexesDiffer(baseIndex, {
       ...baseIndex,
       terms: [{
@@ -306,7 +310,7 @@ describe("SQLiteDiffer private coverage", () => {
         order: "DESC",
       }],
       where: "active   =   1",
-    })).toBe(false);
+    }, identifiers)).toBe(false);
     expect(differ.indexesDiffer(baseIndex, {
       ...baseIndex,
       terms: [{
@@ -314,7 +318,7 @@ describe("SQLiteDiffer private coverage", () => {
         collation: "NOCASE",
         order: "DESC",
       }],
-    })).toBe(true);
+    }, identifiers)).toBe(true);
   });
 
   test("compares lossless SQLite table definitions without blocking additive columns", function () {
@@ -333,16 +337,27 @@ describe("SQLiteDiffer private coverage", () => {
       strict: false,
       withoutRowid: false,
     });
+    const identifiers = [
+      "users",
+      "id",
+      "label",
+      "binary",
+      "nocase",
+      "named",
+      "renamed",
+    ];
 
-    expect(differ.tableDefinitionsDiffer(additive, current)).toBe(false);
+    expect(
+      differ.tableDefinitionsDiffer(additive, current, identifiers)
+    ).toBe(false);
     expect(differ.tableDefinitionsDiffer({
       ...current,
       createStatement: "CREATE TABLE users(id INTEGER COLLATE NOCASE, CONSTRAINT named CHECK(id > 0))",
-    }, current)).toBe(true);
+    }, current, identifiers)).toBe(true);
     expect(differ.tableDefinitionsDiffer({
       ...current,
       createStatement: "CREATE TABLE users(id INTEGER COLLATE BINARY, CONSTRAINT renamed CHECK(id > 0))",
-    }, current)).toBe(true);
+    }, current, identifiers)).toBe(true);
     expect(differ.tableOptionsDiffer({ ...current, strict: true }, current)).toBe(true);
     expect(differ.tableOptionsDiffer({
       ...current,
@@ -367,10 +382,13 @@ describe("SQLiteDiffer private coverage", () => {
       createStatement: `CREATE VIRTUAL TABLE "search docs" USING fts5(title, tokenize='porter')`,
     });
 
-    expect(differ.tableDefinitionsDiffer(desired, current)).toBe(false);
+    const identifiers = ["search docs", "title"];
+    expect(
+      differ.tableDefinitionsDiffer(desired, current, identifiers)
+    ).toBe(false);
     expect(differ.tableDefinitionsDiffer({
       ...desired,
       createStatement: "CREATE VIRTUAL TABLE `search docs` USING fts5(title, tokenize='unicode61')",
-    }, current)).toBe(true);
+    }, current, identifiers)).toBe(true);
   });
 });

@@ -194,6 +194,91 @@ describe("SQLite Edge Cases - Empty and Special", () => {
     expect((await schemaService.plan(recreatedSchema, ["public"])).hasChanges)
       .toBe(false);
   });
+
+  test("should match identifier case inside schema expressions", async function () {
+    const externalClient = await provider.createClient(config);
+    await externalClient.query(`
+      CREATE TABLE "Metrics" (
+        "ID" INTEGER PRIMARY KEY,
+        "Amount" INTEGER CHECK ("Amount" > 0),
+        "Twice" INTEGER GENERATED ALWAYS AS (ABS("Amount") * 2) VIRTUAL
+      )
+    `);
+    await externalClient.query(`
+      CREATE INDEX "Metrics_Positive_IDX"
+      ON "Metrics"(("Amount" + 0)) WHERE "Amount" > 0
+    `);
+    await externalClient.query(`
+      INSERT INTO "Metrics"("ID", "Amount") VALUES (1, 7)
+    `);
+    await externalClient.end();
+
+    const equivalentSchema = `
+      CREATE TABLE metrics (
+        id INTEGER PRIMARY KEY,
+        amount INTEGER CHECK (amount > 0),
+        twice INTEGER GENERATED ALWAYS AS (abs(amount) * 2) VIRTUAL
+      );
+      CREATE INDEX metrics_positive_idx
+      ON metrics((amount + 0)) WHERE amount > 0;
+    `;
+    const equivalentPlan = await schemaService.plan(
+      equivalentSchema,
+      ["public"]
+    );
+    expect(equivalentPlan.hasChanges).toBe(false);
+    expect(equivalentPlan.transactional).toEqual([]);
+
+    const client = await provider.createClient(config);
+    const rows = await client.query(`
+      SELECT id, amount, twice FROM metrics ORDER BY id
+    `);
+    const queryPlan = await client.query<{ detail: string }>(`
+      EXPLAIN QUERY PLAN
+      SELECT id FROM metrics
+      WHERE (amount + 0) = 7 AND amount > 0
+    `);
+    await client.end();
+
+    expect(rows.rows).toEqual([{ ID: 1, Amount: 7, Twice: 14 }]);
+    expect(queryPlan.rows.some(function (row) {
+      return row.detail.includes("Metrics_Positive_IDX");
+    })).toBe(true);
+
+    const changedConstraint = equivalentSchema.replace(
+      "CHECK (amount > 0)",
+      "CHECK (amount >= 0)"
+    );
+    expect((await schemaService.plan(changedConstraint, ["public"])).hasChanges)
+      .toBe(true);
+
+    const changedGeneratedExpression = equivalentSchema.replace(
+      "abs(amount) * 2",
+      "abs(amount) * 3"
+    );
+    expect(
+      (await schemaService.plan(changedGeneratedExpression, ["public"]))
+        .hasChanges
+    ).toBe(true);
+
+    const changedIndexExpression = equivalentSchema.replace(
+      "(amount + 0)",
+      "(amount + 1)"
+    );
+    expect(
+      (await schemaService.plan(changedIndexExpression, ["public"]))
+        .hasChanges
+    ).toBe(true);
+
+    const changedIndexPredicate = equivalentSchema.replace(
+      "WHERE amount > 0",
+      "WHERE amount >= 0"
+    );
+    expect(
+      (await schemaService.plan(changedIndexPredicate, ["public"]))
+        .hasChanges
+    ).toBe(true);
+  });
 });
 
 describe("SQLite Idempotency", () => {
