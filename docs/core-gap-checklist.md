@@ -214,6 +214,7 @@
 - done: reject invalid targets and attribute values, duplicate or unknown options, missing columns, implicit materialized-view output names, and partition statistics catalog drift before mutation.
 - done: model PostgreSQL index keys as one lossless ordered sequence across mixed column/expression and multiple-expression indexes; preserve per-key collation, effective operator class and options, sort/null ordering, and every expression statistics target; validate catalog alignment and converge across PostgreSQL 14-18 without default-opclass drift.
 - done: reject SQLite query-derived `CREATE TABLE ... AS SELECT`, `VALUES`, and CTE forms before target mutation; distinguish valid view/generated-column `AS` clauses plus comments, literals, and trigger bodies; prove file and shared-memory target state remains unchanged.
+- done: exact-pin and certify `libsql` 0.5.29 with embedded SQLite 3.45.1; verify desired parsing, inspection, and execution share the runtime and assert the supported FTS5 and RTree compile features.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

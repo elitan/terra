@@ -104,7 +104,7 @@
     "chalk": "^5.3.0",
     "commander": "^11.1.0",
     "diff": "^5.1.0",
-    "libsql": "^0.5.22",
+    "libsql": "0.5.29",
     "ora": "^9.0.0",
     "pg": "^8.11.3",
     "pg-connection-string": "^2.9.0",

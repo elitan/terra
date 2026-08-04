@@ -9,7 +9,8 @@
 
 ## sqlite runtime baseline
 
-- desired-schema parser, migration executor, and inspector: `libsql` 0.5.22 with SQLite 3.45.1
+- desired-schema parser, migration executor, and inspector: exact-pinned `libsql` 0.5.29 with SQLite 3.45.1
+- the runtime contract verifies SQLite 3.45.1 plus the `ENABLE_FTS5` and `ENABLE_RTREE` compile features
 - desired schemas are parsed by the execution runtime so accepted grammar cannot exceed apply support
 - query-derived `CREATE TABLE ... AS SELECT`/`VALUES`/CTE forms fail before target mutation because their initial rows are not declarative schema state
 
