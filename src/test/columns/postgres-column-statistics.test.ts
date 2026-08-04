@@ -123,11 +123,11 @@ describe("PostgreSQL column statistics parser", function () {
       },
       {
         sql: `CREATE TABLE t (c text); CREATE INDEX i ON t (c); ALTER INDEX i ALTER 1 SET STATISTICS 1;`,
-        message: "single-expression index",
+        message: "must select an expression key",
       },
       {
         sql: `CREATE TABLE t (c text); CREATE INDEX i ON t ((length(c))); ALTER INDEX i ALTER 2 SET STATISTICS 1;`,
-        message: "position 1",
+        message: "does not have key position 2",
       },
       {
         sql: `CREATE TABLE p (c text) PARTITION BY LIST (c); ALTER TABLE p ALTER c SET STATISTICS 1;`,
@@ -746,7 +746,7 @@ describe("PostgreSQL column statistics lifecycle", function () {
     ).rejects.toThrow("statistics target or attribute options");
   });
 
-  test("rejects unmodeled statistics targets on mixed expression indexes", async function () {
+  test("inspects statistics targets on mixed expression indexes", async function () {
     await client.query(`
       CREATE TABLE public.statistics_mixed_index (payload text);
       CREATE INDEX statistics_mixed_index_idx
@@ -755,8 +755,12 @@ describe("PostgreSQL column statistics lifecycle", function () {
         ALTER COLUMN 2 SET STATISTICS 555;
     `);
 
-    await expect(
-      inspector.getCurrentSchema(client, ["public"])
-    ).rejects.toThrow("currently models only position 1");
+    const tables = await inspector.getCurrentSchema(client, ["public"]);
+    expect(tables[0]?.indexes?.[0]?.terms?.[1]).toEqual(
+      expect.objectContaining({
+        expression: "length(payload)",
+        statisticsTarget: 555,
+      })
+    );
   });
 });

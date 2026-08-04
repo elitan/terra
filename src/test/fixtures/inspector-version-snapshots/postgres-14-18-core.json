@@ -166,14 +166,37 @@
             ],
             "opclasses": {
               "email": "text_pattern_ops"
-            }
+            },
+            "terms": [
+              {
+                "column": "email",
+                "opclass": {
+                  "name": "text_pattern_ops"
+                },
+                "opclassDefault": false,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_expr_idx",
             "type": "btree",
             "unique": false,
             "columns": [],
-            "expression": "lower(email)"
+            "expression": "lower(email)",
+            "terms": [
+              {
+                "expression": "lower(email)",
+                "opclass": {
+                  "name": "text_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_score_partial_idx",
@@ -185,7 +208,19 @@
             "sortOrders": [
               "DESC"
             ],
-            "where": "score > 0"
+            "where": "score > 0",
+            "terms": [
+              {
+                "column": "score",
+                "opclass": {
+                  "name": "int4_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "DESC",
+                "nullsOrder": "FIRST"
+              }
+            ]
           }
         ]
       },
@@ -572,14 +607,37 @@
             ],
             "opclasses": {
               "email": "text_pattern_ops"
-            }
+            },
+            "terms": [
+              {
+                "column": "email",
+                "opclass": {
+                  "name": "text_pattern_ops"
+                },
+                "opclassDefault": false,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_expr_idx",
             "type": "btree",
             "unique": false,
             "columns": [],
-            "expression": "lower(email)"
+            "expression": "lower(email)",
+            "terms": [
+              {
+                "expression": "lower(email)",
+                "opclass": {
+                  "name": "text_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_score_partial_idx",
@@ -591,7 +649,19 @@
             "sortOrders": [
               "DESC"
             ],
-            "where": "score > 0"
+            "where": "score > 0",
+            "terms": [
+              {
+                "column": "score",
+                "opclass": {
+                  "name": "int4_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "DESC",
+                "nullsOrder": "FIRST"
+              }
+            ]
           }
         ]
       },
@@ -978,14 +1048,37 @@
             ],
             "opclasses": {
               "email": "text_pattern_ops"
-            }
+            },
+            "terms": [
+              {
+                "column": "email",
+                "opclass": {
+                  "name": "text_pattern_ops"
+                },
+                "opclassDefault": false,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_expr_idx",
             "type": "btree",
             "unique": false,
             "columns": [],
-            "expression": "lower(email)"
+            "expression": "lower(email)",
+            "terms": [
+              {
+                "expression": "lower(email)",
+                "opclass": {
+                  "name": "text_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_score_partial_idx",
@@ -997,7 +1090,19 @@
             "sortOrders": [
               "DESC"
             ],
-            "where": "score > 0"
+            "where": "score > 0",
+            "terms": [
+              {
+                "column": "score",
+                "opclass": {
+                  "name": "int4_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "DESC",
+                "nullsOrder": "FIRST"
+              }
+            ]
           }
         ]
       },
@@ -1384,14 +1489,37 @@
             ],
             "opclasses": {
               "email": "text_pattern_ops"
-            }
+            },
+            "terms": [
+              {
+                "column": "email",
+                "opclass": {
+                  "name": "text_pattern_ops"
+                },
+                "opclassDefault": false,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_expr_idx",
             "type": "btree",
             "unique": false,
             "columns": [],
-            "expression": "lower(email)"
+            "expression": "lower(email)",
+            "terms": [
+              {
+                "expression": "lower(email)",
+                "opclass": {
+                  "name": "text_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_score_partial_idx",
@@ -1403,7 +1531,19 @@
             "sortOrders": [
               "DESC"
             ],
-            "where": "score > 0"
+            "where": "score > 0",
+            "terms": [
+              {
+                "column": "score",
+                "opclass": {
+                  "name": "int4_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "DESC",
+                "nullsOrder": "FIRST"
+              }
+            ]
           }
         ]
       },
@@ -1790,14 +1930,37 @@
             ],
             "opclasses": {
               "email": "text_pattern_ops"
-            }
+            },
+            "terms": [
+              {
+                "column": "email",
+                "opclass": {
+                  "name": "text_pattern_ops"
+                },
+                "opclassDefault": false,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_expr_idx",
             "type": "btree",
             "unique": false,
             "columns": [],
-            "expression": "lower(email)"
+            "expression": "lower(email)",
+            "terms": [
+              {
+                "expression": "lower(email)",
+                "opclass": {
+                  "name": "text_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "ASC",
+                "nullsOrder": "LAST"
+              }
+            ]
           },
           {
             "name": "users_score_partial_idx",
@@ -1809,7 +1972,19 @@
             "sortOrders": [
               "DESC"
             ],
-            "where": "score > 0"
+            "where": "score > 0",
+            "terms": [
+              {
+                "column": "score",
+                "opclass": {
+                  "name": "int4_ops",
+                  "schema": "pg_catalog"
+                },
+                "opclassDefault": true,
+                "order": "DESC",
+                "nullsOrder": "FIRST"
+              }
+            ]
           }
         ]
       },

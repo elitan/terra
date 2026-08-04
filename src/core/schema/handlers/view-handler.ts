@@ -28,6 +28,7 @@ import {
   validatePostgresColumnStatistics,
   validatePostgresStatisticsTarget,
 } from "../../../utils/postgres-statistics";
+import { getPostgresIndexTerms } from "../../../utils/postgres-index";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -627,20 +628,22 @@ function validateMaterializedViewStatistics(views: View[]): void {
           true
         );
       }
-      if (index.expressionStatisticsTarget === undefined) {
-        continue;
-      }
-      validatePostgresStatisticsTarget(
-        index.expressionStatisticsTarget,
-        `${qualifiedName}.${index.name}`
-      );
-      if (!index.expression || index.columns.length !== 0) {
-        throw new ValidationError(
-          `PostgreSQL expression-index statistics target for ${qualifiedName}.${index.name} requires a single-expression index`,
-          `${qualifiedName}.${index.name}`,
-          "expressionStatisticsTarget",
-          index.expressionStatisticsTarget
+      for (const [position, term] of getPostgresIndexTerms(index).entries()) {
+        if (term.statisticsTarget === undefined) {
+          continue;
+        }
+        validatePostgresStatisticsTarget(
+          term.statisticsTarget,
+          `${qualifiedName}.${index.name} position ${position + 1}`
         );
+        if (!term.expression) {
+          throw new ValidationError(
+            `PostgreSQL index statistics target for ${qualifiedName}.${index.name} position ${position + 1} requires an expression key`,
+            `${qualifiedName}.${index.name}`,
+            "terms",
+            term
+          );
+        }
       }
     }
   }

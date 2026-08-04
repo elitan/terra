@@ -6,8 +6,112 @@
 
 import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
-import type { Index, QualifiedName } from "../../../types/schema";
+import type {
+  Index,
+  IndexTerm,
+  QualifiedName,
+} from "../../../types/schema";
 import { parseStorageParameterOptions } from "../../../utils/storage-parameters";
+import { synchronizeLegacyIndexFields } from "../../../utils/postgres-index";
+
+function parseOrdering(
+  ordering: string | number | undefined
+): 'ASC' | 'DESC' {
+  if (ordering === 'SORTBY_DESC' || ordering === 2) return 'DESC';
+  return 'ASC';
+}
+
+function parseNullsOrdering(
+  nullsOrdering: string | number | undefined,
+  sortOrder: 'ASC' | 'DESC'
+): 'FIRST' | 'LAST' {
+  if (nullsOrdering === 'SORTBY_NULLS_FIRST' || nullsOrdering === 1) {
+    return 'FIRST';
+  }
+  if (nullsOrdering === 'SORTBY_NULLS_LAST' || nullsOrdering === 2) {
+    return 'LAST';
+  }
+  return sortOrder === 'DESC' ? 'FIRST' : 'LAST';
+}
+
+function parseQualifiedName(
+  nodes: any[] | undefined
+): QualifiedName | undefined {
+  const nameParts = (nodes || [])
+    .map(function getNamePart(node: any) {
+      return node.String?.sval;
+    })
+    .filter(function hasNamePart(value: unknown): value is string {
+      return typeof value === "string" && value.length > 0;
+    });
+  const name = nameParts.at(-1);
+  if (!name) {
+    return undefined;
+  }
+  const schema = nameParts.length > 1 ? nameParts.at(-2) : undefined;
+  return schema ? { name, schema } : { name };
+}
+
+function parseOpclassOptionValue(node: any): string {
+  if (node?.Integer) {
+    return String(node.Integer.ival ?? 0);
+  }
+  if (node?.Float && typeof node.Float.fval === "string") {
+    return node.Float.fval;
+  }
+  if (node?.String && typeof node.String.sval === "string") {
+    return node.String.sval;
+  }
+  if (node?.A_Const) {
+    return parseOpclassOptionValue(node.A_Const);
+  }
+  return deparseSync([node]).trim();
+}
+
+function parseOpclassOptions(
+  options: any[] | undefined
+): Record<string, string> | undefined {
+  let parsed: Record<string, string> | undefined;
+  for (const option of options || []) {
+    const definition = option.DefElem;
+    if (!definition?.defname || !definition.arg) {
+      continue;
+    }
+    if (!parsed) {
+      parsed = {};
+    }
+    parsed[definition.defname] = parseOpclassOptionValue(definition.arg);
+  }
+  return parsed;
+}
+
+function parseIndexTerm(param: any): IndexTerm | undefined {
+  const element = param.IndexElem;
+  if (!element) {
+    return undefined;
+  }
+  const order = parseOrdering(element.ordering);
+  const collation = parseQualifiedName(element.collation);
+  const opclass = parseQualifiedName(element.opclass);
+  const opclassOptions = parseOpclassOptions(element.opclassopts);
+  const common = {
+    ...(collation ? { collation } : {}),
+    ...(opclass ? { opclass } : {}),
+    ...(opclassOptions ? { opclassOptions } : {}),
+    order,
+    nullsOrder: parseNullsOrdering(element.nulls_ordering, order),
+  };
+  if (element.name) {
+    return { column: element.name, ...common };
+  }
+  if (element.expr) {
+    return {
+      expression: deparseSync([element.expr]).trim(),
+      ...common,
+    };
+  }
+  return undefined;
+}
 
 /**
  * Parse CREATE INDEX statement from pgsql-parser AST
@@ -29,91 +133,9 @@ export function parseCreateIndex(stmt: any): Index | null {
       })
       .filter(Boolean);
 
-    const columns: string[] = [];
-    const collations = parseIndexCollations(indexParams);
-    const sortOrders: ('ASC' | 'DESC')[] = [];
-    const nullsOrders: ('FIRST' | 'LAST')[] = [];
-    let opclasses: Record<string, string> | undefined;
-    let expression: string | undefined;
-    let expressionOpclass: string | undefined;
-
-    function parseOrdering(ordering: string | number | undefined): 'ASC' | 'DESC' {
-      if (ordering === 'SORTBY_DESC' || ordering === 2) return 'DESC';
-      return 'ASC';
-    }
-
-    function parseNullsOrdering(
-      nullsOrdering: string | number | undefined,
-      sortOrder: 'ASC' | 'DESC'
-    ): 'FIRST' | 'LAST' {
-      if (nullsOrdering === 'SORTBY_NULLS_FIRST' || nullsOrdering === 1) {
-        return 'FIRST';
-      }
-      if (nullsOrdering === 'SORTBY_NULLS_LAST' || nullsOrdering === 2) {
-        return 'LAST';
-      }
-      return sortOrder === 'DESC' ? 'FIRST' : 'LAST';
-    }
-
-    function parseOpclass(opclass: any[] | undefined): string | undefined {
-      if (!opclass || opclass.length === 0) {
-        return undefined;
-      }
-
-      return opclass
-        .map((node: any) => node.String?.sval)
-        .filter(Boolean)
-        .join('.') || undefined;
-    }
-
-    if (indexParams.length === 1 && indexParams[0].IndexElem?.expr) {
-      expression = deparseSync([indexParams[0].IndexElem.expr]).trim();
-      expressionOpclass = parseOpclass(indexParams[0].IndexElem.opclass);
-      const ordering = indexParams[0].IndexElem.ordering;
-      const sortOrder = parseOrdering(ordering);
-      sortOrders.push(sortOrder);
-      nullsOrders.push(
-        parseNullsOrdering(
-          indexParams[0].IndexElem.nulls_ordering,
-          sortOrder
-        )
-      );
-    } else {
-      for (const param of indexParams) {
-        if (param.IndexElem) {
-          const colName = param.IndexElem.name;
-          const ordering = param.IndexElem.ordering;
-          const sortOrder = parseOrdering(ordering);
-          if (colName) {
-            columns.push(colName);
-            sortOrders.push(sortOrder);
-            nullsOrders.push(
-              parseNullsOrdering(param.IndexElem.nulls_ordering, sortOrder)
-            );
-            const opclassName = parseOpclass(param.IndexElem.opclass);
-            if (opclassName) {
-              if (!opclasses) opclasses = {};
-              opclasses[colName] = opclassName;
-            }
-          } else if (param.IndexElem.expr) {
-            expression = deparseSync([param.IndexElem.expr]).trim();
-            expressionOpclass = parseOpclass(param.IndexElem.opclass);
-            sortOrders.push(sortOrder);
-            nullsOrders.push(
-              parseNullsOrdering(param.IndexElem.nulls_ordering, sortOrder)
-            );
-            break;
-          }
-        }
-      }
-    }
-    const hasNonDefaultSort = sortOrders.some(s => s === 'DESC');
-    const hasNonDefaultNullsOrder = nullsOrders.some(function isNonDefault(
-      nullsOrder,
-      index
-    ) {
-      const defaultOrder = sortOrders[index] === 'DESC' ? 'FIRST' : 'LAST';
-      return nullsOrder !== defaultOrder;
+    const terms = indexParams.flatMap(function getIndexTerm(param: any) {
+      const term = parseIndexTerm(param);
+      return term ? [term] : [];
     });
 
     const type = (stmt.accessMethod || 'btree').toLowerCase() as Index["type"];
@@ -147,58 +169,27 @@ export function parseCreateIndex(stmt: any): Index | null {
       }
     }
 
-    return {
+    const index: Index = {
       name: indexName,
       tableName,
       schema,
-      columns,
+      columns: [],
       ...(include.length > 0 ? { include } : {}),
-      ...(collations ? { collations } : {}),
-      sortOrders: hasNonDefaultSort ? sortOrders : undefined,
-      nullsOrders: hasNonDefaultNullsOrder ? nullsOrders : undefined,
-      opclasses,
-      ...(expressionOpclass ? { expressionOpclass } : {}),
+      terms,
       type,
       unique,
       ...(stmt.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
       concurrent,
       where: whereClause,
-      expression,
       storageParameters,
       tablespace,
     };
+    synchronizeLegacyIndexFields(index);
+    return index;
   } catch (error) {
     Logger.warning(
       `Failed to parse CREATE INDEX: ${error instanceof Error ? error.message : String(error)}`
     );
     return null;
   }
-}
-
-export function parseIndexCollations(
-  indexParams: any[] | undefined
-): Array<QualifiedName | undefined> | undefined {
-  const collations = (indexParams || []).map(function parseIndexCollation(param) {
-    const nameParts = (param.IndexElem?.collation || [])
-      .map(function getNamePart(node: any) {
-        return node.String?.sval;
-      })
-      .filter(function hasNamePart(value: string | undefined): value is string {
-        return Boolean(value);
-      });
-
-    const name = nameParts.at(-1);
-    if (!name) {
-      return undefined;
-    }
-
-    const schema = nameParts.length > 1 ? nameParts.at(-2) : undefined;
-    return schema ? { name, schema } : { name };
-  });
-
-  return collations.some(function hasCollation(collation) {
-    return Boolean(collation);
-  })
-    ? collations
-    : undefined;
 }

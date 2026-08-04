@@ -110,11 +110,13 @@ describe("PostgreSQL index collations", function () {
 
   test("fails rather than silently dropping an unparsable catalog definition", async function () {
     const inspector = services.inspector as any;
-    expect(
-      await inspector.parseIndexDefinitionCollations(undefined)
-    ).toBeUndefined();
     await expect(
-      inspector.parseIndexDefinitionCollations(
+      inspector.parseIndexDefinition(
+        undefined
+      )
+    ).rejects.toThrow("without a definition");
+    await expect(
+      inspector.parseIndexDefinition(
         "CREATE TABLE public.not_an_index (id integer)"
       )
     ).rejects.toThrow("PostgreSQL returned an invalid index definition");

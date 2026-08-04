@@ -71,7 +71,7 @@ export function collectSQLiteSchemaIdentifiers(
       }
       for (const term of index.terms || []) {
         add(term.column);
-        add(term.collation);
+        add(typeof term.collation === "string" ? term.collation : undefined);
       }
     }
   }

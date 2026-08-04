@@ -99,7 +99,9 @@ function getSQLiteIndexParentKey(
       return term.column as string;
     }),
     collations: index.terms.map(function (term) {
-      return term.collation;
+      return typeof term.collation === "string"
+        ? term.collation
+        : term.collation?.name;
     }),
   };
 }

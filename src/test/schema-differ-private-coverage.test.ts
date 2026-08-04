@@ -74,6 +74,29 @@ describe("SchemaDiffer private coverage", () => {
     ).toBe(false);
   });
 
+  test("treats an omitted effective default opclass symmetrically", function () {
+    const differ = new SchemaDiffer() as any;
+    const omitted = {
+      name: "users_id_idx",
+      tableName: "users",
+      columns: ["id"],
+      terms: [{ column: "id" }],
+      type: "btree",
+      unique: false,
+    };
+    const explicitDefault = {
+      ...omitted,
+      terms: [{
+        column: "id",
+        opclass: { name: "int4_ops", schema: "pg_catalog" },
+        opclassDefault: true,
+      }],
+    };
+
+    expect(differ.indexesAreEqual(explicitDefault, omitted)).toBe(true);
+    expect(differ.indexesAreEqual(omitted, explicitDefault)).toBe(true);
+  });
+
   test("generateColumnStatements handles add modify and drop", () => {
     const differ = new SchemaDiffer();
     const desired = makeTable({

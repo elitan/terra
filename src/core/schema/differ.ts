@@ -10,6 +10,7 @@ import type {
   IdentityColumn,
   QualifiedName,
   ColumnStorage,
+  IndexTerm,
 } from "../../types/schema";
 import type {
   MigrationContext,
@@ -73,6 +74,10 @@ import {
   validatePostgresColumnStatistics,
   validatePostgresStatisticsTarget,
 } from "../../utils/postgres-statistics";
+import {
+  getIndexTermCollation,
+  getPostgresIndexTerms,
+} from "../../utils/postgres-index";
 
 type TableIndexCandidate =
   | { kind: "standalone"; index: Index }
@@ -226,39 +231,8 @@ function stringSetsEqual(
   );
 }
 
-function getIndexKeyCount(index: Index): number {
-  return index.expression ? 1 : index.columns.length;
-}
-
-function getIndexSortOrder(index: Index, position: number): 'ASC' | 'DESC' {
-  return index.sortOrders?.[position] || 'ASC';
-}
-
 function getDefaultNullsOrder(sortOrder: 'ASC' | 'DESC'): 'FIRST' | 'LAST' {
   return sortOrder === 'DESC' ? 'FIRST' : 'LAST';
-}
-
-function getEffectiveNullsOrder(
-  index: Index,
-  position: number
-): 'FIRST' | 'LAST' {
-  return (
-    index.nullsOrders?.[position] ||
-    getDefaultNullsOrder(getIndexSortOrder(index, position))
-  );
-}
-
-function indexNullsOrdersEqual(first: Index, second: Index): boolean {
-  const keyCount = Math.max(getIndexKeyCount(first), getIndexKeyCount(second));
-  for (let position = 0; position < keyCount; position++) {
-    if (
-      getEffectiveNullsOrder(first, position) !==
-      getEffectiveNullsOrder(second, position)
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function indexCollationNamesEqual(
@@ -274,27 +248,12 @@ function indexCollationNamesEqual(
   return !first.schema || !second.schema || first.schema === second.schema;
 }
 
-function indexCollationsEqual(first: Index, second: Index): boolean {
-  const keyCount = Math.max(getIndexKeyCount(first), getIndexKeyCount(second));
-  for (let position = 0; position < keyCount; position++) {
-    if (
-      !indexCollationNamesEqual(
-        first.collations?.[position],
-        second.collations?.[position]
-      )
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function getNonDefaultNullsOrder(
-  index: Index,
-  position: number
+function getNonDefaultTermNullsOrder(
+  term: IndexTerm
 ): 'FIRST' | 'LAST' | undefined {
-  const defaultOrder = getDefaultNullsOrder(getIndexSortOrder(index, position));
-  const nullsOrder = index.nullsOrders?.[position] || defaultOrder;
+  const sortOrder = term.order || "ASC";
+  const defaultOrder = getDefaultNullsOrder(sortOrder);
+  const nullsOrder = term.nullsOrder || defaultOrder;
   return nullsOrder === defaultOrder ? undefined : nullsOrder;
 }
 
@@ -313,6 +272,122 @@ function stringRecordsEqual(
       );
     })
   );
+}
+
+function indexTermExpressionsEqual(first: IndexTerm, second: IndexTerm): boolean {
+  if (first.column && second.column) {
+    return first.column === second.column;
+  }
+  if (first.expression && second.expression) {
+    return expressionsEqual(first.expression, second.expression);
+  }
+  const expression = first.expression || second.expression;
+  const column = first.column || second.column;
+  if (!expression || !column) {
+    return false;
+  }
+  return normalizeExpression(expression).replace(/"/g, "").toLowerCase() ===
+    column.replace(/"/g, "").toLowerCase();
+}
+
+function indexTermOpclassesEqual(first: IndexTerm, second: IndexTerm): boolean {
+  if (!first.opclass || !second.opclass) {
+    if (!first.opclass && !second.opclass) {
+      return true;
+    }
+    return first.opclassDefault === true || second.opclassDefault === true;
+  }
+  return indexCollationNamesEqual(first.opclass, second.opclass);
+}
+
+function indexTermsEqual(first: Index, second: Index): boolean {
+  const firstTerms = getPostgresIndexTerms(first);
+  const secondTerms = getPostgresIndexTerms(second);
+  if (firstTerms.length !== secondTerms.length) {
+    return false;
+  }
+  return firstTerms.every(function hasEqualTerm(term, position) {
+    const other = secondTerms[position];
+    if (!other || !indexTermExpressionsEqual(term, other)) {
+      return false;
+    }
+    const firstOrder = term.order || "ASC";
+    const secondOrder = other.order || "ASC";
+    if (firstOrder !== secondOrder) {
+      return false;
+    }
+    const firstNulls = term.nullsOrder || getDefaultNullsOrder(firstOrder);
+    const secondNulls = other.nullsOrder || getDefaultNullsOrder(secondOrder);
+    if (firstNulls !== secondNulls) {
+      return false;
+    }
+    if (!indexCollationNamesEqual(
+      getIndexTermCollation(term),
+      getIndexTermCollation(other)
+    )) {
+      return false;
+    }
+    if (!indexTermOpclassesEqual(term, other)) {
+      return false;
+    }
+    return stringRecordsEqual(term.opclassOptions, other.opclassOptions);
+  });
+}
+
+function renderIndexObjectName(name: QualifiedName): string {
+  function renderPart(part: string): string {
+    if (/^[a-z_][a-z0-9_$]*$/.test(part)) {
+      return part;
+    }
+    return `"${part.replace(/"/g, '""')}"`;
+  }
+  const renderedName = renderPart(name.name);
+  return name.schema
+    ? `${renderPart(name.schema)}.${renderedName}`
+    : renderedName;
+}
+
+function renderIndexTerm(term: IndexTerm): string {
+  let definition: string;
+  if (term.column) {
+    definition = new SQLBuilder().ident(term.column).build();
+  } else if (term.expression) {
+    const hasOperators = /[+\-*/%^&|<>=!:]/.test(term.expression);
+    definition = hasOperators ? `(${term.expression})` : term.expression;
+  } else {
+    throw new ValidationError(
+      "PostgreSQL index terms must name a column or expression",
+      "index term",
+      "terms",
+      term
+    );
+  }
+  const collation = getIndexTermCollation(term);
+  if (collation) {
+    definition += ` COLLATE ${renderCollationName(collation)}`;
+  }
+  if (term.opclass && !term.opclassDefault) {
+    definition += ` ${renderIndexObjectName(term.opclass)}`;
+    const options = Object.entries(term.opclassOptions || {}).sort(
+      function compareOptions(first, second) {
+        return first[0].localeCompare(second[0]);
+      }
+    );
+    if (options.length > 0) {
+      const rendered = options.map(function renderOption([name, value]) {
+        return `${name}='${value.replace(/'/g, "''")}'`;
+      });
+      definition += ` (${rendered.join(", ")})`;
+    }
+  }
+  if ((term.order || "ASC") === "DESC") {
+    definition += " DESC";
+  }
+  const nullsOrder = getNonDefaultTermNullsOrder(term);
+  if (nullsOrder) {
+    definition += ` NULLS ${nullsOrder}`;
+  }
+  return definition;
 }
 
 function normalizeExclusionOperatorSchema(
@@ -524,24 +599,6 @@ export class SchemaDiffer {
       const structurallyEqual = Boolean(
         current && this.indexesAreEqual(desired, current)
       );
-      if (
-        structurallyEqual &&
-        desired.expressionStatisticsTarget ===
-          current?.expressionStatisticsTarget
-      ) {
-        continue;
-      }
-      if (
-        !structurallyEqual &&
-        desired.expressionStatisticsTarget === undefined
-      ) {
-        continue;
-      }
-
-      const statement = renderPostgresExpressionIndexStatistics(
-        { name: desired.name, schema: desired.schema },
-        desired.expressionStatisticsTarget
-      );
       let creationIsConcurrent = false;
       if (!structurallyEqual) {
         if (desired.concurrent !== undefined) {
@@ -552,10 +609,32 @@ export class SchemaDiffer {
             : useConcurrentForNewIndexes;
         }
       }
-      if (creationIsConcurrent) {
-        deferred.push(statement);
-      } else {
-        statements.push(statement);
+      const desiredTerms = getPostgresIndexTerms(desired);
+      const currentTerms = current ? getPostgresIndexTerms(current) : [];
+      for (let position = 0; position < desiredTerms.length; position++) {
+        const desiredTerm = desiredTerms[position]!;
+        if (!desiredTerm.expression) {
+          continue;
+        }
+        const currentTarget = structurallyEqual
+          ? currentTerms[position]?.statisticsTarget
+          : undefined;
+        if (desiredTerm.statisticsTarget === currentTarget) {
+          continue;
+        }
+        if (!structurallyEqual && desiredTerm.statisticsTarget === undefined) {
+          continue;
+        }
+        const statement = renderPostgresExpressionIndexStatistics(
+          { name: desired.name, schema: desired.schema },
+          desiredTerm.statisticsTarget,
+          position + 1
+        );
+        if (creationIsConcurrent) {
+          deferred.push(statement);
+        } else {
+          statements.push(statement);
+        }
       }
     }
     return { statements, deferred };
@@ -1114,21 +1193,23 @@ export class SchemaDiffer {
         this.getEffectiveTableColumnNames(table, tableMap)
       );
       for (const index of table.indexes || []) {
-        if (index.expressionStatisticsTarget === undefined) {
-          continue;
-        }
         const indexIdentity = `${index.schema || table.schema || "public"}.${index.name}`;
-        validatePostgresStatisticsTarget(
-          index.expressionStatisticsTarget,
-          indexIdentity
-        );
-        if (!index.expression || index.columns.length !== 0) {
-          throw new ValidationError(
-            `PostgreSQL expression-index statistics target for ${indexIdentity} requires a single-expression index`,
-            `index ${indexIdentity}`,
-            "expressionStatisticsTarget",
-            index.expressionStatisticsTarget
+        for (const [position, term] of getPostgresIndexTerms(index).entries()) {
+          if (term.statisticsTarget === undefined) {
+            continue;
+          }
+          validatePostgresStatisticsTarget(
+            term.statisticsTarget,
+            `${indexIdentity} position ${position + 1}`
           );
+          if (!term.expression) {
+            throw new ValidationError(
+              `PostgreSQL index statistics target for ${indexIdentity} position ${position + 1} requires an expression key`,
+              `index ${indexIdentity}`,
+              "terms",
+              term
+            );
+          }
         }
       }
     }
@@ -2536,43 +2617,7 @@ export class SchemaDiffer {
       return false;
     }
 
-    const expr1 = index1.expression;
-    const expr2 = index2.expression;
-
-    if (expr1 && expr2) {
-      if (!expressionsEqual(expr1, expr2)) return false;
-      const sort1 = index1.sortOrders?.[0] || 'ASC';
-      const sort2 = index2.sortOrders?.[0] || 'ASC';
-      if (sort1 !== sort2) return false;
-    } else if (expr1 || expr2) {
-      const expressionIndex = expr1 ? index1 : index2;
-      const columnIndex = expr1 ? index2 : index1;
-      const expression = expr1 || expr2;
-
-      if (!expression || columnIndex.columns.length !== 1) return false;
-      if (!this.expressionMatchesColumn(expression, columnIndex.columns[0] || "")) {
-        return false;
-      }
-
-      const expressionSort = expressionIndex.sortOrders?.[0] || 'ASC';
-      const columnSort = columnIndex.sortOrders?.[0] || 'ASC';
-      if (expressionSort !== columnSort) return false;
-    } else {
-      if (index1.columns.length !== index2.columns.length) return false;
-      for (let i = 0; i < index1.columns.length; i++) {
-        if (index1.columns[i] !== index2.columns[i]) return false;
-      }
-
-      const sortOrders1 = index1.sortOrders || index1.columns.map(() => 'ASC');
-      const sortOrders2 = index2.sortOrders || index2.columns.map(() => 'ASC');
-      if (sortOrders1.length !== sortOrders2.length) return false;
-      for (let i = 0; i < sortOrders1.length; i++) {
-        if (sortOrders1[i] !== sortOrders2[i]) return false;
-      }
-    }
-
-    if (!indexNullsOrdersEqual(index1, index2)) return false;
-    if (!indexCollationsEqual(index1, index2)) return false;
+    if (!indexTermsEqual(index1, index2)) return false;
 
     const where1 = index1.where;
     const where2 = index2.where;
@@ -2581,17 +2626,7 @@ export class SchemaDiffer {
     } else if (where1 !== where2) {
       return false;
     }
-    if (index1.expressionOpclass !== index2.expressionOpclass) return false;
     if (index1.tablespace !== index2.tablespace) return false;
-
-    const opclasses1 = index1.opclasses || {};
-    const opclasses2 = index2.opclasses || {};
-    const opKeys1 = Object.keys(opclasses1);
-    const opKeys2 = Object.keys(opclasses2);
-    if (opKeys1.length !== opKeys2.length) return false;
-    for (const key of opKeys1) {
-      if (opclasses1[key] !== opclasses2[key]) return false;
-    }
 
     const params1 = index1.storageParameters || {};
     const params2 = index2.storageParameters || {};
@@ -2604,14 +2639,6 @@ export class SchemaDiffer {
     }
 
     return true;
-  }
-
-  private expressionMatchesColumn(expression: string, columnName: string): boolean {
-    const normalizedExpression = normalizeExpression(expression)
-      .replace(/"/g, "")
-      .toLowerCase();
-    const normalizedColumn = columnName.replace(/"/g, "").toLowerCase();
-    return normalizedExpression === normalizedColumn;
   }
 
   private generateIndexCreationStatements(indexes: Index[]): string[] {
@@ -2668,54 +2695,8 @@ export class SchemaDiffer {
       builder.p(`USING ${index.type.toUpperCase()}`);
     }
 
-    if (index.expression) {
-      let expr = index.expression;
-      const hasOperators = /[+\-*/%^&|<>=!:]/.test(expr);
-      if (hasOperators) {
-        expr = `(${expr})`;
-      }
-      const expressionOpclass = index.expressionOpclass;
-      const collation = index.collations?.[0];
-      const sortOrder = index.sortOrders?.[0];
-      let expressionDefinition = expr;
-      if (collation) {
-        expressionDefinition += ` COLLATE ${renderCollationName(collation)}`;
-      }
-      if (expressionOpclass) {
-        expressionDefinition += ` ${expressionOpclass}`;
-      }
-      if (sortOrder === 'DESC') {
-        expressionDefinition += ' DESC';
-      }
-      const nullsOrder = getNonDefaultNullsOrder(index, 0);
-      if (nullsOrder) {
-        expressionDefinition += ` NULLS ${nullsOrder}`;
-      }
-      builder.p(`(${expressionDefinition})`);
-    } else {
-      const quotedColumns = index.columns.map((col, i) => {
-        const quoted = `"${col.replace(/"/g, '""')}"`;
-        const collation = index.collations?.[i];
-        const opclass = index.opclasses?.[col];
-        const sortOrder = index.sortOrders?.[i];
-        let result = quoted;
-        if (collation) {
-          result += ` COLLATE ${renderCollationName(collation)}`;
-        }
-        if (opclass) {
-          result += ` ${opclass}`;
-        }
-        if (sortOrder === 'DESC') {
-          result += ' DESC';
-        }
-        const nullsOrder = getNonDefaultNullsOrder(index, i);
-        if (nullsOrder) {
-          result += ` NULLS ${nullsOrder}`;
-        }
-        return result;
-      }).join(", ");
-      builder.p(`(${quotedColumns})`);
-    }
+    const terms = getPostgresIndexTerms(index);
+    builder.p(`(${terms.map(renderIndexTerm).join(", ")})`);
 
     if (index.include && index.include.length > 0) {
       const includedColumns = index.include.map(function quoteColumn(column) {

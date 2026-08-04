@@ -517,8 +517,13 @@ export class SQLiteDiffer {
           normalizeSQLiteIdentifier(currentTerm.column || "") ||
         this.normalizeSQLiteExpression(term.expression, identifiers) !==
           this.normalizeSQLiteExpression(currentTerm.expression, identifiers) ||
-        normalizeSQLiteIdentifier(term.collation || "BINARY") !==
-          normalizeSQLiteIdentifier(currentTerm.collation || "BINARY") ||
+        normalizeSQLiteIdentifier(
+          typeof term.collation === "string" ? term.collation : "BINARY"
+        ) !== normalizeSQLiteIdentifier(
+          typeof currentTerm.collation === "string"
+            ? currentTerm.collation
+            : "BINARY"
+        ) ||
         (term.order || "ASC") !== (currentTerm.order || "ASC")) {
         return true;
       }

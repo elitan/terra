@@ -272,9 +272,10 @@ export function renderPostgresColumnStatisticsChanges(
 
 export function renderPostgresExpressionIndexStatistics(
   index: QualifiedName,
-  target: number | undefined
+  target: number | undefined,
+  position: number = 1
 ): string {
-  return `ALTER INDEX ${qualifyName(index)} ALTER COLUMN 1 SET STATISTICS ${
+  return `ALTER INDEX ${qualifyName(index)} ALTER COLUMN ${position} SET STATISTICS ${
     target === undefined ? "-1" : renderNumber(target)
   };`;
 }

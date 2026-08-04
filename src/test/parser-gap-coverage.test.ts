@@ -350,8 +350,11 @@ describe("Parser gap coverage", function () {
     });
 
     expect(parsed?.columns).toEqual(["tenant_id"]);
-    expect(parsed?.expression?.toLowerCase()).toContain("lower");
-    expect(parsed?.expressionOpclass).toBe("text_pattern_ops");
+    expect(parsed?.expression).toBeUndefined();
+    expect(parsed?.terms?.[1]?.expression?.toLowerCase()).toContain("lower");
+    expect(parsed?.terms?.[1]?.opclass).toEqual({
+      name: "text_pattern_ops",
+    });
     expect(parsed?.sortOrders).toEqual(["ASC", "DESC"]);
     expect(parsed?.nullsOrders).toEqual(["LAST", "LAST"]);
   });

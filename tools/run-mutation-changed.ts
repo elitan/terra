@@ -199,13 +199,13 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/schema-service.test.ts src/test/schema-service-private-coverage.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/differ.ts")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-differ-private-coverage.test.ts src/test/destructive-operations.test.ts src/test/columns/postgres-specific/type-cast-normalization.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-differ-private-coverage.test.ts src/test/destructive-operations.test.ts src/test/columns/postgres-specific/type-cast-normalization.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/parser/sequence-parser.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sequences/sequence-parsing.test.ts src/test/parser-module-coverage.test.ts";
   }
   if (normalized.includes("/src/core/schema/parser")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-parser-private-coverage.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/advanced-sql-object-parsing.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-parser-private-coverage.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/advanced-sql-object-parsing.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/enum-handler.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/enums/enum-handler-schema-scope.test.ts src/test/enums/postgres-enum-evolution.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/enum-types.test.ts src/test/types/postgres-type-ordering.test.ts";
@@ -229,7 +229,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/handler-module-coverage.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/view-handler.ts")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/views/sql-generation.test.ts src/test/views/view-definition-normalization-matrix.test.ts src/test/views/postgres-view-column-names.test.ts src/test/views/postgres-view-options.test.ts src/test/views/materialized-views.test.ts src/test/tables/postgres-clustering.test.ts src/test/indexes/postgres-materialized-view-indexes.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/views/sql-generation.test.ts src/test/views/view-definition-normalization-matrix.test.ts src/test/views/postgres-view-column-names.test.ts src/test/views/postgres-view-options.test.ts src/test/views/materialized-views.test.ts src/test/tables/postgres-clustering.test.ts src/test/indexes/postgres-materialized-view-indexes.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts";
   }
   if (normalized.includes("/src/core/schema/handlers/")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts";

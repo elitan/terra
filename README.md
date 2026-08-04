@@ -122,10 +122,14 @@ inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when
 omitted. Statistics targets accept the documented `0` through `10000` range;
 `DEFAULT` and `-1` normalize to the server default. Materialized views require
-an explicit output-column list when declaring this metadata. A statistics
-target for position 1 of a single-expression index is also supported through
-`ALTER INDEX`; targets on partition relations or unmodeled mixed-expression
-index positions fail before planning instead of being ignored.
+an explicit output-column list when declaring this metadata. PostgreSQL index
+keys are modeled as one complete ordered sequence, including mixed column and
+expression keys, multiple expression keys, per-key collation, operator class
+and operator-class options, sort/null ordering, and expression statistics
+targets. TerraDB reconstructs effective default operator classes from the
+catalog without treating their omission from `pg_get_indexdef` as drift.
+Statistics targets on partition indexes remain outside the managed partition
+contract and fail before planning instead of being ignored.
 PostgreSQL 18 `NOT ENFORCED` constraints, temporal constraints using `WITHOUT
 OVERLAPS` or `PERIOD`, and named, table-level, `NO INHERIT`, or `NOT VALID`
 `NOT NULL` forms are outside the current declarative constraint model. TerraDB
@@ -342,6 +346,11 @@ CREATE INDEX idx_email ON users (email);
 CREATE INDEX idx_active ON users (email) WHERE active = true;  -- partial index
 CREATE UNIQUE INDEX idx_unique_email ON users (email);
 CREATE INDEX idx_email_bytewise ON users (email COLLATE "C");  -- PostgreSQL
+CREATE INDEX idx_search ON users (
+  email COLLATE "C" text_pattern_ops DESC NULLS LAST,
+  (lower(email)) ASC,
+  (length(email)) DESC
+);  -- ordered mixed PostgreSQL keys
 
 -- PostgreSQL planner statistics metadata
 ALTER TABLE ONLY users
@@ -349,6 +358,8 @@ ALTER TABLE ONLY users
   ALTER COLUMN email SET (n_distinct=-0.5);
 CREATE INDEX idx_normalized_email ON users ((lower(email)));
 ALTER INDEX idx_normalized_email ALTER COLUMN 1 SET STATISTICS 750;
+ALTER INDEX idx_search ALTER COLUMN 2 SET STATISTICS 500;
+ALTER INDEX idx_search ALTER COLUMN 3 SET STATISTICS 1000;
 ```
 
 ### PostgreSQL-only Features

@@ -47,6 +47,10 @@ import type {
 } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 import { DEFAULT_COLLATION } from "../../../utils/collation";
+import {
+  getIndexTermCollation,
+  synchronizeLegacyIndexFields,
+} from "../../../utils/postgres-index";
 import { qualifyDeclaredRoutineTypes } from "./routine-type-canonicalizer";
 import { toPgAstNode } from "./pgsql-ast";
 import {
@@ -353,6 +357,33 @@ export class SchemaParser {
   }
 
   private normalizeIndexCollations(index: Index, table: Table): void {
+    if (index.terms) {
+      for (const term of index.terms) {
+        const collation = getIndexTermCollation(term);
+        if (!collation) {
+          continue;
+        }
+        const column = term.column
+          ? table.columns.find(function findColumn(candidate) {
+              return candidate.name === term.column;
+            })
+          : undefined;
+        let naturalCollation: QualifiedName | undefined;
+        if (column) {
+          naturalCollation = column.collation || DEFAULT_COLLATION;
+        } else if (term.expression) {
+          naturalCollation = this.getExpressionNaturalCollation(
+            term.expression,
+            table
+          );
+        }
+        if (SchemaParser.collationNamesEqual(collation, naturalCollation)) {
+          delete term.collation;
+        }
+      }
+      synchronizeLegacyIndexFields(index);
+      return;
+    }
     if (!index.collations) {
       return;
     }

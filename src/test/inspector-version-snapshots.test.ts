@@ -322,6 +322,21 @@ function normalizeSnapshot(input: any): unknown {
           where: normalizeMaybeText(index.where),
           expression: normalizeMaybeText(index.expression),
           opclasses: index.opclasses ? normalizeObject(index.opclasses) : undefined,
+          terms: index.terms?.map(function mapTerm(term: any) {
+            return {
+              column: term.column,
+              expression: normalizeMaybeText(term.expression),
+              collation: term.collation,
+              opclass: term.opclass,
+              opclassOptions: term.opclassOptions
+                ? normalizeObject(term.opclassOptions)
+                : undefined,
+              opclassDefault: term.opclassDefault,
+              order: term.order,
+              nullsOrder: term.nullsOrder,
+              statisticsTarget: term.statisticsTarget,
+            };
+          }),
           storageParameters: index.storageParameters
             ? normalizeObject(index.storageParameters)
             : undefined,

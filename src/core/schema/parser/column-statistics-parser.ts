@@ -6,6 +6,10 @@ import type {
   View,
 } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
+import {
+  getPostgresIndexTerms,
+  synchronizeLegacyIndexFields,
+} from "../../../utils/postgres-index";
 
 type StatisticsField =
   | "statisticsTarget"
@@ -433,17 +437,22 @@ export function mergePendingPostgresStatistics(
           filePath
         );
       }
-      if (
-        change.indexPosition !== 1 ||
-        !index.expression ||
-        index.columns.length !== 0
-      ) {
+      const terms = getPostgresIndexTerms(index);
+      const position = change.indexPosition!;
+      const term = terms[position - 1];
+      if (!term) {
         throw new ParserError(
-          `PostgreSQL index statistics target '${key}' must select position 1 of a single-expression index`,
+          `PostgreSQL index statistics target '${key}' does not have key position ${position}`,
           filePath
         );
       }
-      const seenKey = `${key}:index:statisticsTarget`;
+      if (!term.expression) {
+        throw new ParserError(
+          `PostgreSQL index statistics target '${key}' position ${position} must select an expression key`,
+          filePath
+        );
+      }
+      const seenKey = `${key}:index:${position}:statisticsTarget`;
       if (seen.has(seenKey)) {
         throw new ParserError(
           `PostgreSQL expression-index statistics target for '${key}' is declared more than once`,
@@ -451,11 +460,13 @@ export function mergePendingPostgresStatistics(
         );
       }
       seen.add(seenKey);
+      index.terms = terms;
       if (change.value === undefined) {
-        delete index.expressionStatisticsTarget;
+        delete term.statisticsTarget;
       } else {
-        index.expressionStatisticsTarget = change.value;
+        term.statisticsTarget = change.value;
       }
+      synchronizeLegacyIndexFields(index);
       continue;
     }
 

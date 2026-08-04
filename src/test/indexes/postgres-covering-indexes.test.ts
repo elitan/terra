@@ -47,7 +47,7 @@ describe("PostgreSQL covering indexes", function () {
       return candidate.name === "covering_metadata";
     });
     expect(table?.indexes).toEqual([
-      {
+      expect.objectContaining({
         name: "covering_metadata_lookup_idx",
         tableName: "covering_metadata",
         schema: "public",
@@ -69,7 +69,7 @@ describe("PostgreSQL covering indexes", function () {
         ],
         storageParameters: { fillfactor: "80" },
         tablespace: undefined,
-      },
+      }),
     ]);
     expect((await planSchema(schema)).hasChanges).toBe(false);
   });

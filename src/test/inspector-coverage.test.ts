@@ -8,6 +8,69 @@ function createClient(handler: (sql: string, params?: unknown[]) => { rows: unkn
 }
 
 describe("DatabaseInspector coverage", () => {
+  test("rejects inconsistent index-key catalog metadata", function () {
+    const inspector = new DatabaseInspector() as any;
+    const baseRow = {
+      table_schema: "public",
+      index_name: "search_idx",
+      index_key_count: 2,
+      key_opclasses: [
+        { name: "text_ops", schema: "pg_catalog", default: true },
+        { name: "text_ops", schema: "pg_catalog", default: true },
+      ],
+      key_statistics_targets: [undefined, 100],
+      expression_positions: [2],
+    };
+    const createTerms = function () {
+      return [{ column: "title" }, { expression: "lower(body)" }];
+    };
+
+    const scenarios = [
+      {
+        terms: [{ column: "title" }],
+        row: baseRow,
+        message: "catalog reports 2",
+      },
+      {
+        terms: createTerms(),
+        row: { ...baseRow, key_opclasses: [baseRow.key_opclasses[0]] },
+        message: "incomplete operator-class metadata",
+      },
+      {
+        terms: createTerms(),
+        row: {
+          ...baseRow,
+          key_opclasses: [baseRow.key_opclasses[0], { name: undefined }],
+        },
+        message: "invalid operator class",
+      },
+      {
+        terms: createTerms(),
+        row: { ...baseRow, key_statistics_targets: [undefined] },
+        message: "incomplete statistics metadata",
+      },
+      {
+        terms: createTerms(),
+        row: { ...baseRow, expression_positions: [1] },
+        message: "do not match its catalog",
+      },
+      {
+        terms: createTerms(),
+        row: {
+          ...baseRow,
+          key_statistics_targets: [100, undefined],
+        },
+        message: "does not belong to an expression key",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      expect(function enrichTerms() {
+        inspector.enrichIndexTermsFromCatalog(scenario.terms, scenario.row);
+      }).toThrow(scenario.message);
+    }
+  });
+
   test("covers index type mapping", () => {
     const inspector = new DatabaseInspector() as any;
     expect(inspector.mapPostgreSQLIndexType("gist")).toBe("gist");
@@ -373,6 +436,9 @@ describe("DatabaseInspector coverage", () => {
               sort_options: [1],
               key_statistics_targets: [null],
               expression_positions: [],
+              key_opclasses: [
+                { name: "int4_ops", schema: "pg_catalog", default: true },
+              ],
             }],
           };
         }
@@ -400,6 +466,9 @@ describe("DatabaseInspector coverage", () => {
               sort_options: [0],
               key_statistics_targets: [601],
               expression_positions: [1],
+              key_opclasses: [
+                { name: "text_ops", schema: "pg_catalog", default: true },
+              ],
             }],
           };
         }
@@ -463,6 +532,18 @@ describe("DatabaseInspector coverage", () => {
             unique: true,
             concurrent: false,
             storageParameters: { fillfactor: "75" },
+            terms: [
+              {
+                column: "id",
+                opclass: {
+                  name: "int4_ops",
+                  schema: "pg_catalog",
+                },
+                opclassDefault: true,
+                order: "DESC",
+                nullsOrder: "LAST",
+              },
+            ],
           },
         ],
       },
@@ -487,6 +568,20 @@ describe("DatabaseInspector coverage", () => {
             where: "active",
             expression: "lower(label)",
             expressionStatisticsTarget: 601,
+            terms: [
+              {
+                expression: "lower(label)",
+                collation: { name: "C" },
+                opclass: {
+                  name: "text_ops",
+                  schema: "pg_catalog",
+                },
+                opclassDefault: true,
+                order: "ASC",
+                nullsOrder: "LAST",
+                statisticsTarget: 601,
+              },
+            ],
           },
         ],
       },
@@ -1026,7 +1121,7 @@ describe("DatabaseInspector coverage", () => {
               index_name: "idx_users_email",
               table_name: "users",
               table_schema: "public",
-              index_definition: "CREATE INDEX idx_users_email ON users USING btree (email DESC, created_at)",
+              index_definition: "CREATE INDEX idx_users_email ON users USING btree (email text_pattern_ops DESC NULLS LAST, created_at) INCLUDE (display_name, updated_at)",
               is_unique: true,
               nulls_not_distinct: true,
               access_method: "btree",
@@ -1039,6 +1134,21 @@ describe("DatabaseInspector coverage", () => {
               opclass_names: ["text_pattern_ops", null],
               where_clause: "active = true",
               sort_options: [1, 0],
+              index_key_count: 2,
+              key_statistics_targets: [null, null],
+              expression_positions: [],
+              key_opclasses: [
+                {
+                  name: "text_pattern_ops",
+                  schema: "pg_catalog",
+                  default: false,
+                },
+                {
+                  name: "timestamp_ops",
+                  schema: "pg_catalog",
+                  default: true,
+                },
+              ],
             },
           ],
         };
@@ -1058,6 +1168,25 @@ describe("DatabaseInspector coverage", () => {
         sortOrders: ["DESC", "ASC"],
         nullsOrders: ["LAST", "LAST"],
         opclasses: { email: "text_pattern_ops" },
+        terms: [
+          {
+            column: "email",
+            opclass: { name: "text_pattern_ops" },
+            opclassDefault: false,
+            order: "DESC",
+            nullsOrder: "LAST",
+          },
+          {
+            column: "created_at",
+            opclass: {
+              name: "timestamp_ops",
+              schema: "pg_catalog",
+            },
+            opclassDefault: true,
+            order: "ASC",
+            nullsOrder: "LAST",
+          },
+        ],
         type: "btree",
         unique: true,
         nullsNotDistinct: true,
@@ -1153,6 +1282,16 @@ describe("DatabaseInspector coverage", () => {
               expression_opclass_name: "gin_trgm_ops",
               where_clause: null,
               sort_options: [0],
+              index_key_count: 1,
+              key_statistics_targets: [null],
+              expression_positions: [1],
+              key_opclasses: [
+                {
+                  name: "gin_trgm_ops",
+                  schema: "public",
+                  default: false,
+                },
+              ],
             },
           ],
         };
@@ -1175,6 +1314,15 @@ describe("DatabaseInspector coverage", () => {
         concurrent: false,
         where: undefined,
         expression: "lower(email)",
+        terms: [
+          {
+            expression: "lower(email)",
+            opclass: { name: "gin_trgm_ops" },
+            opclassDefault: false,
+            order: "ASC",
+            nullsOrder: "LAST",
+          },
+        ],
         storageParameters: undefined,
         tablespace: undefined,
       },

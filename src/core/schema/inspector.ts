@@ -27,11 +27,12 @@ import type {
   PostgresTriggerEnabledMode,
   PostgresReplicaIdentity,
   PostgresColumnStatistics,
+  IndexTerm,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
 import { renderCollationName } from "../../utils/collation";
-import { parseIndexCollations } from "./parser/index-parser";
+import { parseCreateIndex } from "./parser/index-parser";
 import {
   columnCompressionFromCatalog,
   columnStorageFromCatalog,
@@ -1039,43 +1040,10 @@ export class DatabaseInspector {
         ) as nulls_not_distinct,
         am.amname as access_method,
         ix.indnkeyatts as index_key_count,
-        ix.indexprs IS NOT NULL as has_expressions,
         -- Extract tablespace information
         ts.spcname as tablespace_name,
         -- Extract storage parameters (reloptions)
         ic.reloptions as storage_options,
-        CASE
-          WHEN ix.indexprs IS NOT NULL THEN
-            pg_get_indexdef(ix.indexrelid, 1, false)
-          ELSE NULL
-        END as expression_def,
-        CASE
-          WHEN ix.indexprs IS NULL THEN
-            -- Regular column-based index
-            ARRAY(
-              SELECT attribute.attname
-              FROM unnest(ix.indkey) WITH ORDINALITY
-                AS key_column(attnum, position)
-              JOIN pg_attribute attribute
-                ON attribute.attrelid = ix.indrelid
-                AND attribute.attnum = key_column.attnum
-              WHERE key_column.position <= ix.indnkeyatts
-              ORDER BY key_column.position
-            )
-          ELSE
-            -- Expression index - no simple column names
-            ARRAY[]::text[]
-        END as column_names,
-        ARRAY(
-          SELECT attribute.attname::text
-          FROM unnest(ix.indkey) WITH ORDINALITY
-            AS included_column(attnum, position)
-          JOIN pg_attribute attribute
-            ON attribute.attrelid = ix.indrelid
-            AND attribute.attnum = included_column.attnum
-          WHERE included_column.position > ix.indnkeyatts
-          ORDER BY included_column.position
-        ) as included_columns,
         ARRAY(
           SELECT DISTINCT attribute.attname::text
           FROM pg_depend dependency
@@ -1090,37 +1058,6 @@ export class DatabaseInspector {
             AND dependency.deptype = 'a'
           ORDER BY attribute.attname::text
         ) as dependent_columns,
-        -- Get operator class names for each column (non-default only)
-        CASE
-          WHEN ix.indexprs IS NULL THEN
-            ARRAY(
-              SELECT
-                CASE
-                  WHEN opc.opcdefault THEN NULL
-                  ELSE opc.opcname
-                END
-              FROM unnest(ix.indclass) WITH ORDINALITY AS u(opcoid, ord)
-              JOIN pg_opclass opc ON opc.oid = u.opcoid
-              ORDER BY u.ord
-            )
-          ELSE
-            ARRAY[]::text[]
-        END as opclass_names,
-        CASE
-          WHEN ix.indexprs IS NOT NULL THEN
-            (
-              SELECT
-                CASE
-                  WHEN opc.opcdefault THEN NULL
-                  ELSE opc.opcname
-                END
-              FROM unnest(ix.indclass) WITH ORDINALITY AS u(opcoid, ord)
-              JOIN pg_opclass opc ON opc.oid = u.opcoid
-              ORDER BY u.ord
-              LIMIT 1
-            )
-          ELSE NULL
-        END as expression_opclass_name,
         CASE
           WHEN ix.indpred IS NOT NULL THEN
             regexp_replace(
@@ -1129,8 +1066,6 @@ export class DatabaseInspector {
             )
           ELSE NULL
         END as where_clause,
-        -- indoption: bit 0 = DESC, bit 1 = NULLS FIRST
-        ix.indoption::int2[] as sort_options,
         ARRAY(
           SELECT attribute.attstattarget
           FROM pg_attribute attribute
@@ -1146,7 +1081,23 @@ export class DatabaseInspector {
           WHERE key_column.position <= ix.indnkeyatts
             AND key_column.attnum = 0
           ORDER BY key_column.position
-        ) as expression_positions
+        ) as expression_positions,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'name', operator_class.opcname,
+              'schema', operator_namespace.nspname,
+              'default', operator_class.opcdefault
+            )
+            ORDER BY operator_key.position
+          )
+          FROM unnest(ix.indclass) WITH ORDINALITY
+            AS operator_key(opclass_oid, position)
+          JOIN pg_opclass operator_class
+            ON operator_class.oid = operator_key.opclass_oid
+          JOIN pg_namespace operator_namespace
+            ON operator_namespace.oid = operator_class.opcnamespace
+        ) as key_opclasses
       FROM pg_indexes i
       JOIN pg_namespace n ON n.nspname = i.schemaname
       JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = n.oid
@@ -1172,54 +1123,21 @@ export class DatabaseInspector {
 
     const indexes: Index[] = [];
     for (const row of result.rows) {
-      const columns = row.column_names || [];
-      const opclassNames = row.opclass_names || [];
-      const sortOptions: number[] = row.sort_options || [];
-      let opclasses: Record<string, string> | undefined;
-      for (let i = 0; i < columns.length; i++) {
-        if (opclassNames[i]) {
-          if (!opclasses) opclasses = {};
-          opclasses[columns[i]] = opclassNames[i];
-        }
+      const parsed = await this.parseIndexDefinition(row.index_definition);
+      this.enrichIndexTermsFromCatalog(parsed.terms || [], row);
+      if (parsed.terms?.length === 1 && parsed.terms[0]?.expression) {
+        parsed.expressionStatisticsTarget = parsed.terms[0].statisticsTarget;
       }
-      const sortOrders = sortOptions.map((opt: number) => (opt & 1) ? 'DESC' : 'ASC') as ('ASC' | 'DESC')[];
-      const hasNonDefaultSort = sortOrders.some(s => s === 'DESC');
-      const nullsOrders = sortOptions.map(function mapNullsOrder(opt: number) {
-        return (opt & 2) ? 'FIRST' : 'LAST';
-      }) as ('FIRST' | 'LAST')[];
-      const hasNonDefaultNullsOrder = nullsOrders.some(
-        function isNonDefault(nullsOrder, index) {
-          const defaultOrder = sortOrders[index] === 'DESC' ? 'FIRST' : 'LAST';
-          return nullsOrder !== defaultOrder;
-        }
-      );
-      const collations = await this.parseIndexDefinitionCollations(
-        row.index_definition
-      );
-      const expressionStatisticsTarget =
-        this.getExpressionIndexStatisticsTarget(row);
       indexes.push({
+        ...parsed,
         name: row.index_name,
         tableName: row.table_name,
         schema: row.table_schema,
-        columns,
-        ...(row.included_columns?.length > 0
-          ? { include: row.included_columns }
-          : {}),
-        ...(collations ? { collations } : {}),
-        sortOrders: hasNonDefaultSort ? sortOrders : undefined,
-        nullsOrders: hasNonDefaultNullsOrder ? nullsOrders : undefined,
-        opclasses,
-        ...(row.expression_opclass_name ? { expressionOpclass: row.expression_opclass_name } : {}),
         type: this.mapPostgreSQLIndexType(row.access_method),
         unique: row.is_unique,
         ...(row.nulls_not_distinct ? { nullsNotDistinct: true } : {}),
         concurrent: false,
         where: row.where_clause || undefined,
-        expression: row.has_expressions ? row.expression_def : undefined,
-        ...(expressionStatisticsTarget !== undefined
-          ? { expressionStatisticsTarget }
-          : {}),
         ...(row.dependent_columns?.length > 0
           ? { dependentColumns: row.dependent_columns }
           : {}),
@@ -1230,8 +1148,50 @@ export class DatabaseInspector {
     return indexes;
   }
 
-  private getExpressionIndexStatisticsTarget(row: any): number | undefined {
+  private enrichIndexTermsFromCatalog(terms: IndexTerm[], row: any): void {
     const identity = `${row.table_schema}.${row.index_name}`;
+    const keyCount = Number(row.index_key_count);
+    if (terms.length !== keyCount) {
+      throw new ValidationError(
+        `PostgreSQL reconstructed ${terms.length} keys for ${identity}, but its catalog reports ${keyCount}`,
+        `index ${identity}`,
+        "terms",
+        terms
+      );
+    }
+
+    const opclasses: Array<{
+      name?: string;
+      schema?: string;
+      default?: boolean;
+    }> = row.key_opclasses || [];
+    if (opclasses.length !== keyCount) {
+      throw new ValidationError(
+        `PostgreSQL returned incomplete operator-class metadata for ${identity}`,
+        `index ${identity}`,
+        "terms",
+        opclasses
+      );
+    }
+    for (let position = 0; position < terms.length; position++) {
+      const term = terms[position]!;
+      const opclass = opclasses[position];
+      if (!opclass?.name) {
+        throw new ValidationError(
+          `PostgreSQL returned an invalid operator class for ${identity} position ${position + 1}`,
+          `index ${identity}`,
+          "terms",
+          opclass
+        );
+      }
+      if (!term.opclass) {
+        term.opclass = opclass.schema
+          ? { name: opclass.name, schema: opclass.schema }
+          : { name: opclass.name };
+      }
+      term.opclassDefault = Boolean(opclass.default);
+    }
+
     const targets: Array<number | undefined> = (
       row.key_statistics_targets || []
     ).map(
@@ -1242,51 +1202,72 @@ export class DatabaseInspector {
         );
       }
     );
-    const customPositions = targets.flatMap(
-      function getCustomPosition(target: number | undefined, position: number) {
-        return target === undefined ? [] : [position + 1];
-      }
-    );
-    if (customPositions.length === 0) {
-      return undefined;
+    if (targets.length !== keyCount) {
+      throw new ValidationError(
+        `PostgreSQL returned incomplete statistics metadata for ${identity}`,
+        `index ${identity}`,
+        "terms",
+        targets
+      );
     }
     const expressionPositions: number[] = (
       row.expression_positions || []
     ).map(Number);
+    const parsedExpressionPositions = terms.flatMap(function getPosition(
+      term,
+      position
+    ) {
+      return term.expression === undefined ? [] : [position + 1];
+    });
     if (
-      Number(row.index_key_count) !== 1 ||
-      expressionPositions.length !== 1 ||
-      expressionPositions[0] !== 1 ||
-      customPositions.some(function isUnsupportedPosition(position) {
-        return position !== 1;
+      expressionPositions.length !== parsedExpressionPositions.length ||
+      expressionPositions.some(function hasDifferentPosition(position, index) {
+        return parsedExpressionPositions[index] !== position;
       })
     ) {
       throw new ValidationError(
-        `Unsupported PostgreSQL expression-index statistics targets are present on ${identity}; TerraDB currently models only position 1 of a single-expression index`,
+        `PostgreSQL reconstructed expression positions for ${identity} that do not match its catalog`,
         `index ${identity}`,
-        "expressionStatisticsTarget",
-        customPositions
+        "terms",
+        expressionPositions
       );
     }
-    return targets[0];
+    for (let position = 0; position < targets.length; position++) {
+      const target = targets[position];
+      if (target === undefined) {
+        continue;
+      }
+      const term = terms[position];
+      if (!term?.expression) {
+        throw new ValidationError(
+          `PostgreSQL statistics target on ${identity} position ${position + 1} does not belong to an expression key`,
+          `index ${identity}`,
+          "terms",
+          target
+        );
+      }
+      term.statisticsTarget = target;
+    }
   }
 
-  private async parseIndexDefinitionCollations(
+  private async parseIndexDefinition(
     indexDefinition: string | undefined
-  ): Promise<Index["collations"]> {
+  ): Promise<Index> {
     if (!indexDefinition) {
-      return undefined;
+      throw new Error("PostgreSQL returned an index without a definition");
     }
 
     const ast = await parse(indexDefinition);
     const statement = toPgAstNode(ast.stmts?.[0]?.stmt);
-    const indexStatement = statement?.IndexStmt;
-    if (!indexStatement) {
+    const parsed = statement?.IndexStmt
+      ? parseCreateIndex(statement.IndexStmt)
+      : undefined;
+    if (!parsed) {
       throw new Error(
         `PostgreSQL returned an invalid index definition: ${indexDefinition}`
       );
     }
-    return parseIndexCollations(indexStatement.indexParams);
+    return parsed;
   }
 
   private parsePostgresColumnStatisticsRows(

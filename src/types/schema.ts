@@ -106,8 +106,13 @@ export interface ExclusionConstraint {
 export interface IndexTerm {
   column?: string;
   expression?: string;
-  collation?: string;
+  collation?: string | QualifiedName;
+  opclass?: QualifiedName;
+  opclassOptions?: Record<string, string>;
+  opclassDefault?: boolean;
   order?: 'ASC' | 'DESC';
+  nullsOrder?: 'FIRST' | 'LAST';
+  statisticsTarget?: number;
 }
 
 export interface Index {
@@ -119,7 +124,7 @@ export interface Index {
   collations?: Array<QualifiedName | undefined>; // Explicit PostgreSQL collation override per key
   sortOrders?: ('ASC' | 'DESC')[]; // Sort order per column (defaults to ASC if not specified)
   nullsOrders?: ('FIRST' | 'LAST')[]; // Effective null placement when any key uses a non-default order
-  terms?: IndexTerm[]; // Complete ordered keys, including SQLite expressions and collations
+  terms?: IndexTerm[]; // Complete ordered keys, including expressions and per-key metadata
   createStatement?: string; // Complete CREATE INDEX statement when exact syntax must be preserved
   opclasses?: Record<string, string>; // Maps column name to operator class (e.g., gin_trgm_ops)
   expressionOpclass?: string;
