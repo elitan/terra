@@ -240,6 +240,15 @@ function resolveTestCommand(file: string, override?: string): string {
   if (normalized.endsWith("/src/providers/sqlite/index.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sqlite/table-recreation.test.ts src/test/sqlite/validation.test.ts";
   }
+  if (
+    normalized.endsWith("/src/providers/sqlite/differ.ts") ||
+    normalized.endsWith("/src/providers/sqlite/sql-parser-utils.ts")
+  ) {
+    return "bun run test:sqlite";
+  }
+  if (normalized.endsWith("/src/providers/sqlite/inspector.ts")) {
+    return "bun run test:sqlite";
+  }
   if (normalized.endsWith("/src/providers/postgres/connection.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/postgres-connection-strings.test.ts src/test/database-config.test.ts";
   }

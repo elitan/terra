@@ -723,6 +723,209 @@ interface SQLiteForeignKeyMatchClause {
   end: number;
 }
 
+type SQLiteForeignKeyAction =
+  | "CASCADE"
+  | "RESTRICT"
+  | "SET NULL"
+  | "SET DEFAULT"
+  | "NO ACTION";
+
+export interface SQLiteForeignKeySemantics {
+  columns: string[];
+  referencedTable: string;
+  referencedColumns: string[];
+  onDelete: SQLiteForeignKeyAction;
+  onUpdate: SQLiteForeignKeyAction;
+  initiallyDeferred: boolean;
+}
+
+interface SQLiteForeignKeyDeferrabilityClause {
+  start: number;
+  end: number;
+  initiallyDeferred: boolean;
+}
+
+function findSQLiteForeignKeyDeferrabilityClause(
+  tokens: SQLiteToken[]
+): SQLiteForeignKeyDeferrabilityClause | undefined {
+  const referencesIndex = tokens.findIndex(function (token) {
+    return isWord(token, "REFERENCES");
+  });
+  if (referencesIndex === -1) {
+    return undefined;
+  }
+
+  for (let index = referencesIndex + 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!isWord(token, "DEFERRABLE")) {
+      continue;
+    }
+
+    const previous = tokens[index - 1];
+    const explicitlyNotDeferrable = isWord(previous, "NOT");
+    const initially = tokens[index + 1];
+    const initialMode = isWord(initially, "INITIALLY")
+      ? tokens[index + 2]
+      : undefined;
+    return {
+      start: explicitlyNotDeferrable ? previous.start : token.start,
+      end: initialMode?.end || token.end,
+      initiallyDeferred:
+        !explicitlyNotDeferrable && isWord(initialMode, "DEFERRED"),
+    };
+  }
+
+  return undefined;
+}
+
+function readSQLiteIdentifierList(
+  sql: string,
+  openParenthesis: number
+): string[] | undefined {
+  const list = readSQLiteParenthesizedList(sql.slice(openParenthesis));
+  if (!list) {
+    return undefined;
+  }
+
+  const identifiers: string[] = [];
+  for (const item of list.items) {
+    const identifier = readSQLiteIdentifier(item);
+    if (!identifier) {
+      return undefined;
+    }
+    identifiers.push(identifier.name);
+  }
+  return identifiers;
+}
+
+function readSQLiteForeignKeyAction(
+  tokens: SQLiteToken[],
+  event: "DELETE" | "UPDATE"
+): SQLiteForeignKeyAction {
+  for (let index = 0; index < tokens.length - 2; index += 1) {
+    if (!isWord(tokens[index], "ON") || !isWord(tokens[index + 1], event)) {
+      continue;
+    }
+
+    const action = tokens[index + 2];
+    const modifier = tokens[index + 3];
+    if (isWord(action, "CASCADE")) {
+      return "CASCADE";
+    }
+    if (isWord(action, "RESTRICT")) {
+      return "RESTRICT";
+    }
+    if (isWord(action, "SET") && isWord(modifier, "NULL")) {
+      return "SET NULL";
+    }
+    if (isWord(action, "SET") && isWord(modifier, "DEFAULT")) {
+      return "SET DEFAULT";
+    }
+    if (isWord(action, "NO") && isWord(modifier, "ACTION")) {
+      return "NO ACTION";
+    }
+  }
+
+  return "NO ACTION";
+}
+
+function parseSQLiteForeignKeySemantics(
+  definition: string
+): SQLiteForeignKeySemantics | undefined {
+  const tokens = getTopLevelSQLiteTokens(definition);
+  const referencesIndex = tokens.findIndex(function (token) {
+    return isWord(token, "REFERENCES");
+  });
+  if (referencesIndex === -1) {
+    return undefined;
+  }
+
+  const referencedTableToken = tokens[referencesIndex + 1];
+  if (!referencedTableToken || referencedTableToken.kind === "symbol") {
+    return undefined;
+  }
+  const referencedTable = readSQLiteIdentifier(
+    definition.slice(referencedTableToken.start)
+  );
+  if (!referencedTable) {
+    return undefined;
+  }
+
+  const targetStart = skipWhitespaceAndComments(
+    definition,
+    referencedTableToken.end
+  );
+  const referencedColumns = definition[targetStart] === "("
+    ? readSQLiteIdentifierList(definition, targetStart)
+    : [];
+  if (referencedColumns === undefined) {
+    return undefined;
+  }
+
+  const foreignIndex = tokens.findIndex(function (token, index) {
+    return index < referencesIndex &&
+      isWord(token, "FOREIGN") &&
+      isWord(tokens[index + 1], "KEY");
+  });
+  let columns: string[];
+  if (foreignIndex !== -1) {
+    const keyToken = tokens[foreignIndex + 1]!;
+    const localStart = skipWhitespaceAndComments(definition, keyToken.end);
+    if (definition[localStart] !== "(") {
+      return undefined;
+    }
+    const localColumns = readSQLiteIdentifierList(definition, localStart);
+    if (!localColumns) {
+      return undefined;
+    }
+    columns = localColumns;
+  } else {
+    const column = readSQLiteIdentifier(definition);
+    if (!column) {
+      return undefined;
+    }
+    columns = [column.name];
+  }
+
+  const foreignKeyTokens = tokens.slice(referencesIndex + 2);
+  const deferrability = findSQLiteForeignKeyDeferrabilityClause(tokens);
+  return {
+    columns,
+    referencedTable: referencedTable.name,
+    referencedColumns,
+    onDelete: readSQLiteForeignKeyAction(foreignKeyTokens, "DELETE"),
+    onUpdate: readSQLiteForeignKeyAction(foreignKeyTokens, "UPDATE"),
+    initiallyDeferred: deferrability?.initiallyDeferred || false,
+  };
+}
+
+export function extractSQLiteForeignKeySemantics(
+  sql: string
+): SQLiteForeignKeySemantics[] {
+  return splitSQLiteTableDefinitions(sql).flatMap(function (definition) {
+    const semantics = parseSQLiteForeignKeySemantics(definition);
+    return semantics ? [semantics] : [];
+  });
+}
+
+export function canonicalizeSQLiteForeignKeyDeferrability(
+  definition: string
+): string {
+  const clause = findSQLiteForeignKeyDeferrabilityClause(
+    getTopLevelSQLiteTokens(definition)
+  );
+  if (!clause) {
+    return definition;
+  }
+
+  const replacement = clause.initiallyDeferred
+    ? "DEFERRABLE INITIALLY DEFERRED"
+    : "";
+  return definition.slice(0, clause.start) +
+    replacement +
+    definition.slice(clause.end);
+}
+
 function findSQLiteForeignKeyMatchClauses(
   definition: string
 ): SQLiteForeignKeyMatchClause[] {
@@ -825,8 +1028,10 @@ export function removeSQLiteForeignKeyMatchSimpleClauses(
 export function canonicalizeSQLiteForeignKeyDefinition(
   definition: string
 ): string {
-  return removeSQLiteForeignKeyMatchSimpleClauses(
-    removeSQLiteForeignKeyTargetColumns(definition)
+  return canonicalizeSQLiteForeignKeyDeferrability(
+    removeSQLiteForeignKeyMatchSimpleClauses(
+      removeSQLiteForeignKeyTargetColumns(definition)
+    )
   );
 }
 

@@ -198,6 +198,18 @@ describe("SQLiteParser execution-runtime parity", function () {
         `${keyword} is not supported in SQLite desired schemas`
       );
     }
+
+    await expect(parser.parseSchema(`
+      CREATE TABLE source (id INTEGER);
+      CREATE TABLE audit_log (value INTEGER);
+      CREATE TRIGGER source_audit AFTER INSERT ON source BEGIN
+        INSERT INTO audit_log(value)
+        VALUES (CASE WHEN NEW.id > 0 THEN NEW.id ELSE 0 END);
+      END;
+      INSERT INTO source(id) VALUES (1);
+    `, "after-trigger.sql")).rejects.toThrow(
+      "INSERT is not supported in SQLite desired schemas"
+    );
   });
 
   test("rejects every query-derived table spelling", async function () {

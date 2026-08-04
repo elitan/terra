@@ -447,6 +447,158 @@ describe("SQLite Foreign Key Constraints", () => {
     expect(children?.foreignKeys).toHaveLength(1);
   });
 
+  test("should normalize equivalent immediate foreign key declarations", async function () {
+    const immediateSchema = `
+      CREATE TABLE parents (id INTEGER PRIMARY KEY);
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER,
+        FOREIGN KEY (parent_id) REFERENCES parents(id)
+      );
+    `;
+    await schemaService.apply(immediateSchema, ["public"], true);
+
+    const immediateClauses = [
+      "NOT DEFERRABLE INITIALLY DEFERRED",
+      "NOT DEFERRABLE INITIALLY IMMEDIATE",
+      "NOT DEFERRABLE",
+      "DEFERRABLE INITIALLY IMMEDIATE",
+      "DEFERRABLE",
+    ];
+    for (const clause of immediateClauses) {
+      const explicitImmediateSchema = immediateSchema.replace(
+        "REFERENCES parents(id)",
+        `REFERENCES parents(id) ${clause}`
+      );
+      const plan = await schemaService.plan(
+        explicitImmediateSchema,
+        ["public"]
+      );
+      expect(plan.hasChanges).toBe(false);
+    }
+
+    const externalClient = await provider.createClient(config);
+    await externalClient.query("DROP TABLE children");
+    await externalClient.query(`
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER,
+        FOREIGN KEY (parent_id) REFERENCES parents(id)
+          NOT DEFERRABLE INITIALLY DEFERRED
+      )
+    `);
+    await externalClient.end();
+    expect((await schemaService.plan(immediateSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
+
+  test("should inspect alter enforce and reapply deferred foreign keys", async function () {
+    const immediateSchema = `
+      CREATE TABLE parents (id INTEGER PRIMARY KEY);
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER,
+        FOREIGN KEY (parent_id) REFERENCES parents(id)
+      );
+    `;
+    const deferredSchema = immediateSchema.replace(
+      "REFERENCES parents(id)",
+      "REFERENCES parents(id) DEFERRABLE INITIALLY DEFERRED"
+    );
+
+    const parsed = await provider.parseSchema(deferredSchema);
+    const parsedChildren = parsed.tables.find(function (table) {
+      return table.name === "children";
+    });
+    expect(parsedChildren?.foreignKeys?.[0]).toEqual(
+      expect.objectContaining({
+        deferrable: true,
+        initiallyDeferred: true,
+      })
+    );
+
+    await schemaService.apply(immediateSchema, ["public"], true);
+    expect((await schemaService.plan(deferredSchema, ["public"])).hasChanges)
+      .toBe(true);
+    await schemaService.apply(deferredSchema, ["public"], true);
+
+    const deferredClient = await provider.createClient(config);
+    const deferredTables = await provider.getCurrentSchema(deferredClient);
+    const inspectedChildren = deferredTables.find(function (table) {
+      return table.name === "children";
+    });
+    expect(inspectedChildren?.foreignKeys?.[0]).toEqual(
+      expect.objectContaining({
+        deferrable: true,
+        initiallyDeferred: true,
+      })
+    );
+
+    await deferredClient.query("BEGIN");
+    await deferredClient.query(
+      "INSERT INTO children(id, parent_id) VALUES (1, 10)"
+    );
+    await deferredClient.query("INSERT INTO parents(id) VALUES (10)");
+    await deferredClient.query("COMMIT");
+    await deferredClient.end();
+
+    expect((await schemaService.plan(deferredSchema, ["public"])).hasChanges)
+      .toBe(false);
+    await schemaService.apply(immediateSchema, ["public"], true);
+
+    const immediateClient = await provider.createClient(config);
+    const preservedRows = await immediateClient.query(
+      "SELECT id, parent_id FROM children ORDER BY id"
+    );
+    expect(preservedRows.rows).toEqual([{ id: 1, parent_id: 10 }]);
+    await immediateClient.query("BEGIN");
+    await expect(
+      immediateClient.query(
+        "INSERT INTO children(id, parent_id) VALUES (3, 30)"
+      )
+    ).rejects.toThrow("FOREIGN KEY constraint failed");
+    await immediateClient.query("ROLLBACK");
+    await immediateClient.end();
+
+    expect((await schemaService.plan(immediateSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
+
+  test("should match mixed foreign key timing without pragma ordering assumptions", async function () {
+    const schema = `
+      CREATE TABLE parents (
+        id INTEGER PRIMARY KEY,
+        external_id TEXT UNIQUE
+      );
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER REFERENCES parents(id)
+          DEFERRABLE INITIALLY DEFERRED,
+        parent_external_id TEXT,
+        FOREIGN KEY (parent_external_id)
+          REFERENCES parents(external_id) ON DELETE CASCADE
+      );
+    `;
+
+    const parsed = await provider.parseSchema(schema);
+    const children = parsed.tables.find(function (table) {
+      return table.name === "children";
+    });
+    const deferred = children?.foreignKeys?.find(function (foreignKey) {
+      return foreignKey.columns[0] === "parent_id";
+    });
+    const immediate = children?.foreignKeys?.find(function (foreignKey) {
+      return foreignKey.columns[0] === "parent_external_id";
+    });
+
+    expect(deferred).toEqual(expect.objectContaining({
+      deferrable: true,
+      initiallyDeferred: true,
+    }));
+    expect(immediate?.initiallyDeferred).toBeUndefined();
+    expect(immediate?.onDelete).toBe("CASCADE");
+  });
+
   test("should handle ON DELETE SET NULL", async () => {
     await schemaService.apply(`
       CREATE TABLE parents (id INTEGER PRIMARY KEY);

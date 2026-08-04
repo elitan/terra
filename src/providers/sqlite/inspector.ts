@@ -15,11 +15,13 @@ import {
   extractSQLiteCheckExpressions,
   extractSQLiteAutoincrementColumns,
   extractSQLiteColumnCollations,
+  extractSQLiteForeignKeySemantics,
   extractSQLiteGeneratedExpressions,
   extractSQLiteViewDefinition,
   parseSQLiteIndexDefinition,
   parseSQLiteTriggerMetadata,
   replaceSQLiteCreateTableName,
+  type SQLiteForeignKeySemantics,
 } from "./sql-parser-utils";
 import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 
@@ -167,7 +169,7 @@ export class SQLiteInspector {
     );
     const columns = this.getColumns(tableInfo.rows, tableName, createSql);
     const primaryKey = this.getPrimaryKey(tableInfo.rows);
-    const foreignKeys = await this.getForeignKeys(client, tableName);
+    const foreignKeys = await this.getForeignKeys(client, tableName, createSql);
     const indexes = await this.getIndexes(client, tableName);
     const checkConstraints = await this.getCheckConstraints(client, tableName);
     const uniqueConstraints = await this.getUniqueConstraints(client, tableName);
@@ -247,7 +249,11 @@ export class SQLiteInspector {
     };
   }
 
-  private async getForeignKeys(client: SQLiteClient, tableName: string): Promise<ForeignKeyConstraint[]> {
+  private async getForeignKeys(
+    client: SQLiteClient,
+    tableName: string,
+    createSql: string | null
+  ): Promise<ForeignKeyConstraint[]> {
     const fks = await client.query<ForeignKeyInfo>(
       `PRAGMA foreign_key_list(${this.quoteIdentifier(tableName)})`
     );
@@ -271,7 +277,52 @@ export class SQLiteInspector {
       }
     }
 
-    return Array.from(fkMap.values());
+    const foreignKeys = Array.from(fkMap.values());
+    const unmatchedSemantics = extractSQLiteForeignKeySemantics(createSql || "");
+
+    for (const foreignKey of foreignKeys) {
+      const matchIndex = unmatchedSemantics.findIndex(function (candidate) {
+        return SQLiteInspector.foreignKeySemanticsMatch(
+          foreignKey,
+          candidate
+        );
+      });
+      if (matchIndex === -1) {
+        throw new Error(
+          `Unable to match foreign key definition for SQLite table "${tableName}"`
+        );
+      }
+      const [match] = unmatchedSemantics.splice(matchIndex, 1);
+      if (match?.initiallyDeferred) {
+        foreignKey.deferrable = true;
+        foreignKey.initiallyDeferred = true;
+      }
+    }
+
+    if (unmatchedSemantics.length > 0) {
+      throw new Error(
+        `Unable to match foreign key definitions for SQLite table "${tableName}"`
+      );
+    }
+    return foreignKeys;
+  }
+
+  private static foreignKeySemanticsMatch(
+    foreignKey: ForeignKeyConstraint,
+    semantics: SQLiteForeignKeySemantics
+  ): boolean {
+    function normalizedList(items: string[]): string {
+      return items.map(normalizeSQLiteIdentifier).join("\0");
+    }
+
+    return normalizedList(foreignKey.columns) ===
+        normalizedList(semantics.columns) &&
+      normalizeSQLiteIdentifier(foreignKey.referencedTable) ===
+        normalizeSQLiteIdentifier(semantics.referencedTable) &&
+      normalizedList(foreignKey.referencedColumns) ===
+        normalizedList(semantics.referencedColumns) &&
+      (foreignKey.onDelete || "NO ACTION") === semantics.onDelete &&
+      (foreignKey.onUpdate || "NO ACTION") === semantics.onUpdate;
   }
 
   private mapFkAction(action: string): 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION' {

@@ -300,6 +300,7 @@ export class SQLiteDiffer {
       foreignKey.referencedColumns.map(normalizeSQLiteIdentifier).join("\0"),
       foreignKey.onDelete || "NO ACTION",
       foreignKey.onUpdate || "NO ACTION",
+      foreignKey.initiallyDeferred ? "DEFERRED" : "IMMEDIATE",
     ].join("\u0001");
   }
 
@@ -564,6 +565,9 @@ export class SQLiteDiffer {
       }
       if (fk.onUpdate && fk.onUpdate !== 'NO ACTION') {
         fkDef += ` ON UPDATE ${fk.onUpdate}`;
+      }
+      if (fk.initiallyDeferred) {
+        fkDef += " DEFERRABLE INITIALLY DEFERRED";
       }
       parts.push(fkDef);
     }

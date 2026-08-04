@@ -12,7 +12,9 @@ import {
 } from "../../utils/sqlite-identifier";
 import {
   canonicalizeSQLiteDefinitionIdentifiers,
+  canonicalizeSQLiteForeignKeyDeferrability,
   extractSQLiteColumnCollations,
+  extractSQLiteForeignKeySemantics,
   extractSQLiteForeignKeyMatchClauses,
   isSQLiteRowidAliasColumnDefinition,
   removeSQLiteForeignKeyMatchSimpleClauses,
@@ -142,6 +144,84 @@ describe("SQLiteDiffer private coverage", () => {
     ).toBe("FOREIGN KEY (parent_id) REFERENCES parents(id) MATCH FULL");
   });
 
+  test("extracts and canonicalizes SQLite foreign key deferrability", function () {
+    const semantics = extractSQLiteForeignKeySemantics(`
+      CREATE TABLE children (
+        "parent id" INTEGER REFERENCES "parents"("id")
+          ON DELETE CASCADE DEFERRABLE /* timing */ INITIALLY DEFERRED,
+        tenant TEXT,
+        code TEXT,
+        CONSTRAINT child_region FOREIGN KEY (tenant, code)
+          REFERENCES regions(tenant, code)
+          ON UPDATE SET NULL NOT DEFERRABLE INITIALLY DEFERRED,
+        note TEXT CHECK (note <> 'REFERENCES ignored(id) DEFERRABLE')
+      )
+    `);
+
+    expect(semantics).toEqual([
+      {
+        columns: ["parent id"],
+        referencedTable: "parents",
+        referencedColumns: ["id"],
+        onDelete: "CASCADE",
+        onUpdate: "NO ACTION",
+        initiallyDeferred: true,
+      },
+      {
+        columns: ["tenant", "code"],
+        referencedTable: "regions",
+        referencedColumns: ["tenant", "code"],
+        onDelete: "NO ACTION",
+        onUpdate: "SET NULL",
+        initiallyDeferred: false,
+      },
+    ]);
+    expect(
+      canonicalizeSQLiteForeignKeyDeferrability(
+        "FOREIGN KEY (parent_id) REFERENCES parents(id) " +
+          "NOT DEFERRABLE INITIALLY DEFERRED"
+      ).trim()
+    ).toBe("FOREIGN KEY (parent_id) REFERENCES parents(id)");
+    expect(
+      canonicalizeSQLiteForeignKeyDeferrability(
+        "parent_id INTEGER REFERENCES parents(id) " +
+          "DEFERRABLE /* timing */ INITIALLY DEFERRED"
+      )
+    ).toBe(
+      "parent_id INTEGER REFERENCES parents(id) " +
+        "DEFERRABLE INITIALLY DEFERRED"
+    );
+
+    const differ = new SQLiteDiffer() as any;
+    const immediateTable = makeTable({
+      columns: [
+        { name: "id", type: "INTEGER", nullable: false },
+        { name: "parent_id", type: "INTEGER", nullable: true },
+      ],
+      foreignKeys: [{
+        columns: ["parent_id"],
+        referencedTable: "parents",
+        referencedColumns: ["id"],
+      }],
+    });
+    const deferredTable = makeTable({
+      ...immediateTable,
+      foreignKeys: [{
+        columns: ["parent_id"],
+        referencedTable: "parents",
+        referencedColumns: ["id"],
+        deferrable: true,
+        initiallyDeferred: true,
+      }],
+    });
+    expect(
+      differ.detectChanges(deferredTable, immediateTable).requiresRecreate
+    ).toBe(true);
+    expect(differ.generateCreateTable(deferredTable)).toContain(
+      "DEFERRABLE INITIALLY DEFERRED"
+    );
+  });
+
   test("canonicalizes SQLite identifiers with ASCII-only folding", function () {
     expect(
       canonicalizeSQLiteDefinitionIdentifiers(
@@ -242,6 +322,22 @@ describe("SQLiteDiffer private coverage", () => {
     const changes = differ.detectChanges(desired, current);
     expect(changes.requiresRecreate).toBe(true);
     expect(changes.uniqueConstraintsChanged).toBe(true);
+  });
+
+  test("detectChanges requires recreation for model-only column and key changes", function () {
+    const differ = new SQLiteDiffer() as any;
+    const current = makeTable();
+    const changedColumn = makeTable({
+      columns: [{ name: "id", type: "TEXT", nullable: false }],
+    });
+    const changedPrimaryKey = makeTable({
+      primaryKey: { columns: ["id"] },
+    });
+
+    expect(differ.detectChanges(changedColumn, current).requiresRecreate)
+      .toBe(true);
+    expect(differ.detectChanges(changedPrimaryKey, current).requiresRecreate)
+      .toBe(true);
   });
 
   test("private SQL builders include unique where not-null and default branches", () => {

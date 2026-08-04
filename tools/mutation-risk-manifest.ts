@@ -52,6 +52,24 @@ export const mutationRiskManifest: MutationRiskManifest = {
       reason: "controls SQLite migration atomicity and integrity verification",
     },
     {
+      path: "src/providers/sqlite/differ.ts",
+      owner: "sqlite-provider",
+      level: "critical",
+      reason: "controls SQLite recreation, preservation, and idempotency",
+    },
+    {
+      path: "src/providers/sqlite/inspector.ts",
+      owner: "sqlite-provider",
+      level: "high",
+      reason: "SQLite introspection drift causes incorrect recreation plans",
+    },
+    {
+      path: "src/providers/sqlite/sql-parser-utils.ts",
+      owner: "sqlite-provider",
+      level: "high",
+      reason: "lossless SQLite definition parsing controls semantic comparison",
+    },
+    {
       path: "src/providers/postgres/connection.ts",
       owner: "postgres-provider",
       level: "high",

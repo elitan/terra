@@ -21,7 +21,13 @@ describe("SQLiteInspector unit coverage", () => {
               type: "table",
               name: "users",
               tbl_name: "users",
-              sql: "CREATE TABLE users (id INT, age INT CHECK(age > 0), CHECK (id > 0))",
+              sql:
+                "CREATE TABLE users (" +
+                "id INT REFERENCES accounts(id) " +
+                "ON UPDATE RESTRICT ON DELETE SET DEFAULT, " +
+                "email TEXT REFERENCES profiles(email) " +
+                "ON UPDATE UNKNOWN_ACTION ON DELETE CASCADE" +
+                ")",
             },
           ],
         };
