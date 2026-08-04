@@ -554,6 +554,18 @@ export class SQLiteProvider implements DatabaseProvider {
           if (violations.length > 0) {
             throw new Error(`Foreign key integrity check failed (${violations.length} violation(s))`);
           }
+
+          currentStatement = "PRAGMA integrity_check(1)";
+          const integrityResult = sqliteClient.raw
+            .prepare("PRAGMA integrity_check(1)")
+            .get() as { integrity_check?: unknown } | undefined;
+          const integrityStatus = integrityResult?.integrity_check;
+          if (integrityStatus !== "ok") {
+            const detail = typeof integrityStatus === "string"
+              ? integrityStatus
+              : "unknown result";
+            throw new Error(`SQLite integrity check failed: ${detail}`);
+          }
         }
       });
 

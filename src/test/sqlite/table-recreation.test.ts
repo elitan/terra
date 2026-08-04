@@ -552,6 +552,55 @@ describe("SQLite Table Recreation", () => {
     }
   });
 
+  test("should rollback generalized migrations that fail integrity checks", async function () {
+    for (const filename of [":memory:", dbPath]) {
+      const client = await provider.createClient({
+        dialect: "sqlite",
+        filename,
+      });
+      await client.query(
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)"
+      );
+      await client.query(
+        "CREATE TABLE scores (value INTEGER CHECK (value > 0))"
+      );
+      await client.query("INSERT INTO users(id, age) VALUES (1, 10)");
+      await client.query("PRAGMA ignore_check_constraints = ON");
+      await client.query("INSERT INTO scores(value) VALUES (-1)");
+      await client.query("PRAGMA ignore_check_constraints = OFF");
+
+      await expect(
+        provider.executeInTransaction(client, [
+          "CREATE TABLE _users_new (id INTEGER PRIMARY KEY, age TEXT)",
+          "INSERT INTO _users_new SELECT * FROM users",
+          "DROP TABLE users",
+          "ALTER TABLE _users_new RENAME TO users",
+        ])
+      ).rejects.toThrow(
+        "SQLite integrity check failed: CHECK constraint failed in scores"
+      );
+
+      const columns = await client.query<{ name: string; type: string }>(
+        "PRAGMA table_info(users)"
+      );
+      const users = await client.query("SELECT id, age FROM users");
+      const temporaryArtifacts = await client.query(`
+        SELECT name
+        FROM sqlite_schema
+        WHERE type = 'table' AND name = '_users_new'
+      `);
+      expect(columns.rows.map(function (column) {
+        return { name: column.name, type: column.type };
+      })).toEqual([
+        { name: "id", type: "INTEGER" },
+        { name: "age", type: "INTEGER" },
+      ]);
+      expect(users.rows).toEqual([{ id: 1, age: 10 }]);
+      expect(temporaryArtifacts.rows).toEqual([]);
+      await client.end();
+    }
+  });
+
   test("should enforce checks during recreation and restore the caller setting", async function () {
     await schemaService.apply(`
       CREATE TABLE scores (
