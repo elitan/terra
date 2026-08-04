@@ -410,6 +410,20 @@
     "comments": [
       {
         "objectType": "COLUMN",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "columnName": "id",
+        "comment": "active user id"
+      },
+      {
+        "objectType": "COLUMN",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "active user email"
+      },
+      {
+        "objectType": "COLUMN",
         "objectName": "users",
         "schemaName": "public",
         "columnName": "email",
@@ -422,15 +436,33 @@
         "comment": "users email pattern"
       },
       {
+        "objectType": "MATERIALIZED VIEW",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "comment": "active user ids"
+      },
+      {
         "objectType": "SCHEMA",
         "objectName": "public",
         "comment": "public schema"
+      },
+      {
+        "objectType": "SEQUENCE",
+        "objectName": "audit_seq",
+        "schemaName": "public",
+        "comment": "audit sequence"
       },
       {
         "objectType": "TABLE",
         "objectName": "users",
         "schemaName": "public",
         "comment": "users table"
+      },
+      {
+        "objectType": "TYPE",
+        "objectName": "user_status",
+        "schemaName": "public",
+        "comment": "user status"
       },
       {
         "objectType": "VIEW",
@@ -851,6 +883,20 @@
     "comments": [
       {
         "objectType": "COLUMN",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "columnName": "id",
+        "comment": "active user id"
+      },
+      {
+        "objectType": "COLUMN",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "active user email"
+      },
+      {
+        "objectType": "COLUMN",
         "objectName": "users",
         "schemaName": "public",
         "columnName": "email",
@@ -863,15 +909,33 @@
         "comment": "users email pattern"
       },
       {
+        "objectType": "MATERIALIZED VIEW",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "comment": "active user ids"
+      },
+      {
         "objectType": "SCHEMA",
         "objectName": "public",
         "comment": "public schema"
+      },
+      {
+        "objectType": "SEQUENCE",
+        "objectName": "audit_seq",
+        "schemaName": "public",
+        "comment": "audit sequence"
       },
       {
         "objectType": "TABLE",
         "objectName": "users",
         "schemaName": "public",
         "comment": "users table"
+      },
+      {
+        "objectType": "TYPE",
+        "objectName": "user_status",
+        "schemaName": "public",
+        "comment": "user status"
       },
       {
         "objectType": "VIEW",
@@ -1292,6 +1356,20 @@
     "comments": [
       {
         "objectType": "COLUMN",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "columnName": "id",
+        "comment": "active user id"
+      },
+      {
+        "objectType": "COLUMN",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "active user email"
+      },
+      {
+        "objectType": "COLUMN",
         "objectName": "users",
         "schemaName": "public",
         "columnName": "email",
@@ -1304,15 +1382,33 @@
         "comment": "users email pattern"
       },
       {
+        "objectType": "MATERIALIZED VIEW",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "comment": "active user ids"
+      },
+      {
         "objectType": "SCHEMA",
         "objectName": "public",
         "comment": "public schema"
+      },
+      {
+        "objectType": "SEQUENCE",
+        "objectName": "audit_seq",
+        "schemaName": "public",
+        "comment": "audit sequence"
       },
       {
         "objectType": "TABLE",
         "objectName": "users",
         "schemaName": "public",
         "comment": "users table"
+      },
+      {
+        "objectType": "TYPE",
+        "objectName": "user_status",
+        "schemaName": "public",
+        "comment": "user status"
       },
       {
         "objectType": "VIEW",
@@ -1733,6 +1829,20 @@
     "comments": [
       {
         "objectType": "COLUMN",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "columnName": "id",
+        "comment": "active user id"
+      },
+      {
+        "objectType": "COLUMN",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "active user email"
+      },
+      {
+        "objectType": "COLUMN",
         "objectName": "users",
         "schemaName": "public",
         "columnName": "email",
@@ -1745,15 +1855,33 @@
         "comment": "users email pattern"
       },
       {
+        "objectType": "MATERIALIZED VIEW",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "comment": "active user ids"
+      },
+      {
         "objectType": "SCHEMA",
         "objectName": "public",
         "comment": "public schema"
+      },
+      {
+        "objectType": "SEQUENCE",
+        "objectName": "audit_seq",
+        "schemaName": "public",
+        "comment": "audit sequence"
       },
       {
         "objectType": "TABLE",
         "objectName": "users",
         "schemaName": "public",
         "comment": "users table"
+      },
+      {
+        "objectType": "TYPE",
+        "objectName": "user_status",
+        "schemaName": "public",
+        "comment": "user status"
       },
       {
         "objectType": "VIEW",
@@ -2174,6 +2302,20 @@
     "comments": [
       {
         "objectType": "COLUMN",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "columnName": "id",
+        "comment": "active user id"
+      },
+      {
+        "objectType": "COLUMN",
+        "objectName": "active_users",
+        "schemaName": "public",
+        "columnName": "email",
+        "comment": "active user email"
+      },
+      {
+        "objectType": "COLUMN",
         "objectName": "users",
         "schemaName": "public",
         "columnName": "email",
@@ -2186,15 +2328,33 @@
         "comment": "users email pattern"
       },
       {
+        "objectType": "MATERIALIZED VIEW",
+        "objectName": "active_user_ids",
+        "schemaName": "public",
+        "comment": "active user ids"
+      },
+      {
         "objectType": "SCHEMA",
         "objectName": "public",
         "comment": "public schema"
+      },
+      {
+        "objectType": "SEQUENCE",
+        "objectName": "audit_seq",
+        "schemaName": "public",
+        "comment": "audit sequence"
       },
       {
         "objectType": "TABLE",
         "objectName": "users",
         "schemaName": "public",
         "comment": "users table"
+      },
+      {
+        "objectType": "TYPE",
+        "objectName": "user_status",
+        "schemaName": "public",
+        "comment": "user status"
       },
       {
         "objectType": "VIEW",

@@ -170,8 +170,12 @@ describe("SchemaParser private coverage", () => {
   test("parseCommentStmt handles column and schema qualified object names", function () {
     const parser = new SchemaParser() as any;
 
-    expect(parser.parseCommentStmt({})).toBeNull();
-    expect(parser.parseCommentStmt({ objtype: "OBJECT_UNKNOWN", comment: "x" })).toBeNull();
+    expect(function parseCommentRemoval() {
+      return parser.parseCommentStmt({});
+    }).toThrow("COMMENT removal");
+    expect(function parseUnknownCommentTarget() {
+      return parser.parseCommentStmt({ objtype: "OBJECT_UNKNOWN", comment: "x" });
+    }).toThrow("is not supported in desired schemas");
 
     expect(
       parser.parseCommentStmt({
@@ -229,8 +233,8 @@ describe("SchemaParser private coverage", () => {
       comment: "table comment",
     });
 
-    expect(
-      parser.parseCommentStmt({
+    expect(function parseInvalidSchemaTarget() {
+      return parser.parseCommentStmt({
         objtype: "OBJECT_SCHEMA",
         comment: "schema comment",
         object: {
@@ -238,10 +242,16 @@ describe("SchemaParser private coverage", () => {
             items: [{ String: { sval: "public" } }, { String: { sval: "ignored" } }],
           },
         },
-      })
-    ).toEqual({
+      });
+    }).toThrow("target identity");
+
+    expect(parser.parseCommentStmt({
+      objtype: "OBJECT_SCHEMA",
+      comment: "schema comment",
+      object: { String: { sval: "public" } },
+    })).toEqual({
       objectType: "SCHEMA",
-      objectName: "ignored",
+      objectName: "public",
       schemaName: undefined,
       comment: "schema comment",
     });
@@ -264,7 +274,7 @@ describe("SchemaParser private coverage", () => {
     });
   });
 
-  test("extractObjectParts handles list arrays and fallback values", function () {
+  test("extractObjectParts keeps only lossless string identities", function () {
     const parser = new SchemaParser() as any;
 
     expect(
@@ -273,11 +283,10 @@ describe("SchemaParser private coverage", () => {
           items: [{ String: { sval: "public" } }, { A_Const: { ival: { ival: 1 } } }],
         },
       })
-    ).toEqual(["public", "[object Object]"]);
+    ).toEqual(["public"]);
 
     expect(parser.extractObjectParts([{ String: { sval: "users" } }, { Integer: { ival: 2 } }])).toEqual([
       "users",
-      "[object Object]",
     ]);
 
     expect(parser.extractObjectParts({ String: { sval: "single" } })).toEqual(["single"]);
@@ -288,6 +297,6 @@ describe("SchemaParser private coverage", () => {
         },
       })
     ).toEqual(["public", "priority_data"]);
-    expect(parser.extractObjectParts(42)).toEqual(["42"]);
+    expect(parser.extractObjectParts(42)).toEqual([]);
   });
 });

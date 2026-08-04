@@ -340,6 +340,8 @@ describe("SchemaService private coverage", function () {
       comments: [
         { objectType: "TABLE", objectName: "users", schemaName: "public", comment: "ok" },
         { objectType: "TABLE", objectName: "audit", schemaName: "internal", comment: "skip" },
+        { objectType: "SCHEMA", objectName: "public", comment: "managed schema" },
+        { objectType: "SCHEMA", objectName: "internal", comment: "unmanaged schema" },
       ],
     });
 
@@ -359,7 +361,19 @@ describe("SchemaService private coverage", function () {
     expect(filtered.sequences).toHaveLength(1);
     expect(filtered.extensions).toHaveLength(1);
     expect(filtered.schemas).toHaveLength(1);
-    expect(filtered.comments).toHaveLength(1);
+    expect(filtered.comments).toEqual([
+      {
+        objectType: "TABLE",
+        objectName: "users",
+        schemaName: "public",
+        comment: "ok",
+      },
+      {
+        objectType: "SCHEMA",
+        objectName: "public",
+        comment: "managed schema",
+      },
+    ]);
 
     expect(privateService.countObjects(parsed)).toBe(14);
     expect(privateService.countObjects(filtered)).toBe(7);

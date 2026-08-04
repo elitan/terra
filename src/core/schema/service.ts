@@ -363,8 +363,9 @@ export class SchemaService {
     managedSchemas: string[],
     parsed: ParsedSchema
   ): ParsedSchema {
-    const isManaged = (schema: string | undefined) =>
-      managedSchemas.includes(schema || 'public');
+    function isManaged(schema: string | undefined): boolean {
+      return managedSchemas.includes(schema || 'public');
+    }
 
     return {
       tables: parsed.tables.filter(t => isManaged(t.schema)),
@@ -377,7 +378,12 @@ export class SchemaService {
       sequences: parsed.sequences.filter(s => isManaged(s.schema)),
       extensions: parsed.extensions,
       schemas: parsed.schemas.filter(s => managedSchemas.includes(s.name)),
-      comments: parsed.comments.filter(c => isManaged(c.schemaName)),
+      comments: parsed.comments.filter(function isManagedComment(comment) {
+        if (comment.objectType === "SCHEMA") {
+          return managedSchemas.includes(comment.objectName);
+        }
+        return isManaged(comment.schemaName);
+      }),
       sqlObjects: (parsed.sqlObjects || []).filter(function (object) {
         return object.schema === undefined || isManaged(object.schema);
       }),

@@ -2928,15 +2928,15 @@ export class DatabaseInspector {
 
   // Get all comments from the database
   async getCurrentComments(client: Client, schemas: string[] = ['public']): Promise<Comment[]> {
-    const comments: Comment[] = [];
-
     const result = await client.query(`
       SELECT
         CASE c.relkind
           WHEN 'r' THEN 'TABLE'
+          WHEN 'p' THEN 'TABLE'
           WHEN 'v' THEN 'VIEW'
-          WHEN 'm' THEN 'VIEW'
+          WHEN 'm' THEN 'MATERIALIZED VIEW'
           WHEN 'i' THEN 'INDEX'
+          WHEN 'S' THEN 'SEQUENCE'
         END as object_type,
         c.relname as object_name,
         n.nspname as schema_name,
@@ -2944,9 +2944,12 @@ export class DatabaseInspector {
         d.description as comment
       FROM pg_class c
       JOIN pg_namespace n ON c.relnamespace = n.oid
-      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = 0
+      JOIN pg_description d
+        ON d.objoid = c.oid
+        AND d.classoid = 'pg_class'::regclass
+        AND d.objsubid = 0
       WHERE n.nspname = ANY($1::text[])
-        AND c.relkind IN ('r', 'v', 'm', 'i')
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'i', 'S')
 
       UNION ALL
 
@@ -2958,13 +2961,16 @@ export class DatabaseInspector {
         d.description as comment
       FROM pg_type t
       JOIN pg_namespace n ON t.typnamespace = n.oid
-      JOIN pg_description d ON d.objoid = t.oid AND d.objsubid = 0
+      JOIN pg_description d
+        ON d.objoid = t.oid
+        AND d.classoid = 'pg_type'::regclass
+        AND d.objsubid = 0
       LEFT JOIN pg_class c ON c.oid = t.typrelid
       LEFT JOIN pg_depend dep ON dep.objid = t.oid AND dep.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND dep.objid IS NULL
         AND (
-          t.typtype = 'e'
+          t.typtype IN ('e', 'd', 'r', 'm')
           OR (t.typtype = 'c' AND c.relkind = 'c')
         )
 
@@ -2977,7 +2983,10 @@ export class DatabaseInspector {
         NULL as column_name,
         d.description as comment
       FROM pg_namespace n
-      JOIN pg_description d ON d.objoid = n.oid
+      JOIN pg_description d
+        ON d.objoid = n.oid
+        AND d.classoid = 'pg_namespace'::regclass
+        AND d.objsubid = 0
       WHERE n.nspname = ANY($1::text[])
 
       UNION ALL
@@ -2991,9 +3000,12 @@ export class DatabaseInspector {
       FROM pg_class c
       JOIN pg_namespace n ON c.relnamespace = n.oid
       JOIN pg_attribute a ON a.attrelid = c.oid
-      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+      JOIN pg_description d
+        ON d.objoid = c.oid
+        AND d.classoid = 'pg_class'::regclass
+        AND d.objsubid = a.attnum
       WHERE n.nspname = ANY($1::text[])
-        AND c.relkind = 'r'
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'c')
         AND a.attnum > 0
         AND NOT a.attisdropped
 

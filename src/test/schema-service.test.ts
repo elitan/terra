@@ -426,33 +426,36 @@ describe("SchemaService - MigrationPlanner Removal", () => {
 
   describe("Unmanaged schema filtering", () => {
     test("should ignore tables from unmanaged schemas", async () => {
-      await client.query("CREATE SCHEMA IF NOT EXISTS other_schema");
-
-      const schema = `
-        CREATE TABLE public.filter_test_users (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(100)
-        );
-        CREATE TABLE other_schema.filter_test_data (
-          id SERIAL PRIMARY KEY,
-          value TEXT
-        );
-      `;
-
-      await schemaService.apply(schema, ['public'], true);
-
-      const result = await client.query(`
-        SELECT table_schema, table_name
-        FROM information_schema.tables
-        WHERE table_name IN ('filter_test_users', 'filter_test_data')
-        AND table_schema IN ('public', 'other_schema')
-      `);
-
-      expect(result.rows).toHaveLength(1);
-      expect(result.rows[0].table_name).toBe('filter_test_users');
-      expect(result.rows[0].table_schema).toBe('public');
-
       await client.query("DROP SCHEMA IF EXISTS other_schema CASCADE");
+      await client.query("CREATE SCHEMA other_schema");
+
+      try {
+        const schema = `
+          CREATE TABLE public.filter_test_users (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100)
+          );
+          CREATE TABLE other_schema.filter_test_data (
+            id SERIAL PRIMARY KEY,
+            value TEXT
+          );
+        `;
+
+        await schemaService.apply(schema, ['public'], true);
+
+        const result = await client.query(`
+          SELECT table_schema, table_name
+          FROM information_schema.tables
+          WHERE table_name IN ('filter_test_users', 'filter_test_data')
+          AND table_schema IN ('public', 'other_schema')
+        `);
+
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0].table_name).toBe('filter_test_users');
+        expect(result.rows[0].table_schema).toBe('public');
+      } finally {
+        await client.query("DROP SCHEMA IF EXISTS other_schema CASCADE");
+      }
     });
 
     test("should preserve FKs referencing external schemas", async () => {

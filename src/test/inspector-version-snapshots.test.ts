@@ -186,7 +186,12 @@ async function prepareSchema(client: Client): Promise<void> {
     COMMENT ON TABLE public.users IS 'users table';
     COMMENT ON COLUMN public.users.email IS 'email column';
     COMMENT ON VIEW public.active_users IS 'active users';
+    COMMENT ON COLUMN public.active_users.email IS 'active user email';
+    COMMENT ON MATERIALIZED VIEW public.active_user_ids IS 'active user ids';
+    COMMENT ON COLUMN public.active_user_ids.id IS 'active user id';
     COMMENT ON INDEX public.users_email_pattern_idx IS 'users email pattern';
+    COMMENT ON SEQUENCE public.audit_seq IS 'audit sequence';
+    COMMENT ON TYPE public.user_status IS 'user status';
   `);
 }
 

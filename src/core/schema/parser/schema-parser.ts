@@ -104,6 +104,20 @@ const ROW_SECURITY_SUBTYPES = new Set([
   "AT_NoForceRowSecurity",
 ]);
 
+const COMMENT_OBJECT_TYPE_MAP: Readonly<
+  Partial<Record<string, Comment['objectType']>>
+> = {
+  OBJECT_TABLE: 'TABLE',
+  OBJECT_COLUMN: 'COLUMN',
+  OBJECT_VIEW: 'VIEW',
+  OBJECT_MATVIEW: 'MATERIALIZED VIEW',
+  OBJECT_INDEX: 'INDEX',
+  OBJECT_SEQUENCE: 'SEQUENCE',
+  OBJECT_SCHEMA: 'SCHEMA',
+  OBJECT_TYPE: 'TYPE',
+  OBJECT_DOMAIN: 'TYPE',
+};
+
 function isRowSecuritySubtype(subtype: unknown): boolean {
   return typeof subtype === "string" && ROW_SECURITY_SUBTYPES.has(subtype);
 }
@@ -721,10 +735,7 @@ export class SchemaParser {
             schemas.push(schema);
           }
         } else if (stmt.CommentStmt) {
-          const comment = this.parseCommentStmt(stmt.CommentStmt);
-          if (comment) {
-            comments.push(comment);
-          }
+          comments.push(this.parseCommentStmt(stmt.CommentStmt, filePath));
         } else if (stmt.CreatePolicyStmt) {
           const sqlObject = this.parsePolicySqlObject(stmt, filePath);
           if (sqlObject) {
@@ -877,6 +888,7 @@ export class SchemaParser {
     }
 
     this.rejectDuplicateDeclarativeSqlObjects(sqlObjects, filePath);
+    this.rejectDuplicateComments(comments, filePath);
     rejectDuplicateTriggerDeclarations(triggers, sqlObjects, filePath);
     mergePendingTriggerModes(
       triggers,
@@ -1925,24 +1937,21 @@ export class SchemaParser {
   /**
    * Parse COMMENT ON statement
    */
-  private parseCommentStmt(stmt: any): Comment | null {
-    if (!stmt.objtype || !stmt.comment) {
-      return null;
+  private parseCommentStmt(stmt: any, filePath?: string): Comment {
+    if (typeof stmt.comment !== "string" || stmt.comment.length === 0) {
+      throw new ParserError(
+        "PostgreSQL COMMENT removal with IS NULL or an empty string is not supported in desired schemas; remove the COMMENT statement to declare that the object should have no comment",
+        filePath
+      );
     }
 
-    const objectTypeMap: Record<string, Comment['objectType']> = {
-      'OBJECT_TABLE': 'TABLE',
-      'OBJECT_COLUMN': 'COLUMN',
-      'OBJECT_VIEW': 'VIEW',
-      'OBJECT_INDEX': 'INDEX',
-      'OBJECT_SCHEMA': 'SCHEMA',
-      'OBJECT_TYPE': 'TYPE',
-      'OBJECT_FUNCTION': 'FUNCTION',
-    };
-
-    const objectType = objectTypeMap[stmt.objtype];
+    const objectType = COMMENT_OBJECT_TYPE_MAP[stmt.objtype];
     if (!objectType) {
-      return null;
+      const target = this.commentTargetName(stmt.objtype);
+      throw new ParserError(
+        `PostgreSQL COMMENT ON ${target} is not supported in desired schemas because TerraDB cannot identify and inspect that comment losslessly; supported targets are SCHEMA, TABLE, COLUMN, VIEW, MATERIALIZED VIEW, INDEX, SEQUENCE, TYPE, and DOMAIN`,
+        filePath
+      );
     }
 
     // For COLUMN comments, we need to extract table name, column name, and optionally schema
@@ -1967,6 +1976,8 @@ export class SchemaParser {
           comment: stmt.comment
         };
       }
+
+      throw this.invalidCommentTargetError(objectType, filePath);
     }
 
     // For other object types, extract name normally
@@ -1979,9 +1990,13 @@ export class SchemaParser {
         // Format: schema.object
         schemaName = parts[0];
         objectName = parts[1];
-      } else {
-        objectName = parts[parts.length - 1] || '';
+      } else if (parts.length === 1 && parts[0]) {
+        objectName = parts[0];
       }
+    }
+
+    if (!objectName) {
+      throw this.invalidCommentTargetError(objectType, filePath);
     }
 
     return {
@@ -1990,6 +2005,42 @@ export class SchemaParser {
       schemaName,
       comment: stmt.comment
     };
+  }
+
+  private commentTargetName(objectType: unknown): string {
+    if (typeof objectType !== "string") {
+      return "UNKNOWN OBJECT";
+    }
+    return objectType.replace(/^OBJECT_/, "").replace(/_/g, " ");
+  }
+
+  private invalidCommentTargetError(
+    objectType: Comment['objectType'],
+    filePath?: string
+  ): ParserError {
+    return new ParserError(
+      `PostgreSQL COMMENT ON ${objectType} has a target identity that TerraDB cannot represent losslessly`,
+      filePath
+    );
+  }
+
+  private rejectDuplicateComments(
+    comments: Comment[],
+    filePath?: string
+  ): void {
+    const identities = new Set<string>();
+    for (const comment of comments) {
+      const identity = comment.objectType === "COLUMN"
+        ? `${comment.objectType}:${comment.schemaName || "public"}.${comment.objectName}.${comment.columnName}`
+        : `${comment.objectType}:${comment.schemaName || "public"}.${comment.objectName}`;
+      if (identities.has(identity)) {
+        throw new ParserError(
+          `PostgreSQL comment ${identity} is declared more than once; declare each object's final comment exactly once`,
+          filePath
+        );
+      }
+      identities.add(identity);
+    }
   }
 
   /**
@@ -2009,20 +2060,22 @@ export class SchemaParser {
     }
 
     if (obj.List?.items) {
-      return obj.List.items.map((item: any) => {
-        if (item.String?.sval) return item.String.sval;
-        return String(item);
+      return obj.List.items.map(function getListItem(item: any) {
+        return item.String?.sval;
+      }).filter(function isString(value: unknown): value is string {
+        return typeof value === "string";
       });
     }
 
     if (Array.isArray(obj)) {
-      return obj.map(item => {
-        if (item.String?.sval) return item.String.sval;
-        return String(item);
+      return obj.map(function getArrayItem(item: any) {
+        return item.String?.sval;
+      }).filter(function isString(value: unknown): value is string {
+        return typeof value === "string";
       });
     }
 
-    return [String(obj)];
+    return [];
   }
 
 }

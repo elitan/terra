@@ -406,7 +406,15 @@ export interface SchemaDefinition {
   ifNotExists?: boolean;
 }
 
-export type CommentObjectType = 'SCHEMA' | 'TABLE' | 'COLUMN' | 'VIEW' | 'FUNCTION' | 'INDEX' | 'TYPE';
+export type CommentObjectType =
+  | 'SCHEMA'
+  | 'TABLE'
+  | 'COLUMN'
+  | 'VIEW'
+  | 'MATERIALIZED VIEW'
+  | 'INDEX'
+  | 'SEQUENCE'
+  | 'TYPE';
 
 export interface Comment {
   objectType: CommentObjectType;

@@ -607,6 +607,12 @@ describe("DatabaseInspector coverage", () => {
       }
 
       if (sql.includes("FROM pg_class c") && sql.includes("UNION ALL")) {
+        expect(sql).toContain("d.classoid = 'pg_class'::regclass");
+        expect(sql).toContain("d.classoid = 'pg_type'::regclass");
+        expect(sql).toContain("d.classoid = 'pg_namespace'::regclass");
+        expect(sql).toContain("c.relkind IN ('r', 'p', 'v', 'm', 'i', 'S')");
+        expect(sql).toContain("c.relkind IN ('r', 'p', 'v', 'm', 'c')");
+        expect(sql).toContain("t.typtype IN ('e', 'd', 'r', 'm')");
         return {
           rows: [
             {
@@ -615,6 +621,20 @@ describe("DatabaseInspector coverage", () => {
               schema_name: null,
               column_name: null,
               comment: "table comment",
+            },
+            {
+              object_type: "MATERIALIZED VIEW",
+              object_name: "event_rollup",
+              schema_name: "public",
+              column_name: null,
+              comment: "rollup comment",
+            },
+            {
+              object_type: "SEQUENCE",
+              object_name: "event_ids",
+              schema_name: "public",
+              column_name: null,
+              comment: "sequence comment",
             },
           ],
         };
@@ -644,6 +664,20 @@ describe("DatabaseInspector coverage", () => {
         schemaName: undefined,
         columnName: undefined,
         comment: "table comment",
+      },
+      {
+        objectType: "MATERIALIZED VIEW",
+        objectName: "event_rollup",
+        schemaName: "public",
+        columnName: undefined,
+        comment: "rollup comment",
+      },
+      {
+        objectType: "SEQUENCE",
+        objectName: "event_ids",
+        schemaName: "public",
+        columnName: undefined,
+        comment: "sequence comment",
       },
     ]);
   });

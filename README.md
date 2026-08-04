@@ -111,6 +111,7 @@ export DATABASE_URL=":memory:"
 | Triggers | Yes | Yes |
 | Materialized Views | Yes | No |
 | Schemas | Yes | No |
+| Object Comments (`COMMENT ON`) | Yes | No |
 | Extensions | Yes | No |
 | Row-Level Security & Policies | Yes | No |
 
@@ -155,6 +156,14 @@ statements combine a synthesized table definition with initial query rows,
 which cannot be represented by TerraDB's declarative schema model; define the
 columns explicitly and load data separately.
 PostgreSQL desired schemas also describe persistent database state. Session-local temporary tables, views, and sequences are rejected before migration planning instead of being converted into persistent objects. Query-derived tables created with `CREATE TABLE AS` or `SELECT INTO` are also rejected because their structure and optional initial data cannot be reconciled declaratively; define their table structure explicitly and load data separately. `CREATE TABLE LIKE` and typed `CREATE TABLE OF` declarations must likewise be expanded to explicit columns and constraints so copied options or persistent type dependencies are never discarded. Other top-level data, query, session, transaction, maintenance, and untracked DDL commands fail explicitly instead of being silently ignored; SQL inside managed routine bodies remains supported.
+PostgreSQL object comments are declarative for schemas, ordinary and partitioned
+tables, table/view/materialized-view/composite columns, ordinary and
+materialized views, indexes, sequences, and user-defined types including enums,
+composites, domains, ranges, and multiranges. Remove a `COMMENT ON` statement to
+remove the stored comment. Explicit `IS NULL` or empty-string removals,
+duplicate declarations, and targets whose identity is not yet modeled—such as
+routines, constraints, policies, and triggers—fail before migration planning
+instead of being silently ignored.
 PostgreSQL sequences preserve type, bounds, start, increment, cache, cycling,
 column ownership, and logged/unlogged persistence. Existing sequences evolve
 with native `ALTER SEQUENCE` operations so their OIDs, dependents, and live

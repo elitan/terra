@@ -177,6 +177,24 @@ describe("Handler module coverage", () => {
       expect(statements[1]).toContain("\"public\".\"events\".\"metadata\"");
       expect(statements[1]).toContain("column''s note");
     });
+
+    test("creates materialized view sequence and type comment SQL", () => {
+      const handler = new CommentHandler();
+      const statements = handler.generateStatements(
+        [
+          makeComment({ objectType: "MATERIALIZED VIEW", objectName: "event_rollup" }),
+          makeComment({ objectType: "SEQUENCE", objectName: "event_ids" }),
+          makeComment({ objectType: "TYPE", objectName: "event_status" }),
+        ],
+        []
+      );
+
+      expect(statements).toEqual([
+        `COMMENT ON MATERIALIZED VIEW "public"."event_rollup" IS 'table comment';`,
+        `COMMENT ON SEQUENCE "public"."event_ids" IS 'table comment';`,
+        `COMMENT ON TYPE "public"."event_status" IS 'table comment';`,
+      ]);
+    });
   });
 
   describe("sequence handler", () => {
