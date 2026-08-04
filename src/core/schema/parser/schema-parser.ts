@@ -725,10 +725,7 @@ export class SchemaParser {
             sequences.push(sequence);
           }
         } else if (stmt.CreateExtensionStmt) {
-          const extension = parseCreateExtension(stmt.CreateExtensionStmt);
-          if (extension) {
-            extensions.push(extension);
-          }
+          extensions.push(parseCreateExtension(stmt.CreateExtensionStmt, filePath));
         } else if (stmt.CreateSchemaStmt) {
           schemas.push(parseCreateSchema(stmt.CreateSchemaStmt, filePath));
         } else if (stmt.CommentStmt) {
@@ -886,6 +883,7 @@ export class SchemaParser {
 
     this.rejectDuplicateDeclarativeSqlObjects(sqlObjects, filePath);
     this.rejectDuplicateSchemas(schemas, filePath);
+    this.rejectDuplicateExtensions(extensions, filePath);
     this.rejectDuplicateComments(comments, filePath);
     rejectDuplicateTriggerDeclarations(triggers, sqlObjects, filePath);
     mergePendingTriggerModes(
@@ -2054,6 +2052,22 @@ export class SchemaParser {
         );
       }
       names.add(schema.name);
+    }
+  }
+
+  private rejectDuplicateExtensions(
+    extensions: Extension[],
+    filePath?: string
+  ): void {
+    const names = new Set<string>();
+    for (const extension of extensions) {
+      if (names.has(extension.name)) {
+        throw new ParserError(
+          `PostgreSQL extension ${extension.name} is declared more than once; declare each extension exactly once`,
+          filePath
+        );
+      }
+      names.add(extension.name);
     }
   }
 

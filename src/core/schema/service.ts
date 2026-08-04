@@ -7,7 +7,7 @@ import type {
   AdvisoryLockOptions,
   ParsedSchema,
 } from "../../providers/types";
-import type { Trigger, View } from "../../types/schema";
+import type { Extension, Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import { isDestructiveStatement } from "../../utils/statement-classifier";
 import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
@@ -412,6 +412,46 @@ export class SchemaService {
     });
   }
 
+  private filterCurrentExtensions(
+    currentExtensions: Extension[],
+    desiredExtensions: Extension[],
+    managedSchemas: string[]
+  ): Extension[] {
+    const byName = new Map(currentExtensions.map(function mapExtension(extension) {
+      return [extension.name, extension] as const;
+    }));
+    const desiredNames = new Set(desiredExtensions.map(function mapName(extension) {
+      return extension.name;
+    }));
+    const managedSchemaNames = new Set(managedSchemas);
+    const includedNames = new Set<string>();
+
+    function includeWithDependencies(name: string): void {
+      if (includedNames.has(name)) {
+        return;
+      }
+      const extension = byName.get(name);
+      if (!extension) {
+        return;
+      }
+      includedNames.add(name);
+      for (const dependency of extension.dependencies || []) {
+        includeWithDependencies(dependency);
+      }
+    }
+
+    for (const extension of currentExtensions) {
+      const schema = extension.schema || "public";
+      if (managedSchemaNames.has(schema) || desiredNames.has(extension.name)) {
+        includeWithDependencies(extension.name);
+      }
+    }
+
+    return currentExtensions.filter(function isIncluded(extension) {
+      return includedNames.has(extension.name);
+    });
+  }
+
   private async buildCombinedPlan(
     client: DatabaseClient,
     filtered: ParsedSchema,
@@ -445,7 +485,12 @@ export class SchemaService {
     const currentProcedures = await this.provider.getCurrentProcedures(client, schemas);
     const currentTriggers = await this.provider.getCurrentTriggers(client, schemas);
     const currentSequences = await this.provider.getCurrentSequences(client, schemas);
-    const currentExtensions = await this.provider.getCurrentExtensions(client, schemas);
+    const inspectedExtensions = await this.provider.getCurrentExtensions(client, schemas);
+    const currentExtensions = this.filterCurrentExtensions(
+      inspectedExtensions,
+      desiredExtensions,
+      schemas
+    );
     const currentSchemas = await this.provider.getCurrentSchemas(client, schemas);
     const currentComments = await this.provider.getCurrentComments(client, schemas);
     const currentSqlObjects = this.filterCurrentSqlObjects(

@@ -418,6 +418,36 @@ describe("SchemaService private coverage", function () {
     })).toEqual([scopedPolicy.key, desiredRole.key]);
   });
 
+  test("filterCurrentExtensions keeps managed desired and required extensions", function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as {
+      filterCurrentExtensions: (
+        current: ParsedSchema["extensions"],
+        desired: ParsedSchema["extensions"],
+        schemas: string[]
+      ) => ParsedSchema["extensions"];
+    };
+    const current = [
+      { name: "cube", schema: "external", dependencies: ["base"] },
+      { name: "base", schema: "external" },
+      { name: "earthdistance", schema: "managed", dependencies: ["cube"] },
+      { name: "hstore", schema: "external" },
+      { name: "pgcrypto", schema: "external" },
+    ];
+
+    expect(privateService.filterCurrentExtensions(
+      current,
+      [{ name: "hstore", schema: "managed" }],
+      ["managed"]
+    )).toEqual([
+      { name: "cube", schema: "external", dependencies: ["base"] },
+      { name: "base", schema: "external" },
+      { name: "earthdistance", schema: "managed", dependencies: ["cube"] },
+      { name: "hstore", schema: "external" },
+    ]);
+  });
+
   test("orders planned trigger removal before its dependent function", async function () {
     const mock = createMockProvider({
       features: new Set(["stored_functions", "triggers"]),

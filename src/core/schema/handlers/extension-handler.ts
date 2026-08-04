@@ -1,6 +1,8 @@
 import type { Extension } from "../../../types/schema";
+import { ValidationError } from "../../../types/errors";
 import { Logger } from "../../../utils/logger";
 import { SQLBuilder } from "../../../utils/sql-builder";
+import { quotePostgresStringLiteral } from "../../../utils/sql";
 
 export class ExtensionHandler {
   generateStatements(desiredExtensions: Extension[], currentExtensions: Extension[]): {
@@ -9,15 +11,27 @@ export class ExtensionHandler {
   } {
     const createStatements: string[] = [];
     const dropStatements: string[] = [];
-    const currentExtensionMap = new Map(currentExtensions.map(e => [e.name, e]));
-    const desiredExtensionNames = new Set(desiredExtensions.map(e => e.name));
+    const currentExtensionMap = new Map(currentExtensions.map(function mapExtension(extension) {
+      return [extension.name, extension] as const;
+    }));
+    const desiredExtensionNames = new Set(desiredExtensions.map(function mapName(extension) {
+      return extension.name;
+    }));
+    const retainedExtensionNames = collectRetainedExtensionNames(
+      desiredExtensionNames,
+      currentExtensionMap
+    );
+    const removedExtensions = currentExtensions.filter(function isRemoved(extension) {
+      return !retainedExtensionNames.has(extension.name);
+    });
 
-    for (const currentExt of currentExtensions) {
-      if (!desiredExtensionNames.has(currentExt.name)) {
-        const dropBuilder = new SQLBuilder().p("DROP EXTENSION IF EXISTS").ident(currentExt.name).p("CASCADE");
-        dropStatements.push(dropBuilder.build() + ';');
-        Logger.info(`Dropping extension '${currentExt.name}' (CASCADE will drop dependent objects)`);
-      }
+    for (const currentExt of orderExtensionDrops(removedExtensions)) {
+      const dropBuilder = new SQLBuilder()
+        .p("DROP EXTENSION")
+        .ident(currentExt.name)
+        .p("RESTRICT");
+      dropStatements.push(dropBuilder.build() + ';');
+      Logger.info(`Dropping extension '${currentExt.name}' with dependency protection`);
     }
 
     for (const desiredExt of desiredExtensions) {
@@ -55,14 +69,14 @@ export class ExtensionHandler {
   }
 
   private generateCreateExtensionSQL(extension: Extension): string {
-    const builder = new SQLBuilder().p("CREATE EXTENSION IF NOT EXISTS").ident(extension.name);
+    const builder = new SQLBuilder().p("CREATE EXTENSION").ident(extension.name);
 
     if (extension.schema) {
       builder.p("SCHEMA").ident(extension.schema);
     }
 
     if (extension.version) {
-      builder.p(`VERSION '${extension.version}'`);
+      builder.p("VERSION").p(quotePostgresStringLiteral(extension.version));
     }
 
     if (extension.cascade) {
@@ -73,7 +87,11 @@ export class ExtensionHandler {
   }
 
   private generateUpdateExtensionVersionSQL(name: string, version: string): string {
-    const builder = new SQLBuilder().p("ALTER EXTENSION").ident(name).p(`UPDATE TO '${version}'`);
+    const builder = new SQLBuilder()
+      .p("ALTER EXTENSION")
+      .ident(name)
+      .p("UPDATE TO")
+      .p(quotePostgresStringLiteral(version));
     return builder.build() + ';';
   }
 
@@ -81,4 +99,97 @@ export class ExtensionHandler {
     const builder = new SQLBuilder().p("ALTER EXTENSION").ident(name).p("SET SCHEMA").ident(schema);
     return builder.build() + ';';
   }
+}
+
+function collectRetainedExtensionNames(
+  desiredNames: Set<string>,
+  currentExtensions: Map<string, Extension>
+): Set<string> {
+  const retained = new Set(desiredNames);
+
+  function includeDependencies(name: string): void {
+    const extension = currentExtensions.get(name);
+    if (!extension) {
+      return;
+    }
+    for (const dependency of extension.dependencies || []) {
+      if (retained.has(dependency)) {
+        continue;
+      }
+      retained.add(dependency);
+      includeDependencies(dependency);
+    }
+  }
+
+  for (const desiredName of desiredNames) {
+    includeDependencies(desiredName);
+  }
+  return retained;
+}
+
+function orderExtensionDrops(extensions: Extension[]): Extension[] {
+  const byName = new Map(extensions.map(function mapExtension(extension) {
+    return [extension.name, extension] as const;
+  }));
+  const dependentCounts = new Map<string, number>(
+    extensions.map(function initializeCount(extension) {
+      return [extension.name, 0] as const;
+    })
+  );
+
+  for (const extension of extensions) {
+    for (const dependency of extension.dependencies || []) {
+      if (byName.has(dependency)) {
+        dependentCounts.set(
+          dependency,
+          (dependentCounts.get(dependency) || 0) + 1
+        );
+      }
+    }
+  }
+
+  const ready = extensions
+    .filter(function hasNoDependent(extension) {
+      return dependentCounts.get(extension.name) === 0;
+    })
+    .sort(compareExtensionNames);
+  const ordered: Extension[] = [];
+
+  while (ready.length > 0) {
+    const extension = ready.shift();
+    if (!extension) {
+      break;
+    }
+    ordered.push(extension);
+    for (const dependency of extension.dependencies || []) {
+      const dependencyExtension = byName.get(dependency);
+      if (!dependencyExtension) {
+        continue;
+      }
+      const nextCount = (dependentCounts.get(dependency) || 0) - 1;
+      dependentCounts.set(dependency, nextCount);
+      if (nextCount === 0) {
+        ready.push(dependencyExtension);
+        ready.sort(compareExtensionNames);
+      }
+    }
+  }
+
+  if (ordered.length !== extensions.length) {
+    const names = extensions.map(function mapName(extension) {
+      return extension.name;
+    }).sort();
+    throw new ValidationError(
+      `PostgreSQL extension dependency cycle cannot be ordered safely: ${names.join(", ")}`,
+      "extension",
+      "dependencies",
+      names
+    );
+  }
+
+  return ordered;
+}
+
+function compareExtensionNames(left: Extension, right: Extension): number {
+  return left.name.localeCompare(right.name);
 }

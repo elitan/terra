@@ -292,6 +292,7 @@ export interface Extension {
   schema?: string; // Schema where extension is installed, defaults to 'public'
   version?: string; // Extension version
   cascade?: boolean; // If true, install dependencies
+  dependencies?: string[]; // Installed extensions required by this extension
 }
 
 export type SqlObjectKind =

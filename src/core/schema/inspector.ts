@@ -2884,26 +2884,43 @@ export class DatabaseInspector {
     return args;
   }
 
-  // Get all extensions from the database
-  // Only returns extensions that were explicitly installed by users, not system extensions
-  async getCurrentExtensions(client: Client, schemas: string[] = ['public']): Promise<Extension[]> {
+  // Get the database-wide extension graph, excluding the built-in language extension.
+  async getCurrentExtensions(client: Client, _schemas: string[] = ['public']): Promise<Extension[]> {
     const result = await client.query(`
       SELECT
         e.extname as extension_name,
         n.nspname as schema_name,
-        e.extversion as version
+        e.extversion as version,
+        dependency.names as dependencies
       FROM pg_extension e
       JOIN pg_namespace n ON e.extnamespace = n.oid
-      WHERE n.nspname = ANY($1::text[])
-        AND e.extname != 'plpgsql'  -- Exclude built-in extensions
+      LEFT JOIN LATERAL (
+        SELECT json_agg(required.extname ORDER BY required.extname) as names
+        FROM pg_depend d
+        JOIN pg_extension required
+          ON d.refclassid = 'pg_extension'::regclass
+          AND d.refobjid = required.oid
+        WHERE d.classid = 'pg_extension'::regclass
+          AND d.objid = e.oid
+          AND d.objsubid = 0
+          AND d.refobjsubid = 0
+          AND d.deptype = 'n'
+          AND required.extname != 'plpgsql'
+      ) dependency ON true
+      WHERE e.extname != 'plpgsql'  -- Exclude the built-in language extension
       ORDER BY n.nspname, e.extname
-    `, [schemas]);
+    `);
 
-    return result.rows.map((row: any) => ({
-      name: row.extension_name,
-      schema: row.schema_name,
-      version: row.version || undefined,
-    }));
+    return result.rows.map(function mapExtension(row: any) {
+      return {
+        name: row.extension_name,
+        schema: row.schema_name,
+        version: row.version || undefined,
+        dependencies: row.dependencies?.length > 0
+          ? row.dependencies
+          : undefined,
+      };
+    });
   }
 
   // Get all user-created schemas from the database

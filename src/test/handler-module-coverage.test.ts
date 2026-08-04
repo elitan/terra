@@ -77,17 +77,12 @@ describe("Handler module coverage", () => {
         [makeExtension({ name: "old_ext" })]
       );
 
-      expect(result.drop).toHaveLength(1);
-      expect(result.drop[0]).toContain("DROP EXTENSION IF EXISTS");
-      expect(result.drop[0]).toContain("\"old_ext\"");
-      expect(result.drop[0]).toContain("CASCADE");
-
-      expect(result.create).toHaveLength(1);
-      expect(result.create[0]).toContain("CREATE EXTENSION IF NOT EXISTS");
-      expect(result.create[0]).toContain("\"vector\"");
-      expect(result.create[0]).toContain("SCHEMA");
-      expect(result.create[0]).toContain("VERSION '0.8.0'");
-      expect(result.create[0]).toContain("CASCADE");
+      expect(result).toEqual({
+        create: [
+          'CREATE EXTENSION "vector" SCHEMA "public" VERSION \'0.8.0\' CASCADE;',
+        ],
+        drop: ['DROP EXTENSION "old_ext" RESTRICT;'],
+      });
     });
 
     test("skips existing extension and handles version drift path", () => {
@@ -107,6 +102,37 @@ describe("Handler module coverage", () => {
         create: [`ALTER EXTENSION "pgcrypto" UPDATE TO '1.4';`],
         drop: [],
       });
+
+      const quotedVersion = handler.generateStatements(
+        [{ name: "pgcrypto", version: "1.4'; DROP TABLE accounts; --" }],
+        [{ name: "pgcrypto", version: "1.3" }]
+      );
+      expect(quotedVersion.create).toEqual([
+        `ALTER EXTENSION "pgcrypto" UPDATE TO '1.4''; DROP TABLE accounts; --';`,
+      ]);
+    });
+
+    test("retains requirements and orders protected extension drops", function () {
+      const handler = new ExtensionHandler();
+      const current = [
+        makeExtension({ name: "cube" }),
+        makeExtension({ name: "earthdistance", dependencies: ["cube"] }),
+      ];
+
+      expect(handler.generateStatements(
+        [makeExtension({ name: "earthdistance" })],
+        current
+      )).toEqual({ create: [], drop: [] });
+      expect(handler.generateStatements([], current).drop).toEqual([
+        'DROP EXTENSION "earthdistance" RESTRICT;',
+        'DROP EXTENSION "cube" RESTRICT;',
+      ]);
+      expect(function orderCycle() {
+        return handler.generateStatements([], [
+          makeExtension({ name: "first", dependencies: ["second"] }),
+          makeExtension({ name: "second", dependencies: ["first"] }),
+        ]);
+      }).toThrow("dependency cycle");
     });
   });
 

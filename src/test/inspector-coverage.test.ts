@@ -8,6 +8,48 @@ function createClient(handler: (sql: string, params?: unknown[]) => { rows: unkn
 }
 
 describe("DatabaseInspector coverage", () => {
+  test("inspects the database-wide extension dependency graph", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function handleExtensionQuery(sql, params) {
+      expect(sql).toContain("d.classid = 'pg_extension'::regclass");
+      expect(sql).toContain("d.refclassid = 'pg_extension'::regclass");
+      expect(sql).toContain("d.deptype = 'n'");
+      expect(sql).not.toContain("n.nspname = ANY");
+      expect(params).toBeUndefined();
+      return {
+        rows: [
+          {
+            extension_name: "cube",
+            schema_name: "external_extensions",
+            version: "1.5",
+            dependencies: null,
+          },
+          {
+            extension_name: "earthdistance",
+            schema_name: "managed_extensions",
+            version: "1.2",
+            dependencies: ["cube"],
+          },
+        ],
+      };
+    });
+
+    expect(await inspector.getCurrentExtensions(client, ["managed_extensions"])).toEqual([
+      {
+        name: "cube",
+        schema: "external_extensions",
+        version: "1.5",
+        dependencies: undefined,
+      },
+      {
+        name: "earthdistance",
+        schema: "managed_extensions",
+        version: "1.2",
+        dependencies: ["cube"],
+      },
+    ]);
+  });
+
   test("rejects inconsistent index-key catalog metadata", function () {
     const inspector = new DatabaseInspector() as any;
     const baseRow = {

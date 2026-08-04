@@ -118,6 +118,14 @@ export DATABASE_URL=":memory:"
 PostgreSQL 14 through 18 are supported. Stored generated columns work across
 that range; virtual generated columns are supported on PostgreSQL 18 and fail
 before mutation on older servers.
+PostgreSQL extensions are matched by their database-wide unqualified names,
+including when their member objects are installed outside a managed schema.
+`CASCADE` installation dependencies are inspected recursively so a required
+extension is retained while its dependent remains desired. Removals run in
+dependent-first order with `RESTRICT`; unmanaged dependent objects therefore
+stop and roll back an apply instead of being deleted. `IF NOT EXISTS` is
+normalized to declarative existence, while duplicate extension declarations
+or options fail before mutation.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

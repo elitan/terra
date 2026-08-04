@@ -169,7 +169,7 @@ describe("Parser module coverage", () => {
         options: [
           { DefElem: { defname: "schema", arg: { String: { sval: "public" } } } },
           { DefElem: { defname: "new_version", arg: { String: { sval: "0.8.0" } } } },
-          { DefElem: { defname: "cascade" } },
+          { DefElem: { defname: "cascade", arg: { Boolean: { boolval: true } } } },
         ],
       });
 
@@ -179,20 +179,58 @@ describe("Parser module coverage", () => {
         version: "0.8.0",
         cascade: true,
       });
+      expect(parseCreateExtension({ extname: "hstore", options: [] })).toEqual({
+        name: "hstore",
+        schema: undefined,
+        version: undefined,
+        cascade: false,
+      });
     });
 
-    test("returns null for missing extension name", () => {
-      expect(parseCreateExtension({ options: [] })).toBeNull();
+    test("rejects a missing extension name", () => {
+      expect(function parseMissingExtension() {
+        return parseCreateExtension({ options: [] });
+      }).toThrow("has no concrete extension name");
     });
 
-    test("returns null when statement access throws", () => {
+    test("rejects extension options that are not losslessly representable", () => {
+      const invalidStatements = [
+        { extname: "hstore", options: [{}] },
+        {
+          extname: "hstore",
+          options: [
+            { DefElem: { defname: "cascade", arg: { Boolean: { boolval: false } } } },
+          ],
+        },
+        {
+          extname: "hstore",
+          options: [{ DefElem: { defname: "unsupported_option" } }],
+        },
+        {
+          extname: "hstore",
+          options: [
+            { DefElem: { defname: "schema", arg: { String: { sval: "" } } } },
+          ],
+        },
+      ];
+
+      for (const statement of invalidStatements) {
+        expect(function parseInvalidExtensionOption() {
+          return parseCreateExtension(statement);
+        }).toThrow("cannot be represented losslessly");
+      }
+    });
+
+    test("does not hide extension parser failures", () => {
       const stmt: any = {};
       Object.defineProperty(stmt, "extname", {
         get() {
           throw new Error("boom");
         },
       });
-      expect(parseCreateExtension(stmt)).toBeNull();
+      expect(function parseBrokenExtension() {
+        return parseCreateExtension(stmt);
+      }).toThrow("boom");
     });
   });
 
