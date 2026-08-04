@@ -30,6 +30,7 @@ function candidateUrls(): string[] {
     process.env.REAL_WORLD_SCHEMA_DATABASE_URL,
     process.env.EXTENSIONS_DATABASE_URL,
     process.env.DATABASE_URL,
+    process.env.DATABASE_URL_PG18,
     process.env.DATABASE_URL_PG17,
     process.env.DATABASE_URL_PG16,
     process.env.DATABASE_URL_PG15,

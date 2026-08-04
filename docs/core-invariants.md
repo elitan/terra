@@ -40,4 +40,4 @@
 
 1. type aliases that are semantically equal must not produce diffs.
 2. precision/scale compatible forms must normalize deterministically.
-3. normalization must be stable across pg14 to pg17.
+3. normalization must be stable across pg14 to pg18.

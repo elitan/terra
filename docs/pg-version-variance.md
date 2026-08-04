@@ -6,6 +6,7 @@
 - 15
 - 16
 - 17
+- 18
 
 ## allowed variance policy
 
@@ -18,4 +19,6 @@
 
 | area | versions | status | note |
 |---|---|---|---|
-| view definition column qualification | 14, 15 vs 16, 17 | tracked | inspector matrix snapshot shows `users.id`/`users.email` qualification in 14/15 and unqualified projection in 16/17 for same view definition |
+| view definition column qualification | 14, 15 vs 16, 17, 18 | tracked | inspector matrix snapshot shows `users.id`/`users.email` qualification in 14/15 and unqualified projection in 16-18 for same view definition |
+| generated column storage | 14-17 vs 18 | enforced | stored generated columns are supported throughout; PostgreSQL 18 adds virtual generated columns and makes them the default when the storage kind is omitted, while TerraDB rejects virtual definitions before mutation on 14-17 |
+| `NOT NULL` catalog rows | 14-17 vs 18 | normalized | PostgreSQL 18 adds `pg_constraint` rows for column nullability; TerraDB continues to model nullability on columns and excludes those duplicate rows when reconstructing table constraints |

@@ -141,6 +141,41 @@ describe("SchemaDiffer private coverage", () => {
     expect(statements[1]).toContain("STORED");
   });
 
+  test("validates PostgreSQL 18 virtual generated column support", function () {
+    const differ = new SchemaDiffer();
+    const virtualTable = makeTable({
+      columns: [
+        makeColumn({ name: "source", type: "TEXT", nullable: true }),
+        makeColumn({
+          name: "derived",
+          type: "TEXT",
+          nullable: true,
+          generated: {
+            always: true,
+            expression: "lower(source)",
+            stored: false,
+          },
+        }),
+      ],
+    });
+
+    expect(function rejectUnknownVersion() {
+      differ.generateMigrationPlan([virtualTable], []);
+    }).toThrow("without the PostgreSQL server version");
+    expect(function rejectPostgres17() {
+      differ.generateMigrationPlan([virtualTable], [], {
+        postgresVersionNum: 170000,
+      });
+    }).toThrow("PostgreSQL 18 or newer is required");
+
+    const postgres18Plan = differ.generateMigrationPlan([virtualTable], [], {
+      postgresVersionNum: 180000,
+    });
+    expect(postgres18Plan.transactional.join("\n")).toContain(
+      '"derived" TEXT GENERATED ALWAYS AS (lower(source)) VIRTUAL'
+    );
+  });
+
   test("type conversion helpers cover serial and boolean branches", () => {
     const differ = new SchemaDiffer();
 

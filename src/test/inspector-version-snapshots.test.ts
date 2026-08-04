@@ -13,7 +13,7 @@ type VersionTarget = {
 type SnapshotMap = Record<string, unknown>;
 
 const SNAPSHOT_PATH =
-  "src/test/fixtures/inspector-version-snapshots/postgres-14-17-core.json";
+  "src/test/fixtures/inspector-version-snapshots/postgres-14-18-core.json";
 
 function normalizeSpace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -48,6 +48,7 @@ function getVersionTargets(): VersionTarget[] {
     { key: "pg15", url: process.env.DATABASE_URL_PG15 },
     { key: "pg16", url: process.env.DATABASE_URL_PG16 },
     { key: "pg17", url: process.env.DATABASE_URL_PG17 },
+    { key: "pg18", url: process.env.DATABASE_URL_PG18 },
   ];
 }
 

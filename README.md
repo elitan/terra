@@ -99,6 +99,10 @@ export DATABASE_URL=":memory:"
 | Schemas | Yes | No |
 | Extensions | Yes | No |
 
+PostgreSQL 14 through 18 are supported. Stored generated columns work across
+that range; virtual generated columns are supported on PostgreSQL 18 and fail
+before mutation on older servers.
+
 SQLite uses table recreation for schema changes that ALTER TABLE doesn't support (column type changes, constraint modifications, etc.).
 Table recreation preserves hidden ROWID values and SQLite-specific definitions including `STRICT`, `WITHOUT ROWID`, `AUTOINCREMENT`, collations, named constraints, and `ON CONFLICT` policies. It validates foreign keys and database integrity before commit, enforces CHECK constraints during migration even when the caller disabled enforcement, and disables `writable_schema` so ALTER operations cannot silently ignore malformed schema entries. It then restores the caller's `foreign_keys`, `defer_foreign_keys`, `ignore_check_constraints`, and `writable_schema` settings. Recreation fails before mutation when declared columns shadow every SQL-visible ROWID name and exact row identity cannot be transferred safely.
 SQLite virtual tables are managed losslessly; bundled FTS5 and RTree modules are covered, while their implementation-owned shadow tables are never managed as user tables.
@@ -176,13 +180,14 @@ bun run test:doctor
 
 # PostgreSQL tests
 docker compose up -d
-bun run test:pg:17
+bun run test:pg:18
 
 # PostgreSQL matrix
 bun run test:pg:14
 bun run test:pg:15
 bun run test:pg:16
 bun run test:pg:17
+bun run test:pg:18
 
 # Extension tests
 bun run test:pg:extensions

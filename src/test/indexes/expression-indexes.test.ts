@@ -74,7 +74,7 @@ describe("Expression Index Support", () => {
       const substringIndex = indexes.find(
         (idx) => idx.name === "idx_substring"
       );
-      expect(substringIndex?.expression).toBe("substring(email, 1, 10)");
+      expect(substringIndex?.expression).toBe('"substring"(email, 1, 10)');
     });
   });
 

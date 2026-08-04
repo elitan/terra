@@ -95,13 +95,13 @@ jobs:
         env:
           DATABASE_URL_PG14: postgres://test_user:test_password@localhost:5432/sql_terraform_test
 
-  test-pg17:
-    name: test:pg:17
+  test-pg18:
+    name: test:pg:18
     runs-on: ubuntu-latest
     timeout-minutes: 12
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: test_password
           POSTGRES_USER: test_user
@@ -120,9 +120,9 @@ jobs:
           bun-version: latest
       - run: cp .env.example .env
       - run: bun install
-      - run: bun run test:pg:17
+      - run: bun run test:pg:18
         env:
-          DATABASE_URL_PG17: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+          DATABASE_URL_PG18: postgres://test_user:test_password@localhost:5432/sql_terraform_test
 
   test-pg-extensions:
     name: test:pg:extensions

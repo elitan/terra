@@ -2,6 +2,7 @@ import type { View } from "../../../types/schema";
 import type { MigrationContext } from "../../../types/migration";
 import { ValidationError } from "../../../types/errors";
 import { deparseSync, parseSync } from "pgsql-parser";
+import { toPgAstNode } from "../parser/pgsql-ast";
 import {
   generateCreateViewSQL,
   generateDropViewSQL,
@@ -151,15 +152,20 @@ function clearOutputAliases(selectStatement: any): void {
 function definitionWithoutOutputAliases(definition: string): string {
   try {
     const parsed = parseSync(definition);
-    const selectStatement = parsed.stmts?.[0]?.stmt?.SelectStmt;
-    if (!selectStatement) {
+    const statements = parsed.stmts;
+    const firstStatement = toPgAstNode(statements?.[0]?.stmt);
+    const selectStatement = firstStatement?.SelectStmt;
+    if (!selectStatement || !statements) {
       return definition;
     }
     clearOutputAliases(selectStatement);
-    const statements = parsed.stmts.map(function getStatement(item: any) {
-      return item.stmt;
+    const statementNodes = statements.flatMap(function getStatement(item) {
+      return item.stmt ? [item.stmt] : [];
     });
-    return deparseSync(statements).trim();
+    if (statementNodes.length !== statements.length) {
+      return definition;
+    }
+    return deparseSync(statementNodes).trim();
   } catch {
     return definition;
   }

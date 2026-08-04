@@ -114,6 +114,10 @@ function checkDbUrls(envFileValues: Record<string, string>): CheckResult[] {
       key: "DATABASE_URL_PG17",
       fallback: "postgres://test_user:test_password@localhost:5487/sql_terraform_test",
     },
+    {
+      key: "DATABASE_URL_PG18",
+      fallback: "postgres://test_user:test_password@localhost:5483/sql_terraform_test",
+    },
   ];
 
   const optional: Array<{ key: string; fallback?: string }> = [

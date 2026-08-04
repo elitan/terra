@@ -227,11 +227,13 @@ function extractGeneratedColumn(constraints: any[]): Column['generated'] | undef
       if (constraint.Constraint?.contype === "CONSTR_GENERATED") {
         const c = constraint.Constraint;
 
-        // generated_when can be 'a' (ALWAYS) or 's' (BY DEFAULT/ON STORAGE)
-        // In pgsql-parser, 'a' = ALWAYS, but we need to check the actual value
+        // generated_when uses 'a' for ALWAYS. PostgreSQL 18 adds
+        // generated_kind, where 's' is stored and 'v' is virtual.
         const always = c.generated_when === 'a' || c.generated_when === 97; // 97 is ASCII 'a'
-
-        const stored = true;
+        const stored =
+          c.generated_kind === undefined ||
+          c.generated_kind === 's' ||
+          c.generated_kind === 115;
 
         const expression = c.raw_expr ? deparseSync([c.raw_expr]).trim() : "";
 

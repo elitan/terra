@@ -74,6 +74,51 @@ describe("Table parser coverage", () => {
     ]);
   });
 
+  test("parses PostgreSQL 18 generated column storage kinds", async function () {
+    const ast = await parse(`
+      CREATE TABLE generated_storage (
+        source text,
+        implicit_virtual text GENERATED ALWAYS AS (lower(source)),
+        explicit_virtual text GENERATED ALWAYS AS (upper(source)) VIRTUAL,
+        explicit_stored text GENERATED ALWAYS AS (source || '!') STORED
+      );
+    `);
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.columns.map(function (column) {
+      return {
+        name: column.name,
+        generated: column.generated,
+      };
+    })).toEqual([
+      { name: "source", generated: undefined },
+      {
+        name: "implicit_virtual",
+        generated: {
+          always: true,
+          expression: "lower(source)",
+          stored: false,
+        },
+      },
+      {
+        name: "explicit_virtual",
+        generated: {
+          always: true,
+          expression: "upper(source)",
+          stored: false,
+        },
+      },
+      {
+        name: "explicit_stored",
+        generated: {
+          always: true,
+          expression: "source || '!'",
+          stored: true,
+        },
+      },
+    ]);
+  });
+
   test("parses unlogged persistence and canonical public references", async function () {
     const ast = await parse(`
       CREATE UNLOGGED TABLE public.child_records (

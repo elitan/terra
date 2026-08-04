@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import {
   createTestClient,
+  createTestSchemaService,
   cleanDatabase,
-  getTableColumns,
 } from "../utils";
 import {
   createColumnTestServices,
@@ -49,6 +49,101 @@ describe("Generated Columns", () => {
     expect(fullNameColumn?.generated?.stored).toBe(true);
     expect(fullNameColumn?.generated?.expression).toContain("first_name");
     expect(fullNameColumn?.generated?.expression).toContain("last_name");
+  });
+
+  test("should enforce PostgreSQL version support for virtual generated columns", async () => {
+    const versionResult = await client.query<{ version: string }>(
+      "SELECT current_setting('server_version_num') AS version"
+    );
+    const version = Number(versionResult.rows[0]?.version);
+    const virtualSchema = `
+      CREATE TABLE generated_values (
+        id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        source TEXT NOT NULL,
+        implicit_virtual TEXT GENERATED ALWAYS AS (lower(source)),
+        explicit_virtual TEXT GENERATED ALWAYS AS (upper(source)) VIRTUAL
+      );
+    `;
+    const schemaService = createTestSchemaService();
+
+    if (version < 180000) {
+      await expect(
+        schemaService.apply(virtualSchema, ["public"], true)
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: `PostgreSQL ${Math.floor(version / 10000)} does not support virtual generated columns; PostgreSQL 18 or newer is required`,
+      });
+      const relation = await client.query(
+        "SELECT to_regclass('public.generated_values') AS name"
+      );
+      expect(relation.rows[0]?.name).toBeNull();
+      return;
+    }
+
+    const createPlan = await schemaService.apply(
+      virtualSchema,
+      ["public"],
+      true
+    );
+    expect(createPlan.hasChanges).toBe(true);
+
+    const createdTables = await services.inspector.getCurrentSchema(client);
+    const createdTable = createdTables.find(function findGeneratedValues(table) {
+      return table.name === "generated_values";
+    });
+    expect(findColumn(createdTable!.columns, "implicit_virtual")?.generated?.stored)
+      .toBe(false);
+    expect(findColumn(createdTable!.columns, "explicit_virtual")?.generated?.stored)
+      .toBe(false);
+
+    await client.query(
+      "INSERT INTO generated_values (source) VALUES ('TerraDB')"
+    );
+    const virtualValues = await client.query(
+      "SELECT implicit_virtual, explicit_virtual FROM generated_values"
+    );
+    expect(virtualValues.rows).toEqual([
+      { implicit_virtual: "terradb", explicit_virtual: "TERRADB" },
+    ]);
+
+    const noOpPlan = await schemaService.plan(virtualSchema, ["public"]);
+    expect(noOpPlan.hasChanges).toBe(false);
+
+    const storedSchema = virtualSchema.replace(
+      "GENERATED ALWAYS AS (upper(source)) VIRTUAL",
+      "GENERATED ALWAYS AS (upper(source)) STORED"
+    );
+    const alterPlan = await schemaService.apply(storedSchema, ["public"], true);
+    expect(alterPlan.transactional).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('DROP COLUMN "explicit_virtual"'),
+        expect.stringContaining(
+          'ADD COLUMN "explicit_virtual" TEXT GENERATED ALWAYS AS (upper(source)) STORED'
+        ),
+      ])
+    );
+
+    const alteredTables = await services.inspector.getCurrentSchema(client);
+    const alteredTable = alteredTables.find(function findGeneratedValues(table) {
+      return table.name === "generated_values";
+    });
+    expect(findColumn(alteredTable!.columns, "implicit_virtual")?.generated?.stored)
+      .toBe(false);
+    expect(findColumn(alteredTable!.columns, "explicit_virtual")?.generated?.stored)
+      .toBe(true);
+    const storedValues = await client.query(
+      "SELECT source, implicit_virtual, explicit_virtual FROM generated_values"
+    );
+    expect(storedValues.rows).toEqual([
+      {
+        source: "TerraDB",
+        implicit_virtual: "terradb",
+        explicit_virtual: "TERRADB",
+      },
+    ]);
+
+    const storedNoOpPlan = await schemaService.plan(storedSchema, ["public"]);
+    expect(storedNoOpPlan.hasChanges).toBe(false);
   });
 
   test("should apply schema with generated columns", async () => {

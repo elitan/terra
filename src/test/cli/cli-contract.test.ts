@@ -83,6 +83,7 @@ async function isPostgresReachable(connectionString: string): Promise<boolean> {
 async function getReachablePostgresUrls(): Promise<string[]> {
   const candidates = [
     process.env.DATABASE_URL_PG14,
+    process.env.DATABASE_URL_PG18,
     process.env.DATABASE_URL_PG17,
     process.env.DATABASE_URL,
   ];

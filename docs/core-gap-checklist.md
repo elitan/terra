@@ -185,7 +185,13 @@
 - done: wire `test:mutation:changed:gate` into CI PR checks with runtime cap and mutation report artifact upload.
 - done: simplify mutation runner parsing/failure helpers and cli json-line extraction helpers with no behavior change.
 - done: rerun parser coverage suites, `schema-service`, `cli-contract`, `test:mutation:changed:gate`, and `tsc --noEmit` green after simplification pass.
-- next: monitor PR runtime impact from mutation job and tune per-file mutant cap if needed.
+- done: upgrade the PostgreSQL parser and deparser to the PostgreSQL 18 grammar while preserving a typed compatibility boundary for statement dispatch.
+- done: parse implicit and explicit PostgreSQL 18 virtual generated columns, fail before mutation on PostgreSQL 14-17, and cover create, inspect, evaluate, storage-kind change, base-row preservation, and idempotent reapply on PostgreSQL 18.
+- done: fix PostgreSQL 18 virtual generated-column inspection so catalog storage kind `v` remains `GENERATED ALWAYS` instead of causing a perpetual drop/add diff.
+- done: normalize PostgreSQL 18 AST-only expression source locations so `IN` and `= ANY` remain semantically equivalent after the parser upgrade.
+- done: normalize PostgreSQL 18 `NOT NULL` catalog rows through column nullability instead of duplicating them as reconstructed table constraints.
+- done: add PostgreSQL 18 local, PR CI, release-verification, inspector-snapshot, CLI-discovery, and full matrix lanes without changing nightly automation.
+- next: audit PostgreSQL 18 constraint additions (`NOT ENFORCED`, named `NOT NULL`, and temporal constraints) for complete lifecycle support or explicit pre-mutation rejection.
 
 ## parser
 

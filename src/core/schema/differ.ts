@@ -429,6 +429,7 @@ export class SchemaDiffer {
   ): MigrationPlan {
     this.validateNullsNotDistinctSupport(desiredSchema, context);
     this.validateForeignKeyDeleteColumns(desiredSchema, context);
+    this.validateVirtualGeneratedColumnSupport(desiredSchema, context);
     const statements: string[] = [];
     const deferred: string[] = [];
     const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
@@ -649,6 +650,37 @@ export class SchemaDiffer {
       deferred,
       hasChanges: transactional.length > 0 || concurrent.length > 0 || deferred.length > 0,
     };
+  }
+
+  private validateVirtualGeneratedColumnSupport(
+    desiredSchema: Table[],
+    context: MigrationContext
+  ): void {
+    for (const table of desiredSchema) {
+      const virtualColumn = table.columns.find(function findVirtual(column) {
+        return column.generated !== undefined && !column.generated.stored;
+      });
+      if (!virtualColumn) continue;
+
+      const tableName = getQualifiedTableName(table);
+      if (context.postgresVersionNum === undefined) {
+        throw new ValidationError(
+          `Cannot safely use virtual generated column ${tableName}.${virtualColumn.name} without the PostgreSQL server version`,
+          tableName,
+          virtualColumn.name,
+          virtualColumn.generated
+        );
+      }
+      if (context.postgresVersionNum < 180000) {
+        const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+        throw new ValidationError(
+          `PostgreSQL ${serverMajor} does not support virtual generated columns; PostgreSQL 18 or newer is required`,
+          tableName,
+          virtualColumn.name,
+          virtualColumn.generated
+        );
+      }
+    }
   }
 
   private validateNullsNotDistinctSupport(

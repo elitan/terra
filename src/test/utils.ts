@@ -252,6 +252,7 @@ export async function getConstraintDefinitions(
     JOIN pg_namespace n ON n.oid = t.relnamespace
     WHERE n.nspname = $1
       AND t.relname = $2
+      AND c.contype <> 'n'
     ORDER BY c.conname
   `,
     [schemaName, tableName]

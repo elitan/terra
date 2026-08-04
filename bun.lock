@@ -12,7 +12,7 @@
         "libsql": "^0.5.22",
         "ora": "^9.0.0",
         "pg": "^8.11.3",
-        "pgsql-parser": "^17.8.2",
+        "pgsql-parser": "^18.2.3",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -47,7 +47,9 @@
 
     "@neon-rs/load": ["@neon-rs/load@0.0.4", "", {}, "sha512-kTPhdZyTQxB+2wpiRcFWrDcejc4JI6tkPuS7UZCG4l6Zvc5kU/gGQ/ozvHTh1XR5tS+UlfAfGuPajjzQjCiHCw=="],
 
-    "@pgsql/types": ["@pgsql/types@17.6.1", "", {}, "sha512-Hk51+nyOxS7Dy5oySWywyNZxo5HndX1VDXT4ZEBD+p+vvMFM2Vc+sKSuByCiI8banou4edbgdnOC251IOuq7QQ=="],
+    "@pgsql/quotes": ["@pgsql/quotes@18.2.1", "", {}, "sha512-tsSWkNAKL5aTMrgRKE0dYYlbeZMLVcN9pgjq4TYDmCHzPP3I6p1/pV09Fn44Pd7r6pdkvehYHaoLWQq4jw4I9Q=="],
+
+    "@pgsql/types": ["@pgsql/types@18.0.0", "", {}, "sha512-jtAY4JU7jdVYZ/Vv3zlZqVP+FRWZokyCLKPPCnAApiaJAElpyyiMC3HRiquBu29kSrVs+rkqZD50SUIb/zyEGw=="],
 
     "@types/bun": ["@types/bun@1.2.15", "", { "dependencies": { "bun-types": "1.2.15" } }, "sha512-U1ljPdBEphF0nw1MIk0hI7kPg7dFdPyM7EenHsp6W5loNHl7zqy6JQf/RKCgnUn2KDzUpkBwHPnEJEjII594bA=="],
 
@@ -95,7 +97,7 @@
 
     "is-unicode-supported": ["is-unicode-supported@2.1.0", "", {}, "sha512-mE00Gnza5EEB3Ds0HfMyllZzbBrmLOX3vfWoj9A9PEnTfratQ/BcaJOuMhnkhjXvb2+FkY3VuHqtAGpTPmglFQ=="],
 
-    "libpg-query": ["libpg-query@17.6.0", "", { "dependencies": { "@pgsql/types": "^17.6.0" } }, "sha512-r4zOTcLTGYS5PlLQAicJ6Yi/tvZFag42YUuNEO8pi8bwt/ZZ4kj514J4QV5bOx0mZzPLF6agbfNXQVxGgmHR8g=="],
+    "libpg-query": ["libpg-query@18.1.4", "", { "dependencies": { "@pgsql/types": "^18.0.0" } }, "sha512-6jF9qn9ln4yLnmSF+bS/DBvAfNcPhGI05+pkQy+n3cRd3p9aO8LWjquEin8SLO0k7zYk745ZGBXYUiL9AUI7gA=="],
 
     "libsql": ["libsql@0.5.22", "", { "dependencies": { "@neon-rs/load": "^0.0.4", "detect-libc": "2.0.2" }, "optionalDependencies": { "@libsql/darwin-arm64": "0.5.22", "@libsql/darwin-x64": "0.5.22", "@libsql/linux-arm-gnueabihf": "0.5.22", "@libsql/linux-arm-musleabihf": "0.5.22", "@libsql/linux-arm64-gnu": "0.5.22", "@libsql/linux-arm64-musl": "0.5.22", "@libsql/linux-x64-gnu": "0.5.22", "@libsql/linux-x64-musl": "0.5.22", "@libsql/win32-x64-msvc": "0.5.22" }, "os": [ "linux", "win32", "darwin", ], "cpu": [ "arm", "x64", "arm64", ] }, "sha512-NscWthMQt7fpU8lqd7LXMvT9pi+KhhmTHAJWUB/Lj6MWa0MKFv0F2V4C6WKKpjCVZl0VwcDz4nOI3CyaT1DDiA=="],
 
@@ -123,9 +125,9 @@
 
     "pgpass": ["pgpass@1.0.5", "", { "dependencies": { "split2": "^4.1.0" } }, "sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug=="],
 
-    "pgsql-deparser": ["pgsql-deparser@17.11.1", "", { "dependencies": { "@pgsql/types": "^17.6.1" } }, "sha512-BGKgwC4qs+FPcG8Ai989LO6i4E8KF5HEvlTnI8uhS4qUyu6P1xCyP9pJDky95ZL8DolaGUDFAJtxteDBw33OCg=="],
+    "pgsql-deparser": ["pgsql-deparser@18.3.3", "", { "dependencies": { "@pgsql/quotes": "18.2.1", "@pgsql/types": "^18.0.0" } }, "sha512-lMCx74eMonRfvKw3t6kgvG0JWiRAcXsNH1DtHpCZZDNRK5EIUKlkHYPc23kpS5z8M+kbWzK9sMC0vUHSFFwbaQ=="],
 
-    "pgsql-parser": ["pgsql-parser@17.8.2", "", { "dependencies": { "@pgsql/types": "17.6.1", "libpg-query": "17.6.0", "pgsql-deparser": "17.11.1" } }, "sha512-/uHZL7mq3Bj23v/nDShb8gN8LwUKdejFii6IFBxRYRXxWlRrbsdky1KtevIxiVGasWZfI+E5t1//Wq+D3cVmAg=="],
+    "pgsql-parser": ["pgsql-parser@18.2.3", "", { "dependencies": { "@pgsql/types": "^18.0.0", "libpg-query": "18.1.4", "pgsql-deparser": "18.3.3" } }, "sha512-LA0gh10hYJJpJKOZU3b86AbxVGQCPB0Axzsv+XVPGEA/NkASHZteNWzhDLKTBjuuHiMjeQxixseYQQm8io3aug=="],
 
     "postgres-array": ["postgres-array@2.0.0", "", {}, "sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA=="],
 

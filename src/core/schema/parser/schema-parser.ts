@@ -42,6 +42,7 @@ import type {
 import { ParserError } from "../../../types/errors";
 import { DEFAULT_COLLATION } from "../../../utils/collation";
 import { qualifyDeclaredRoutineTypes } from "./routine-type-canonicalizer";
+import { toPgAstNode } from "./pgsql-ast";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -317,8 +318,10 @@ export class SchemaParser {
     table: Table
   ): QualifiedName | undefined {
     const ast = parseSync(`SELECT ${expression} AS terradb_index_expression`);
+    const statement = toPgAstNode(ast.stmts?.[0]?.stmt);
+    const target = toPgAstNode(statement?.SelectStmt?.targetList?.[0]);
     const expressionNode =
-      ast.stmts?.[0]?.stmt?.SelectStmt?.targetList?.[0]?.ResTarget?.val;
+      target?.ResTarget?.val;
     const referencedColumns = new Set<string>();
 
     function collectColumnReferences(value: unknown): void {
@@ -472,7 +475,13 @@ export class SchemaParser {
       }
 
       for (const stmtWrapper of ast.stmts) {
-        const stmt = stmtWrapper.stmt;
+        const stmt = toPgAstNode(stmtWrapper.stmt);
+        if (!stmt) {
+          throw new ParserError(
+            "PostgreSQL parser returned an empty statement",
+            filePath
+          );
+        }
         this.rejectTemporaryRelation(stmt, filePath);
         if (stmt.CreateStmt) {
           this.rejectUnsupportedTableShorthand(stmt.CreateStmt, filePath);

@@ -1,5 +1,6 @@
 import { Client } from "pg";
 import { parse } from "pgsql-parser";
+import { toPgAstNode } from "./parser/pgsql-ast";
 import type {
   Table,
   Column,
@@ -406,12 +407,11 @@ export class DatabaseInspector {
         let defaultValue = col.column_default;
 
         if (col.attgenerated && col.attgenerated !== '') {
-          const always = col.attgenerated === 's' || col.attgenerated === 'a';
           const stored = col.attgenerated === 's';
           const expression = col.generation_expression || '';
 
           generated = {
-            always,
+            always: true,
             expression,
             stored,
           };
@@ -754,7 +754,8 @@ export class DatabaseInspector {
     }
 
     const ast = await parse(indexDefinition);
-    const indexStatement = ast.stmts?.[0]?.stmt?.IndexStmt;
+    const statement = toPgAstNode(ast.stmts?.[0]?.stmt);
+    const indexStatement = statement?.IndexStmt;
     if (!indexStatement) {
       throw new Error(
         `PostgreSQL returned an invalid index definition: ${indexDefinition}`
@@ -2380,6 +2381,7 @@ export class DatabaseInspector {
           pg_get_constraintdef(oid) as definition
         FROM pg_constraint
         WHERE contypid = $1
+          AND contype <> 'n'
         ORDER BY conname
       `, [row.oid]);
 
@@ -2749,6 +2751,7 @@ export class DatabaseInspector {
         pg_get_constraintdef(oid) as definition
       FROM pg_constraint
       WHERE conrelid = $1
+        AND contype <> 'n'
       ORDER BY conname
     `, [relationOid]);
 
@@ -2772,9 +2775,8 @@ export class DatabaseInspector {
     }
 
     if (row.attgenerated && row.attgenerated !== "") {
-      const always = row.attgenerated === "s" || row.attgenerated === "a" ? "ALWAYS" : "BY DEFAULT";
       const stored = row.attgenerated === "s" ? "STORED" : "VIRTUAL";
-      parts.push(`GENERATED ${always} AS (${row.generation_expression}) ${stored}`);
+      parts.push(`GENERATED ALWAYS AS (${row.generation_expression}) ${stored}`);
       return parts.join(" ");
     }
 

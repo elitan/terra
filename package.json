@@ -61,6 +61,7 @@
     "test:pg:15": "DATABASE_URL=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:16": "DATABASE_URL=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:17": "DATABASE_URL=${DATABASE_URL_PG17:-postgres://test_user:test_password@localhost:5487/sql_terraform_test} bun run test:pg:matrix",
+    "test:pg:18": "DATABASE_URL=${DATABASE_URL_PG18:-postgres://test_user:test_password@localhost:5483/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:extensions": "bun --env-file=.env test src/test/extensions",
     "test:pg:real-world": "REAL_WORLD_SCHEMA_DATABASE_URL=${REAL_WORLD_SCHEMA_DATABASE_URL:-postgres://test_user:test_password@localhost:5490/postgres} bun --env-file=.env test src/test/cli/real-world-schema-idempotency.test.ts",
     "test:e2e": "bun --env-file=.env test src/test/cli",
@@ -69,8 +70,8 @@
     "test:property:replay": "if [ -z \"$FC_SEED\" ]; then echo \"FC_SEED is required\" && exit 1; fi; if [ -n \"$FC_PATH\" ] && [ -z \"$FC_TARGET\" ]; then echo \"FC_TARGET is required when FC_PATH is set\" && exit 1; fi; TARGET=${FC_TARGET:-src/test/properties/}; TERRADB_TEST_SILENT=${TERRADB_TEST_SILENT:-1} FC_PATH=${FC_PATH:-} bun --env-file=.env test $TARGET",
     "test:fuzz": "PARSER_FUZZ_SEED=${PARSER_FUZZ_SEED:-20260222} bun --env-file=.env test src/test/properties/parser-fuzz.test.ts",
     "test:fuzz:replay": "PARSER_FUZZ_SEED=${PARSER_FUZZ_SEED:-20260222} PARSER_FUZZ_FIXTURE_CASE=${PARSER_FUZZ_FIXTURE_CASE:-0} PARSER_FUZZ_RANDOM_CASE=${PARSER_FUZZ_RANDOM_CASE:-0} bun --env-file=.env test src/test/properties/parser-fuzz.test.ts",
-    "test:inspector:snapshots": "DATABASE_URL_PG14=${DATABASE_URL_PG14:-postgres://test_user:test_password@localhost:5486/sql_terraform_test} DATABASE_URL_PG15=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} DATABASE_URL_PG16=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} DATABASE_URL_PG17=${DATABASE_URL_PG17:-postgres://test_user:test_password@localhost:5487/sql_terraform_test} TERRADB_REQUIRE_FULL_PG_MATRIX=${TERRADB_REQUIRE_FULL_PG_MATRIX:-1} bun --env-file=.env test src/test/inspector-version-snapshots.test.ts",
-    "test:inspector:snapshots:update": "DATABASE_URL_PG14=${DATABASE_URL_PG14:-postgres://test_user:test_password@localhost:5486/sql_terraform_test} DATABASE_URL_PG15=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} DATABASE_URL_PG16=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} DATABASE_URL_PG17=${DATABASE_URL_PG17:-postgres://test_user:test_password@localhost:5487/sql_terraform_test} TERRADB_WRITE_INSPECTOR_SNAPSHOTS=1 bun --env-file=.env test src/test/inspector-version-snapshots.test.ts",
+    "test:inspector:snapshots": "DATABASE_URL_PG14=${DATABASE_URL_PG14:-postgres://test_user:test_password@localhost:5486/sql_terraform_test} DATABASE_URL_PG15=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} DATABASE_URL_PG16=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} DATABASE_URL_PG17=${DATABASE_URL_PG17:-postgres://test_user:test_password@localhost:5487/sql_terraform_test} DATABASE_URL_PG18=${DATABASE_URL_PG18:-postgres://test_user:test_password@localhost:5483/sql_terraform_test} TERRADB_REQUIRE_FULL_PG_MATRIX=${TERRADB_REQUIRE_FULL_PG_MATRIX:-1} bun --env-file=.env test src/test/inspector-version-snapshots.test.ts",
+    "test:inspector:snapshots:update": "DATABASE_URL_PG14=${DATABASE_URL_PG14:-postgres://test_user:test_password@localhost:5486/sql_terraform_test} DATABASE_URL_PG15=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} DATABASE_URL_PG16=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} DATABASE_URL_PG17=${DATABASE_URL_PG17:-postgres://test_user:test_password@localhost:5487/sql_terraform_test} DATABASE_URL_PG18=${DATABASE_URL_PG18:-postgres://test_user:test_password@localhost:5483/sql_terraform_test} TERRADB_WRITE_INSPECTOR_SNAPSHOTS=1 bun --env-file=.env test src/test/inspector-version-snapshots.test.ts",
     "test:mutation:changed:report": "rm -f coverage/mutation/mutation-report.json && bun run tools/check-mutation-gate.ts --mode report --threshold 85 --min-risk high --out coverage/mutation/changed-files-baseline.json && bun run tools/run-mutation-changed.ts --baseline coverage/mutation/changed-files-baseline.json --report coverage/mutation/mutation-report.json",
     "test:mutation:changed:gate": "bun run test:mutation:changed:report && bun run tools/check-mutation-gate.ts --mode gate --threshold 85 --min-risk high --out coverage/mutation/changed-files-baseline.json --report coverage/mutation/mutation-report.json",
     "test:mutation:escaped:report": "bun run tools/summarize-escaped-mutants.ts --report ${MUTATION_REPORT_PATH:-coverage/mutation/mutation-report.json} --out coverage/mutation/escaped-mutants.json",
@@ -92,7 +93,7 @@
     "test:destructive": "bun --env-file=.env test src/test/destructive-operations.test.ts",
     "test:properties": "bun --env-file=.env test src/test/properties/",
     "test:properties:watch": "bun --env-file=.env test --watch src/test/properties/",
-    "test:matrix:pr": "bun run test:doctor && bun run test:unit && bun run test:sqlite && bun run test:pg:14 && bun run test:pg:17 && bun run test:pg:extensions && bun run test:e2e && bun run test:property:pr && bun run test:flake && bun run test:coverage && bun run build",
+    "test:matrix:pr": "bun run test:doctor && bun run test:unit && bun run test:sqlite && bun run test:pg:14 && bun run test:pg:18 && bun run test:pg:extensions && bun run test:e2e && bun run test:property:pr && bun run test:flake && bun run test:coverage && bun run build",
     "test:matrix:nightly": "bun run test:doctor && bun run test:sqlite && bun run test:pg:14 && bun run test:pg:15 && bun run test:pg:16 && bun run test:pg:17 && bun run test:pg:extensions && bun run test:e2e && bun run test:property:nightly && bun run test:flake && bun run test:coverage:full && bun run test:perf && bun run build",
     "release:patch": "bun run tools/release.ts patch",
     "release:minor": "bun run tools/release.ts minor",
@@ -106,7 +107,7 @@
     "libsql": "^0.5.22",
     "ora": "^9.0.0",
     "pg": "^8.11.3",
-    "pgsql-parser": "^17.8.2"
+    "pgsql-parser": "^18.2.3"
   },
   "devDependencies": {
     "@types/bun": "latest",

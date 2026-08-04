@@ -1156,6 +1156,19 @@ describe("DatabaseInspector coverage", () => {
 
     expect(
       inspector.buildColumnDefinition({
+        column_name: "normalized_slug",
+        pg_type: "text",
+        is_nullable: true,
+        column_default: null,
+        attgenerated: "v",
+        generation_expression: "lower(slug)",
+      })
+    ).toBe(
+      '"normalized_slug" text GENERATED ALWAYS AS (lower(slug)) VIRTUAL'
+    );
+
+    expect(
+      inspector.buildColumnDefinition({
         column_name: "count",
         pg_type: "integer",
         is_nullable: false,

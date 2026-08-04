@@ -1,5 +1,13 @@
 import { parseSync } from "pgsql-parser";
 
+const AST_LOCATION_FIELDS = new Set([
+  "location",
+  "list_start",
+  "list_end",
+  "rexpr_list_start",
+  "rexpr_list_end",
+]);
+
 function getTypeCastName(typeCast: Record<string, unknown>): string | undefined {
   const typeName = typeCast.typeName as Record<string, unknown> | undefined;
   const names = typeName?.names as Array<Record<string, unknown>> | undefined;
@@ -281,7 +289,7 @@ function normalizeAstNode(node: unknown): unknown {
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (key === "location") continue;
+    if (AST_LOCATION_FIELDS.has(key)) continue;
     result[key] = normalizeAstNode(value);
   }
   if (result.FuncCall) {

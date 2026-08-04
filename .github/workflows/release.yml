@@ -73,6 +73,19 @@ jobs:
           --health-retries 10
         ports:
           - 5487:5432
+      postgres18:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5483:5432
       postgres-pgvector:
         image: pgvector/pgvector:0.8.1-pg17
         env:
