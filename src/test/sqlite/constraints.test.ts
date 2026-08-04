@@ -81,6 +81,157 @@ describe("SQLite Primary Keys", () => {
 
     expect(tables[0].primaryKey?.columns).toEqual(["code"]);
   });
+
+  test("should inspect nullable primary keys on ordinary rowid tables", async function () {
+    const parsed = await provider.parseSchema(`
+      CREATE TABLE ordinary_keys (
+        tenant TEXT,
+        code TEXT,
+        PRIMARY KEY (tenant, code)
+      );
+      CREATE TABLE text_key (code TEXT PRIMARY KEY);
+      CREATE TABLE int_spelling_key (id INT PRIMARY KEY);
+      CREATE TABLE int_key (id INTEGER PRIMARY KEY);
+      CREATE TABLE inline_desc_key (id INTEGER PRIMARY KEY DESC);
+      CREATE TABLE table_desc_key (
+        id INTEGER,
+        PRIMARY KEY (id DESC)
+      );
+      CREATE TABLE explicit_not_null (
+        code TEXT PRIMARY KEY NOT NULL
+      );
+      CREATE TABLE strict_key (code TEXT PRIMARY KEY) STRICT;
+      CREATE TABLE without_rowid_key (
+        code TEXT PRIMARY KEY
+      ) WITHOUT ROWID;
+    `);
+
+    function nullability(tableName: string): boolean[] | undefined {
+      return parsed.tables
+        .find(function (table) {
+          return table.name === tableName;
+        })
+        ?.columns.map(function (column) {
+          return column.nullable;
+        });
+    }
+
+    expect(nullability("ordinary_keys")).toEqual([true, true]);
+    expect(nullability("text_key")).toEqual([true]);
+    expect(nullability("int_spelling_key")).toEqual([true]);
+    expect(nullability("int_key")).toEqual([false]);
+    expect(nullability("inline_desc_key")).toEqual([true]);
+    expect(nullability("table_desc_key")).toEqual([false]);
+    expect(nullability("explicit_not_null")).toEqual([false]);
+    expect(nullability("strict_key")).toEqual([false]);
+    expect(nullability("without_rowid_key")).toEqual([false]);
+  });
+
+  test("should preserve nullable primary key rows through recreation", async function () {
+    const initialSchema = `
+      CREATE TABLE nullable_keys (
+        code TEXT PRIMARY KEY,
+        payload INTEGER
+      );
+      CREATE TABLE composite_keys (
+        tenant TEXT,
+        code TEXT,
+        payload INTEGER,
+        PRIMARY KEY (tenant, code)
+      );
+      CREATE TABLE inline_desc_keys (
+        id INTEGER PRIMARY KEY DESC,
+        payload INTEGER
+      );
+      CREATE TABLE table_desc_keys (
+        id INTEGER,
+        payload TEXT,
+        PRIMARY KEY (id DESC)
+      );
+      CREATE TABLE strict_keys (
+        code TEXT PRIMARY KEY
+      ) STRICT;
+      CREATE TABLE without_rowid_keys (
+        code TEXT PRIMARY KEY
+      ) WITHOUT ROWID;
+    `;
+    const recreatedSchema = initialSchema.replaceAll(
+      "payload INTEGER",
+      "payload TEXT"
+    );
+
+    await schemaService.apply(initialSchema, ["public"], true);
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(
+      "INSERT INTO nullable_keys(code, payload) VALUES (NULL, 1), (NULL, 2)"
+    );
+    await seedClient.query(`
+      INSERT INTO composite_keys(tenant, code, payload)
+      VALUES (NULL, 'same', 1), (NULL, 'same', 2)
+    `);
+    await seedClient.query(
+      "INSERT INTO inline_desc_keys(id, payload) VALUES (NULL, 1), (NULL, 2)"
+    );
+    await seedClient.query(
+      "INSERT INTO table_desc_keys(id, payload) VALUES (NULL, 'a'), (NULL, 'b')"
+    );
+    await expect(
+      seedClient.query("INSERT INTO strict_keys(code) VALUES (NULL)")
+    ).rejects.toThrow("NOT NULL constraint failed");
+    await expect(
+      seedClient.query("INSERT INTO without_rowid_keys(code) VALUES (NULL)")
+    ).rejects.toThrow("NOT NULL constraint failed");
+
+    const inlineDescRows = await seedClient.query(
+      "SELECT id FROM inline_desc_keys ORDER BY rowid"
+    );
+    const tableDescRows = await seedClient.query(
+      "SELECT id FROM table_desc_keys ORDER BY id"
+    );
+    expect(inlineDescRows.rows).toEqual([{ id: null }, { id: null }]);
+    expect(tableDescRows.rows).toEqual([{ id: 1 }, { id: 2 }]);
+    await seedClient.end();
+
+    await schemaService.apply(recreatedSchema, ["public"], true);
+    const client = await provider.createClient(config);
+    const nullableRows = await client.query(`
+      SELECT code, payload, typeof(payload) AS payload_type
+      FROM nullable_keys
+      ORDER BY rowid
+    `);
+    const compositeRows = await client.query(`
+      SELECT tenant, code, payload, typeof(payload) AS payload_type
+      FROM composite_keys
+      ORDER BY rowid
+    `);
+    const recreatedInlineDescRows = await client.query(`
+      SELECT id, payload, typeof(payload) AS payload_type
+      FROM inline_desc_keys
+      ORDER BY rowid
+    `);
+    const current = await provider.getCurrentSchema(client);
+    await client.end();
+
+    expect(nullableRows.rows).toEqual([
+      { code: null, payload: "1", payload_type: "text" },
+      { code: null, payload: "2", payload_type: "text" },
+    ]);
+    expect(compositeRows.rows).toEqual([
+      { tenant: null, code: "same", payload: "1", payload_type: "text" },
+      { tenant: null, code: "same", payload: "2", payload_type: "text" },
+    ]);
+    expect(recreatedInlineDescRows.rows).toEqual([
+      { id: null, payload: "1", payload_type: "text" },
+      { id: null, payload: "2", payload_type: "text" },
+    ]);
+    expect(
+      current.find(function (table) {
+        return table.name === "nullable_keys";
+      })?.columns[0]?.nullable
+    ).toBe(true);
+    expect((await schemaService.plan(recreatedSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
 });
 
 describe("SQLite Unique Constraints", () => {

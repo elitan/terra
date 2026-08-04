@@ -268,7 +268,8 @@ describe("SQLiteInspector unit coverage", () => {
         { cid: 3, name: "internal", type: "", notnull: 0, dflt_value: null, pk: 0, hidden: 1 },
       ],
       "computed",
-      "CREATE TABLE computed (base INT, dynamic INT AS (base + 1), materialized INT AS ((base * 2) + abs(base)) STORED NOT NULL)"
+      "CREATE TABLE computed (base INT, dynamic INT AS (base + 1), materialized INT AS ((base * 2) + abs(base)) STORED NOT NULL)",
+      { virtual: false, strict: false, withoutRowid: false }
     );
 
     expect(columns).toEqual([
@@ -307,7 +308,8 @@ describe("SQLiteInspector unit coverage", () => {
       inspector.getColumns(
         [{ cid: 0, name: "lost", type: "INT", notnull: 0, dflt_value: null, pk: 0, hidden: 2 }],
         "computed",
-        "CREATE TABLE computed (base INT)"
+        "CREATE TABLE computed (base INT)",
+        { virtual: false, strict: false, withoutRowid: false }
       );
     }).toThrow("Unable to inspect generated expression");
   });

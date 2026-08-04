@@ -14,12 +14,14 @@ import type {
 import {
   extractSQLiteCheckExpressions,
   extractSQLiteAutoincrementColumns,
+  extractSQLiteColumnDefinition,
   extractSQLiteColumnCollations,
   extractSQLiteForeignKeySemantics,
   extractSQLiteGeneratedExpressions,
   extractSQLiteViewDefinition,
   parseSQLiteIndexDefinition,
   parseSQLiteTriggerMetadata,
+  isSQLiteRowidAliasColumnDefinition,
   replaceSQLiteCreateTableName,
   type SQLiteForeignKeySemantics,
 } from "./sql-parser-utils";
@@ -75,6 +77,12 @@ interface SQLiteTableListRow {
   type: "table" | "view" | "shadow" | "virtual";
   wr: number;
   strict: number;
+}
+
+interface SQLiteTableOptions {
+  virtual: boolean;
+  strict: boolean;
+  withoutRowid: boolean;
 }
 
 export class SQLiteInspector {
@@ -151,11 +159,7 @@ export class SQLiteInspector {
     client: SQLiteClient,
     tableName: string,
     createSql: string | null,
-    tableOptions: {
-      virtual: boolean;
-      strict: boolean;
-      withoutRowid: boolean;
-    }
+    tableOptions: SQLiteTableOptions
   ): Promise<Table> {
     const rawCreateStatement = createSql?.trim().replace(/;+\s*$/g, "") || "";
     const createStatement = replaceSQLiteCreateTableName(
@@ -167,7 +171,12 @@ export class SQLiteInspector {
     const tableInfo = await client.query<TableInfo>(
       `PRAGMA table_xinfo(${this.quoteIdentifier(tableName)})`
     );
-    const columns = this.getColumns(tableInfo.rows, tableName, createSql);
+    const columns = this.getColumns(
+      tableInfo.rows,
+      tableName,
+      createSql,
+      tableOptions
+    );
     const primaryKey = this.getPrimaryKey(tableInfo.rows);
     const foreignKeys = await this.getForeignKeys(client, tableName, createSql);
     const indexes = await this.getIndexes(client, tableName);
@@ -196,10 +205,13 @@ export class SQLiteInspector {
   private getColumns(
     rows: TableInfo[],
     tableName: string,
-    createSql: string | null
+    createSql: string | null,
+    tableOptions: SQLiteTableOptions
   ): Column[] {
     const generatedExpressions = extractSQLiteGeneratedExpressions(createSql || "");
     const collations = extractSQLiteColumnCollations(createSql || "");
+    const implicitlyNotNullPrimaryKeys =
+      this.getImplicitlyNotNullPrimaryKeys(rows, createSql, tableOptions);
     const inspector = this;
 
     return rows
@@ -223,11 +235,13 @@ export class SQLiteInspector {
             }
           : undefined;
         const collation = collations.get(row.name);
+        const normalizedName = normalizeSQLiteIdentifier(row.name);
 
         return {
           name: row.name,
           type: inspector.normalizeType(row.type),
-          nullable: row.notnull === 0 && row.pk === 0,
+          nullable: row.notnull === 0 &&
+            !implicitlyNotNullPrimaryKeys.has(normalizedName),
           default: row.dflt_value
             ? inspector.normalizeDefault(row.dflt_value)
             : undefined,
@@ -235,6 +249,35 @@ export class SQLiteInspector {
           generated: generatedMetadata,
         };
       });
+  }
+
+  private getImplicitlyNotNullPrimaryKeys(
+    rows: TableInfo[],
+    createSql: string | null,
+    tableOptions: SQLiteTableOptions
+  ): Set<string> {
+    const primaryKeyRows = rows.filter(function (row) {
+      return row.pk > 0;
+    });
+    if (tableOptions.strict || tableOptions.withoutRowid) {
+      return new Set(primaryKeyRows.map(function (row) {
+        return normalizeSQLiteIdentifier(row.name);
+      }));
+    }
+    if (primaryKeyRows.length !== 1) {
+      return new Set();
+    }
+
+    const primaryKey = primaryKeyRows[0]!;
+    const definition = extractSQLiteColumnDefinition(
+      createSql || "",
+      primaryKey.name
+    );
+    if (!definition || !isSQLiteRowidAliasColumnDefinition(definition)) {
+      return new Set();
+    }
+
+    return new Set([normalizeSQLiteIdentifier(primaryKey.name)]);
   }
 
   private getPrimaryKey(rows: TableInfo[]): PrimaryKeyConstraint | null {
