@@ -1,6 +1,6 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 type CliOptions = {
   baselinePath: string;
@@ -16,6 +16,12 @@ type BaselineFileAssessment = {
 
 type BaselineReport = {
   targetFiles?: BaselineFileAssessment[];
+  diffRef?: string | null;
+};
+
+type ChangedLineRange = {
+  start: number;
+  end: number;
 };
 
 type MutationOperator = {
@@ -66,6 +72,7 @@ type MutationReport = {
   timeoutMs: number;
   durationMs: number;
   files: string[];
+  diffRef: string | null;
   results: MutationResult[];
 };
 
@@ -195,6 +202,12 @@ function resolveTestCommand(file: string, override?: string): string {
   }
 
   const normalized = file.replace(/\\/g, "/");
+  if (
+    normalized.endsWith("/tools/run-mutation-changed.ts") ||
+    normalized.endsWith("/tools/check-mutation-gate.ts")
+  ) {
+    return "bun --env-file=.env test src/test/mutation-tools.test.ts";
+  }
   if (normalized.endsWith("/src/core/schema/service.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/schema-service.test.ts src/test/schema-service-private-coverage.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
   }
@@ -261,11 +274,24 @@ function resolveTestCommand(file: string, override?: string): string {
   return "bun --env-file=.env test --max-concurrency=1 src/test/schema-service-private-coverage.test.ts";
 }
 
+function isChangedLine(
+  line: number,
+  changedLines: readonly ChangedLineRange[] | undefined
+): boolean {
+  if (changedLines === undefined) {
+    return true;
+  }
+  return changedLines.some(function (range) {
+    return line >= range.start && line <= range.end;
+  });
+}
+
 function generateCandidatesForFile(
   file: string,
   content: string,
   maxPerFile: number,
-  command: string
+  command: string,
+  changedLines?: readonly ChangedLineRange[]
 ): MutationCandidate[] {
   const collected: MutationCandidate[] = [];
   const seen = new Set<string>();
@@ -279,9 +305,14 @@ function generateCandidatesForFile(
       const end = start + match[0].length;
       const original = match[0];
       const key = `${start}:${end}:${operator.replacement}`;
-      if (!seen.has(key) && original !== operator.replacement && !isCommentOnlyLine(content, start)) {
+      const location = lineColumnAt(content, start);
+      if (
+        !seen.has(key) &&
+        original !== operator.replacement &&
+        !isCommentOnlyLine(content, start) &&
+        isChangedLine(location.line, changedLines)
+      ) {
         seen.add(key);
-        const location = lineColumnAt(content, start);
         collected.push({
           id: `${file}#${sequence}`,
           file,
@@ -304,6 +335,55 @@ function generateCandidatesForFile(
   }
 
   return collected;
+}
+
+function parseChangedLineRanges(diff: string): ChangedLineRange[] {
+  const ranges: ChangedLineRange[] = [];
+  for (const line of diff.split(/\r?\n/)) {
+    const match = line.match(
+      /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/
+    );
+    if (!match?.[1]) {
+      continue;
+    }
+    const start = Number.parseInt(match[1], 10);
+    const count = match[2] === undefined
+      ? 1
+      : Number.parseInt(match[2], 10);
+    if (count === 0) {
+      continue;
+    }
+    ranges.push({ start, end: start + count - 1 });
+  }
+  return ranges;
+}
+
+function getChangedLineRanges(
+  file: string,
+  diffRef: string | null | undefined
+): ChangedLineRange[] | undefined {
+  if (!diffRef) {
+    return undefined;
+  }
+  const filePath = relative(process.cwd(), file).replace(/\\/g, "/");
+  try {
+    const diff = execFileSync(
+      "git",
+      [
+        "diff",
+        "--unified=0",
+        "--no-color",
+        "--end-of-options",
+        diffRef,
+        "--",
+        filePath,
+      ],
+      { encoding: "utf-8" }
+    );
+    return parseChangedLineRanges(diff);
+  } catch {
+    return undefined;
+  }
 }
 
 function extractFailure(error: unknown): string {
@@ -420,11 +500,13 @@ function main(): void {
     const content = readFileSync(file, "utf-8");
     originals.set(file, content);
     const command = resolveTestCommand(file, options.testCommandOverride);
+    const changedLines = getChangedLineRanges(file, baseline.diffRef);
     const fileCandidates = generateCandidatesForFile(
       file,
       content,
       options.maxPerFile,
-      command
+      command,
+      changedLines
     );
     candidates.push(...fileCandidates);
   }
@@ -477,6 +559,7 @@ function main(): void {
     timeoutMs: options.timeoutMs,
     durationMs: Date.now() - startedAt,
     files: targetFiles,
+    diffRef: baseline.diffRef || null,
     results,
   };
 

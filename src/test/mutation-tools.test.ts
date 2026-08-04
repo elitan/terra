@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +14,18 @@ type SummarizedReport = {
   totalEscaped: number;
   modules: Array<Record<string, unknown>>;
   mutants: Array<Record<string, unknown>>;
+};
+
+type NativeMutationReport = {
+  diffRef: string | null;
+  results: Array<{
+    line: number;
+    status: string;
+  }>;
+};
+
+type MutationGateReport = {
+  diffRef: string | null;
 };
 
 function summarizeEscapedMutants(input: unknown): SummarizedReport {
@@ -38,6 +51,126 @@ function summarizeEscapedMutants(input: unknown): SummarizedReport {
       }
     );
     return JSON.parse(readFileSync(outputPath, "utf-8")) as SummarizedReport;
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function runChangedLineMutationScenario(
+  mode: "changed" | "deleted" | "whole-file"
+): NativeMutationReport {
+  const temporaryDirectory = realpathSync(
+    mkdtempSync(join(tmpdir(), "terradb-mutation-runner-"))
+  );
+  const sourcePath = join(temporaryDirectory, "candidate.ts");
+  const verificationPath = join(temporaryDirectory, "candidate.test.ts");
+  const baselinePath = join(temporaryDirectory, "baseline.json");
+  const reportPath = join(temporaryDirectory, "mutation-report.json");
+  const initialSource = [
+    "export const first = true;",
+    "export const second = false;",
+    "export const changed = true;",
+    "",
+  ].join("\n");
+  const changedSource = mode === "deleted"
+    ? [
+      "export const first = true;",
+      "export const second = false;",
+      "",
+    ].join("\n")
+    : [
+      "export const first = true;",
+      "export const second = false;",
+      "export const changed = false;",
+      "",
+    ].join("\n");
+
+  try {
+    writeFileSync(sourcePath, initialSource);
+    execFileSync("git", ["init", "--quiet"], { cwd: temporaryDirectory });
+    execFileSync("git", ["config", "user.email", "test@terradb.local"], {
+      cwd: temporaryDirectory,
+    });
+    execFileSync("git", ["config", "user.name", "TerraDB Test"], {
+      cwd: temporaryDirectory,
+    });
+    execFileSync("git", ["add", "candidate.ts"], { cwd: temporaryDirectory });
+    execFileSync("git", ["commit", "--quiet", "-m", "initial"], {
+      cwd: temporaryDirectory,
+    });
+    writeFileSync(sourcePath, changedSource);
+    writeFileSync(verificationPath, `
+import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+
+test("keeps the expected changed literal", function () {
+  const source = readFileSync(${JSON.stringify(sourcePath)}, "utf-8");
+  expect(source).toContain("changed = false");
+});
+`);
+    writeFileSync(baselinePath, JSON.stringify({
+      targetFiles: [{ file: sourcePath, selected: true }],
+      diffRef: mode === "whole-file" ? null : "HEAD",
+    }));
+
+    execFileSync(
+      process.execPath,
+      [
+        "run",
+        resolve("tools/run-mutation-changed.ts"),
+        "--baseline",
+        baselinePath,
+        "--report",
+        reportPath,
+        "--max-per-file",
+        "10",
+        "--timeout-ms",
+        "30000",
+        "--test-command",
+        `bun test ${verificationPath}`,
+      ],
+      {
+        cwd: temporaryDirectory,
+        stdio: "pipe",
+      }
+    );
+    return JSON.parse(readFileSync(reportPath, "utf-8")) as NativeMutationReport;
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function runMutationGate(
+  args: string[],
+  environment: Record<string, string>
+): MutationGateReport {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "terradb-mutation-gate-"));
+  const reportPath = join(temporaryDirectory, "gate-report.json");
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        "run",
+        resolve("tools/check-mutation-gate.ts"),
+        "--mode",
+        "report",
+        "--out",
+        reportPath,
+        ...args,
+      ],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          MUTATION_BASE_REF: "",
+          MUTATION_HEAD_REF: "",
+          ...environment,
+        },
+        stdio: "pipe",
+      }
+    );
+    return JSON.parse(readFileSync(reportPath, "utf-8")) as MutationGateReport;
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
@@ -124,4 +257,50 @@ test("escaped mutant rollup retains Stryker report compatibility", function () {
     mutator: "ConditionalExpression",
     location: { line: 17, column: 4 },
   })]);
+});
+
+test("changed mutation candidates stay inside added and modified lines", function () {
+  const changedReport = runChangedLineMutationScenario("changed");
+  const deletionReport = runChangedLineMutationScenario("deleted");
+  const wholeFileReport = runChangedLineMutationScenario("whole-file");
+
+  expect(changedReport.diffRef).toBe("HEAD");
+  expect(changedReport.results).toEqual([
+    expect.objectContaining({ line: 3, status: "killed" }),
+  ]);
+  expect(deletionReport.results).toEqual([]);
+  expect(wholeFileReport.diffRef).toBeNull();
+  expect(wholeFileReport.results.map(function (result) {
+    return result.line;
+  })).toEqual([1, 2, 3]);
+});
+
+test("mutation gate resolves clean-checkout base and head refs", function () {
+  const pullRequestReport = runMutationGate([], {
+    MUTATION_BASE_REF: "HEAD",
+    MUTATION_HEAD_REF: "HEAD~1",
+  });
+  const defaultHeadReport = runMutationGate([], {
+    MUTATION_BASE_REF: "HEAD",
+  });
+  const commandLineReport = runMutationGate([
+    "--base",
+    "HEAD~1",
+    "--head",
+    "HEAD",
+  ], {
+    MUTATION_BASE_REF: "HEAD",
+    MUTATION_HEAD_REF: "HEAD~1",
+  });
+
+  expect(pullRequestReport.diffRef).toBe(
+    "HEAD...HEAD~1"
+  );
+  expect(defaultHeadReport.diffRef).toBe("HEAD...HEAD");
+  expect(commandLineReport.diffRef).toBe("HEAD~1...HEAD");
+  expect(runMutationGate([], {}).diffRef).toBe("HEAD");
+  expect(runMutationGate([
+    "--files",
+    "src/core/schema/differ.ts",
+  ], {}).diffRef).toBeNull();
 });

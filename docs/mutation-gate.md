@@ -28,13 +28,18 @@ changed-file mutation runner:
 4. default operators: boolean flip, strict equality flip, logical and/or flip
 5. defaults: `max-per-file=4`, `timeout-ms=120000`
 6. env overrides: `MUTATION_MAX_MUTANTS_PER_FILE`, `MUTATION_TIMEOUT_MS`, `MUTATION_TEST_COMMAND`
+7. when a git diff reference is available, candidates are selected only from added or modified hunk lines; deletion-only hunks produce no candidates
+8. reports include the exact `diffRef` used and each selected mutant's final-file line and column
 
 changed file sources:
 
 1. `--files file1,file2`
 2. `--files-from <path>`
 3. `--base <ref> --head <ref>`
-4. fallback: `git diff --name-only --diff-filter=ACMRTUXB HEAD`
+4. `MUTATION_BASE_REF` plus optional `MUTATION_HEAD_REF` (defaults to `HEAD`)
+5. fallback: `git diff --name-only --diff-filter=ACMRTUXB HEAD`
+6. CI checks out full history and supplies the event base and head SHAs, so committed pull-request and push changes are visible from a clean worktree
+7. explicit `--files` and `--files-from` inputs have no hunk reference, so their candidate selection covers the whole target file
 
 gate behavior:
 

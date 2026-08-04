@@ -180,6 +180,7 @@
 - done: rerun full `test:coverage` gate green after parser-failure lock regressions (`1360` pass, `98.21%` line, `96.97%` function).
 - done: add real changed-files mutation runner (`tools/run-mutation-changed.ts`) with report output at `coverage/mutation/mutation-report.json`.
 - done: wire `test:mutation:changed:report` and `test:mutation:changed:gate` to generate and consume real mutation scores.
+- done: make changed-file mutation testing select candidates from added and modified hunk lines, carry the exact diff reference into reports, use event base/head SHAs with full history on clean CI checkouts, and mutation-test the gate implementation itself.
 - done: fix mutation baseline script to clear stale mutation report before baseline generation.
 - done: widen parser mutation test command to include parser-focused suites (`parser-module`, function/procedure/table/constraint coverage, view/trigger suites).
 - done: skip comment-only line mutations to avoid false-positive survivors.

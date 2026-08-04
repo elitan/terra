@@ -16,6 +16,18 @@ export const mutationRiskManifest: MutationRiskManifest = {
   version: 1,
   entries: [
     {
+      path: "tools/run-mutation-changed.ts",
+      owner: "quality-gates",
+      level: "high",
+      reason: "mutation candidate selection and execution determine gate trustworthiness",
+    },
+    {
+      path: "tools/check-mutation-gate.ts",
+      owner: "quality-gates",
+      level: "high",
+      reason: "changed-file discovery and score enforcement determine gate coverage",
+    },
+    {
       path: "src/core/schema/differ.ts",
       owner: "core-schema",
       level: "critical",

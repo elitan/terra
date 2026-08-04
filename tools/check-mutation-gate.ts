@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   mutationRiskManifest,
   type MutationRiskEntry,
@@ -9,7 +9,7 @@ import {
 
 type GateMode = "gate" | "report";
 
-type Options = {
+type MutationGateOptions = {
   mode: GateMode;
   threshold: number;
   minRisk: MutationRiskLevel;
@@ -47,6 +47,7 @@ type MutationGateReport = {
   targetFiles: FileAssessment[];
   score: number | null;
   scoreSource: string | null;
+  diffRef: string | null;
   pass: boolean;
 };
 
@@ -57,8 +58,11 @@ const RISK_ORDER: Record<MutationRiskLevel, number> = {
   critical: 4,
 };
 
-function parseArgs(argv: string[]): Options {
-  const options: Options = {
+function parseMutationGateOptions(
+  argv: string[],
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): MutationGateOptions {
+  const options: MutationGateOptions = {
     mode: "gate",
     threshold: 85,
     minRisk: "high",
@@ -138,7 +142,32 @@ function parseArgs(argv: string[]): Options {
     throw new Error(`Unknown argument --${name}`);
   }
 
+  if (!options.baseRef && environment.MUTATION_BASE_REF) {
+    options.baseRef = environment.MUTATION_BASE_REF;
+  }
+  if (!options.headRef && environment.MUTATION_HEAD_REF) {
+    options.headRef = environment.MUTATION_HEAD_REF;
+  }
+  if (options.baseRef && !options.headRef) {
+    options.headRef = "HEAD";
+  }
+
   return options;
+}
+
+function buildMutationDiffRef(
+  options: Pick<
+    MutationGateOptions,
+    "filesArg" | "filesFromPath" | "baseRef" | "headRef"
+  >
+): string | null {
+  if (options.filesArg || options.filesFromPath) {
+    return null;
+  }
+  if (options.baseRef) {
+    return `${options.baseRef}...${options.headRef || "HEAD"}`;
+  }
+  return "HEAD";
 }
 
 function isRiskLevel(value: string): value is MutationRiskLevel {
@@ -149,7 +178,7 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").trim();
 }
 
-function getChangedFiles(options: Options): string[] {
+function getChangedFiles(options: MutationGateOptions): string[] {
   if (options.filesArg) {
     return options.filesArg
       .split(",")
@@ -167,21 +196,22 @@ function getChangedFiles(options: Options): string[] {
       .sort();
   }
 
-  if (options.baseRef && options.headRef) {
-    const diff = execGitDiff(`${options.baseRef}...${options.headRef}`);
-    return diff;
-  }
-
-  return execGitDiff("HEAD");
+  return execGitDiff(buildMutationDiffRef(options) || "HEAD");
 }
 
 function execGitDiff(ref: string): string[] {
-  const command =
-    ref === "HEAD"
-      ? "git diff --name-only --diff-filter=ACMRTUXB HEAD"
-      : `git diff --name-only --diff-filter=ACMRTUXB ${ref}`;
-
-  const output = execSync(command, { encoding: "utf-8" });
+  const output = execFileSync(
+    "git",
+    [
+      "diff",
+      "--name-only",
+      "--diff-filter=ACMRTUXB",
+      "--end-of-options",
+      ref,
+      "--",
+    ],
+    { encoding: "utf-8" }
+  );
   return output
     .split(/\r?\n/)
     .map(normalizePath)
@@ -295,7 +325,9 @@ function getScoreFromReport(reportPath: string): number | null {
   return null;
 }
 
-function resolveScore(options: Options): { score: number | null; source: string | null } {
+function resolveScore(
+  options: MutationGateOptions
+): { score: number | null; source: string | null } {
   const fromArg = parseNumericScore(options.scoreArg);
   if (fromArg !== null) {
     return { score: fromArg, source: "--score" };
@@ -338,7 +370,7 @@ function resolveScore(options: Options): { score: number | null; source: string 
 }
 
 function toReport(
-  options: Options,
+  options: MutationGateOptions,
   assessments: FileAssessment[],
   score: number | null,
   scoreSource: string | null
@@ -367,6 +399,7 @@ function toReport(
     targetFiles,
     score,
     scoreSource,
+    diffRef: buildMutationDiffRef(options),
     pass,
   };
 }
@@ -408,7 +441,7 @@ function printSummary(report: MutationGateReport, outPath: string): void {
 }
 
 function main(): void {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseMutationGateOptions(process.argv.slice(2));
   const changedFiles = getChangedFiles(options);
   const assessments = assessChangedFiles(changedFiles, options.minRisk);
   const scoreResult = resolveScore(options);

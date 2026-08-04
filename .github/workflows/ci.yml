@@ -256,6 +256,8 @@ jobs:
           - 5432:5432
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -268,6 +270,8 @@ jobs:
           DATABASE_URL_PG15: ""
           DATABASE_URL_PG16: ""
           DATABASE_URL_PG17: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+          MUTATION_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+          MUTATION_HEAD_REF: ${{ github.sha }}
           MUTATION_MAX_MUTANTS_PER_FILE: "4"
           MUTATION_TIMEOUT_MS: "90000"
       - uses: actions/upload-artifact@v4

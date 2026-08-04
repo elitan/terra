@@ -735,16 +735,7 @@ export class SQLiteDiffer {
       return undefined;
     }
 
-    const currentAlias = this.getRowidAlias(current);
     const normalizedDesiredAlias = normalizeSQLiteIdentifier(desiredAlias);
-    if (
-      currentAlias &&
-      normalizeSQLiteIdentifier(currentAlias) ===
-        normalizedDesiredAlias
-    ) {
-      return undefined;
-    }
-
     const currentColumn = current.columns.find(function (column) {
       return normalizeSQLiteIdentifier(column.name) ===
         normalizedDesiredAlias;
