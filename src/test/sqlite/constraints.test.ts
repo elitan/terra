@@ -182,8 +182,11 @@ describe("SQLite Unique Constraints", () => {
 
     const parsed = await provider.parseSchema(initialSql);
     expect(parsed.tables[0].uniqueConstraints).toEqual([
-      { columns: ["email"] },
-      { columns: ["tenant", "username"] },
+      { columns: ["email"], collations: ["BINARY"] },
+      {
+        columns: ["tenant", "username"],
+        collations: ["BINARY", "BINARY"],
+      },
     ]);
 
     await schemaService.apply(initialSql, ["public"], true);
@@ -241,7 +244,10 @@ describe("SQLite Unique Constraints", () => {
       );
       const tables = await provider.getCurrentSchema(removalClient);
       expect(tables[0].uniqueConstraints).toEqual([
-        { columns: ["tenant", "username"] },
+        {
+          columns: ["tenant", "username"],
+          collations: ["BINARY", "BINARY"],
+        },
       ]);
     } finally {
       await removalClient.end();
@@ -651,5 +657,97 @@ describe("SQLite Foreign Key Constraints", () => {
         object: "children.parent_id",
       })
     );
+  });
+
+  test("should preserve valid unique foreign key parents through recreation", async function () {
+    const initialSchema = `
+      CREATE TABLE parents (
+        id INTEGER PRIMARY KEY,
+        external_id TEXT COLLATE NOCASE NOT NULL,
+        tenant TEXT NOT NULL,
+        code TEXT NOT NULL,
+        payload INTEGER,
+        UNIQUE (tenant, code)
+      );
+      CREATE UNIQUE INDEX parents_external_id
+      ON parents(external_id);
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_external_id TEXT REFERENCES parents(external_id),
+        tenant TEXT,
+        code TEXT,
+        FOREIGN KEY (code, tenant) REFERENCES parents(code, tenant)
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`
+      INSERT INTO parents(id, external_id, tenant, code, payload)
+      VALUES (1, 'Parent-A', 'acme', 'one', 42)
+    `);
+    await seedClient.query(`
+      INSERT INTO children(id, parent_external_id, tenant, code)
+      VALUES (1, 'parent-a', 'acme', 'one')
+    `);
+    await seedClient.end();
+
+    const recreatedSchema = initialSchema.replace(
+      "payload INTEGER",
+      "payload TEXT"
+    );
+    await schemaService.apply(recreatedSchema, ["public"], true);
+
+    const client = await provider.createClient(config);
+    const parentRows = await client.query(`
+      SELECT id, external_id, tenant, code, payload
+      FROM parents
+      ORDER BY id
+    `);
+    const foreignKeyCheck = await client.query("PRAGMA foreign_key_check");
+    await expect(
+      client.query(`
+        INSERT INTO children(id, parent_external_id, tenant, code)
+        VALUES (2, 'missing', 'acme', 'one')
+      `)
+    ).rejects.toThrow("FOREIGN KEY constraint failed");
+    await client.end();
+
+    expect(parentRows.rows).toEqual([
+      {
+        id: 1,
+        external_id: "Parent-A",
+        tenant: "acme",
+        code: "one",
+        payload: "42",
+      },
+    ]);
+    expect(foreignKeyCheck.rows).toEqual([]);
+    expect((await schemaService.plan(recreatedSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
+
+  test("should reject invalid foreign key parents before database mutation", async function () {
+    const invalidSchema = `
+      CREATE TABLE surrounding_table (id INTEGER PRIMARY KEY);
+      CREATE TABLE parents (external_id TEXT);
+      CREATE TABLE children (
+        parent_external_id TEXT REFERENCES parents(external_id)
+      );
+    `;
+
+    await expect(
+      schemaService.apply(invalidSchema, ["public"], true)
+    ).rejects.toThrow("Schema validation failed");
+
+    const client = await provider.createClient(config);
+    const tables = await client.query<{ name: string }>(`
+      SELECT name
+      FROM sqlite_schema
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `);
+    await client.end();
+    expect(tables.rows).toEqual([]);
   });
 });

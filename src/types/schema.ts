@@ -69,6 +69,7 @@ export interface CheckConstraint {
 export interface UniqueConstraint {
   name?: string;
   columns: string[];
+  collations?: string[]; // SQLite effective collations for each constrained column
   include?: string[];
   storageParameters?: Record<string, string>;
   tablespace?: string;

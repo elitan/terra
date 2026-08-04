@@ -284,6 +284,116 @@ describe("SQLite Unsupported Features Validation", () => {
     );
   });
 
+  test("should reject invalid explicit foreign key parent keys", async function () {
+    const cases = [
+      {
+        code: "SQLITE_FOREIGN_KEY_TARGET_COLUMN_MISSING",
+        sql: `
+          CREATE TABLE parents (id INTEGER PRIMARY KEY);
+          CREATE TABLE children (
+            parent_id INTEGER REFERENCES parents(missing_id)
+          );
+        `,
+      },
+      {
+        code: "SQLITE_FOREIGN_KEY_TARGET_NOT_UNIQUE",
+        sql: `
+          CREATE TABLE parents (external_id TEXT);
+          CREATE TABLE children (
+            parent_id TEXT REFERENCES parents(external_id)
+          );
+        `,
+      },
+      {
+        code: "SQLITE_FOREIGN_KEY_TARGET_NOT_UNIQUE",
+        sql: `
+          CREATE TABLE parents (external_id TEXT);
+          CREATE UNIQUE INDEX parents_external_id
+          ON parents(external_id)
+          WHERE external_id IS NOT NULL;
+          CREATE TABLE children (
+            parent_id TEXT REFERENCES parents(external_id)
+          );
+        `,
+      },
+      {
+        code: "SQLITE_FOREIGN_KEY_TARGET_COLLATION_MISMATCH",
+        sql: `
+          CREATE TABLE parents (
+            external_id TEXT COLLATE NOCASE,
+            UNIQUE (external_id COLLATE BINARY)
+          );
+          CREATE TABLE children (
+            parent_id TEXT REFERENCES parents(external_id)
+          );
+        `,
+      },
+      {
+        code: "SQLITE_FOREIGN_KEY_TARGET_COLLATION_MISMATCH",
+        sql: `
+          CREATE TABLE parents (external_id TEXT COLLATE NOCASE);
+          CREATE UNIQUE INDEX parents_external_id
+          ON parents(external_id COLLATE BINARY);
+          CREATE TABLE children (
+            parent_id TEXT REFERENCES parents(external_id)
+          );
+        `,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const parsed = await provider.parseSchema(testCase.sql);
+      expect(provider.validateSchema(parsed).errors).toContainEqual(
+        expect.objectContaining({
+          code: testCase.code,
+          object: "children.parent_id",
+        })
+      );
+
+      const runtimeClient = await provider.createClient({
+        dialect: "sqlite",
+        filename: ":memory:",
+      });
+      try {
+        for (const statement of testCase.sql.split(";")) {
+          if (statement.trim()) {
+            await runtimeClient.query(statement);
+          }
+        }
+        await expect(
+          runtimeClient.query("PRAGMA foreign_key_check")
+        ).rejects.toThrow("foreign key mismatch");
+      } finally {
+        await runtimeClient.end();
+      }
+    }
+  });
+
+  test("should accept exact primary and unique foreign key parent keys", async function () {
+    const parsed = await provider.parseSchema(`
+      CREATE TABLE parents (
+        id INTEGER PRIMARY KEY,
+        alias TEXT COLLATE NOCASE UNIQUE,
+        tenant TEXT NOT NULL,
+        code TEXT NOT NULL,
+        external_id TEXT COLLATE RTRIM,
+        UNIQUE (tenant, code)
+      );
+      CREATE UNIQUE INDEX parents_external_id
+      ON parents(external_id);
+      CREATE TABLE children (
+        parent_id INTEGER REFERENCES parents(id),
+        parent_alias TEXT REFERENCES parents(alias),
+        parent_external_id TEXT REFERENCES parents(external_id),
+        tenant TEXT,
+        code TEXT,
+        FOREIGN KEY (code, tenant) REFERENCES parents(code, tenant)
+      );
+    `);
+
+    expect(provider.validateSchema(parsed).errors).toEqual([]);
+  });
+
   test("should collect multiple errors", () => {
     const schema = {
       tables: [],

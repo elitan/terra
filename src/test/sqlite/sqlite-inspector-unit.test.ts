@@ -82,8 +82,13 @@ describe("SQLiteInspector unit coverage", () => {
         };
       }
 
-      if (sql.includes('PRAGMA index_info("sqlite_autoindex_users_1")')) {
-        return { rows: [{ seqno: 0, cid: 1, name: "email" }] };
+      if (sql.includes('PRAGMA index_xinfo("sqlite_autoindex_users_1")')) {
+        return {
+          rows: [
+            { seqno: 0, cid: 1, name: "email", desc: 0, coll: "BINARY", key: 1 },
+            { seqno: 1, cid: -1, name: null, desc: 0, coll: "BINARY", key: 0 },
+          ],
+        };
       }
 
       if (sql.includes('PRAGMA index_info("idx_users_email")')) {
@@ -170,7 +175,9 @@ describe("SQLiteInspector unit coverage", () => {
     expect(users.foreignKeys?.[0]?.onDelete).toBe("SET DEFAULT");
     expect(users.foreignKeys?.[0]?.onUpdate).toBe("RESTRICT");
     expect(users.foreignKeys?.[1]?.onUpdate).toBe("NO ACTION");
-    expect(users.uniqueConstraints).toEqual([{ columns: ["email"] }]);
+    expect(users.uniqueConstraints).toEqual([
+      { columns: ["email"], collations: ["BINARY"] },
+    ]);
     expect(users.indexes).toEqual([
       {
         name: "idx_users_email",

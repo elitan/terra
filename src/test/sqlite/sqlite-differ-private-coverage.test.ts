@@ -7,7 +7,10 @@ import {
   isSQLiteRecreationTableStatement,
 } from "../../utils/sqlite-recreation";
 import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
-import { removeSQLiteForeignKeyTargetColumns } from "../../providers/sqlite/sql-parser-utils";
+import {
+  extractSQLiteColumnCollations,
+  removeSQLiteForeignKeyTargetColumns,
+} from "../../providers/sqlite/sql-parser-utils";
 
 function makeTable(overrides: Partial<Table> = {}): Table {
   return {
@@ -69,6 +72,17 @@ describe("SQLiteDiffer private coverage", () => {
     ).toBe(`CHECK (note = 'REFERENCES parents(id)')`);
   });
 
+  test("extracts only declared column collations", function () {
+    const collations = extractSQLiteColumnCollations(`
+      CREATE TABLE examples (
+        "name" TEXT /* declared */ COLLATE [NOCASE],
+        note TEXT DEFAULT ('COLLATE RTRIM'),
+        CHECK (note COLLATE RTRIM <> '')
+      )
+    `);
+    expect(Array.from(collations.entries())).toEqual([["name", "NOCASE"]]);
+  });
+
   test("detectChanges marks check constraint changes for recreation", () => {
     const differ = new SQLiteDiffer() as any;
     const desired = makeTable({
@@ -105,10 +119,23 @@ describe("SQLiteDiffer private coverage", () => {
 
     const createTable = differ.generateCreateTable(
       makeTable({
-        uniqueConstraints: [{ name: "users_id_unique", columns: ["id"] }],
+        columns: [{
+          name: "id",
+          type: "TEXT",
+          nullable: false,
+          collation: { name: "NOCASE" },
+        }],
+        uniqueConstraints: [{
+          name: "users_id_unique",
+          columns: ["id"],
+          collations: ["NOCASE"],
+        }],
       })
     ) as string;
-    expect(createTable).toContain("CONSTRAINT \"users_id_unique\" UNIQUE (\"id\")");
+    expect(createTable).toContain(`"id" TEXT COLLATE "NOCASE" NOT NULL`);
+    expect(createTable).toContain(
+      `CONSTRAINT "users_id_unique" UNIQUE ("id" COLLATE "NOCASE")`
+    );
 
     const createIndex = differ.generateCreateIndex({
       name: "idx_users_active",

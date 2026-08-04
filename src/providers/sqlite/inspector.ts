@@ -14,6 +14,7 @@ import type {
 import {
   extractSQLiteCheckExpressions,
   extractSQLiteAutoincrementColumns,
+  extractSQLiteColumnCollations,
   extractSQLiteGeneratedExpressions,
   extractSQLiteViewDefinition,
   parseSQLiteIndexDefinition,
@@ -196,6 +197,7 @@ export class SQLiteInspector {
     createSql: string | null
   ): Column[] {
     const generatedExpressions = extractSQLiteGeneratedExpressions(createSql || "");
+    const collations = extractSQLiteColumnCollations(createSql || "");
     const inspector = this;
 
     return rows
@@ -218,6 +220,7 @@ export class SQLiteInspector {
               stored: row.hidden === 3,
             }
           : undefined;
+        const collation = collations.get(row.name);
 
         return {
           name: row.name,
@@ -226,6 +229,7 @@ export class SQLiteInspector {
           default: row.dflt_value
             ? inspector.normalizeDefault(row.dflt_value)
             : undefined,
+          ...(collation ? { collation: { name: collation } } : {}),
           generated: generatedMetadata,
         };
       });
@@ -393,23 +397,30 @@ export class SQLiteInspector {
       }
 
       const indexInfo = await client.query<IndexColumnInfo>(
-        `PRAGMA index_info(${this.quoteIdentifier(index.name)})`
+        `PRAGMA index_xinfo(${this.quoteIdentifier(index.name)})`
       );
-      if (indexInfo.rows.some(function (column) {
+      const keyColumns = indexInfo.rows
+        .filter(function (column) {
+          return column.key === 1;
+        })
+        .sort(function (left, right) {
+          return left.seqno - right.seqno;
+        });
+      if (keyColumns.some(function (column) {
         return column.name === null;
       })) {
         throw new Error(
           `Unable to inspect UNIQUE constraint columns for SQLite index "${index.name}"`
         );
       }
-      const columns = indexInfo.rows
-        .sort(function (left, right) {
-          return left.seqno - right.seqno;
-        })
+      const columns = keyColumns
         .map(function (column) {
           return column.name as string;
         });
-      constraints.push({ columns });
+      const collations = keyColumns.map(function (column) {
+        return column.coll;
+      });
+      constraints.push({ columns, collations });
     }
 
     return constraints.sort(function (left, right) {

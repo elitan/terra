@@ -546,6 +546,49 @@ export function extractSQLiteGeneratedExpressions(sql: string): Map<string, stri
   return expressions;
 }
 
+export function extractSQLiteColumnCollations(sql: string): Map<string, string> {
+  const collations = new Map<string, string>();
+
+  for (const definition of splitSQLiteTableDefinitions(sql)) {
+    if (isSQLiteTableConstraint(definition)) {
+      continue;
+    }
+    const column = readSQLiteIdentifier(definition);
+    if (!column) {
+      continue;
+    }
+
+    let depth = 0;
+    let cursor = column.end;
+    while (cursor < definition.length) {
+      const skipped = skipQuotedOrComment(definition, cursor);
+      if (skipped !== undefined) {
+        cursor = skipped;
+        continue;
+      }
+      if (definition[cursor] === "(") {
+        depth += 1;
+      } else if (definition[cursor] === ")") {
+        depth -= 1;
+      } else if (
+        depth === 0 &&
+        isKeywordAt(definition, cursor, "COLLATE")
+      ) {
+        const collation = readSQLiteIdentifier(
+          definition.slice(cursor + "COLLATE".length)
+        );
+        if (collation) {
+          collations.set(column.name, collation.name);
+        }
+        break;
+      }
+      cursor += 1;
+    }
+  }
+
+  return collations;
+}
+
 export function extractSQLiteAutoincrementColumns(sql: string): string[] {
   const columns: string[] = [];
 

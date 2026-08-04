@@ -20,6 +20,7 @@ import type {
   Extension,
   SchemaDefinition,
   Comment,
+  Index,
 } from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
 import { SQLiteClient } from "./client";
@@ -43,6 +44,100 @@ const UNSUPPORTED_FEATURES: DatabaseFeature[] = [
   "materialized_views",
   "index_types",
 ];
+
+type SQLiteParentKeyStatus = "valid" | "not_unique" | "collation_mismatch";
+
+function sqliteColumnSetsEqual(first: string[], second: string[]): boolean {
+  if (first.length !== second.length) {
+    return false;
+  }
+  const normalizedFirst = first.map(normalizeSQLiteIdentifier).sort();
+  const normalizedSecond = second.map(normalizeSQLiteIdentifier).sort();
+  return normalizedFirst.every(function (column, index) {
+    return column === normalizedSecond[index];
+  });
+}
+
+function sqliteKeyCollationsMatch(
+  table: Table,
+  columns: string[],
+  collations?: Array<string | undefined>
+): boolean {
+  if (!collations) {
+    return true;
+  }
+
+  return columns.every(function (columnName, index) {
+    const normalizedColumn = normalizeSQLiteIdentifier(columnName);
+    const column = table.columns.find(function (candidate) {
+      return normalizeSQLiteIdentifier(candidate.name) === normalizedColumn;
+    });
+    const declaredCollation = column?.collation?.name || "BINARY";
+    const keyCollation = collations[index] || "BINARY";
+    return normalizeSQLiteIdentifier(declaredCollation) ===
+      normalizeSQLiteIdentifier(keyCollation);
+  });
+}
+
+function getSQLiteIndexParentKey(
+  index: Index
+): { columns: string[]; collations?: Array<string | undefined> } | undefined {
+  if (!index.unique || index.where) {
+    return undefined;
+  }
+  if (!index.terms) {
+    return { columns: index.columns };
+  }
+  if (index.terms.some(function (term) {
+    return term.column === undefined || term.expression !== undefined;
+  })) {
+    return undefined;
+  }
+  return {
+    columns: index.terms.map(function (term) {
+      return term.column as string;
+    }),
+    collations: index.terms.map(function (term) {
+      return term.collation;
+    }),
+  };
+}
+
+function getSQLiteParentKeyStatus(
+  table: Table,
+  referencedColumns: string[]
+): SQLiteParentKeyStatus {
+  if (
+    table.primaryKey &&
+    sqliteColumnSetsEqual(table.primaryKey.columns, referencedColumns)
+  ) {
+    return "valid";
+  }
+
+  let collationMismatch = false;
+  for (const constraint of table.uniqueConstraints || []) {
+    if (!sqliteColumnSetsEqual(constraint.columns, referencedColumns)) {
+      continue;
+    }
+    if (sqliteKeyCollationsMatch(table, constraint.columns, constraint.collations)) {
+      return "valid";
+    }
+    collationMismatch = true;
+  }
+
+  for (const index of table.indexes || []) {
+    const key = getSQLiteIndexParentKey(index);
+    if (!key || !sqliteColumnSetsEqual(key.columns, referencedColumns)) {
+      continue;
+    }
+    if (sqliteKeyCollationsMatch(table, key.columns, key.collations)) {
+      return "valid";
+    }
+    collationMismatch = true;
+  }
+
+  return collationMismatch ? "collation_mismatch" : "not_unique";
+}
 
 export class SQLiteProvider implements DatabaseProvider {
   readonly dialect = "sqlite" as const;
@@ -250,6 +345,61 @@ export class SQLiteProvider implements DatabaseProvider {
             suggestion:
               "Specify referenced columns explicitly or use the complete " +
               "parent primary key",
+          });
+          continue;
+        }
+
+        const referencedColumnNames = new Set(
+          referencedTable.columns.map(function (column) {
+            return normalizeSQLiteIdentifier(column.name);
+          })
+        );
+        const missingReferencedColumns = foreignKey.referencedColumns.filter(
+          function (column) {
+            return !referencedColumnNames.has(normalizeSQLiteIdentifier(column));
+          }
+        );
+        if (missingReferencedColumns.length > 0) {
+          errors.push({
+            code: "SQLITE_FOREIGN_KEY_TARGET_COLUMN_MISSING",
+            message:
+              `Foreign key on "${table.name}" references missing column(s) ` +
+              `${missingReferencedColumns.join(", ")} on ` +
+              `"${referencedTable.name}"`,
+            object: `${table.name}.${foreignKey.columns.join(",")}`,
+            suggestion:
+              "Reference named columns that exist on the parent table",
+          });
+          continue;
+        }
+
+        const parentKeyStatus = getSQLiteParentKeyStatus(
+          referencedTable,
+          foreignKey.referencedColumns
+        );
+        if (parentKeyStatus === "collation_mismatch") {
+          errors.push({
+            code: "SQLITE_FOREIGN_KEY_TARGET_COLLATION_MISMATCH",
+            message:
+              `Foreign key on "${table.name}" references a unique key on ` +
+              `"${referencedTable.name}" whose collations do not match the ` +
+              "parent column declarations",
+            object: `${table.name}.${foreignKey.columns.join(",")}`,
+            suggestion:
+              "Use the parent columns' declared collations for the complete " +
+              "UNIQUE key",
+          });
+        } else if (parentKeyStatus === "not_unique") {
+          errors.push({
+            code: "SQLITE_FOREIGN_KEY_TARGET_NOT_UNIQUE",
+            message:
+              `Foreign key on "${table.name}" references columns on ` +
+              `"${referencedTable.name}" that are not exactly covered by a ` +
+              "PRIMARY KEY or non-partial UNIQUE key",
+            object: `${table.name}.${foreignKey.columns.join(",")}`,
+            suggestion:
+              "Add a matching PRIMARY KEY, UNIQUE constraint, or non-partial " +
+              "UNIQUE index",
           });
         }
       }

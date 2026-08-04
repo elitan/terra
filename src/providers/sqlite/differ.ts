@@ -15,6 +15,7 @@ import {
   replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
 import { chooseSQLiteRecreationTableName } from "../../utils/sqlite-recreation";
+import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 
 interface ColumnChange {
   type: 'add' | 'drop' | 'modify';
@@ -196,6 +197,12 @@ export class SQLiteDiffer {
     if (this.normalizeDefault(desired.default) !== this.normalizeDefault(current.default)) {
       return true;
     }
+    if (
+      normalizeSQLiteIdentifier(desired.collation?.name || "BINARY") !==
+      normalizeSQLiteIdentifier(current.collation?.name || "BINARY")
+    ) {
+      return true;
+    }
     if (desired.generated || current.generated) {
       if (!desired.generated || !current.generated) {
         return true;
@@ -256,12 +263,18 @@ export class SQLiteDiffer {
   ): boolean {
     const desiredColumns = (desired || [])
       .map(function (constraint) {
-        return constraint.columns.join("\0");
+        return constraint.columns.map(function (column, index) {
+          const collation = constraint.collations?.[index] || "BINARY";
+          return `${column}\0${normalizeSQLiteIdentifier(collation)}`;
+        }).join("\0");
       })
       .sort();
     const currentColumns = (current || [])
       .map(function (constraint) {
-        return constraint.columns.join("\0");
+        return constraint.columns.map(function (column, index) {
+          const collation = constraint.collations?.[index] || "BINARY";
+          return `${column}\0${normalizeSQLiteIdentifier(collation)}`;
+        }).join("\0");
       })
       .sort();
 
@@ -428,7 +441,14 @@ export class SQLiteDiffer {
     }
 
     for (const uc of table.uniqueConstraints || []) {
-      const ucCols = this.quoteIdentifiers(uc.columns);
+      const differ = this;
+      const ucCols = uc.columns.map(function (column, index) {
+        const quotedColumn = differ.quoteIdentifier(column);
+        const collation = uc.collations?.[index];
+        return collation
+          ? `${quotedColumn} COLLATE ${differ.quoteIdentifier(collation)}`
+          : quotedColumn;
+      }).join(", ");
       const name = uc.name
         ? `CONSTRAINT ${this.quoteIdentifier(uc.name)} `
         : "";
@@ -471,6 +491,10 @@ export class SQLiteDiffer {
 
   private generateColumnDefinition(column: Column): string {
     let definition = `${this.quoteIdentifier(column.name)} ${column.type}`;
+
+    if (column.collation) {
+      definition += ` COLLATE ${this.quoteIdentifier(column.collation.name)}`;
+    }
 
     if (column.generated) {
       definition += ` GENERATED ALWAYS AS (${column.generated.expression})`;
