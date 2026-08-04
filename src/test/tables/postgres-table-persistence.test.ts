@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
 import { createColumnTestServices } from "../columns/column-test-utils";
-import { cleanDatabase, createTestClient } from "../utils";
+import {
+  cleanDatabase,
+  createTestClient,
+  createTestSchemaService,
+} from "../utils";
 
 describe("PostgreSQL table persistence", function () {
   let client: Client;
@@ -67,6 +71,112 @@ describe("PostgreSQL table persistence", function () {
       .transactional.join("\n");
     expect(sql).toContain('CREATE TABLE "public"."permanent_table"');
     expect(sql).toContain('CREATE UNLOGGED TABLE "public"."unlogged_table"');
+  });
+
+  test("rejects unlogged partition hierarchy definitions before planning", async function () {
+    const cases = [
+      `
+        CREATE UNLOGGED TABLE public.unlogged_partition_parent (
+          id integer
+        ) PARTITION BY RANGE (id);
+      `,
+      `
+        CREATE TABLE public.logged_partition_parent (
+          id integer
+        ) PARTITION BY RANGE (id);
+        CREATE UNLOGGED TABLE public.unlogged_partition_child
+          PARTITION OF public.logged_partition_parent
+          FOR VALUES FROM (0) TO (100);
+      `,
+    ];
+
+    for (const schema of cases) {
+      await expect(
+        services.parser.parseSchema(schema, "unlogged-partition.sql")
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        filePath: "unlogged-partition.sql",
+        message: expect.stringContaining("UNLOGGED partition hierarchies"),
+      });
+    }
+  });
+
+  test("rejects unlogged partitions before applying surrounding DDL", async function () {
+    const schema = `
+      CREATE TABLE public.persistence_before (id integer PRIMARY KEY);
+      CREATE UNLOGGED TABLE public.persistence_partitioned (
+        id integer
+      ) PARTITION BY RANGE (id);
+      CREATE TABLE public.persistence_after (id integer PRIMARY KEY);
+    `;
+
+    await expect(
+      createTestSchemaService().apply(schema, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "PARSER_ERROR",
+      message: expect.stringContaining("UNLOGGED partition hierarchies"),
+    });
+
+    const relations = await client.query(`
+      SELECT
+        to_regclass('public.persistence_before') AS before,
+        to_regclass('public.persistence_partitioned') AS partitioned,
+        to_regclass('public.persistence_after') AS after
+    `);
+    expect(relations.rows[0]).toEqual({
+      before: null,
+      partitioned: null,
+      after: null,
+    });
+  });
+
+  test("rejects external unlogged partition hierarchy state", async function () {
+    const versionResult = await client.query(
+      "SELECT current_setting('server_version_num')::integer AS version"
+    );
+    if (Number(versionResult.rows[0]?.version) >= 180000) {
+      return;
+    }
+
+    const schemaService = createTestSchemaService();
+    await client.query(`
+      CREATE UNLOGGED TABLE public.external_unlogged_parent (id integer)
+        PARTITION BY RANGE (id);
+      CREATE TABLE public.external_logged_child
+        PARTITION OF public.external_unlogged_parent
+        FOR VALUES FROM (0) TO (100);
+    `);
+    await expect(
+      schemaService.plan("", ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("external_unlogged_parent"),
+    });
+
+    expect(
+      (
+        await client.query(`
+          SELECT relpersistence
+          FROM pg_class
+          WHERE oid = 'public.external_unlogged_parent'::regclass
+        `)
+      ).rows[0]?.relpersistence
+    ).toBe("u");
+
+    await client.query(`
+      DROP TABLE public.external_unlogged_parent;
+      CREATE TABLE public.external_logged_parent (id integer)
+        PARTITION BY RANGE (id);
+      CREATE UNLOGGED TABLE public.external_unlogged_child
+        PARTITION OF public.external_logged_parent
+        FOR VALUES FROM (0) TO (100);
+    `);
+    await expect(
+      schemaService.plan("", ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("external_unlogged_child"),
+    });
   });
 
   test("creates, inspects, and reapplies an unlogged table", async function () {

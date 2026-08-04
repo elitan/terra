@@ -346,7 +346,14 @@ interface UnsupportedConstraintCatalogRow {
 interface TableConstraintCatalogRow {
   table_name?: string;
   table_schema?: string;
+  schema_name?: string;
+  relation_persistence?: string;
   unsupported_constraints?: UnsupportedConstraintCatalogRow[];
+}
+
+function getCatalogRelationIdentity(row: TableConstraintCatalogRow): string {
+  const schemaName = row.table_schema || row.schema_name || "public";
+  return `${schemaName}.${row.table_name || "unknown table"}`;
 }
 
 function getUnsupportedConstraintFeatures(
@@ -382,11 +389,9 @@ function assertConstraintRowsAreSupported(
         continue;
       }
 
-      const identity = [
-        row.table_schema || "public",
-        row.table_name || "unknown table",
-        constraint.constraintName || "unknown constraint",
-      ].join(".");
+      const identity = `${getCatalogRelationIdentity(row)}.${
+        constraint.constraintName || "unknown constraint"
+      }`;
       throw new ValidationError(
         `Unsupported PostgreSQL constraint ${identity} is present in a managed schema: ${features.join(", ")}. TerraDB cannot inspect this constraint losslessly; replace it with a supported constraint or manage the table outside TerraDB before planning`,
         `constraint ${identity}`,
@@ -394,6 +399,24 @@ function assertConstraintRowsAreSupported(
         features
       );
     }
+  }
+}
+
+function assertPartitionRowsAreSupported(
+  rows: TableConstraintCatalogRow[]
+): void {
+  for (const row of rows) {
+    if (row.relation_persistence !== "u") {
+      continue;
+    }
+
+    const identity = getCatalogRelationIdentity(row);
+    throw new ValidationError(
+      `Unsupported PostgreSQL UNLOGGED partition hierarchy relation ${identity} is present in a managed schema. PostgreSQL 18 rejects unlogged partitioned parents and earlier releases do not propagate persistence consistently to children; use a logged partition hierarchy or manage it outside TerraDB before planning`,
+      `relation ${identity}`,
+      "persistence",
+      "UNLOGGED"
+    );
   }
 }
 
@@ -2288,6 +2311,7 @@ export class DatabaseInspector {
         c.oid,
         c.relname as table_name,
         n.nspname as schema_name,
+        c.relpersistence as relation_persistence,
         pg_get_partkeydef(c.oid) as partition_key,
         unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
@@ -2299,6 +2323,7 @@ export class DatabaseInspector {
         AND d.objid IS NULL
       ORDER BY n.nspname, c.relname
     `, [schemas]);
+    assertPartitionRowsAreSupported(result.rows);
     assertConstraintRowsAreSupported(result.rows);
 
     const objects: SqlObject[] = [];
@@ -2324,6 +2349,7 @@ export class DatabaseInspector {
       SELECT
         c.relname as table_name,
         n.nspname as schema_name,
+        c.relpersistence as relation_persistence,
         parent.relname as parent_name,
         parent_ns.nspname as parent_schema,
         pg_get_expr(c.relpartbound, c.oid) as partition_bound,
@@ -2340,6 +2366,7 @@ export class DatabaseInspector {
         AND d.objid IS NULL
       ORDER BY n.nspname, c.relname
     `, [schemas]);
+    assertPartitionRowsAreSupported(childResult.rows);
     assertConstraintRowsAreSupported(childResult.rows);
 
     for (const row of childResult.rows) {

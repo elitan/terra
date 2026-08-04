@@ -485,6 +485,10 @@ export class SchemaParser {
         this.rejectTemporaryRelation(stmt, filePath);
         if (stmt.CreateStmt) {
           this.rejectUnsupportedTableShorthand(stmt.CreateStmt, filePath);
+          this.rejectUnsupportedPartitionPersistence(
+            stmt.CreateStmt,
+            filePath
+          );
           this.rejectUnsupportedConstraintSemantics(
             stmt.CreateStmt,
             filePath
@@ -747,6 +751,23 @@ export class SchemaParser {
         filePath
       );
     }
+  }
+
+  private rejectUnsupportedPartitionPersistence(
+    stmt: any,
+    filePath?: string
+  ): void {
+    if (
+      stmt.relation?.relpersistence !== "u" ||
+      !this.isPartitionCreateStatement(stmt)
+    ) {
+      return;
+    }
+
+    throw new ParserError(
+      "PostgreSQL UNLOGGED partition hierarchies are not supported in desired schemas because PostgreSQL 18 rejects unlogged partitioned parents and earlier releases do not propagate persistence consistently to children; use a logged partition hierarchy or manage it outside TerraDB",
+      filePath
+    );
   }
 
   private rejectUnsupportedConstraintSemantics(

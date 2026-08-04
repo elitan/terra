@@ -108,6 +108,49 @@ describe("DatabaseInspector coverage", () => {
     }
   });
 
+  test("rejects unlogged partition hierarchy catalog state", async function () {
+    const scenarios = [
+      { parentPersistence: "u", childPersistence: undefined, name: "parent" },
+      { parentPersistence: undefined, childPersistence: "u", name: "child" },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const inspector = new DatabaseInspector() as any;
+      const client = createClient(function handleQuery(sql, params) {
+        expect(sql).toContain("c.relpersistence as relation_persistence");
+        expect(params).toEqual([["public"]]);
+        if (sql.includes("pg_get_partkeydef")) {
+          return {
+            rows: scenario.parentPersistence
+              ? [{
+                  table_name: "unlogged_parent",
+                  schema_name: "audit",
+                  relation_persistence: scenario.parentPersistence,
+                }]
+              : [],
+          };
+        }
+        if (sql.includes("c.relispartition")) {
+          return {
+            rows: [{
+              table_name: "unlogged_child",
+              schema_name: "audit",
+              relation_persistence: scenario.childPersistence,
+            }],
+          };
+        }
+        throw new Error(`Unhandled SQL: ${sql}`);
+      });
+
+      await expect(
+        inspector.getCurrentPartitionObjects(client, ["public"])
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining(`audit.unlogged_${scenario.name}`),
+      });
+    }
+  });
+
   test("maps unlogged table persistence", async function () {
     const inspector = new DatabaseInspector() as any;
     inspector.getPrimaryKeyConstraint = async function () { return undefined; };
