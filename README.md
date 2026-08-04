@@ -125,8 +125,10 @@ versions do not propagate parent persistence consistently and TerraDB does not
 model mixed-persistence partition hierarchies. Equivalent external catalog
 state on PostgreSQL 14–17 is also rejected before diffing.
 PostgreSQL partition definitions are compared through PostgreSQL's parsed
-representation, so equivalent identifier quoting, type aliases, formatting,
-and implicit `public` qualification converge after inspection. A change only
+representation and TerraDB's semantic column model, so equivalent identifier
+quoting, type aliases, formatting, implicit `public` qualification, catalog
+collation qualification, default-expression casts, identity-sequence expansion,
+and explicit `NULL` converge after inspection. A change only
 to a leaf partition bound uses transactional `DETACH PARTITION` and `ATTACH
 PARTITION` statements, preserving the partition table and its rows. If the new
 bound rejects existing rows, the transaction rolls back to the prior attached
@@ -140,7 +142,9 @@ constraints, `IF NOT EXISTS`, subpartitions, leaf column overrides or local
 constraints, foreign-table partitions, partition access methods, storage
 parameters, tablespaces, and parent column `STORAGE` or `COMPRESSION` settings
 are rejected before mutation because TerraDB cannot yet inspect and order them
-losslessly. Imperative `ALTER TABLE ... ATTACH/DETACH PARTITION` commands are
+losslessly. Legacy `serial` pseudo-types are also rejected on partitioned parents;
+use an identity column so sequence semantics remain declarative. Imperative
+`ALTER TABLE ... ATTACH/DETACH PARTITION` commands are
 also rejected in desired schemas; add or remove the declarative leaf instead.
 Equivalent unsupported state created outside TerraDB is detected from the
 PostgreSQL catalogs and rejected before diffing.

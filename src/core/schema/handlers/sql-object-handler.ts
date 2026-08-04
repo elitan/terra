@@ -1,6 +1,11 @@
 import type { SqlObject, SqlObjectKind } from "../../../types/schema";
 import { ValidationError } from "../../../types/errors";
 import { deparseSync, parse } from "pgsql-parser";
+import { parseCreateTable } from "../parser/tables/table-parser";
+import {
+  partitionParentsAreEquivalent,
+  type PartitionParent,
+} from "./partition-comparator";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -16,6 +21,7 @@ type SqlObjectPlan = {
 type CanonicalSqlObject = {
   normalized: string;
   statement?: any;
+  partitionParent?: PartitionParent;
 };
 
 type PartitionBoundReplacement = {
@@ -103,9 +109,27 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
       return { normalized: normalizeSql(object.createStatement) };
     }
 
+    const statement = statements.length === 1 ? statements[0] : undefined;
+    const createStatement = statement?.CreateStmt;
+    const partitionTable =
+      createStatement?.partspec && !createStatement.partbound
+        ? parseCreateTable(createStatement)
+        : null;
+
     return {
       normalized: normalizeSql(deparseSync(statements)),
-      statement: statements.length === 1 ? statements[0] : undefined,
+      statement,
+      ...(partitionTable
+        ? {
+            partitionParent: {
+              definition: deparseCreateStatement({
+                ...createStatement,
+                tableElts: [],
+              }),
+              table: partitionTable,
+            },
+          }
+        : {}),
     };
   } catch {
     return { normalized: normalizeSql(object.createStatement) };
@@ -314,6 +338,17 @@ export class SqlObjectHandler {
       const currentCanonical = canonicalObjects.get(currentObject)!;
       const desiredCanonical = canonicalObjects.get(desiredObject)!;
       if (currentCanonical.normalized === desiredCanonical.normalized) {
+        continue;
+      }
+
+      if (
+        currentObject.kind === "partition" &&
+        desiredObject.kind === "partition" &&
+        partitionParentsAreEquivalent(
+          desiredCanonical.partitionParent,
+          currentCanonical.partitionParent
+        )
+      ) {
         continue;
       }
 

@@ -87,6 +87,30 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
         feature: "column STORAGE or COMPRESSION",
       },
       {
+        sql: "CREATE TABLE public.events (id serial, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "serial pseudo-types; use an identity column instead",
+      },
+      {
+        sql: "CREATE TABLE public.events (id serial2, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "serial pseudo-types; use an identity column instead",
+      },
+      {
+        sql: "CREATE TABLE public.events (id serial4, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "serial pseudo-types; use an identity column instead",
+      },
+      {
+        sql: "CREATE TABLE public.events (id serial8, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "serial pseudo-types; use an identity column instead",
+      },
+      {
+        sql: "CREATE TABLE public.events (id smallserial, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "serial pseudo-types; use an identity column instead",
+      },
+      {
+        sql: "CREATE TABLE public.events (id bigserial, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "serial pseudo-types; use an identity column instead",
+      },
+      {
         sql: "CREATE TABLE public.events (id integer, bucket integer, CHECK (id > 0)) PARTITION BY RANGE (bucket);",
         feature: "explicitly named table constraints",
       },

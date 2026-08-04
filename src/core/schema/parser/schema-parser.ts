@@ -850,6 +850,26 @@ export class SchemaParser {
       if (hasPhysicalColumnOptions) {
         features.push("column STORAGE or COMPRESSION");
       }
+
+      const serialTypeNames = new Set([
+        "serial",
+        "serial2",
+        "serial4",
+        "serial8",
+        "smallserial",
+        "bigserial",
+      ]);
+      const hasSerialColumn = (stmt.tableElts || []).some(
+        function hasSerialColumn(item: any) {
+          const names = item.ColumnDef?.typeName?.names || [];
+          return names.some(function isSerialName(name: any) {
+            return serialTypeNames.has(String(name?.String?.sval || "").toLowerCase());
+          });
+        }
+      );
+      if (hasSerialColumn) {
+        features.push("serial pseudo-types; use an identity column instead");
+      }
     }
 
     if (stmt.accessMethod) {

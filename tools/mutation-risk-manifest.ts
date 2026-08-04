@@ -34,6 +34,12 @@ export const mutationRiskManifest: MutationRiskManifest = {
       reason: "parser drift causes false diffs and migration risk",
     },
     {
+      path: "src/core/schema/handlers",
+      owner: "core-schema",
+      level: "critical",
+      reason: "object handlers control lifecycle ordering and destructive-change safety",
+    },
+    {
       path: "src/core/schema/inspector.ts",
       owner: "core-inspector",
       level: "high",
