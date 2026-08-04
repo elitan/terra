@@ -151,6 +151,47 @@ describe("DatabaseInspector coverage", () => {
     }
   });
 
+  test("rejects lossy partition catalog features", async function () {
+    const scenarios = [
+      { relation_kind: "p", is_partition: true, feature: "subpartitioning" },
+      {
+        relation_kind: "f",
+        is_partition: true,
+        feature: "foreign-table partition",
+      },
+      { relation_options: ["fillfactor=70"], feature: "storage parameters" },
+      { relation_tablespace: "fast_tables", feature: "tablespace" },
+      { relation_access_method: "custom_heap", feature: "access method" },
+      {
+        unsupported_partition_features: ["column payload STORAGE or COMPRESSION"],
+        feature: "column payload STORAGE or COMPRESSION",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const inspector = new DatabaseInspector() as any;
+      const client = createClient(function handleQuery(sql) {
+        if (!sql.includes("pg_get_partkeydef")) {
+          throw new Error(`Unhandled SQL: ${sql}`);
+        }
+        return {
+          rows: [{
+            table_name: "advanced_parent",
+            schema_name: "audit",
+            ...scenario,
+          }],
+        };
+      });
+
+      await expect(
+        inspector.getCurrentPartitionObjects(client, ["audit"])
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining(scenario.feature),
+      });
+    }
+  });
+
   test("maps unlogged table persistence", async function () {
     const inspector = new DatabaseInspector() as any;
     inspector.getPrimaryKeyConstraint = async function () { return undefined; };

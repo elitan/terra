@@ -95,6 +95,35 @@ describe("SqlObjectHandler", function () {
     expect(plan.earlyDrop).toEqual([]);
   });
 
+  test("ignores parent table constraint order", async function () {
+    const handler = new SqlObjectHandler();
+    const desired = makeSqlObject({
+      createStatement: `
+        CREATE TABLE public.accounts (
+          id integer NOT NULL,
+          region_id integer NOT NULL,
+          CONSTRAINT accounts_positive CHECK (id > 0),
+          CONSTRAINT accounts_pkey PRIMARY KEY (id, region_id)
+        ) PARTITION BY RANGE (region_id);
+      `,
+    });
+    const current = makeSqlObject({
+      createStatement: `
+        CREATE TABLE "public"."accounts" (
+          "id" integer NOT NULL,
+          "region_id" integer NOT NULL,
+          CONSTRAINT "accounts_pkey" PRIMARY KEY (id, region_id),
+          CONSTRAINT "accounts_positive" CHECK ((id > 0))
+        ) PARTITION BY RANGE (region_id);
+      `,
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.preTableCreate).toEqual([]);
+    expect(plan.earlyDrop).toEqual([]);
+  });
+
   test("quotes unusual partition identifiers when changing a bound", async function () {
     const handler = new SqlObjectHandler();
     const current = makeSqlObject({

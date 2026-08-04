@@ -133,6 +133,17 @@ bound rejects existing rows, the transaction rolls back to the prior attached
 partition and bound. Other in-place partition-definition replacements fail
 before execution instead of dropping and recreating a potentially populated
 partition hierarchy.
+The supported partition contract is a basic partitioned parent with explicitly
+named table-level key/check constraints and direct `CREATE TABLE ... PARTITION
+OF` leaves. Parent foreign keys, unnamed or inline key/check/reference
+constraints, `IF NOT EXISTS`, subpartitions, leaf column overrides or local
+constraints, foreign-table partitions, partition access methods, storage
+parameters, tablespaces, and parent column `STORAGE` or `COMPRESSION` settings
+are rejected before mutation because TerraDB cannot yet inspect and order them
+losslessly. Imperative `ALTER TABLE ... ATTACH/DETACH PARTITION` commands are
+also rejected in desired schemas; add or remove the declarative leaf instead.
+Equivalent unsupported state created outside TerraDB is detected from the
+PostgreSQL catalogs and rejected before diffing.
 
 ## Commands
 

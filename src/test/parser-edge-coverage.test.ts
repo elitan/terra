@@ -779,10 +779,7 @@ describe("Parser edge coverage", () => {
             cmds: [{ AlterTableCmd: { subtype: "AT_AttachPartition" } }],
           },
         })
-      ).toMatchObject({
-        kind: "partition",
-        key: "partition:public.accounts:alter",
-      });
+      ).toBeNull();
 
       expect(parser.parsePolicySqlObject({ CreatePolicyStmt: { policy_name: "tenant_policy" } })).toBeNull();
       expect(parser.parseDomainSqlObject({ CreateDomainStmt: { domainname: [] } })).toBeNull();

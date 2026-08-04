@@ -348,6 +348,12 @@ interface TableConstraintCatalogRow {
   table_schema?: string;
   schema_name?: string;
   relation_persistence?: string;
+  relation_kind?: string;
+  is_partition?: boolean;
+  relation_options?: string[] | null;
+  relation_tablespace?: string;
+  relation_access_method?: string;
+  unsupported_partition_features?: string[];
   unsupported_constraints?: UnsupportedConstraintCatalogRow[];
 }
 
@@ -406,16 +412,47 @@ function assertPartitionRowsAreSupported(
   rows: TableConstraintCatalogRow[]
 ): void {
   for (const row of rows) {
-    if (row.relation_persistence !== "u") {
+    const identity = getCatalogRelationIdentity(row);
+    if (row.relation_persistence === "u") {
+      throw new ValidationError(
+        `Unsupported PostgreSQL UNLOGGED partition hierarchy relation ${identity} is present in a managed schema. PostgreSQL 18 rejects unlogged partitioned parents and earlier releases do not propagate persistence consistently to children; use a logged partition hierarchy or manage it outside TerraDB before planning`,
+        `relation ${identity}`,
+        "persistence",
+        "UNLOGGED"
+      );
+    }
+
+    const features = Array.isArray(row.unsupported_partition_features)
+      ? [...row.unsupported_partition_features]
+      : [];
+    if (row.relation_kind === "p" && row.is_partition === true) {
+      features.push("subpartitioning");
+    }
+    if (row.relation_kind === "f" && row.is_partition === true) {
+      features.push("foreign-table partition");
+    }
+    if (Array.isArray(row.relation_options) && row.relation_options.length > 0) {
+      features.push("storage parameters");
+    }
+    if (row.relation_tablespace) {
+      features.push(`tablespace ${row.relation_tablespace}`);
+    }
+    if (
+      row.relation_access_method &&
+      row.relation_access_method !== "heap"
+    ) {
+      features.push(`access method ${row.relation_access_method}`);
+    }
+    const uniqueFeatures = [...new Set(features)];
+    if (uniqueFeatures.length === 0) {
       continue;
     }
 
-    const identity = getCatalogRelationIdentity(row);
     throw new ValidationError(
-      `Unsupported PostgreSQL UNLOGGED partition hierarchy relation ${identity} is present in a managed schema. PostgreSQL 18 rejects unlogged partitioned parents and earlier releases do not propagate persistence consistently to children; use a logged partition hierarchy or manage it outside TerraDB before planning`,
+      `Unsupported PostgreSQL partition relation ${identity} is present in a managed schema: ${uniqueFeatures.join(", ")}. TerraDB cannot inspect this partition relation losslessly; replace it with a basic partitioned parent and direct leaf, or manage the hierarchy outside TerraDB before planning`,
       `relation ${identity}`,
-      "persistence",
-      "UNLOGGED"
+      "definition",
+      uniqueFeatures
     );
   }
 }
@@ -2312,10 +2349,45 @@ export class DatabaseInspector {
         c.relname as table_name,
         n.nspname as schema_name,
         c.relpersistence as relation_persistence,
+        c.relkind as relation_kind,
+        c.relispartition as is_partition,
+        c.reloptions as relation_options,
+        relation_tablespace.spcname as relation_tablespace,
+        relation_access_method.amname as relation_access_method,
         pg_get_partkeydef(c.oid) as partition_key,
+        unsupported_partition_feature.items as unsupported_partition_features,
         unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
+      LEFT JOIN pg_tablespace relation_tablespace
+        ON relation_tablespace.oid = c.reltablespace
+      LEFT JOIN pg_am relation_access_method
+        ON relation_access_method.oid = c.relam
+      LEFT JOIN LATERAL (
+        SELECT array_agg(feature ORDER BY feature) AS items
+        FROM (
+          SELECT format(
+            'column %I STORAGE or COMPRESSION',
+            attribute.attname
+          ) AS feature
+          FROM pg_attribute attribute
+          JOIN pg_type attribute_type ON attribute_type.oid = attribute.atttypid
+          WHERE attribute.attrelid = c.oid
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+            AND (
+              attribute.attstorage <> attribute_type.typstorage
+              OR attribute.attcompression <> ''
+            )
+
+          UNION ALL
+
+          SELECT format('foreign key %I', constraint_catalog.conname)
+          FROM pg_constraint constraint_catalog
+          WHERE constraint_catalog.conrelid = c.oid
+            AND constraint_catalog.contype = 'f'
+        ) feature_catalog
+      ) unsupported_partition_feature ON true
       ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
@@ -2323,8 +2395,8 @@ export class DatabaseInspector {
         AND d.objid IS NULL
       ORDER BY n.nspname, c.relname
     `, [schemas]);
-    assertPartitionRowsAreSupported(result.rows);
     assertConstraintRowsAreSupported(result.rows);
+    assertPartitionRowsAreSupported(result.rows);
 
     const objects: SqlObject[] = [];
 
@@ -2350,24 +2422,72 @@ export class DatabaseInspector {
         c.relname as table_name,
         n.nspname as schema_name,
         c.relpersistence as relation_persistence,
+        c.relkind as relation_kind,
+        c.relispartition as is_partition,
+        c.reloptions as relation_options,
+        relation_tablespace.spcname as relation_tablespace,
+        relation_access_method.amname as relation_access_method,
         parent.relname as parent_name,
         parent_ns.nspname as parent_schema,
         pg_get_expr(c.relpartbound, c.oid) as partition_bound,
+        unsupported_partition_feature.items as unsupported_partition_features,
         unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_inherits i ON i.inhrelid = c.oid
       JOIN pg_class parent ON parent.oid = i.inhparent
       JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+      LEFT JOIN pg_tablespace relation_tablespace
+        ON relation_tablespace.oid = c.reltablespace
+      LEFT JOIN pg_am relation_access_method
+        ON relation_access_method.oid = c.relam
+      LEFT JOIN LATERAL (
+        SELECT array_agg(feature ORDER BY feature) AS items
+        FROM (
+          SELECT format('column override %I', child_attribute.attname) AS feature
+          FROM pg_attribute child_attribute
+          JOIN pg_attribute parent_attribute
+            ON parent_attribute.attrelid = parent.oid
+            AND parent_attribute.attname = child_attribute.attname
+            AND parent_attribute.attnum > 0
+            AND NOT parent_attribute.attisdropped
+          LEFT JOIN pg_attrdef child_default
+            ON child_default.adrelid = child_attribute.attrelid
+            AND child_default.adnum = child_attribute.attnum
+          LEFT JOIN pg_attrdef parent_default
+            ON parent_default.adrelid = parent_attribute.attrelid
+            AND parent_default.adnum = parent_attribute.attnum
+          WHERE child_attribute.attrelid = c.oid
+            AND child_attribute.attnum > 0
+            AND NOT child_attribute.attisdropped
+            AND (
+              child_attribute.attnotnull IS DISTINCT FROM parent_attribute.attnotnull
+              OR pg_get_expr(child_default.adbin, child_default.adrelid)
+                IS DISTINCT FROM
+                pg_get_expr(parent_default.adbin, parent_default.adrelid)
+              OR child_attribute.attstorage IS DISTINCT FROM parent_attribute.attstorage
+              OR child_attribute.attcompression IS DISTINCT FROM parent_attribute.attcompression
+            )
+
+          UNION ALL
+
+          SELECT format('local constraint %I', constraint_catalog.conname)
+          FROM pg_constraint constraint_catalog
+          WHERE constraint_catalog.conrelid = c.oid
+            AND constraint_catalog.conislocal
+            AND constraint_catalog.coninhcount = 0
+        ) feature_catalog
+      ) unsupported_partition_feature ON true
       ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND c.relispartition
+        AND c.relkind IN ('r', 'p', 'f')
         AND d.objid IS NULL
       ORDER BY n.nspname, c.relname
     `, [schemas]);
-    assertPartitionRowsAreSupported(childResult.rows);
     assertConstraintRowsAreSupported(childResult.rows);
+    assertPartitionRowsAreSupported(childResult.rows);
 
     for (const row of childResult.rows) {
       const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);

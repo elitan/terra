@@ -489,6 +489,10 @@ export class SchemaParser {
             stmt.CreateStmt,
             filePath
           );
+          this.rejectUnsupportedPartitionDefinition(
+            stmt.CreateStmt,
+            filePath
+          );
           this.rejectUnsupportedConstraintSemantics(
             stmt.CreateStmt,
             filePath
@@ -643,6 +647,7 @@ export class SchemaParser {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.AlterTableStmt) {
+          this.rejectUnsupportedPartitionAlter(stmt.AlterTableStmt, filePath);
           const sqlObject = this.parseAlterTableSqlObject(stmt);
           if (sqlObject) {
             sqlObjects.push(sqlObject);
@@ -766,6 +771,126 @@ export class SchemaParser {
 
     throw new ParserError(
       "PostgreSQL UNLOGGED partition hierarchies are not supported in desired schemas because PostgreSQL 18 rejects unlogged partitioned parents and earlier releases do not propagate persistence consistently to children; use a logged partition hierarchy or manage it outside TerraDB",
+      filePath
+    );
+  }
+
+  private rejectUnsupportedPartitionDefinition(
+    stmt: any,
+    filePath?: string
+  ): void {
+    if (!this.isPartitionCreateStatement(stmt)) {
+      return;
+    }
+
+    const features: string[] = [];
+    if (stmt.if_not_exists === true) {
+      features.push("IF NOT EXISTS");
+    }
+
+    if (stmt.partbound) {
+      if ((stmt.tableElts || []).length > 0) {
+        features.push("column overrides or local constraints");
+      }
+      if (stmt.partspec) {
+        features.push("subpartitioning");
+      }
+    } else {
+      const parentConstraints = (stmt.tableElts || []).flatMap(
+        function getParentConstraints(item: any) {
+          if (item.Constraint) {
+            return [{ constraint: item.Constraint, inline: false }];
+          }
+          return (item.ColumnDef?.constraints || []).flatMap(
+            function getColumnConstraint(wrapper: any) {
+              return wrapper.Constraint
+                ? [{ constraint: wrapper.Constraint, inline: true }]
+                : [];
+            }
+          );
+        }
+      );
+      const hasUnnamedTableConstraint = parentConstraints.some(
+        function hasUnnamedTableConstraint(item: any) {
+          return !item.inline && !item.constraint.conname;
+        }
+      );
+      if (hasUnnamedTableConstraint) {
+        features.push("constraints without explicit names; use explicitly named table constraints");
+      }
+      const hasInlinePersistentConstraint = parentConstraints.some(
+        function hasInlinePersistentConstraint(item: any) {
+          return item.inline && [
+            "CONSTR_PRIMARY",
+            "CONSTR_UNIQUE",
+            "CONSTR_CHECK",
+            "CONSTR_FOREIGN",
+          ].includes(item.constraint.contype);
+        }
+      );
+      if (hasInlinePersistentConstraint) {
+        features.push("inline key, check, or reference constraints");
+      }
+      const hasForeignKey = parentConstraints.some(
+        function hasForeignKey(item: any) {
+          return item.constraint.contype === "CONSTR_FOREIGN";
+        }
+      );
+      if (hasForeignKey) {
+        features.push("foreign keys");
+      }
+
+      const hasPhysicalColumnOptions = (stmt.tableElts || []).some(
+        function hasPhysicalColumnOptions(item: any) {
+          return Boolean(
+            item.ColumnDef?.storage_name || item.ColumnDef?.compression
+          );
+        }
+      );
+      if (hasPhysicalColumnOptions) {
+        features.push("column STORAGE or COMPRESSION");
+      }
+    }
+
+    if (stmt.accessMethod) {
+      features.push("access method");
+    }
+    if ((stmt.options || []).length > 0) {
+      features.push("storage parameters");
+    }
+    if (stmt.tablespacename) {
+      features.push("tablespace");
+    }
+
+    if (features.length === 0) {
+      return;
+    }
+
+    throw new ParserError(
+      `PostgreSQL partition definition uses unsupported persistent features: ${features.join(", ")}. TerraDB cannot inspect these features losslessly; use a basic partitioned parent and direct CREATE TABLE ... PARTITION OF leaf, or manage the hierarchy outside TerraDB`,
+      filePath
+    );
+  }
+
+  private rejectUnsupportedPartitionAlter(
+    stmt: any,
+    filePath?: string
+  ): void {
+    const hasPartitionCommand = (stmt.cmds || []).some(
+      function hasPartitionCommand(item: any) {
+        return [
+          "AT_AttachPartition",
+          "AT_DetachPartition",
+          "AT_DetachPartitionFinalize",
+        ].includes(item?.AlterTableCmd?.subtype);
+      }
+    );
+    if (!hasPartitionCommand) {
+      return;
+    }
+
+    throw new ParserError(
+      "Imperative PostgreSQL ATTACH PARTITION and DETACH PARTITION commands are not supported in declarative desired schemas; declare the child with CREATE TABLE ... PARTITION OF or remove it from the desired schema instead",
       filePath
     );
   }
@@ -1163,25 +1288,6 @@ export class SchemaParser {
         tableName,
         schema,
         `row-level-security:${schema || "public"}.${tableName}:${suffix}`
-      );
-    }
-
-    const hasOnlyPartitionCommands = subtypes.every(function (subtype: string) {
-      return [
-        "AT_AttachPartition",
-        "AT_DetachPartition",
-        "AT_DetachPartitionFinalize",
-      ].includes(subtype);
-    });
-
-    if (hasOnlyPartitionCommands) {
-      const schema = relation?.schemaname;
-      return this.buildSqlObject(
-        "partition",
-        stmt,
-        tableName,
-        schema,
-        `partition:${schema || "public"}.${tableName}:alter`
       );
     }
 

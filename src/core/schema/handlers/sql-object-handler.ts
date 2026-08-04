@@ -37,6 +37,26 @@ function terminateStatement(statement: string): string {
   return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
 }
 
+function sortPartitionTableConstraints(elements: any[] | undefined): any[] | undefined {
+  if (!elements) {
+    return undefined;
+  }
+
+  const otherElements = elements.filter(function isNotConstraint(element) {
+    return !element?.Constraint;
+  });
+  const constraints = elements
+    .filter(function isConstraint(element) {
+      return Boolean(element?.Constraint);
+    })
+    .sort(function sortConstraint(left, right) {
+      const leftName = left.Constraint.conname || "";
+      const rightName = right.Constraint.conname || "";
+      return leftName.localeCompare(rightName);
+    });
+  return [...otherElements, ...constraints];
+}
+
 function qualifyPartitionCreateAst(object: SqlObject, statement: any): any {
   const createStatement = statement?.CreateStmt;
   if (!createStatement?.relation) {
@@ -61,6 +81,9 @@ function qualifyPartitionCreateAst(object: SqlObject, statement: any): any {
     CreateStmt: {
       ...createStatement,
       relation,
+      ...(!createStatement.partbound
+        ? { tableElts: sortPartitionTableConstraints(createStatement.tableElts) }
+        : {}),
       ...(inheritedRelations ? { inhRelations: inheritedRelations } : {}),
     },
   };

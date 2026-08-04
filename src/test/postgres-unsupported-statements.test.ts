@@ -32,6 +32,10 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
       ["SET search_path TO public;", "SET"],
       ["BEGIN;", "TRANSACTION"],
       ["CREATE CAST (text AS integer) WITH INOUT;", "CREATE CAST"],
+      [
+        "CREATE FOREIGN TABLE public.remote_events (id integer) SERVER remote_server;",
+        "CREATE FOREIGN TABLE",
+      ],
       ["ALTER SEQUENCE public.ids RESTART WITH 10;", "ALTER SEQUENCE"],
       ["REFRESH MATERIALIZED VIEW public.summary;", "REFRESH MATERIALIZED VIEW"],
     ] as const;
@@ -65,6 +69,131 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
         body: expect.stringContaining("INSERT INTO public.audit_log"),
       }),
     ]);
+  });
+
+  test("rejects partition definitions that cannot be inspected losslessly", async function () {
+    const parser = new SchemaParser();
+    const cases = [
+      {
+        sql: "CREATE TABLE IF NOT EXISTS public.events (bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "IF NOT EXISTS",
+      },
+      {
+        sql: "CREATE TABLE public.events (payload text STORAGE MAIN, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "column STORAGE or COMPRESSION",
+      },
+      {
+        sql: "CREATE TABLE public.events (payload text COMPRESSION pglz, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "column STORAGE or COMPRESSION",
+      },
+      {
+        sql: "CREATE TABLE public.events (id integer, bucket integer, CHECK (id > 0)) PARTITION BY RANGE (bucket);",
+        feature: "explicitly named table constraints",
+      },
+      {
+        sql: "CREATE TABLE public.events (id integer PRIMARY KEY, bucket integer) PARTITION BY RANGE (bucket);",
+        feature: "inline key, check, or reference constraints",
+      },
+      {
+        sql: `
+          CREATE TABLE public.accounts (id integer PRIMARY KEY);
+          CREATE TABLE public.events (
+            account_id integer,
+            bucket integer,
+            CONSTRAINT events_account_fkey
+              FOREIGN KEY (account_id) REFERENCES public.accounts (id)
+          ) PARTITION BY RANGE (bucket);
+        `,
+        feature: "foreign keys",
+      },
+      {
+        sql: "CREATE TABLE public.events (bucket integer) PARTITION BY RANGE (bucket) USING heap;",
+        feature: "access method",
+      },
+      {
+        sql: "CREATE TABLE public.events (bucket integer) PARTITION BY RANGE (bucket) TABLESPACE fast_tables;",
+        feature: "tablespace",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (id integer, bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events (
+            id WITH OPTIONS DEFAULT 1,
+            CONSTRAINT events_early_positive CHECK (id > 0)
+          ) FOR VALUES FROM (0) TO (100);
+        `,
+        feature: "column overrides or local constraints",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (id integer, bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (0) TO (100) PARTITION BY LIST (id);
+        `,
+        feature: "subpartitioning",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (0) TO (100) USING heap;
+        `,
+        feature: "access method",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (0) TO (100) WITH (fillfactor = 70);
+        `,
+        feature: "storage parameters",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (0) TO (100) TABLESPACE fast_tables;
+        `,
+        feature: "tablespace",
+      },
+    ] as const;
+
+    for (const scenario of cases) {
+      await expect(
+        parser.parseSchema(scenario.sql, "unsupported-partition.sql")
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        filePath: "unsupported-partition.sql",
+        message: expect.stringContaining(scenario.feature),
+      });
+    }
+  });
+
+  test("rejects imperative partition attachment commands", async function () {
+    const parser = new SchemaParser();
+    const cases = [
+      "ALTER TABLE public.events ATTACH PARTITION public.events_early FOR VALUES FROM (0) TO (100);",
+      "ALTER TABLE public.events DETACH PARTITION public.events_early;",
+      "ALTER TABLE public.events DETACH PARTITION public.events_early CONCURRENTLY;",
+      "ALTER TABLE public.events DETACH PARTITION public.events_early FINALIZE;",
+    ];
+
+    for (const sql of cases) {
+      await expect(
+        parser.parseSchema(sql, "imperative-partition.sql")
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        filePath: "imperative-partition.sql",
+        message: expect.stringContaining(
+          "declare the child with CREATE TABLE ... PARTITION OF"
+        ),
+      });
+    }
   });
 
   test("rejects PostgreSQL 18 constraint semantics that are not modeled", async function () {
@@ -335,6 +464,133 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
         to_regclass('public.constraint_after') AS after
     `);
     expect(result.rows[0]).toEqual({ before: null, gap: null, after: null });
+  });
+
+  test("rejects unsupported partition syntax before applying surrounding DDL", async function () {
+    const schema = `
+      CREATE TABLE public.partition_before (id integer PRIMARY KEY);
+      CREATE TABLE public.partition_parent (id integer, bucket integer)
+        PARTITION BY RANGE (bucket);
+      CREATE TABLE public.partition_child PARTITION OF public.partition_parent (
+        CONSTRAINT partition_child_positive CHECK (id > 0)
+      ) FOR VALUES FROM (0) TO (100);
+      CREATE TABLE public.partition_after (id integer PRIMARY KEY);
+    `;
+
+    await expect(
+      createTestSchemaService().apply(schema, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "PARSER_ERROR",
+      message: expect.stringContaining("local constraints"),
+    });
+
+    const result = await client.query(`
+      SELECT
+        to_regclass('public.partition_before') AS before,
+        to_regclass('public.partition_parent') AS parent,
+        to_regclass('public.partition_child') AS child,
+        to_regclass('public.partition_after') AS after
+    `);
+    expect(result.rows[0]).toEqual({
+      before: null,
+      parent: null,
+      child: null,
+      after: null,
+    });
+  });
+
+  test("rejects unsupported partition catalog state before applying changes", async function () {
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE TABLE public.external_partition_parent (
+        id integer,
+        payload text,
+        bucket integer
+      ) PARTITION BY RANGE (bucket);
+      CREATE TABLE public.external_partition_child
+        PARTITION OF public.external_partition_parent
+        FOR VALUES FROM (0) TO (100);
+    `;
+
+    await client.query(`
+      CREATE TABLE public.external_partition_parent (
+        id integer,
+        payload text,
+        bucket integer
+      ) PARTITION BY RANGE (bucket);
+      CREATE TABLE public.external_partition_child
+        PARTITION OF public.external_partition_parent (
+          payload WITH OPTIONS DEFAULT 'leaf',
+          CONSTRAINT external_partition_child_positive CHECK (id > 0)
+        ) FOR VALUES FROM (0) TO (100) WITH (fillfactor = 70);
+      INSERT INTO public.external_partition_child (id, bucket) VALUES (1, 1);
+    `);
+
+    await expect(
+      service.apply(desired, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("cannot inspect this partition relation losslessly"),
+    });
+
+    const state = await client.query(`
+      SELECT id, payload, bucket
+      FROM public.external_partition_child
+    `);
+    expect(state.rows).toEqual([{ id: 1, payload: "leaf", bucket: 1 }]);
+  });
+
+  test("rejects externally created subpartitions and unsupported parents", async function () {
+    const service = createTestSchemaService();
+
+    await client.query(`
+      CREATE TABLE public.external_partition_parent (id integer, bucket integer)
+        PARTITION BY RANGE (bucket);
+      CREATE TABLE public.external_partition_child
+        PARTITION OF public.external_partition_parent
+        FOR VALUES FROM (0) TO (100) PARTITION BY LIST (id);
+      CREATE TABLE public.external_partition_grandchild
+        PARTITION OF public.external_partition_child FOR VALUES IN (1);
+    `);
+    await expect(
+      service.plan("", ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("subpartitioning"),
+    });
+
+    await client.query("DROP TABLE public.external_partition_parent CASCADE");
+    await client.query(`
+      CREATE TABLE public.external_compressed_parent (
+        payload text COMPRESSION pglz,
+        bucket integer
+      ) PARTITION BY RANGE (bucket);
+    `);
+    await expect(
+      service.plan("", ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("column payload STORAGE or COMPRESSION"),
+    });
+
+    await client.query("DROP TABLE public.external_compressed_parent");
+    await client.query(`
+      CREATE TABLE public.external_accounts (id integer PRIMARY KEY);
+      CREATE TABLE public.external_foreign_key_parent (
+        account_id integer,
+        bucket integer,
+        CONSTRAINT external_foreign_key_parent_account_fkey
+          FOREIGN KEY (account_id) REFERENCES public.external_accounts (id)
+      ) PARTITION BY RANGE (bucket);
+    `);
+    await expect(
+      service.plan("", ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining(
+        "foreign key external_foreign_key_parent_account_fkey"
+      ),
+    });
   });
 
   test("rejects a mixed schema before applying surrounding DDL", async function () {

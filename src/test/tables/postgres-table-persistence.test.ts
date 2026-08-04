@@ -247,6 +247,38 @@ describe("PostgreSQL table persistence", function () {
     expect((await schemaService.plan(expandedSchema, ["public"])).hasChanges).toBe(false);
   });
 
+  test("converges supported parent columns and inherited constraints", async function () {
+    const schemaService = createTestSchemaService();
+    const schema = `
+      CREATE TABLE public.constrained_partition_parent (
+        id integer NOT NULL DEFAULT 7,
+        bucket integer NOT NULL,
+        payload text,
+        CONSTRAINT constrained_partition_parent_positive CHECK (id > 0),
+        CONSTRAINT constrained_partition_parent_pkey PRIMARY KEY (id, bucket)
+      ) PARTITION BY RANGE (bucket);
+      CREATE TABLE public.constrained_partition_child
+        PARTITION OF public.constrained_partition_parent
+        FOR VALUES FROM (0) TO (100);
+    `;
+
+    await schemaService.apply(schema, ["public"], true);
+    await client.query(`
+      INSERT INTO public.constrained_partition_child (bucket, payload)
+      VALUES (1, 'preserved')
+    `);
+
+    expect((await schemaService.plan(schema, ["public"])).hasChanges).toBe(false);
+    expect(
+      (
+        await client.query(`
+          SELECT id, bucket, payload
+          FROM public.constrained_partition_child
+        `)
+      ).rows
+    ).toEqual([{ id: 7, bucket: 1, payload: "preserved" }]);
+  });
+
   test("creates, inspects, and reapplies an unlogged table", async function () {
     const schema = `
       CREATE UNLOGGED TABLE public.persistence_create (
