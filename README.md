@@ -124,6 +124,15 @@ planning: PostgreSQL 18 disallows unlogged partitioned parents, while earlier
 versions do not propagate parent persistence consistently and TerraDB does not
 model mixed-persistence partition hierarchies. Equivalent external catalog
 state on PostgreSQL 14–17 is also rejected before diffing.
+PostgreSQL partition definitions are compared through PostgreSQL's parsed
+representation, so equivalent identifier quoting, type aliases, formatting,
+and implicit `public` qualification converge after inspection. A change only
+to a leaf partition bound uses transactional `DETACH PARTITION` and `ATTACH
+PARTITION` statements, preserving the partition table and its rows. If the new
+bound rejects existing rows, the transaction rolls back to the prior attached
+partition and bound. Other in-place partition-definition replacements fail
+before execution instead of dropping and recreating a potentially populated
+partition hierarchy.
 
 ## Commands
 

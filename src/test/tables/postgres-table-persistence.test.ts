@@ -179,6 +179,74 @@ describe("PostgreSQL table persistence", function () {
     });
   });
 
+  test("converges partition syntax and preserves rows when changing a bound", async function () {
+    const schemaService = createTestSchemaService();
+    const initialSchema = `
+      CREATE TABLE partition_accounts (
+        id integer NOT NULL,
+        region_id integer NOT NULL
+      ) PARTITION BY RANGE (region_id);
+      CREATE TABLE partition_accounts_eu
+        PARTITION OF partition_accounts
+        FOR VALUES FROM (0) TO (100);
+    `;
+
+    await schemaService.apply(initialSchema, ["public"], true);
+    await client.query(
+      "INSERT INTO public.partition_accounts (id, region_id) VALUES (1, 80)"
+    );
+
+    expect((await schemaService.plan(initialSchema, ["public"])).hasChanges).toBe(false);
+
+    const expandedSchema = initialSchema.replace("TO (100)", "TO (200)");
+    const expandedPlan = await schemaService.plan(expandedSchema, ["public"]);
+    const detachIndex = expandedPlan.transactional.findIndex(function (statement) {
+      return statement.includes("DETACH PARTITION");
+    });
+    const attachIndex = expandedPlan.transactional.findIndex(function (statement) {
+      return statement.includes("ATTACH PARTITION");
+    });
+
+    expect(detachIndex).toBeGreaterThanOrEqual(0);
+    expect(attachIndex).toBeGreaterThan(detachIndex);
+    expect(expandedPlan.transactional.join("\n")).not.toContain("DROP TABLE");
+    await schemaService.apply(
+      expandedSchema,
+      ["public"],
+      true,
+      undefined,
+      false,
+      true
+    );
+
+    expect(
+      (await client.query("SELECT * FROM public.partition_accounts")).rows
+    ).toEqual([{ id: 1, region_id: 80 }]);
+    expect((await schemaService.plan(expandedSchema, ["public"])).hasChanges).toBe(false);
+
+    const unsupportedParentChange = expandedSchema.replace(
+      "PARTITION BY RANGE",
+      "PARTITION BY LIST"
+    );
+    await expect(
+      schemaService.apply(unsupportedParentChange, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("could lose data"),
+    });
+    expect((await schemaService.plan(expandedSchema, ["public"])).hasChanges).toBe(false);
+
+    const invalidNarrowing = expandedSchema.replace("TO (200)", "TO (50)");
+    await expect(
+      schemaService.apply(invalidNarrowing, ["public"], true)
+    ).rejects.toThrow();
+
+    expect(
+      (await client.query("SELECT * FROM public.partition_accounts")).rows
+    ).toEqual([{ id: 1, region_id: 80 }]);
+    expect((await schemaService.plan(expandedSchema, ["public"])).hasChanges).toBe(false);
+  });
+
   test("creates, inspects, and reapplies an unlogged table", async function () {
     const schema = `
       CREATE UNLOGGED TABLE public.persistence_create (

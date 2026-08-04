@@ -604,7 +604,7 @@ export class SchemaService {
       );
     }
 
-    const sqlObjectPlan = this.sqlObjectHandler.generateStatements(
+    const sqlObjectPlan = await this.sqlObjectHandler.generateStatements(
       desiredSqlObjects,
       currentSqlObjects
     );
@@ -617,8 +617,8 @@ export class SchemaService {
       ...compositeTypeCreateStatements,
       ...sqlObjectPlan.typeCreate,
       ...preSequenceStatements,
-      ...sqlObjectPlan.preTableCreate,
       ...sqlObjectPlan.earlyDrop,
+      ...sqlObjectPlan.preTableCreate,
       ...preTableTriggerStatements,
       ...preTableViewStatements,
       ...tableStatements,

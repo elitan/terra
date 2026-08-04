@@ -1,4 +1,6 @@
 import type { SqlObject, SqlObjectKind } from "../../../types/schema";
+import { ValidationError } from "../../../types/errors";
+import { deparseSync, parse } from "pgsql-parser";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -11,6 +13,16 @@ type SqlObjectPlan = {
   lateDrop: string[];
 };
 
+type CanonicalSqlObject = {
+  normalized: string;
+  statement?: any;
+};
+
+type PartitionBoundReplacement = {
+  detachStatement: string;
+  attachStatement: string;
+};
+
 function normalizeSql(statement: string): string {
   return statement
     .replace(/;\s*$/g, "")
@@ -18,6 +30,128 @@ function normalizeSql(statement: string): string {
     .replace(/\bPASSWORD\s+'(?:[^']|'')*'/gi, "PASSWORD '<redacted>'")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function terminateStatement(statement: string): string {
+  const trimmed = statement.trim();
+  return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
+}
+
+function qualifyPartitionCreateAst(object: SqlObject, statement: any): any {
+  const createStatement = statement?.CreateStmt;
+  if (!createStatement?.relation) {
+    return statement;
+  }
+
+  const defaultSchema = object.schema || "public";
+  const relation = createStatement.relation.schemaname
+    ? createStatement.relation
+    : { ...createStatement.relation, schemaname: defaultSchema };
+  const inheritedRelations = createStatement.inhRelations?.map(function (item: any) {
+    if (!item?.RangeVar || item.RangeVar.schemaname) {
+      return item;
+    }
+    return {
+      RangeVar: { ...item.RangeVar, schemaname: defaultSchema },
+    };
+  });
+
+  return {
+    ...statement,
+    CreateStmt: {
+      ...createStatement,
+      relation,
+      ...(inheritedRelations ? { inhRelations: inheritedRelations } : {}),
+    },
+  };
+}
+
+async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObject> {
+  if (object.kind !== "partition") {
+    return { normalized: normalizeSql(object.createStatement) };
+  }
+
+  try {
+    const parsed = await parse(object.createStatement);
+    const statements = (parsed.stmts || []).flatMap(function (item) {
+      return item.stmt ? [qualifyPartitionCreateAst(object, item.stmt)] : [];
+    });
+    if (statements.length === 0) {
+      return { normalized: normalizeSql(object.createStatement) };
+    }
+
+    return {
+      normalized: normalizeSql(deparseSync(statements)),
+      statement: statements.length === 1 ? statements[0] : undefined,
+    };
+  } catch {
+    return { normalized: normalizeSql(object.createStatement) };
+  }
+}
+
+function getDirectPartitionCreate(statement: any): any | undefined {
+  const createStatement = statement?.CreateStmt;
+  if (
+    !createStatement?.relation ||
+    !createStatement?.partbound ||
+    createStatement.inhRelations?.length !== 1 ||
+    !createStatement.inhRelations[0]?.RangeVar
+  ) {
+    return undefined;
+  }
+  return createStatement;
+}
+
+function deparseCreateStatement(createStatement: any): string {
+  return normalizeSql(deparseSync([{ CreateStmt: createStatement }] as any));
+}
+
+function quoteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function qualifyRangeVariable(rangeVariable: any): string {
+  const relation = quoteIdentifier(rangeVariable.relname);
+  return rangeVariable.schemaname
+    ? `${quoteIdentifier(rangeVariable.schemaname)}.${relation}`
+    : relation;
+}
+
+function getPartitionBoundReplacement(
+  current: CanonicalSqlObject,
+  desired: CanonicalSqlObject
+): PartitionBoundReplacement | undefined {
+  const currentCreate = getDirectPartitionCreate(current.statement);
+  const desiredCreate = getDirectPartitionCreate(desired.statement);
+  if (!currentCreate || !desiredCreate) {
+    return undefined;
+  }
+
+  const desiredWithCurrentBound = {
+    ...desiredCreate,
+    partbound: currentCreate.partbound,
+  };
+  if (deparseCreateStatement(desiredWithCurrentBound) !== current.normalized) {
+    return undefined;
+  }
+
+  const parent = desiredCreate.inhRelations[0].RangeVar;
+  const child = desiredCreate.relation;
+  const boundMatch = desired.normalized.match(/\s(FOR VALUES .+|DEFAULT)$/i);
+  if (!boundMatch) {
+    return undefined;
+  }
+
+  const parentName = qualifyRangeVariable(parent);
+  const childName = qualifyRangeVariable(child);
+  return {
+    detachStatement: terminateStatement(
+      `ALTER TABLE ${parentName} DETACH PARTITION ${childName}`
+    ),
+    attachStatement: terminateStatement(
+      `ALTER TABLE ${parentName} ATTACH PARTITION ${childName} ${boundMatch[1]}`
+    ),
+  };
 }
 
 function getCreateBucket(kind: SqlObjectKind): keyof SqlObjectPlan {
@@ -105,7 +239,10 @@ function pushStatements(
 }
 
 export class SqlObjectHandler {
-  generateStatements(desiredObjects: SqlObject[], currentObjects: SqlObject[]): SqlObjectPlan {
+  async generateStatements(
+    desiredObjects: SqlObject[],
+    currentObjects: SqlObject[]
+  ): Promise<SqlObjectPlan> {
     const plan: SqlObjectPlan = {
       bootstrapCreate: [],
       typeCreate: [],
@@ -126,6 +263,13 @@ export class SqlObjectHandler {
 
     const dropsByBucket = new Map<keyof SqlObjectPlan, SqlObject[]>();
     const createsByBucket = new Map<keyof SqlObjectPlan, SqlObject[]>();
+    const canonicalObjects = new Map<SqlObject, CanonicalSqlObject>();
+
+    await Promise.all(
+      [...currentObjects, ...desiredObjects].map(async function (item) {
+        canonicalObjects.set(item, await canonicalizeSqlObject(item));
+      })
+    );
 
     function addToBucket(
       buckets: Map<keyof SqlObjectPlan, SqlObject[]>,
@@ -144,8 +288,35 @@ export class SqlObjectHandler {
         continue;
       }
 
-      if (normalizeSql(currentObject.createStatement) === normalizeSql(desiredObject.createStatement)) {
+      const currentCanonical = canonicalObjects.get(currentObject)!;
+      const desiredCanonical = canonicalObjects.get(desiredObject)!;
+      if (currentCanonical.normalized === desiredCanonical.normalized) {
         continue;
+      }
+
+      if (currentObject.kind === "partition" && desiredObject.kind === "partition") {
+        const replacement = getPartitionBoundReplacement(
+          currentCanonical,
+          desiredCanonical
+        );
+        if (replacement) {
+          addToBucket(dropsByBucket, "earlyDrop", {
+            ...currentObject,
+            dropStatement: replacement.detachStatement,
+          });
+          addToBucket(createsByBucket, "preTableCreate", {
+            ...desiredObject,
+            createStatement: replacement.attachStatement,
+          });
+          continue;
+        }
+
+        throw new ValidationError(
+          `Changing partition '${currentObject.key}' beyond its bound is not supported because recreating it could lose data`,
+          "partition",
+          currentObject.key,
+          desiredObject.createStatement
+        );
       }
 
       addToBucket(dropsByBucket, getDropBucket(currentObject.kind), currentObject);
