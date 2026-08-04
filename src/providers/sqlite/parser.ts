@@ -4,6 +4,7 @@ import { SQLiteClient } from "./client";
 import { SQLiteInspector } from "./inspector";
 import {
   findSQLiteStatementStartKeyword,
+  hasSQLiteConditionalCreate,
   hasSQLiteQueryDerivedTable,
 } from "./sql-parser-utils";
 
@@ -63,6 +64,14 @@ export class SQLiteParser {
         throw new ParserError(
           "CREATE TABLE AS SELECT is not supported in SQLite desired schemas. " +
             "Define table columns explicitly and load data separately",
+          filePath
+        );
+      }
+      if (hasSQLiteConditionalCreate(sql)) {
+        throw new ParserError(
+          "IF NOT EXISTS is not supported in SQLite desired schemas because " +
+            "conditional creation can silently hide conflicting definitions. " +
+            "Remove IF NOT EXISTS; TerraDB determines whether each object exists",
           filePath
         );
       }

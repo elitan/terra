@@ -1393,6 +1393,71 @@ export function findSQLiteStatementStartKeyword(
   return undefined;
 }
 
+function isSQLiteConditionalCreateAt(
+  sql: string,
+  createTokenEnd: number
+): boolean {
+  let token = readSQLiteToken(sql, createTokenEnd);
+  if (isWord(token, "TEMP") || isWord(token, "TEMPORARY")) {
+    token = readSQLiteToken(sql, token.end);
+  }
+  if (isWord(token, "UNIQUE")) {
+    token = readSQLiteToken(sql, token.end);
+    if (!isWord(token, "INDEX")) {
+      return false;
+    }
+  } else if (isWord(token, "VIRTUAL")) {
+    token = readSQLiteToken(sql, token.end);
+    if (!isWord(token, "TABLE")) {
+      return false;
+    }
+  } else if (
+    !isWord(token, "TABLE") &&
+    !isWord(token, "INDEX") &&
+    !isWord(token, "VIEW") &&
+    !isWord(token, "TRIGGER")
+  ) {
+    return false;
+  }
+
+  const ifToken = readExpectedWord(sql, token.end, "IF");
+  const notToken = ifToken
+    ? readExpectedWord(sql, ifToken.end, "NOT")
+    : undefined;
+  return notToken !== undefined &&
+    readExpectedWord(sql, notToken.end, "EXISTS") !== undefined;
+}
+
+export function hasSQLiteConditionalCreate(sql: string): boolean {
+  let cursor = 0;
+  let atStatementStart = true;
+
+  while (cursor < sql.length) {
+    const token = readSQLiteToken(sql, cursor);
+    if (!token) {
+      break;
+    }
+    cursor = token.end;
+
+    if (token.kind === "symbol" && token.value === ";") {
+      atStatementStart = true;
+      continue;
+    }
+    if (!atStatementStart) {
+      continue;
+    }
+    atStatementStart = false;
+    if (
+      isWord(token, "CREATE") &&
+      isSQLiteConditionalCreateAt(sql, token.end)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function isSQLiteQueryDerivedTableAt(
   sql: string,
   createTokenEnd: number

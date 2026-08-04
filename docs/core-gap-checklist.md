@@ -219,6 +219,7 @@
 - done: reject SQLite query-derived `CREATE TABLE ... AS SELECT`, `VALUES`, and CTE forms before target mutation; distinguish valid view/generated-column `AS` clauses plus comments, literals, and trigger bodies; prove file and shared-memory target state remains unchanged.
 - done: exact-pin and certify `libsql` 0.5.29 with embedded SQLite 3.45.1; verify desired parsing, inspection, and execution share the runtime and assert the supported FTS5 and RTree compile features.
 - done: preserve SQLite deferred foreign-key enforcement timing through parse, stored-definition inspection, semantic diff, recreation, runtime behavior, data preservation, and idempotent reapply; normalize every other accepted deferrability spelling to the immediate default and match mixed constraints independently of pragma row order; add the SQLite differ, inspector, and definition parser to the changed-file mutation gate and kill all 12 selected mutants.
+- done: reject SQLite `IF NOT EXISTS` for tables, virtual tables, indexes, views, and triggers before desired-model construction or target mutation so duplicate and racing conflicting definitions cannot disappear as successful no-ops; distinguish top-level grammar from comments, literals, identifiers, and trigger bodies, and mutation-test the parser preflight.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

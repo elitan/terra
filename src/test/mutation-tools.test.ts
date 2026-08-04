@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import {
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -19,6 +20,7 @@ type SummarizedReport = {
 type NativeMutationReport = {
   diffRef: string | null;
   results: Array<{
+    command: string;
     line: number;
     status: string;
   }>;
@@ -62,7 +64,13 @@ function runChangedLineMutationScenario(
   const temporaryDirectory = realpathSync(
     mkdtempSync(join(tmpdir(), "terradb-mutation-runner-"))
   );
-  const sourcePath = join(temporaryDirectory, "candidate.ts");
+  const sourceDirectory = join(
+    temporaryDirectory,
+    "src",
+    "providers",
+    "sqlite"
+  );
+  const sourcePath = join(sourceDirectory, "parser.ts");
   const verificationPath = join(temporaryDirectory, "candidate.test.ts");
   const baselinePath = join(temporaryDirectory, "baseline.json");
   const reportPath = join(temporaryDirectory, "mutation-report.json");
@@ -86,7 +94,13 @@ function runChangedLineMutationScenario(
     ].join("\n");
 
   try {
+    mkdirSync(sourceDirectory, { recursive: true });
     writeFileSync(sourcePath, initialSource);
+    writeFileSync(join(temporaryDirectory, "package.json"), JSON.stringify({
+      scripts: {
+        "test:sqlite": "bun test candidate.test.ts",
+      },
+    }));
     execFileSync("git", ["init", "--quiet"], { cwd: temporaryDirectory });
     execFileSync("git", ["config", "user.email", "test@terradb.local"], {
       cwd: temporaryDirectory,
@@ -94,7 +108,9 @@ function runChangedLineMutationScenario(
     execFileSync("git", ["config", "user.name", "TerraDB Test"], {
       cwd: temporaryDirectory,
     });
-    execFileSync("git", ["add", "candidate.ts"], { cwd: temporaryDirectory });
+    execFileSync("git", ["add", "src/providers/sqlite/parser.ts"], {
+      cwd: temporaryDirectory,
+    });
     execFileSync("git", ["commit", "--quiet", "-m", "initial"], {
       cwd: temporaryDirectory,
     });
@@ -126,8 +142,6 @@ test("keeps the expected changed literal", function () {
         "10",
         "--timeout-ms",
         "30000",
-        "--test-command",
-        `bun test ${verificationPath}`,
       ],
       {
         cwd: temporaryDirectory,
@@ -157,6 +171,8 @@ function runMutationGate(
         "report",
         "--out",
         reportPath,
+        "--score",
+        "100",
         ...args,
       ],
       {
@@ -266,7 +282,11 @@ test("changed mutation candidates stay inside added and modified lines", functio
 
   expect(changedReport.diffRef).toBe("HEAD");
   expect(changedReport.results).toEqual([
-    expect.objectContaining({ line: 3, status: "killed" }),
+    expect.objectContaining({
+      command: "bun run test:sqlite",
+      line: 3,
+      status: "killed",
+    }),
   ]);
   expect(deletionReport.results).toEqual([]);
   expect(wholeFileReport.diffRef).toBeNull();

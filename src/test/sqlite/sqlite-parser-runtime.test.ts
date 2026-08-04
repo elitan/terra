@@ -212,6 +212,70 @@ describe("SQLiteParser execution-runtime parity", function () {
     );
   });
 
+  test("rejects conditional creation for every managed SQLite object", async function () {
+    const parser = new SQLiteParser();
+    const schemas = [
+      "CREATE TABLE IF NOT EXISTS users (id INTEGER);",
+      "CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(body);",
+      `CREATE TABLE users (email TEXT);
+       CREATE /* unique */ UNIQUE INDEX /* conditional */ IF NOT EXISTS
+         users_email_idx ON users(email);`,
+      `CREATE TABLE users (id INTEGER);
+       CREATE VIEW IF NOT EXISTS user_ids AS SELECT id FROM users;`,
+      `CREATE TABLE users (id INTEGER);
+       CREATE TRIGGER IF NOT EXISTS users_insert AFTER INSERT ON users BEGIN
+         SELECT NEW.id;
+       END;`,
+    ];
+
+    for (const sql of schemas) {
+      await expect(
+        parser.parseSchema(sql, "conditional-create.sql")
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        filePath: "conditional-create.sql",
+        message: expect.stringContaining(
+          "IF NOT EXISTS is not supported in SQLite desired schemas"
+        ),
+      });
+    }
+  });
+
+  test("does not mistake comments literals or identifiers for conditional creation", async function () {
+    const parser = new SQLiteParser();
+    const schema = await parser.parseSchema(`
+      -- CREATE TABLE IF NOT EXISTS ignored (id INTEGER);
+      CREATE TABLE messages (
+        "IF NOT EXISTS" TEXT DEFAULT 'CREATE VIEW IF NOT EXISTS ignored',
+        value TEXT
+      );
+      CREATE TABLE audit_log (message TEXT);
+      CREATE TRIGGER messages_insert AFTER INSERT ON messages BEGIN
+        INSERT INTO audit_log(message)
+        VALUES ('CREATE INDEX IF NOT EXISTS ignored ON messages(value)');
+      END;
+    `);
+
+    expect(schema.tables.map(function getTableName(table) {
+      return table.name;
+    })).toEqual(["audit_log", "messages"]);
+    expect(schema.triggers.map(function getTriggerName(trigger) {
+      return trigger.name;
+    })).toEqual(["messages_insert"]);
+
+    try {
+      await parser.parseSchema(
+        "CREATE UNIQUE TABLE IF NOT EXISTS invalid (id INTEGER);"
+      );
+      throw new Error("expected invalid SQLite grammar to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ParserError);
+      expect((error as ParserError).message).not.toContain(
+        "IF NOT EXISTS is not supported"
+      );
+    }
+  });
+
   test("rejects every query-derived table spelling", async function () {
     const parser = new SQLiteParser();
     const schemas = [
@@ -267,7 +331,7 @@ describe("SQLiteParser execution-runtime parity", function () {
     })).toEqual(["ordinary_insert"]);
   });
 
-  test("rejects query-derived tables before mutating file and shared-memory targets", async function () {
+  test("rejects unsafe table declarations before mutating file and shared-memory targets", async function () {
     const filePath = path.join(
       os.tmpdir(),
       `terradb-query-derived-${Date.now()}.db`
@@ -297,6 +361,15 @@ describe("SQLiteParser execution-runtime parity", function () {
           await expect(service.apply(`
             CREATE TABLE should_not_exist (id INTEGER);
             CREATE TABLE derived AS SELECT 7 AS id;
+          `, ["public"], true)).rejects.toMatchObject({
+            code: "PARSER_ERROR",
+          });
+          await expect(service.apply(`
+            CREATE TABLE should_not_exist (id INTEGER);
+            CREATE TABLE IF NOT EXISTS should_not_exist (
+              id TEXT,
+              silently_lost TEXT
+            );
           `, ["public"], true)).rejects.toMatchObject({
             code: "PARSER_ERROR",
           });

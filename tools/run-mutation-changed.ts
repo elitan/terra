@@ -255,6 +255,7 @@ function resolveTestCommand(file: string, override?: string): string {
   }
   if (
     normalized.endsWith("/src/providers/sqlite/differ.ts") ||
+    normalized.endsWith("/src/providers/sqlite/parser.ts") ||
     normalized.endsWith("/src/providers/sqlite/sql-parser-utils.ts")
   ) {
     return "bun run test:sqlite";

@@ -82,6 +82,12 @@ export const mutationRiskManifest: MutationRiskManifest = {
       reason: "lossless SQLite definition parsing controls semantic comparison",
     },
     {
+      path: "src/providers/sqlite/parser.ts",
+      owner: "sqlite-provider",
+      level: "high",
+      reason: "SQLite desired-schema preflight prevents silent or imperative mutations",
+    },
+    {
       path: "src/providers/postgres/connection.ts",
       owner: "postgres-provider",
       level: "high",
