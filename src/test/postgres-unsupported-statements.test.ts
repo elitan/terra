@@ -163,6 +163,43 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
           CREATE TABLE public.events (bucket integer)
             PARTITION BY RANGE (bucket);
           CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (0::integer) TO (100::integer);
+        `,
+        feature: "non-literal partition bound expressions",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (1 + 1) TO (50 * 2);
+        `,
+        feature: "non-literal partition bound expressions",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (recorded_at timestamptz)
+            PARTITION BY RANGE (recorded_at);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES FROM (CURRENT_TIMESTAMP)
+            TO (CURRENT_TIMESTAMP + INTERVAL '1 day');
+        `,
+        feature: "non-literal partition bound expressions",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (bucket integer)
+            PARTITION BY LIST (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
+            FOR VALUES IN (1::integer, 2);
+        `,
+        feature: "non-literal partition bound expressions",
+      },
+      {
+        sql: `
+          CREATE TABLE public.events (bucket integer)
+            PARTITION BY RANGE (bucket);
+          CREATE TABLE public.events_early PARTITION OF public.events
             FOR VALUES FROM (0) TO (100) USING heap;
         `,
         feature: "access method",
@@ -514,6 +551,39 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
         to_regclass('public.partition_parent') AS parent,
         to_regclass('public.partition_child') AS child,
         to_regclass('public.partition_after') AS after
+    `);
+    expect(result.rows[0]).toEqual({
+      before: null,
+      parent: null,
+      child: null,
+      after: null,
+    });
+  });
+
+  test("rejects evaluated partition bounds before applying surrounding DDL", async function () {
+    const schema = `
+      CREATE TABLE public.bound_before (id integer PRIMARY KEY);
+      CREATE TABLE public.bound_parent (recorded_at timestamptz)
+        PARTITION BY RANGE (recorded_at);
+      CREATE TABLE public.bound_child PARTITION OF public.bound_parent
+        FOR VALUES FROM (CURRENT_TIMESTAMP)
+        TO (CURRENT_TIMESTAMP + INTERVAL '1 day');
+      CREATE TABLE public.bound_after (id integer PRIMARY KEY);
+    `;
+
+    await expect(
+      createTestSchemaService().apply(schema, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "PARSER_ERROR",
+      message: expect.stringContaining("canonical uncast literal values"),
+    });
+
+    const result = await client.query(`
+      SELECT
+        to_regclass('public.bound_before') AS before,
+        to_regclass('public.bound_parent') AS parent,
+        to_regclass('public.bound_child') AS child,
+        to_regclass('public.bound_after') AS after
     `);
     expect(result.rows[0]).toEqual({
       before: null,

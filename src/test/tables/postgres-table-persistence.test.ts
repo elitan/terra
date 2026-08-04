@@ -427,6 +427,73 @@ describe("PostgreSQL table persistence", function () {
     ).toBe("RANGE (payload text_pattern_ops)");
   });
 
+  test("converges canonical literal partition bounds", async function () {
+    const schemaService = createTestSchemaService();
+    const cases = [
+      ["date", "'2024-01-01'", "'2024-02-01'"],
+      ["timestamp", "'2024-01-01 00:00:00'", "'2024-02-01 00:00:00'"],
+      ["timestamptz", "'2024-01-01 00:00:00+00'", "'2024-02-01 00:00:00+00'"],
+      ["numeric", "1.25", "2.50"],
+      [
+        "uuid",
+        "'00000000-0000-0000-0000-000000000001'",
+        "'00000000-0000-0000-0000-000000000010'",
+      ],
+      ["inet", "'192.168.1.1'", "'192.168.1.10'"],
+      ["interval", "'1 day'", "'2 days'"],
+    ] as const;
+
+    for (const [type, lower, upper] of cases) {
+      await cleanDatabase(client);
+      const schema = `
+        CREATE TABLE public.literal_bound_parent (
+          value ${type}
+        ) PARTITION BY RANGE (value);
+        CREATE TABLE public.literal_bound_child
+          PARTITION OF public.literal_bound_parent
+          FOR VALUES FROM (${lower}) TO (${upper});
+      `;
+
+      await schemaService.apply(schema, ["public"], true);
+      expect((await schemaService.plan(schema, ["public"])).hasChanges).toBe(false);
+    }
+  });
+
+  test("converges sentinel, null, hash, and default partition bounds", async function () {
+    const schema = `
+      CREATE TABLE public.range_bound_parent (value integer)
+        PARTITION BY RANGE (value);
+      CREATE TABLE public.range_bound_lower
+        PARTITION OF public.range_bound_parent
+        FOR VALUES FROM (MINVALUE) TO (-1);
+      CREATE TABLE public.range_bound_upper
+        PARTITION OF public.range_bound_parent
+        FOR VALUES FROM (-1) TO (MAXVALUE);
+
+      CREATE TABLE public.list_bound_parent (value text)
+        PARTITION BY LIST (value);
+      CREATE TABLE public.list_bound_child
+        PARTITION OF public.list_bound_parent
+        FOR VALUES IN (NULL, 'a', 'b');
+
+      CREATE TABLE public.hash_bound_parent (value integer)
+        PARTITION BY HASH (value);
+      CREATE TABLE public.hash_bound_child
+        PARTITION OF public.hash_bound_parent
+        FOR VALUES WITH (MODULUS 4, REMAINDER 0);
+
+      CREATE TABLE public.default_bound_parent (value integer)
+        PARTITION BY RANGE (value);
+      CREATE TABLE public.default_bound_child
+        PARTITION OF public.default_bound_parent DEFAULT;
+    `;
+    const schemaService = createTestSchemaService();
+
+    await schemaService.apply(schema, ["public"], true);
+
+    expect((await schemaService.plan(schema, ["public"])).hasChanges).toBe(false);
+  });
+
   test("creates, inspects, and reapplies an unlogged table", async function () {
     const schema = `
       CREATE UNLOGGED TABLE public.persistence_create (

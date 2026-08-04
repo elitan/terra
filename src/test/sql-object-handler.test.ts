@@ -95,6 +95,31 @@ describe("SqlObjectHandler", function () {
     expect(plan.earlyDrop).toEqual([]);
   });
 
+  test("treats reconstructed negative partition literals as unchanged", async function () {
+    const handler = new SqlObjectHandler();
+    const desired = makeSqlObject({
+      key: "partition:public.accounts_negative",
+      name: "accounts_negative",
+      createStatement:
+        "CREATE TABLE public.accounts_negative PARTITION OF public.accounts " +
+        "FOR VALUES FROM (MINVALUE) TO (-1);",
+      dependencies: ["partition:public.accounts"],
+    });
+    const current = makeSqlObject({
+      key: "partition:public.accounts_negative",
+      name: "accounts_negative",
+      createStatement:
+        'CREATE TABLE "public"."accounts_negative" PARTITION OF "public"."accounts" ' +
+        "FOR VALUES FROM (MINVALUE) TO ('-1');",
+      dependencies: ["partition:public.accounts"],
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.preTableCreate).toEqual([]);
+    expect(plan.earlyDrop).toEqual([]);
+  });
+
   test("ignores parent table constraint order", async function () {
     const handler = new SqlObjectHandler();
     const desired = makeSqlObject({

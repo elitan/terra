@@ -60,6 +60,21 @@ type PendingTableConstraint = {
     }
 );
 
+function isCanonicalPartitionBoundDatum(datum: any, strategy: string): boolean {
+  if (datum?.A_Const) {
+    return true;
+  }
+  if (strategy !== "r" || !datum?.ColumnRef) {
+    return false;
+  }
+
+  const fields = datum.ColumnRef.fields || [];
+  const sentinel = fields.length === 1
+    ? fields[0]?.String?.sval?.toLowerCase()
+    : undefined;
+  return sentinel === "minvalue" || sentinel === "maxvalue";
+}
+
 export class SchemaParser {
   private async ensureWasmLoaded() {
     if (!wasmInitialization) {
@@ -794,6 +809,24 @@ export class SchemaParser {
       }
       if (stmt.partspec) {
         features.push("subpartitioning");
+      }
+      const boundDatums = [
+        ...(stmt.partbound.lowerdatums || []),
+        ...(stmt.partbound.upperdatums || []),
+        ...(stmt.partbound.listdatums || []),
+      ];
+      const hasEvaluatedBoundExpression = boundDatums.some(
+        function hasEvaluatedBoundExpression(datum: any) {
+          return !isCanonicalPartitionBoundDatum(
+            datum,
+            stmt.partbound.strategy
+          );
+        }
+      );
+      if (hasEvaluatedBoundExpression) {
+        features.push(
+          "non-literal partition bound expressions; use canonical uncast literal values"
+        );
       }
     } else {
       const parentConstraints = (stmt.tableElts || []).flatMap(

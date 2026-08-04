@@ -21,6 +21,7 @@ type SqlObjectPlan = {
 
 type CanonicalSqlObject = {
   normalized: string;
+  comparisonNormalized: string;
   statement?: any;
   partitionParent?: PartitionParent;
 };
@@ -96,9 +97,57 @@ function qualifyPartitionCreateAst(object: SqlObject, statement: any): any {
   };
 }
 
+function canonicalizePartitionBoundConstant(datum: any): any {
+  const constant = datum?.A_Const;
+  if (!constant) {
+    return datum;
+  }
+
+  const value =
+    constant.ival?.ival ??
+    constant.fval?.fval ??
+    constant.boolval?.boolval ??
+    constant.sval?.sval;
+  if (value === undefined) {
+    return datum;
+  }
+  return { A_Const: { sval: { sval: String(value) } } };
+}
+
+function canonicalizePartitionCreateForComparison(createStatement: any): any {
+  if (!createStatement?.partbound) {
+    return createStatement;
+  }
+
+  const partbound = createStatement.partbound;
+  return {
+    ...createStatement,
+    partbound: {
+      ...partbound,
+      lowerdatums: partbound.lowerdatums?.map(canonicalizePartitionBoundConstant),
+      upperdatums: partbound.upperdatums?.map(canonicalizePartitionBoundConstant),
+      listdatums: partbound.listdatums?.map(canonicalizePartitionBoundConstant),
+    },
+  };
+}
+
+function normalizePartitionStatementForComparison(statement: any): string {
+  return normalizeSql(
+    deparseSync([
+      {
+        ...statement,
+        CreateStmt: canonicalizePartitionCreateForComparison(
+          statement.CreateStmt
+        ),
+      },
+    ] as any)
+  );
+}
+
 async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObject> {
   if (object.kind !== "partition") {
-    return { normalized: normalizeSql(object.createStatement) };
+    const normalized = normalizeSql(object.createStatement);
+    return { normalized, comparisonNormalized: normalized };
   }
 
   try {
@@ -107,7 +156,8 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
       return item.stmt ? [qualifyPartitionCreateAst(object, item.stmt)] : [];
     });
     if (statements.length === 0) {
-      return { normalized: normalizeSql(object.createStatement) };
+      const normalized = normalizeSql(object.createStatement);
+      return { normalized, comparisonNormalized: normalized };
     }
 
     const statement = statements.length === 1 ? statements[0] : undefined;
@@ -124,8 +174,12 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
         )
       : undefined;
 
+    const normalized = normalizeSql(deparseSync(statements));
     return {
-      normalized: normalizeSql(deparseSync(statements)),
+      normalized,
+      comparisonNormalized: statement
+        ? normalizePartitionStatementForComparison(statement)
+        : normalized,
       statement,
       ...(partitionTable && partitionKey
         ? {
@@ -137,7 +191,8 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
         : {}),
     };
   } catch {
-    return { normalized: normalizeSql(object.createStatement) };
+    const normalized = normalizeSql(object.createStatement);
+    return { normalized, comparisonNormalized: normalized };
   }
 }
 
@@ -156,6 +211,12 @@ function getDirectPartitionCreate(statement: any): any | undefined {
 
 function deparseCreateStatement(createStatement: any): string {
   return normalizeSql(deparseSync([{ CreateStmt: createStatement }] as any));
+}
+
+function deparseCreateStatementForComparison(createStatement: any): string {
+  return deparseCreateStatement(
+    canonicalizePartitionCreateForComparison(createStatement)
+  );
 }
 
 function quoteIdentifier(identifier: string): string {
@@ -183,7 +244,10 @@ function getPartitionBoundReplacement(
     ...desiredCreate,
     partbound: currentCreate.partbound,
   };
-  if (deparseCreateStatement(desiredWithCurrentBound) !== current.normalized) {
+  if (
+    deparseCreateStatementForComparison(desiredWithCurrentBound) !==
+    current.comparisonNormalized
+  ) {
     return undefined;
   }
 
@@ -342,7 +406,10 @@ export class SqlObjectHandler {
 
       const currentCanonical = canonicalObjects.get(currentObject)!;
       const desiredCanonical = canonicalObjects.get(desiredObject)!;
-      if (currentCanonical.normalized === desiredCanonical.normalized) {
+      if (
+        currentCanonical.comparisonNormalized ===
+        desiredCanonical.comparisonNormalized
+      ) {
         continue;
       }
 

@@ -138,6 +138,11 @@ bound rejects existing rows, the transaction rolls back to the prior attached
 partition and bound. Other in-place partition-definition replacements fail
 before execution instead of dropping and recreating a potentially populated
 partition hierarchy.
+Leaf partition bounds support canonical uncast literal values, `NULL`,
+`MINVALUE`/`MAXVALUE`, hash modulus/remainder bounds, and `DEFAULT`. Explicit
+casts and other evaluated bound expressions are rejected before mutation because
+PostgreSQL stores only their one-time result, so the original expression cannot
+be inspected or reconciled declaratively.
 The supported partition contract is a basic partitioned parent with explicitly
 named table-level key/check constraints and direct `CREATE TABLE ... PARTITION
 OF` leaves. Parent foreign keys, unnamed or inline key/check/reference
