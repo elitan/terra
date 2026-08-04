@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import { createTestClient, createTestSchemaService } from "./utils";
+import { getStatementRisk } from "../utils/statement-classifier";
 
 const MANAGED_SCHEMA = "foreign_server_contract";
 const EXTERNAL_SCHEMA = "foreign_server_external";
 const SERVER_NAME = "Remote Server";
 const OWNER_ROLE = "TerraDB Foreign Server Owner";
+const REMOVAL_GUARD = "foreign_server_removal_guard";
 
 describe("PostgreSQL foreign server lifecycle", function () {
   let client!: Client;
@@ -219,6 +221,95 @@ describe("PostgreSQL foreign server lifecycle", function () {
     expect(await publicHasUsage(client)).toBe(true);
     expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
   });
+
+  test("removes an explicitly absent server safely and idempotently", async function () {
+    await client.query(`
+      CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+      CREATE SERVER "${SERVER_NAME}" FOREIGN DATA WRAPPER postgres_fdw;
+    `);
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE EXTENSION postgres_fdw;
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      DROP SERVER IF EXISTS "${SERVER_NAME}" RESTRICT;
+    `;
+    const plan = await service.plan(desired, [MANAGED_SCHEMA]);
+    const dropStatement = `DROP SERVER IF EXISTS "${SERVER_NAME}" RESTRICT;`;
+
+    expect(plan.transactional).toContain(dropStatement);
+    expect(getStatementRisk(dropStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(
+        desired,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        true,
+        true
+      )
+    ).rejects.toThrow(/strict mode blocked/i);
+    expect(await foreignServerExists(client)).toBe(true);
+
+    await service.apply(desired, [MANAGED_SCHEMA], true);
+    expect(await foreignServerExists(client)).toBe(false);
+    expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
+  });
+
+  test("rolls back restricted removal without deleting unmanaged dependents", async function () {
+    await client.query(`
+      CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+      CREATE SERVER "${SERVER_NAME}" FOREIGN DATA WRAPPER postgres_fdw;
+      CREATE USER MAPPING FOR CURRENT_USER SERVER "${SERVER_NAME}";
+      CREATE SCHEMA ${EXTERNAL_SCHEMA};
+      CREATE FOREIGN TABLE ${EXTERNAL_SCHEMA}.remote_rows (id integer)
+        SERVER "${SERVER_NAME}"
+        OPTIONS (schema_name 'public', table_name 'rows');
+    `);
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE EXTENSION postgres_fdw;
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE TABLE ${MANAGED_SCHEMA}.${REMOVAL_GUARD} (id integer);
+      DROP SERVER "${SERVER_NAME}";
+    `;
+
+    await expect(
+      service.apply(desired, [MANAGED_SCHEMA], true)
+    ).rejects.toMatchObject({ code: "MIGRATION_ERROR" });
+
+    expect(
+      await relationExists(client, `${MANAGED_SCHEMA}.${REMOVAL_GUARD}`)
+    ).toBe(false);
+    expect(await foreignServerExists(client)).toBe(true);
+    expect(await userMappingExists(client)).toBe(true);
+    expect(await foreignTableUsesServer(client)).toBe(true);
+  });
+
+  test("rejects cascading removal before preceding mutations", async function () {
+    await client.query(`
+      CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+      CREATE SERVER "${SERVER_NAME}" FOREIGN DATA WRAPPER postgres_fdw;
+      CREATE USER MAPPING FOR CURRENT_USER SERVER "${SERVER_NAME}";
+    `);
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE TABLE ${MANAGED_SCHEMA}.${REMOVAL_GUARD} (id integer);
+      DROP SERVER "${SERVER_NAME}" CASCADE;
+    `;
+
+    await expect(
+      service.apply(desired, [MANAGED_SCHEMA], true)
+    ).rejects.toMatchObject({ code: "PARSER_ERROR" });
+
+    expect(
+      await relationExists(client, `${MANAGED_SCHEMA}.${REMOVAL_GUARD}`)
+    ).toBe(false);
+    expect(await foreignServerExists(client)).toBe(true);
+    expect(await userMappingExists(client)).toBe(true);
+  });
 });
 
 function desiredServer(type: string, wrapper: string): string {
@@ -242,12 +333,27 @@ function isServerDrop(statement: string): boolean {
   return statement.startsWith("DROP SERVER");
 }
 
-async function foreignServerOid(client: Client): Promise<number> {
+async function foreignServerOid(client: Client): Promise<number | undefined> {
   const result = await client.query(
     "SELECT oid::integer FROM pg_foreign_server WHERE srvname = $1",
     [SERVER_NAME]
   );
   return result.rows[0]?.oid;
+}
+
+async function foreignServerExists(client: Client): Promise<boolean> {
+  return (await foreignServerOid(client)) !== undefined;
+}
+
+async function relationExists(
+  client: Client,
+  relation: string
+): Promise<boolean> {
+  const result = await client.query(
+    "SELECT to_regclass($1) IS NOT NULL AS exists",
+    [relation]
+  );
+  return result.rows[0]?.exists === true;
 }
 
 async function inspectForeignServer(client: Client): Promise<{

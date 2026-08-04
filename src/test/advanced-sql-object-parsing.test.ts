@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { SchemaParser } from "../core/schema/parser";
 import { hasEmptyForeignServerClause } from "../core/schema/parser/schema-parser";
+import {
+  parseForeignServerRemovals,
+} from "../core/schema/parser/foreign-server-removal-parser";
 
 describe("Advanced SQL object parsing", function () {
   test("models complete foreign server definitions and normalizes conditionals", async function () {
@@ -81,6 +84,66 @@ describe("Advanced SQL object parsing", function () {
         `)
       ).rejects.toThrow(/depends on the apply session/i);
     }
+  });
+
+  test("models explicit foreign server absence and rejects unsafe removal", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      DROP SERVER IF EXISTS "Remote Server" RESTRICT;
+      DROP SERVER alpha_server, "Beta Server";
+    `);
+
+    expect(parsed.sqlObjects).toEqual([
+      {
+        kind: "foreign-server",
+        key: "foreign-server:Remote Server",
+        name: "Remote Server",
+        createStatement:
+          'DROP SERVER IF EXISTS "Remote Server" RESTRICT;',
+        desiredAbsent: true,
+      },
+      {
+        kind: "foreign-server",
+        key: "foreign-server:alpha_server",
+        name: "alpha_server",
+        createStatement:
+          'DROP SERVER IF EXISTS "alpha_server" RESTRICT;',
+        desiredAbsent: true,
+      },
+      {
+        kind: "foreign-server",
+        key: "foreign-server:Beta Server",
+        name: "Beta Server",
+        createStatement:
+          'DROP SERVER IF EXISTS "Beta Server" RESTRICT;',
+        desiredAbsent: true,
+      },
+    ]);
+
+    await expect(
+      parser.parseSchema(`DROP SERVER unsafe_server CASCADE;`)
+    ).rejects.toThrow(/CASCADE.*not supported.*dependent/i);
+    await expect(
+      parser.parseSchema(`
+        CREATE SERVER conflict FOREIGN DATA WRAPPER postgres_fdw;
+        DROP SERVER conflict;
+      `)
+    ).rejects.toThrow(/foreign server.*declared more than once/i);
+    expect(function parseUnknownBehavior() {
+      parseForeignServerRemovals(
+        { behavior: "DROP_UNKNOWN", objects: [] },
+        "removal.sql"
+      );
+    }).toThrow(/unsupported dependency behavior/i);
+    expect(function parseMissingName() {
+      parseForeignServerRemovals(
+        {
+          behavior: "DROP_RESTRICT",
+          objects: [{ Integer: { ival: 1 } }],
+        },
+        "removal.sql"
+      );
+    }).toThrow(/no concrete server name/i);
   });
 
   test("quotes unusual foreign server fields losslessly", async function () {

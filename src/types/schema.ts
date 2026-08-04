@@ -396,6 +396,7 @@ export interface SqlObject {
   kind: SqlObjectKind;
   key: string;
   name: string;
+  desiredAbsent?: boolean;
   schema?: string;
   createStatement: string;
   dropStatement?: string;

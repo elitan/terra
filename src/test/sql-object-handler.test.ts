@@ -135,6 +135,53 @@ describe("SqlObjectHandler", function () {
     ]);
   });
 
+  test("orders explicit foreign server removals deterministically", async function () {
+    const handler = new SqlObjectHandler();
+    const alpha = makeSqlObject({
+      kind: "foreign-server",
+      key: "foreign-server:alpha",
+      name: "alpha",
+      createStatement:
+        "CREATE SERVER alpha FOREIGN DATA WRAPPER postgres_fdw;",
+      dropStatement: 'DROP SERVER IF EXISTS "alpha" RESTRICT;',
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        options: [],
+      },
+    });
+    const zeta = makeSqlObject({
+      ...alpha,
+      key: "foreign-server:zeta",
+      name: "zeta",
+      createStatement:
+        "CREATE SERVER zeta FOREIGN DATA WRAPPER postgres_fdw;",
+      dropStatement: 'DROP SERVER IF EXISTS "zeta" RESTRICT;',
+    });
+    const removeAlpha = {
+      ...alpha,
+      createStatement: 'DROP SERVER IF EXISTS "alpha" RESTRICT;',
+      desiredAbsent: true,
+      foreignServerDefinition: undefined,
+    };
+    const removeZeta = {
+      ...zeta,
+      createStatement: 'DROP SERVER IF EXISTS "zeta" RESTRICT;',
+      desiredAbsent: true,
+      foreignServerDefinition: undefined,
+    };
+
+    const plan = await handler.generateStatements(
+      [removeZeta, removeAlpha],
+      [alpha, zeta]
+    );
+
+    expect(plan.earlyDrop).toEqual([
+      zeta.dropStatement,
+      alpha.dropStatement,
+    ]);
+    expect(plan.preTableCreate).toEqual([]);
+  });
+
   test("separates dependent type drops from unrelated late drops", async function () {
     const handler = new SqlObjectHandler();
     const current = [

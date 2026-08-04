@@ -36,6 +36,10 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
         "CREATE FOREIGN TABLE public.remote_events (id integer) SERVER remote_server;",
         "CREATE FOREIGN TABLE",
       ],
+      [
+        "ALTER SERVER remote_server RENAME TO renamed_server;",
+        "RENAME",
+      ],
       ["ALTER SEQUENCE public.ids RESTART WITH 10;", "ALTER SEQUENCE"],
       ["REFRESH MATERIALIZED VIEW public.summary;", "REFRESH MATERIALIZED VIEW"],
     ] as const;

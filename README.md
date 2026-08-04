@@ -141,7 +141,10 @@ duplicates fail during parsing. A following `ALTER SERVER ... OWNER TO` with a
 concrete role makes ownership declarative and repairs drift in place; contextual
 session roles are rejected before mutation, while omitted ownership remains
 unmanaged. Unrelated global foreign servers remain outside a managed-schema plan
-unless declared by name.
+unless declared by name. `DROP SERVER [IF EXISTS] name [RESTRICT]` is the
+explicit, idempotent absent-state declaration for a database-wide server; it is
+classified as destructive, respects strict mode, and rolls back without deleting
+dependent mappings or foreign tables. `CASCADE` is rejected before mutation.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

@@ -799,6 +799,14 @@ export class SqlObjectHandler {
         addToBucket(dropsByBucket, getDropBucket(currentObject.kind), currentObject);
         continue;
       }
+      if (desiredObject.desiredAbsent === true) {
+        addToBucket(
+          dropsByBucket,
+          getDropBucket(currentObject.kind),
+          currentObject
+        );
+        continue;
+      }
 
       const currentTypeDefinition = currentObject.typeDefinition;
       const desiredTypeDefinition = desiredObject.typeDefinition;
@@ -963,6 +971,7 @@ export class SqlObjectHandler {
 
     for (const desiredObject of desiredObjects) {
       if (
+        desiredObject.desiredAbsent === true ||
         currentMap.has(desiredObject.key) ||
         replacementDesiredKeys.has(desiredObject.key)
       ) {

@@ -135,6 +135,10 @@ export function renderPostgresForeignServerOwnerAlter(
     `${quoteIdentifier(owner)};`;
 }
 
+export function renderPostgresForeignServerDrop(serverName: string): string {
+  return `DROP SERVER IF EXISTS ${quoteIdentifier(serverName)} RESTRICT;`;
+}
+
 function renderCreateOption(option: PostgresForeignServerOption): string {
   return `${quoteIdentifier(option.name)} ${quoteLiteral(option.value)}`;
 }

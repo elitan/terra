@@ -89,6 +89,7 @@ import {
   parseForeignServerOwner,
   type PendingForeignServerOwner,
 } from "./foreign-server-owner-parser";
+import { parseForeignServerRemovals } from "./foreign-server-removal-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -1005,6 +1006,12 @@ export class SchemaParser {
           throw new ParserError(
             "Physical CLUSTER is an imperative maintenance operation and is not supported in desired schemas; declare only the persistent choice with ALTER TABLE or ALTER MATERIALIZED VIEW ... CLUSTER ON",
             filePath
+          );
+        } else if (
+          stmt.DropStmt?.removeType === "OBJECT_FOREIGN_SERVER"
+        ) {
+          sqlObjects.push(
+            ...parseForeignServerRemovals(stmt.DropStmt, filePath)
           );
         } else if (stmt.DropStmt) {
           throw new ParserError(
