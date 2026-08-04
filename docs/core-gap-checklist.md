@@ -95,6 +95,7 @@
 - done: preserve SQLite STRICT/WITHOUT ROWID options, quoted identifiers, named constraints, collations, conflict policies, and exact table DDL through additive changes and recreation.
 - done: preserve SQLite AUTOINCREMENT high-water marks through table recreation so deleted historical rowids are not reused.
 - done: preserve hidden SQLite ROWID values through table recreation, including shadowed built-in names and the inline `INTEGER PRIMARY KEY DESC` exception; fail before mutation when no ROWID name is accessible.
+- done: enforce SQLite CHECK constraints during migrations even when the caller set `ignore_check_constraints=ON`, then restore the connection setting after success or rollback.
 - done: manage SQLite FTS5/RTree virtual tables losslessly and exclude their implementation-owned shadow tables from desired/current schema diffs.
 - done: cover SQLite virtual-table create, query behavior, idempotency, destructive strict-mode blocking, definition change, view restoration, rollback, and removal in memory and on disk.
 - done: reject connection-local SQLite temporary tables, views, triggers, and virtual tables instead of silently omitting them from the persistent desired schema.

@@ -16,6 +16,15 @@ async function getForeignKeysSetting(client: DatabaseClient): Promise<number> {
   return result.rows[0]?.foreign_keys ?? -1;
 }
 
+async function getIgnoreCheckConstraintsSetting(
+  client: DatabaseClient
+): Promise<number> {
+  const result = await client.query<{ ignore_check_constraints: number }>(
+    "PRAGMA ignore_check_constraints"
+  );
+  return result.rows[0]?.ignore_check_constraints ?? -1;
+}
+
 async function createReferencedUsersMigration(
   provider: SQLiteProvider
 ): Promise<{ client: DatabaseClient; statements: string[] }> {
@@ -457,6 +466,67 @@ describe("SQLite Table Recreation", () => {
       ]);
       await client.end();
     }
+  });
+
+  test("should enforce checks during recreation and restore the caller setting", async function () {
+    await schemaService.apply(`
+      CREATE TABLE scores (
+        value INTEGER NOT NULL,
+        obsolete TEXT
+      );
+    `, ["public"], true);
+
+    const desired = await provider.parseSchema(`
+      CREATE TABLE scores (
+        value INTEGER NOT NULL CHECK (value > 0)
+      );
+    `);
+    const client = await provider.createClient(config);
+    await client.query(
+      "INSERT INTO scores(value, obsolete) VALUES (-1, 'keep on rollback')"
+    );
+    await client.query("PRAGMA ignore_check_constraints = ON");
+
+    const current = await provider.getCurrentSchema(client);
+    const plan = provider.generateMigrationPlan(desired.tables, current);
+    await expect(
+      provider.executeInTransaction(client, plan.transactional)
+    ).rejects.toThrow("CHECK constraint failed");
+    expect(await getIgnoreCheckConstraintsSetting(client)).toBe(1);
+
+    const rolledBackRows = await client.query(
+      "SELECT value, obsolete FROM scores"
+    );
+    const rolledBackColumns = await client.query<{ name: string }>(
+      "PRAGMA table_info(scores)"
+    );
+    expect(rolledBackRows.rows).toEqual([{
+      value: -1,
+      obsolete: "keep on rollback",
+    }]);
+    expect(rolledBackColumns.rows.map(function (column) {
+      return column.name;
+    })).toEqual(["value", "obsolete"]);
+
+    await client.query("UPDATE scores SET value = 1");
+    await provider.executeInTransaction(client, plan.transactional);
+    expect(await getIgnoreCheckConstraintsSetting(client)).toBe(1);
+
+    await client.query("PRAGMA ignore_check_constraints = OFF");
+    const integrity = await client.query<{ integrity_check: string }>(
+      "PRAGMA integrity_check"
+    );
+    const rows = await client.query("SELECT value FROM scores");
+    const temporaryArtifacts = await client.query(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name LIKE '_scores_new%'
+    `);
+    await client.end();
+
+    expect(integrity.rows).toEqual([{ integrity_check: "ok" }]);
+    expect(rows.rows).toEqual([{ value: 1 }]);
+    expect(temporaryArtifacts.rows).toEqual([]);
   });
 
   test("should reject migrations inside an active transaction or savepoint", async function () {

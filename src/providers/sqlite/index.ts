@@ -482,12 +482,26 @@ export class SQLiteProvider implements DatabaseProvider {
       this.requiresForeignKeySuspension(statements);
     let foreignKeysWereEnabled = false;
     let foreignKeysSuspended = false;
+    let checkConstraintsTemporarilyEnforced = false;
 
     try {
       if (sqliteClient.raw.inTransaction) {
         throw new Error(
           "SQLite migrations must run outside an active transaction or savepoint"
         );
+      }
+
+      currentStatement = "PRAGMA ignore_check_constraints";
+      const checkConstraintResult = await sqliteClient.query<{
+        ignore_check_constraints: number;
+      }>("PRAGMA ignore_check_constraints");
+      const checkConstraintsWereIgnored =
+        checkConstraintResult.rows[0]?.ignore_check_constraints === 1;
+
+      if (checkConstraintsWereIgnored) {
+        currentStatement = "PRAGMA ignore_check_constraints = OFF";
+        sqliteClient.execMultiple("PRAGMA ignore_check_constraints = OFF");
+        checkConstraintsTemporarilyEnforced = true;
       }
 
       if (foreignKeySuspensionRequired) {
@@ -526,6 +540,12 @@ export class SQLiteProvider implements DatabaseProvider {
         foreignKeysSuspended = false;
       }
 
+      if (checkConstraintsTemporarilyEnforced) {
+        currentStatement = "PRAGMA ignore_check_constraints = ON";
+        sqliteClient.execMultiple("PRAGMA ignore_check_constraints = ON");
+        checkConstraintsTemporarilyEnforced = false;
+      }
+
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       if (spinner) {
         spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
@@ -534,6 +554,11 @@ export class SQLiteProvider implements DatabaseProvider {
       if (foreignKeysSuspended) {
         try {
           sqliteClient.execMultiple("PRAGMA foreign_keys = ON");
+        } catch {}
+      }
+      if (checkConstraintsTemporarilyEnforced) {
+        try {
+          sqliteClient.execMultiple("PRAGMA ignore_check_constraints = ON");
         } catch {}
       }
       if (spinner) {
