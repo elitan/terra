@@ -617,7 +617,11 @@ export class SchemaService {
     if (this.provider.supportsFeature("composite_types")) {
       compositeTypeRemovalStatements = this.compositeTypeHandler.generateRemovalStatements(
         desiredCompositeTypes,
-        currentCompositeTypes
+        currentCompositeTypes,
+        desiredSchema,
+        schemas,
+        desiredSqlObjects,
+        normalizedDesiredViews
       );
     }
 
@@ -648,6 +652,7 @@ export class SchemaService {
       ...sqlObjectPlan.postRoutineCreate,
       ...commentStatements,
       ...sqlObjectPlan.finalCreate,
+      ...sqlObjectPlan.typeDrop,
       ...enumRemovalStatements,
       ...compositeTypeRemovalStatements,
       ...sqlObjectPlan.lateDrop,

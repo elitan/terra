@@ -111,6 +111,51 @@ const UNSUPPORTED_CONSTRAINT_JOIN_SQL = `
   ) unsupported_constraint ON true
 `;
 
+const COMPOSITE_TYPE_DEPENDENCY_CTE_SQL = `
+  WITH RECURSIVE target_types AS (
+    SELECT
+      target_type.oid,
+      target_type.typrelid,
+      target_type.typname,
+      type_namespace.nspname
+    FROM pg_type target_type
+    JOIN pg_namespace type_namespace
+      ON type_namespace.oid = target_type.typnamespace
+    WHERE type_namespace.nspname = ANY($1::text[])
+      AND target_type.typtype = 'c'
+  ), dependent_types AS (
+    SELECT
+      target_type.oid as target_type_oid,
+      target_type.oid as dependent_type_oid
+    FROM target_types target_type
+
+    UNION
+
+    SELECT
+      dependent_type.target_type_oid,
+      containing_type.oid
+    FROM dependent_types dependent_type
+    JOIN LATERAL (
+      SELECT candidate.oid
+      FROM pg_type candidate
+      WHERE candidate.typbasetype = dependent_type.dependent_type_oid
+         OR candidate.typelem = dependent_type.dependent_type_oid
+
+      UNION
+
+      SELECT type_range.rngtypid
+      FROM pg_range type_range
+      WHERE type_range.rngsubtype = dependent_type.dependent_type_oid
+
+      UNION
+
+      SELECT type_range.rngmultitypid
+      FROM pg_range type_range
+      WHERE type_range.rngsubtype = dependent_type.dependent_type_oid
+    ) containing_type ON true
+  )
+`;
+
 function parseBooleanRelationOption(
   options: string[] | null,
   name: string
@@ -1361,17 +1406,26 @@ export class DatabaseInspector {
         n.nspname as schema_name,
         a.attname as attribute_name,
         format_type(a.atttypid, a.atttypmod) as attribute_type,
+        attribute_collation.collname as attribute_collation_name,
+        attribute_collation_namespace.nspname as attribute_collation_schema,
         a.attnum
       FROM pg_type t
       JOIN pg_namespace n ON t.typnamespace = n.oid
       JOIN pg_class c ON c.oid = t.typrelid
-      JOIN pg_attribute a ON a.attrelid = c.oid
+      LEFT JOIN pg_attribute a
+        ON a.attrelid = c.oid
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+      LEFT JOIN pg_type attribute_type ON attribute_type.oid = a.atttypid
+      LEFT JOIN pg_collation attribute_collation
+        ON attribute_collation.oid = a.attcollation
+        AND a.attcollation <> attribute_type.typcollation
+      LEFT JOIN pg_namespace attribute_collation_namespace
+        ON attribute_collation_namespace.oid = attribute_collation.collnamespace
       LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND t.typtype = 'c'
         AND c.relkind = 'c'
-        AND a.attnum > 0
-        AND NOT a.attisdropped
         AND d.objid IS NULL
       ORDER BY n.nspname, t.typname, a.attnum
     `, [schemas]);
@@ -1381,24 +1435,113 @@ export class DatabaseInspector {
     for (const row of result.rows) {
       const key = `${row.schema_name}.${row.type_name}`;
       const current = groups.get(key);
+      const attribute = row.attribute_name
+        ? {
+            name: row.attribute_name,
+            type: row.attribute_type,
+            ...(row.attribute_collation_name
+              ? {
+                  collation: {
+                    name: row.attribute_collation_name,
+                    schema: row.attribute_collation_schema || undefined,
+                  },
+                }
+              : {}),
+          }
+        : undefined;
 
       if (current) {
-        current.attributes.push({
-          name: row.attribute_name,
-          type: row.attribute_type,
-        });
+        if (attribute) {
+          current.attributes.push(attribute);
+        }
         continue;
       }
 
       groups.set(key, {
         name: row.type_name,
         schema: row.schema_name,
-        attributes: [
-          {
-            name: row.attribute_name,
-            type: row.attribute_type,
-          },
-        ],
+        attributes: attribute ? [attribute] : [],
+      });
+    }
+
+    const dependencyResult = await client.query(`
+      ${COMPOSITE_TYPE_DEPENDENCY_CTE_SQL}
+      SELECT
+        target_type.nspname as type_schema,
+        target_type.typname as type_name,
+        relation_namespace.nspname as relation_schema,
+        relation.relname as relation_name,
+        attribute.attname as attribute_name,
+        relation.relkind as relation_kind
+      FROM target_types target_type
+      JOIN dependent_types dependent_type
+        ON dependent_type.target_type_oid = target_type.oid
+      JOIN pg_attribute attribute
+        ON attribute.attnum > 0
+        AND NOT attribute.attisdropped
+        AND attribute.atttypid = dependent_type.dependent_type_oid
+      JOIN pg_class relation ON relation.oid = attribute.attrelid
+      JOIN pg_namespace relation_namespace
+        ON relation_namespace.oid = relation.relnamespace
+      WHERE relation.oid <> target_type.typrelid
+      ORDER BY
+        target_type.nspname,
+        target_type.typname,
+        relation_namespace.nspname,
+        relation.relname,
+        attribute.attnum
+    `, [schemas]);
+
+    for (const row of dependencyResult.rows) {
+      const compositeType = groups.get(`${row.type_schema}.${row.type_name}`);
+      if (!compositeType) continue;
+      if (!compositeType.attributeDependents) {
+        compositeType.attributeDependents = [];
+      }
+      compositeType.attributeDependents.push({
+        schema: row.relation_schema,
+        relation: row.relation_name,
+        attribute: row.attribute_name,
+        relationKind: row.relation_kind,
+      });
+    }
+
+    const typeDependencyResult = await client.query(`
+      ${COMPOSITE_TYPE_DEPENDENCY_CTE_SQL}
+      SELECT DISTINCT
+        target_type.nspname as type_schema,
+        target_type.typname as type_name,
+        dependent_namespace.nspname as dependent_schema,
+        dependent_type.typname as dependent_name,
+        CASE dependent_type.typtype
+          WHEN 'd' THEN 'domain'
+          WHEN 'r' THEN 'range'
+        END as dependent_kind
+      FROM target_types target_type
+      JOIN dependent_types dependency
+        ON dependency.target_type_oid = target_type.oid
+      JOIN pg_type dependent_type
+        ON dependent_type.oid = dependency.dependent_type_oid
+      JOIN pg_namespace dependent_namespace
+        ON dependent_namespace.oid = dependent_type.typnamespace
+      WHERE dependent_type.typtype IN ('d', 'r')
+      ORDER BY
+        target_type.nspname,
+        target_type.typname,
+        dependent_namespace.nspname,
+        dependent_type.typname
+    `, [schemas]);
+
+    for (const row of typeDependencyResult.rows) {
+      const compositeType = groups.get(`${row.type_schema}.${row.type_name}`);
+      if (!compositeType) continue;
+      if (!compositeType.typeDependents) {
+        compositeType.typeDependents = [];
+      }
+      compositeType.typeDependents.push({
+        schema: row.dependent_schema,
+        name: row.dependent_name,
+        kind: row.dependent_kind,
       });
     }
 
@@ -1638,6 +1781,13 @@ export class DatabaseInspector {
       WHERE n.nspname = ANY($1::text[])
         AND p.prokind IN ('f', 'w', 'a')
         AND d.objid IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend internal_dependency
+          WHERE internal_dependency.classid = 'pg_proc'::regclass
+            AND internal_dependency.objid = p.oid
+            AND internal_dependency.deptype = 'i'
+        )
       ORDER BY n.nspname, p.proname
     `, [schemas]);
 

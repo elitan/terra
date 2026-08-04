@@ -15,6 +15,43 @@ function makeSqlObject(overrides: Partial<SqlObject>): SqlObject {
 }
 
 describe("SqlObjectHandler", function () {
+  test("separates dependent type drops from unrelated late drops", async function () {
+    const handler = new SqlObjectHandler();
+    const current = [
+      makeSqlObject({
+        kind: "domain-type",
+        key: "domain-type:public.payload_domain",
+        name: "payload_domain",
+        createStatement: "CREATE DOMAIN public.payload_domain AS public.payload;",
+        dropStatement: "DROP DOMAIN public.payload_domain;",
+      }),
+      makeSqlObject({
+        kind: "range-type",
+        key: "range-type:public.payload_range",
+        name: "payload_range",
+        createStatement:
+          "CREATE TYPE public.payload_range AS RANGE (subtype=public.payload);",
+        dropStatement: "DROP TYPE public.payload_range;",
+      }),
+      makeSqlObject({
+        kind: "role",
+        key: "role:app_owner",
+        name: "app_owner",
+        schema: undefined,
+        createStatement: "CREATE ROLE app_owner;",
+        dropStatement: "DROP ROLE app_owner;",
+      }),
+    ];
+
+    const plan = await handler.generateStatements([], current);
+
+    expect(plan.typeDrop).toEqual([
+      "DROP TYPE public.payload_range;",
+      "DROP DOMAIN public.payload_domain;",
+    ]);
+    expect(plan.lateDrop).toEqual(["DROP ROLE app_owner;"]);
+  });
+
   test("changes partition bounds without dropping the partition", async function () {
     const handler = new SqlObjectHandler();
     const desired = [

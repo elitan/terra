@@ -16,6 +16,7 @@ type SqlObjectPlan = {
   postRoutineCreate: string[];
   finalCreate: string[];
   earlyDrop: string[];
+  typeDrop: string[];
   lateDrop: string[];
 };
 
@@ -290,6 +291,9 @@ function getCreateBucket(kind: SqlObjectKind): keyof SqlObjectPlan {
 }
 
 function getDropBucket(kind: SqlObjectKind): keyof SqlObjectPlan {
+  if (kind === "domain-type" || kind === "range-type") {
+    return "typeDrop";
+  }
   if (
     kind === "grant" ||
     kind === "policy" ||
@@ -367,6 +371,7 @@ export class SqlObjectHandler {
       postRoutineCreate: [],
       finalCreate: [],
       earlyDrop: [],
+      typeDrop: [],
       lateDrop: [],
     };
 
@@ -469,6 +474,7 @@ export class SqlObjectHandler {
     }
 
     plan.earlyDrop = dedupeStatements(plan.earlyDrop);
+    plan.typeDrop = dedupeStatements(plan.typeDrop);
     plan.lateDrop = dedupeStatements(plan.lateDrop);
     plan.bootstrapCreate = dedupeStatements(plan.bootstrapCreate);
     plan.typeCreate = dedupeStatements(plan.typeCreate);

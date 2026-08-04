@@ -1625,6 +1625,129 @@ describe("CLI Contract", () => {
   );
 
   test.skipIf(reachablePostgresUrls.length === 0)(
+    "should expose composite attribute drops as destructive type changes",
+    async function () {
+      const postgresUrl = reachablePostgresUrls[0];
+      if (!postgresUrl) return;
+
+      const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+      const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+      const schemaName = `cli_composite_risk_${suffix}`;
+      const seedSchemaPath = join(dir, `composite-risk-seed-${suffix}.sql`);
+      const nextSchemaPath = join(dir, `composite-risk-next-${suffix}.sql`);
+      const client = new Client({ connectionString: postgresUrl });
+
+      try {
+        await writeFile(
+          seedSchemaPath,
+          `
+          CREATE SCHEMA ${schemaName};
+          CREATE TYPE ${schemaName}.payload AS (
+            value integer,
+            legacy text
+          );
+          `.trim() + "\n"
+        );
+        await writeFile(
+          nextSchemaPath,
+          `
+          CREATE SCHEMA ${schemaName};
+          CREATE TYPE ${schemaName}.payload AS (value integer);
+          `.trim() + "\n"
+        );
+
+        const seedResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "apply",
+            "-f",
+            seedSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--auto-approve",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(seedResult.exitCode).toBe(0);
+
+        const planResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "plan",
+            "-f",
+            nextSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--format",
+            "json",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(planResult.exitCode).toBe(0);
+
+        const payload = parseJsonOutput(planResult.output);
+        const dropStatement =
+          `ALTER TYPE "${schemaName}"."payload" ` +
+          `DROP ATTRIBUTE "legacy" RESTRICT;`;
+        expect(payload.statements.transactional).toEqual([dropStatement]);
+        expect(payload.statementMetadata).toEqual([
+          {
+            order: 1,
+            channel: "transactional",
+            category: "type",
+            risk: "destructive",
+            sql: dropStatement,
+          },
+        ]);
+
+        const strictResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "apply",
+            "-f",
+            nextSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--auto-approve",
+            "--dry-run",
+            "--strict",
+            "--format",
+            "json",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(strictResult.exitCode).toBe(1);
+        expect(parseJsonOutput(strictResult.output).error.code).toBe(
+          "STRICT_MODE_ERROR"
+        );
+      } finally {
+        try {
+          await client.connect();
+          await client.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+        } finally {
+          try {
+            await client.end();
+          } catch {
+          }
+          await rm(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  );
+
+  test.skipIf(reachablePostgresUrls.length === 0)(
     "should release advisory lock after strict mode failure in postgres apply path",
     async function () {
       const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));

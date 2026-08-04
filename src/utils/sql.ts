@@ -1434,7 +1434,11 @@ export function generateCreateCompositeTypeSQL(compositeType: CompositeType): st
 
   const attributes = compositeType.attributes
     .map(function (attribute) {
-      return `"${attribute.name.replace(/"/g, '""')}" ${attribute.type}`;
+      const name = `"${attribute.name.replace(/"/g, '""')}"`;
+      const collation = attribute.collation
+        ? ` COLLATE ${renderCollationName(attribute.collation)}`
+        : "";
+      return `${name} ${attribute.type}${collation}`;
     })
     .join(', ');
   builder.p(`AS (${attributes});`);

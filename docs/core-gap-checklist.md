@@ -48,6 +48,10 @@
 - done: add enum schema-scope regression tests (no-op, targeted append, scoped removal).
 - done: add enum duplicate-value guard to fail fast before generating unsafe repeated ALTER TYPE statements.
 - done: add enum mixed-case append and duplicate-guard regression tests.
+- done: preserve zero-attribute composite types and explicit attribute collations.
+- done: support dependency-ordered composite create/drop and native attribute evolution.
+- done: classify composite attribute drops as destructive and reject blocked type changes during planning.
+- done: traverse array/domain/range/multirange relation dependencies and coordinate dependent type/view removal.
 - done: make sequence, procedure, and view handlers schema-aware for keying and drop/create sql.
 - done: add cross-schema name-collision regression tests for sequence, procedure, and view handlers.
 - done: add schema-service integration regressions for same-name cross-schema sequence/procedure/view lifecycle.

@@ -18,6 +18,7 @@ export function isDestructiveStatement(statement: string): boolean {
   return (
     normalized.startsWith("DROP ") ||
     normalized.includes(" DROP COLUMN ") ||
+    normalized.includes(" DROP ATTRIBUTE ") ||
     normalized.includes(" DROP CONSTRAINT ") ||
     normalized.includes(" ALTER COLUMN ") ||
     normalized.includes(" SET DATA TYPE ")
@@ -64,7 +65,11 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   if (normalized.startsWith("CREATE VIEW") || normalized.startsWith("DROP VIEW")) {
     return "view";
   }
-  if (normalized.startsWith("ALTER TYPE") || normalized.startsWith("CREATE TYPE")) {
+  if (
+    (normalized.startsWith("CREATE TYPE") && normalized.includes(" AS ENUM")) ||
+    (normalized.startsWith("ALTER TYPE") &&
+      (normalized.includes(" ADD VALUE ") || normalized.includes(" RENAME VALUE ")))
+  ) {
     return "enum";
   }
   if (
@@ -108,6 +113,8 @@ export function getStatementCategory(statement: string): CliStatementCategory {
     return "comment";
   }
   if (
+    normalized.startsWith("ALTER TYPE") ||
+    normalized.startsWith("CREATE TYPE") ||
     normalized.startsWith("DROP TYPE") ||
     normalized.startsWith("CREATE DOMAIN") ||
     normalized.startsWith("DROP DOMAIN")

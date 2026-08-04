@@ -102,6 +102,7 @@ export DATABASE_URL=":memory:"
 | Check Constraints | Yes | Yes |
 | Views | Yes | Yes |
 | ENUM Types | Yes | No |
+| Composite Types | Yes | No |
 | Sequences | Yes | No |
 | Functions | Yes | No |
 | Procedures | Yes | No |
@@ -179,6 +180,19 @@ version 2 exposes this phase through `counts.preTransactional`,
 Because this phase commits first, an added label remains as a safe additive
 change if a later transactional statement fails; rerunning apply resumes the
 remaining work.
+PostgreSQL composite types preserve zero-attribute definitions, attribute order,
+quoted names, schema-qualified types, arrays, typemods, and explicit collations.
+TerraDB dependency-orders composite creation and removal, and uses native
+transactional `ALTER TYPE` operations for positional renames, type or collation
+changes, appended attributes, and attribute drops. PostgreSQL cannot insert a
+new composite attribute before an existing one, so that transition and existing
+attribute reordering fail before mutation. Attribute drops are destructive and
+are blocked by `--strict`. PostgreSQL also refuses attribute type or collation
+changes while relation columns depend on the type, including dependencies
+through arrays, domains, ranges, and multiranges; TerraDB detects and reports
+those columns during planning so they can be migrated first. Type removal
+likewise protects retained managed and unmanaged relations, domains, and ranges
+while still ordering their coordinated removal in one apply.
 
 ## Commands
 
@@ -227,6 +241,12 @@ CREATE INDEX idx_email_bytewise ON users (email COLLATE "C");  -- PostgreSQL
 CREATE TYPE status AS ENUM ('pending', 'active', 'inactive');
 -- Adding a label between existing labels is supported on a later apply:
 CREATE TYPE status AS ENUM ('pending', 'in_review', 'active', 'inactive');
+
+-- Composite types
+CREATE TYPE address AS (
+  street text,
+  city text COLLATE "C"
+);
 
 -- Views
 CREATE VIEW active_users AS SELECT * FROM users WHERE active = true;

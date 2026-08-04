@@ -81,7 +81,7 @@ export function parseColumn(columnDef: any): Column | null {
   }
 }
 
-function extractColumnCollation(
+export function extractColumnCollation(
   collClause: any
 ): Column['collation'] | undefined {
   const parts = (collClause?.collname || [])
@@ -100,6 +100,11 @@ function extractColumnCollation(
   });
 }
 
+function renderTypeIdentifier(value: string): string {
+  if (/^[a-z_][a-z0-9_$]*$/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
 /**
  * Extract data type from typeName node
  */
@@ -108,14 +113,18 @@ export function extractDataType(typeName: any): string {
     if (!typeName || !typeName.names) return "UNKNOWN";
 
     const names = typeName.names.map((n: any) => n.String?.sval || '');
+    if (names.length === 0) return "UNKNOWN";
 
     let type: string;
     if (names.length > 1 && names[0] === 'pg_catalog') {
       type = names[names.length - 1].toUpperCase();
     } else if (names.length > 1) {
-      type = names.join('.');
+      type = names.map(renderTypeIdentifier).join('.');
     } else {
-      type = names[0].toUpperCase();
+      const name = names[0];
+      type = /^[a-z_][a-z0-9_$]*$/.test(name)
+        ? name.toUpperCase()
+        : renderTypeIdentifier(name);
     }
 
     if (typeName.typmods && typeName.typmods.length > 0) {

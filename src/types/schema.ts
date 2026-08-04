@@ -141,12 +141,28 @@ export interface EnumType {
 export interface CompositeTypeAttribute {
   name: string;
   type: string;
+  collation?: QualifiedName;
+}
+
+export interface CompositeTypeAttributeDependent {
+  schema: string;
+  relation: string;
+  attribute: string;
+  relationKind: string;
+}
+
+export interface CompositeTypeTypeDependent {
+  schema: string;
+  name: string;
+  kind: "domain" | "range";
 }
 
 export interface CompositeType {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   attributes: CompositeTypeAttribute[];
+  attributeDependents?: CompositeTypeAttributeDependent[];
+  typeDependents?: CompositeTypeTypeDependent[];
 }
 
 export interface View {

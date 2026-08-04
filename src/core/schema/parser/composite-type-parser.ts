@@ -1,6 +1,9 @@
 import { Logger } from "../../../utils/logger";
 import type { CompositeType } from "../../../types/schema";
-import { extractDataType } from "./tables/column-parser";
+import {
+  extractColumnCollation,
+  extractDataType,
+} from "./tables/column-parser";
 
 export function parseCreateCompositeType(stmt: any): CompositeType | null {
   try {
@@ -9,22 +12,19 @@ export function parseCreateCompositeType(stmt: any): CompositeType | null {
       return null;
     }
 
-    const attributes = (stmt.coldeflist || [])
-      .map(function (item: any) {
-        const columnDef = item.ColumnDef;
-        if (!columnDef?.colname || !columnDef.typeName) {
-          return null;
-        }
+    const attributes: CompositeType["attributes"] = [];
+    for (const item of stmt.coldeflist || []) {
+      const columnDef = item.ColumnDef;
+      if (!columnDef?.colname || !columnDef.typeName) {
+        return null;
+      }
 
-        return {
-          name: columnDef.colname,
-          type: extractDataType(columnDef.typeName),
-        };
-      })
-      .filter(Boolean);
-
-    if (attributes.length === 0) {
-      return null;
+      const collation = extractColumnCollation(columnDef.collClause);
+      attributes.push({
+        name: columnDef.colname,
+        type: extractDataType(columnDef.typeName),
+        ...(collation ? { collation } : {}),
+      });
     }
 
     return {
