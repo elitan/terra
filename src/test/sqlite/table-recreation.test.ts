@@ -25,6 +25,15 @@ async function getIgnoreCheckConstraintsSetting(
   return result.rows[0]?.ignore_check_constraints ?? -1;
 }
 
+async function getDeferredForeignKeysSetting(
+  client: DatabaseClient
+): Promise<number> {
+  const result = await client.query<{ defer_foreign_keys: number }>(
+    "PRAGMA defer_foreign_keys"
+  );
+  return result.rows[0]?.defer_foreign_keys ?? -1;
+}
+
 async function createReferencedUsersMigration(
   provider: SQLiteProvider,
   filename = ":memory:"
@@ -608,6 +617,7 @@ describe("SQLite Table Recreation", () => {
     ]);
     expect(await getForeignKeysSetting(client)).toBe(0);
     expect(await getIgnoreCheckConstraintsSetting(client)).toBe(0);
+    expect(await getDeferredForeignKeysSetting(client)).toBe(0);
 
     await expect(
       provider.executeInTransaction(client, [
@@ -616,7 +626,48 @@ describe("SQLite Table Recreation", () => {
     ).rejects.toThrow("missing_table");
     expect(await getForeignKeysSetting(client)).toBe(0);
     expect(await getIgnoreCheckConstraintsSetting(client)).toBe(0);
+    expect(await getDeferredForeignKeysSetting(client)).toBe(0);
     await client.end();
+  });
+
+  test("should restore deferred foreign keys after success and rollback", async function () {
+    const additiveClient = await provider.createClient({
+      dialect: "sqlite",
+      filename: ":memory:",
+    });
+    await additiveClient.query("PRAGMA defer_foreign_keys = ON");
+    expect(await getDeferredForeignKeysSetting(additiveClient)).toBe(1);
+
+    await provider.executeInTransaction(additiveClient, [
+      "CREATE TABLE deferred_state (id INTEGER PRIMARY KEY)",
+    ]);
+    expect(await getDeferredForeignKeysSetting(additiveClient)).toBe(1);
+
+    await expect(
+      provider.executeInTransaction(additiveClient, [
+        "INSERT INTO missing_table DEFAULT VALUES",
+      ])
+    ).rejects.toThrow("missing_table");
+    expect(await getDeferredForeignKeysSetting(additiveClient)).toBe(1);
+    await additiveClient.end();
+
+    const { client: recreationClient, statements } =
+      await createReferencedUsersMigration(provider, dbPath);
+    await recreationClient.query("PRAGMA defer_foreign_keys = ON");
+    await provider.executeInTransaction(recreationClient, statements);
+    expect(await getDeferredForeignKeysSetting(recreationClient)).toBe(1);
+
+    const failingStatements = [...statements];
+    failingStatements.splice(
+      failingStatements.length - 1,
+      0,
+      "INSERT INTO missing_table DEFAULT VALUES"
+    );
+    await expect(
+      provider.executeInTransaction(recreationClient, failingStatements)
+    ).rejects.toThrow("missing_table");
+    expect(await getDeferredForeignKeysSetting(recreationClient)).toBe(1);
+    await recreationClient.end();
   });
 
   test("should reject migrations inside an active transaction or savepoint", async function () {

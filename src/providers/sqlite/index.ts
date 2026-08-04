@@ -483,6 +483,7 @@ export class SQLiteProvider implements DatabaseProvider {
     let foreignKeysInitiallyEnabled = false;
     let foreignKeysSuspended = false;
     let checkConstraintsTemporarilyEnforced = false;
+    let deferredForeignKeysNeedRestoration = false;
 
     try {
       if (sqliteClient.raw.inTransaction) {
@@ -503,6 +504,13 @@ export class SQLiteProvider implements DatabaseProvider {
         sqliteClient.execMultiple("PRAGMA ignore_check_constraints = OFF");
         checkConstraintsTemporarilyEnforced = true;
       }
+
+      currentStatement = "PRAGMA defer_foreign_keys";
+      const deferredForeignKeyResult = await sqliteClient.query<{
+        defer_foreign_keys: number;
+      }>("PRAGMA defer_foreign_keys");
+      deferredForeignKeysNeedRestoration =
+        deferredForeignKeyResult.rows[0]?.defer_foreign_keys === 1;
 
       if (foreignKeySuspensionRequired) {
         currentStatement = "PRAGMA foreign_keys";
@@ -546,6 +554,12 @@ export class SQLiteProvider implements DatabaseProvider {
         checkConstraintsTemporarilyEnforced = false;
       }
 
+      if (deferredForeignKeysNeedRestoration) {
+        currentStatement = "PRAGMA defer_foreign_keys = ON";
+        sqliteClient.execMultiple("PRAGMA defer_foreign_keys = ON");
+        deferredForeignKeysNeedRestoration = false;
+      }
+
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       if (spinner) {
         spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
@@ -559,6 +573,11 @@ export class SQLiteProvider implements DatabaseProvider {
       if (checkConstraintsTemporarilyEnforced) {
         try {
           sqliteClient.execMultiple("PRAGMA ignore_check_constraints = ON");
+        } catch {}
+      }
+      if (deferredForeignKeysNeedRestoration) {
+        try {
+          sqliteClient.execMultiple("PRAGMA defer_foreign_keys = ON");
         } catch {}
       }
       if (spinner) {

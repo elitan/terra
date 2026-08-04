@@ -97,6 +97,7 @@
 - done: preserve hidden SQLite ROWID values through table recreation, including shadowed built-in names and the inline `INTEGER PRIMARY KEY DESC` exception; fail before mutation when no ROWID name is accessible.
 - done: enforce SQLite CHECK constraints during migrations even when the caller set `ignore_check_constraints=ON`, then restore the connection setting after success or rollback.
 - done: verify SQLite foreign-key integrity before committing generalized migrations even when the caller set `foreign_keys=OFF`, then preserve that setting after success or rollback.
+- done: restore SQLite `defer_foreign_keys` after every successful or failed migration because SQLite clears it automatically at transaction boundaries.
 - done: classify the SQLite migration executor as critical for changed-file mutation testing and route its mutants through real SQLite executor and validation suites.
 - done: manage SQLite FTS5/RTree virtual tables losslessly and exclude their implementation-owned shadow tables from desired/current schema diffs.
 - done: cover SQLite virtual-table create, query behavior, idempotency, destructive strict-mode blocking, definition change, view restoration, rollback, and removal in memory and on disk.
