@@ -207,6 +207,9 @@ function resolveTestCommand(file: string, override?: string): string {
   if (normalized.endsWith("/src/core/schema/inspector.ts")) {
     return "bun --env-file=.env test src/test/inspector-coverage.test.ts src/test/inspector-version-snapshots.test.ts";
   }
+  if (normalized.endsWith("/src/providers/sqlite/index.ts")) {
+    return "bun --env-file=.env test src/test/sqlite/table-recreation.test.ts src/test/sqlite/validation.test.ts";
+  }
   return "bun --env-file=.env test src/test/schema-service-private-coverage.test.ts";
 }
 

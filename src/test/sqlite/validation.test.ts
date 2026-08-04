@@ -307,6 +307,19 @@ describe("SQLite Unsupported Features Validation", () => {
       {
         code: "SQLITE_FOREIGN_KEY_TARGET_NOT_UNIQUE",
         sql: `
+          CREATE TABLE parents (
+            tenant_id INTEGER NOT NULL,
+            external_id TEXT NOT NULL,
+            UNIQUE (tenant_id, external_id)
+          );
+          CREATE TABLE children (
+            parent_id TEXT REFERENCES parents(external_id)
+          );
+        `,
+      },
+      {
+        code: "SQLITE_FOREIGN_KEY_TARGET_NOT_UNIQUE",
+        sql: `
           CREATE TABLE parents (external_id TEXT);
           CREATE UNIQUE INDEX parents_external_id
           ON parents(external_id)
@@ -391,6 +404,18 @@ describe("SQLite Unsupported Features Validation", () => {
       );
     `);
 
+    expect(provider.validateSchema(parsed).errors).toEqual([]);
+
+    const parentTable = parsed.tables.find(function (table) {
+      return table.name === "parents";
+    });
+    const externalIndex = parentTable?.indexes?.find(function (index) {
+      return index.name === "parents_external_id";
+    });
+    if (!externalIndex) {
+      throw new Error("Expected parsed external parent-key index");
+    }
+    externalIndex.terms = undefined;
     expect(provider.validateSchema(parsed).errors).toEqual([]);
   });
 

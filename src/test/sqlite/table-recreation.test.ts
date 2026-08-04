@@ -26,7 +26,8 @@ async function getIgnoreCheckConstraintsSetting(
 }
 
 async function createReferencedUsersMigration(
-  provider: SQLiteProvider
+  provider: SQLiteProvider,
+  filename = ":memory:"
 ): Promise<{ client: DatabaseClient; statements: string[] }> {
   const initialSchema = `
     CREATE TABLE users (
@@ -45,7 +46,7 @@ async function createReferencedUsersMigration(
   );
   const client = await provider.createClient({
     dialect: "sqlite",
-    filename: ":memory:",
+    filename,
   });
   await client.query(
     "CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)"
@@ -418,14 +419,11 @@ describe("SQLite Table Recreation", () => {
       const { client, statements } =
         await createReferencedUsersMigration(provider);
       await client.query(`PRAGMA foreign_keys = ${initialSetting}`);
-      if (initialSetting === 0) {
-        await client.query("UPDATE posts SET user_id = 999 WHERE id = 1");
-      }
 
       await provider.executeInTransaction(client, statements);
       expect(await getForeignKeysSetting(client)).toBe(initialSetting);
       const violations = await client.query("PRAGMA foreign_key_check");
-      expect(violations.rows).toHaveLength(initialSetting === 0 ? 1 : 0);
+      expect(violations.rows).toHaveLength(0);
 
       const failingStatements = [...statements];
       failingStatements.splice(
@@ -438,18 +436,16 @@ describe("SQLite Table Recreation", () => {
       ).rejects.toThrow("missing_table");
       expect(await getForeignKeysSetting(client)).toBe(initialSetting);
 
-      if (initialSetting === 1) {
-        const integrityFailureStatements = [...statements];
-        integrityFailureStatements.splice(
-          integrityFailureStatements.length - 1,
-          0,
-          "UPDATE posts SET user_id = 999 WHERE id = 1;"
-        );
-        await expect(
-          provider.executeInTransaction(client, integrityFailureStatements)
-        ).rejects.toThrow("Foreign key integrity check failed");
-        expect(await getForeignKeysSetting(client)).toBe(1);
-      }
+      const integrityFailureStatements = [...statements];
+      integrityFailureStatements.splice(
+        integrityFailureStatements.length - 1,
+        0,
+        "UPDATE posts SET user_id = 999 WHERE id = 1;"
+      );
+      await expect(
+        provider.executeInTransaction(client, integrityFailureStatements)
+      ).rejects.toThrow("Foreign key integrity check failed");
+      expect(await getForeignKeysSetting(client)).toBe(initialSetting);
 
       const rows = await client.query(`
         SELECT users.id, users.age, posts.user_id
@@ -461,10 +457,80 @@ describe("SQLite Table Recreation", () => {
         {
           id: 1,
           age: "10",
-          user_id: initialSetting === 0 ? 999 : 1,
+          user_id: 1,
         },
       ]);
       await client.end();
+    }
+  });
+
+  test("should validate foreign keys with caller enforcement off in memory and on disk", async function () {
+    for (const filename of [":memory:", dbPath]) {
+      const { client, statements } =
+        await createReferencedUsersMigration(provider, filename);
+      await client.query("PRAGMA foreign_keys = OFF");
+
+      const violatingStatements = [...statements];
+      violatingStatements.splice(
+        violatingStatements.length - 1,
+        0,
+        "UPDATE posts SET user_id = 999 WHERE id = 1;"
+      );
+
+      await expect(
+        provider.executeInTransaction(client, violatingStatements)
+      ).rejects.toThrow("Foreign key integrity check failed");
+      expect(await getForeignKeysSetting(client)).toBe(0);
+
+      const rolledBackColumns = await client.query<{
+        name: string;
+        type: string;
+      }>("PRAGMA table_info(users)");
+      const rolledBackRows = await client.query(`
+        SELECT users.id, users.age, posts.user_id
+        FROM users
+        JOIN posts ON posts.id = users.id
+      `);
+      const rolledBackArtifacts = await client.query(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name LIKE '_users_new%'
+      `);
+      expect(rolledBackColumns.rows.map(function (column) {
+        return { name: column.name, type: column.type };
+      })).toEqual([
+        { name: "id", type: "INTEGER" },
+        { name: "age", type: "INTEGER" },
+      ]);
+      expect(rolledBackRows.rows).toEqual([{
+        id: 1,
+        age: 10,
+        user_id: 1,
+      }]);
+      expect(rolledBackArtifacts.rows).toEqual([]);
+
+      await provider.executeInTransaction(client, statements);
+      expect(await getForeignKeysSetting(client)).toBe(0);
+      const foreignKeyCheck = await client.query("PRAGMA foreign_key_check");
+      const migratedRows = await client.query(`
+        SELECT users.id, users.age, posts.user_id
+        FROM users
+        JOIN posts ON posts.id = users.id
+      `);
+      const temporaryArtifacts = await client.query(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name LIKE '_users_new%'
+      `);
+      await client.end();
+
+      expect(foreignKeyCheck.rows).toEqual([]);
+      expect(migratedRows.rows).toEqual([{
+        id: 1,
+        age: "10",
+        user_id: 1,
+      }]);
+      expect(temporaryArtifacts.rows).toEqual([]);
     }
   });
 
@@ -527,6 +593,30 @@ describe("SQLite Table Recreation", () => {
     expect(integrity.rows).toEqual([{ integrity_check: "ok" }]);
     expect(rows.rows).toEqual([{ value: 1 }]);
     expect(temporaryArtifacts.rows).toEqual([]);
+  });
+
+  test("should preserve pragma settings when suspension is unnecessary", async function () {
+    const client = await provider.createClient({
+      dialect: "sqlite",
+      filename: ":memory:",
+    });
+    await client.query("PRAGMA foreign_keys = OFF");
+    await client.query("PRAGMA ignore_check_constraints = OFF");
+
+    await provider.executeInTransaction(client, [
+      "CREATE TABLE additive_change (id INTEGER PRIMARY KEY)",
+    ]);
+    expect(await getForeignKeysSetting(client)).toBe(0);
+    expect(await getIgnoreCheckConstraintsSetting(client)).toBe(0);
+
+    await expect(
+      provider.executeInTransaction(client, [
+        "INSERT INTO missing_table DEFAULT VALUES",
+      ])
+    ).rejects.toThrow("missing_table");
+    expect(await getForeignKeysSetting(client)).toBe(0);
+    expect(await getIgnoreCheckConstraintsSetting(client)).toBe(0);
+    await client.end();
   });
 
   test("should reject migrations inside an active transaction or savepoint", async function () {

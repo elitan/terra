@@ -480,7 +480,7 @@ export class SQLiteProvider implements DatabaseProvider {
     let currentStatement: string | undefined;
     const foreignKeySuspensionRequired =
       this.requiresForeignKeySuspension(statements);
-    let foreignKeysWereEnabled = false;
+    let foreignKeysInitiallyEnabled = false;
     let foreignKeysSuspended = false;
     let checkConstraintsTemporarilyEnforced = false;
 
@@ -509,10 +509,10 @@ export class SQLiteProvider implements DatabaseProvider {
         const result = await sqliteClient.query<{ foreign_keys: number }>(
           "PRAGMA foreign_keys"
         );
-        foreignKeysWereEnabled = result.rows[0]?.foreign_keys === 1;
+        foreignKeysInitiallyEnabled = result.rows[0]?.foreign_keys === 1;
       }
 
-      if (foreignKeysWereEnabled) {
+      if (foreignKeysInitiallyEnabled) {
         sqliteClient.execMultiple("PRAGMA foreign_keys = OFF");
         foreignKeysSuspended = true;
       }
@@ -526,7 +526,7 @@ export class SQLiteProvider implements DatabaseProvider {
           sqliteClient.execMultiple(statement);
         }
 
-        if (foreignKeysWereEnabled) {
+        if (foreignKeySuspensionRequired) {
           currentStatement = "PRAGMA foreign_key_check";
           const violations = sqliteClient.raw.prepare("PRAGMA foreign_key_check").all();
           if (violations.length > 0) {

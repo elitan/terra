@@ -39,5 +39,11 @@ export const mutationRiskManifest: MutationRiskManifest = {
       level: "high",
       reason: "introspection drift causes incorrect change plans",
     },
+    {
+      path: "src/providers/sqlite/index.ts",
+      owner: "sqlite-provider",
+      level: "critical",
+      reason: "controls SQLite migration atomicity and integrity verification",
+    },
   ],
 };
