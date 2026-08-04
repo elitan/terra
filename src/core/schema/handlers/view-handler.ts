@@ -3,6 +3,7 @@ import {
   generateCreateViewSQL,
   generateDropViewSQL,
   generateCreateOrReplaceViewSQL,
+  generateRefreshMaterializedViewSQL,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import { SchemaDiffer } from "../differ";
@@ -125,6 +126,14 @@ function getViewKey(view: View): string {
   return `${view.schema || "public"}.${view.name}`;
 }
 
+function mapViewsByKey(views: View[]): Map<string, View> {
+  return new Map(
+    views.map(function mapView(view) {
+      return [getViewKey(view), view] as const;
+    })
+  );
+}
+
 function hasCreateStatement(view: View): boolean {
   return typeof view.createStatement === "string" && view.createStatement.trim().length > 0;
 }
@@ -182,11 +191,7 @@ function generateMaterializedViewIndexStatements(
   currentViews: View[]
 ): string[] {
   const statements: string[] = [];
-  const currentMap = new Map(
-    currentViews.map(function mapView(view) {
-      return [getViewKey(view), view] as const;
-    })
-  );
+  const currentMap = mapViewsByKey(currentViews);
 
   for (const desired of desiredViews) {
     if (!desired.materialized) {
@@ -208,6 +213,41 @@ function generateMaterializedViewIndexStatements(
   return statements;
 }
 
+function generateMaterializedViewPopulationStatements(
+  desiredViews: View[],
+  currentViews: View[]
+): string[] {
+  const statements: string[] = [];
+  const currentMap = mapViewsByKey(currentViews);
+
+  for (const desired of desiredViews) {
+    if (!desired.materialized || desired.populated === undefined) {
+      continue;
+    }
+
+    const current = currentMap.get(getViewKey(desired));
+    if (
+      !current ||
+      current.populated === undefined ||
+      current.populated === desired.populated ||
+      config.needsUpdate(desired, current)
+    ) {
+      continue;
+    }
+
+    statements.push(
+      generateRefreshMaterializedViewSQL(
+        desired.name,
+        false,
+        desired.schema,
+        desired.populated
+      )
+    );
+  }
+
+  return statements;
+}
+
 export class ViewHandler {
   generateStatements(desiredViews: View[], currentViews: View[]): string[] {
     const usesCreateStatements = desiredViews.some(hasCreateStatement) ||
@@ -222,6 +262,12 @@ export class ViewHandler {
     }
     statements.push(
       ...generateMaterializedViewIndexStatements(desiredViews, currentViews)
+    );
+    statements.push(
+      ...generateMaterializedViewPopulationStatements(
+        desiredViews,
+        currentViews
+      )
     );
     return statements;
   }

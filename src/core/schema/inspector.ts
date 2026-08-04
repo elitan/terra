@@ -1078,6 +1078,7 @@ export class DatabaseInspector {
         schema: row.schema_name,
         definition: row.definition.trim(),
         materialized: true,
+        populated: row.ispopulated,
       };
 
       const indexes = await this.getTableIndexes(

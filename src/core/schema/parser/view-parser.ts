@@ -131,6 +131,7 @@ export function parseCreateMaterializedView(stmt: any): View | null {
       schema,
       definition,
       materialized: true,
+      populated: !Boolean(into.skipData),
     };
   } catch (error) {
     Logger.warning(

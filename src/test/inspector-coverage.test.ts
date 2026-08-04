@@ -146,7 +146,7 @@ describe("DatabaseInspector coverage", () => {
               view_name: "mv_orders",
               schema_name: "tenant_a",
               definition: " SELECT id FROM orders ",
-              ispopulated: true,
+              ispopulated: false,
             },
           ],
         };
@@ -228,6 +228,7 @@ describe("DatabaseInspector coverage", () => {
         schema: "public",
         definition: "SELECT id FROM users",
         materialized: true,
+        populated: true,
         indexes: [
           {
             name: "mv_users_idx",
@@ -249,6 +250,7 @@ describe("DatabaseInspector coverage", () => {
         schema: "tenant_a",
         definition: "SELECT id FROM orders",
         materialized: true,
+        populated: false,
         indexes: [
           {
             name: "mv_orders_idx",

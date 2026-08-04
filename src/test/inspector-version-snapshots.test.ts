@@ -132,6 +132,15 @@ async function prepareSchema(client: Client): Promise<void> {
       FROM public.users
       WHERE status = 'active'::public.user_status;
 
+    CREATE MATERIALIZED VIEW public.active_user_ids AS
+      SELECT id
+      FROM public.users;
+
+    CREATE MATERIALIZED VIEW tenant_a.pending_user_ids AS
+      SELECT id
+      FROM tenant_a.users
+      WITH NO DATA;
+
     CREATE FUNCTION public.touch_user(p_id integer)
       RETURNS integer
       LANGUAGE sql
@@ -320,6 +329,7 @@ function normalizeSnapshot(input: any): unknown {
       schema: view.schema,
       name: view.name,
       materialized: Boolean(view.materialized),
+      populated: view.populated,
       definition: normalizeSpace(String(view.definition || "")),
       checkOption: view.checkOption,
       securityBarrier: view.securityBarrier,

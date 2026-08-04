@@ -918,6 +918,10 @@ export function generateCreateViewSQL(view: View): string {
     builder.p(`WITH ${view.checkOption} CHECK OPTION`);
   }
 
+  if (view.materialized && view.populated === false) {
+    builder.p("WITH NO DATA");
+  }
+
   return builder.p(";").build();
 }
 
@@ -958,7 +962,18 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
   return builder.p(";").build();
 }
 
-export function generateRefreshMaterializedViewSQL(viewName: string, concurrently: boolean = false): string {
+export function generateRefreshMaterializedViewSQL(
+  viewName: string,
+  concurrently: boolean = false,
+  schema?: string,
+  populated?: boolean
+): string {
+  if (concurrently && populated === false) {
+    throw new Error(
+      "PostgreSQL does not allow CONCURRENTLY with WITH NO DATA"
+    );
+  }
+
   const builder = new SQLBuilder();
 
   if (concurrently) {
@@ -967,7 +982,12 @@ export function generateRefreshMaterializedViewSQL(viewName: string, concurrentl
     builder.p("REFRESH MATERIALIZED VIEW");
   }
 
-  return builder.ident(viewName).p(";").build();
+  builder.table(viewName, schema);
+  if (populated !== undefined) {
+    builder.p(populated ? "WITH DATA" : "WITH NO DATA");
+  }
+
+  return builder.p(";").build();
 }
 
 // FUNCTION SQL generation functions

@@ -231,9 +231,25 @@
     "views": [
       {
         "schema": "public",
+        "name": "active_user_ids",
+        "materialized": true,
+        "populated": true,
+        "definition": "SELECT users.id FROM users;",
+        "indexes": []
+      },
+      {
+        "schema": "public",
         "name": "active_users",
         "materialized": false,
         "definition": "SELECT users.id, users.email FROM users WHERE (users.status = 'active'::user_status);",
+        "indexes": []
+      },
+      {
+        "schema": "tenant_a",
+        "name": "pending_user_ids",
+        "materialized": true,
+        "populated": false,
+        "definition": "SELECT users.id FROM tenant_a.users;",
         "indexes": []
       }
     ],
@@ -598,9 +614,25 @@
     "views": [
       {
         "schema": "public",
+        "name": "active_user_ids",
+        "materialized": true,
+        "populated": true,
+        "definition": "SELECT users.id FROM users;",
+        "indexes": []
+      },
+      {
+        "schema": "public",
         "name": "active_users",
         "materialized": false,
         "definition": "SELECT users.id, users.email FROM users WHERE (users.status = 'active'::user_status);",
+        "indexes": []
+      },
+      {
+        "schema": "tenant_a",
+        "name": "pending_user_ids",
+        "materialized": true,
+        "populated": false,
+        "definition": "SELECT users.id FROM tenant_a.users;",
         "indexes": []
       }
     ],
@@ -965,9 +997,25 @@
     "views": [
       {
         "schema": "public",
+        "name": "active_user_ids",
+        "materialized": true,
+        "populated": true,
+        "definition": "SELECT id FROM users;",
+        "indexes": []
+      },
+      {
+        "schema": "public",
         "name": "active_users",
         "materialized": false,
         "definition": "SELECT id, email FROM users WHERE (status = 'active'::user_status);",
+        "indexes": []
+      },
+      {
+        "schema": "tenant_a",
+        "name": "pending_user_ids",
+        "materialized": true,
+        "populated": false,
+        "definition": "SELECT id FROM tenant_a.users;",
         "indexes": []
       }
     ],
@@ -1332,9 +1380,25 @@
     "views": [
       {
         "schema": "public",
+        "name": "active_user_ids",
+        "materialized": true,
+        "populated": true,
+        "definition": "SELECT id FROM users;",
+        "indexes": []
+      },
+      {
+        "schema": "public",
         "name": "active_users",
         "materialized": false,
         "definition": "SELECT id, email FROM users WHERE (status = 'active'::user_status);",
+        "indexes": []
+      },
+      {
+        "schema": "tenant_a",
+        "name": "pending_user_ids",
+        "materialized": true,
+        "populated": false,
+        "definition": "SELECT id FROM tenant_a.users;",
         "indexes": []
       }
     ],

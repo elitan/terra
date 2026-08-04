@@ -156,6 +156,7 @@ export interface View {
   materialized?: boolean;
   columns?: Column[]; // For typed views or materialized views
   indexes?: Index[]; // Only for materialized views
+  populated?: boolean; // Materialized view scannability from WITH [NO] DATA
   checkOption?: 'CASCADED' | 'LOCAL'; // WITH CHECK OPTION
   securityBarrier?: boolean; // security_barrier option
   dependencies?: string[]; // Tables/views this view depends on
