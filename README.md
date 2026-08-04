@@ -126,6 +126,10 @@ dependent-first order with `RESTRICT`; unmanaged dependent objects therefore
 stop and roll back an apply instead of being deleted. `IF NOT EXISTS` is
 normalized to declarative existence, while duplicate extension declarations
 or options fail before mutation.
+PostgreSQL table removal uses dependency-protected `RESTRICT` drops. TerraDB
+removes managed dependent views and foreign keys first when their desired state
+also removes those dependencies; an unmanaged view or foreign key blocks and
+rolls back the apply instead of being deleted or stripped by `CASCADE`.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

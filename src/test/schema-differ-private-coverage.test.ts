@@ -1588,8 +1588,8 @@ describe("SchemaDiffer private coverage", () => {
     const plan = differ.generateMigrationPlan([desiredPublic], [currentPublic, currentTenant]);
     const sql = plan.transactional.join("\n");
 
-    expect(sql).toContain('DROP TABLE "tenant_a"."users" CASCADE;');
-    expect(sql).not.toContain('DROP TABLE "public"."users" CASCADE;');
+    expect(sql).toContain('DROP TABLE "tenant_a"."users" RESTRICT;');
+    expect(sql).not.toContain('DROP TABLE "public"."users" RESTRICT;');
   });
 
   test("generateMigrationPlan drops all removed same-name tables across schemas", () => {
@@ -1609,7 +1609,7 @@ describe("SchemaDiffer private coverage", () => {
     const plan = differ.generateMigrationPlan([], [currentPublic, currentTenant]);
     const sql = plan.transactional.join("\n");
 
-    expect(sql).toContain('DROP TABLE "public"."users" CASCADE;');
-    expect(sql).toContain('DROP TABLE "tenant_a"."users" CASCADE;');
+    expect(sql).toContain('DROP TABLE "public"."users" RESTRICT;');
+    expect(sql).toContain('DROP TABLE "tenant_a"."users" RESTRICT;');
   });
 });

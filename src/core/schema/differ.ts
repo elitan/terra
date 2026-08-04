@@ -1525,7 +1525,7 @@ export class SchemaDiffer {
           const sql = new SQLBuilder()
             .p("DROP TABLE")
             .table(table.name, table.schema)
-            .p("CASCADE;")
+            .p("RESTRICT;")
             .build();
           statements.push(sql);
         }

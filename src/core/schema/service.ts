@@ -660,6 +660,10 @@ export class SchemaService {
       ) {
         return !/^DROP\s+TRIGGER\b/i.test(statement.trim());
       });
+      preTableViewStatements = viewStatements.filter(isPostgresViewDrop);
+      viewStatements = viewStatements.filter(function isNotDrop(statement) {
+        return !isPostgresViewDrop(statement);
+      });
     }
 
     commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
@@ -959,4 +963,8 @@ export class SchemaService {
   private quoteIdentifier(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
   }
+}
+
+function isPostgresViewDrop(statement: string): boolean {
+  return /^DROP\s+(?:MATERIALIZED\s+)?VIEW\b/i.test(statement.trim());
 }
