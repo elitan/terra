@@ -20,6 +20,7 @@ import {
   parseSQLiteTriggerMetadata,
   replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
+import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 
 interface TableInfo {
   cid: number;
@@ -36,7 +37,7 @@ interface ForeignKeyInfo {
   seq: number;
   table: string;
   from: string;
-  to: string;
+  to: string | null;
   on_update: string;
   on_delete: string;
   match: string;
@@ -113,7 +114,34 @@ export class SQLiteInspector {
       result.push(table);
     }
 
+    this.resolveImplicitForeignKeyColumns(result);
     return result;
+  }
+
+  private resolveImplicitForeignKeyColumns(tables: Table[]): void {
+    const tablesByName = new Map(
+      tables.map(function (table) {
+        return [normalizeSQLiteIdentifier(table.name), table] as const;
+      })
+    );
+
+    for (const table of tables) {
+      for (const foreignKey of table.foreignKeys || []) {
+        if (foreignKey.referencedColumns.length === foreignKey.columns.length) {
+          continue;
+        }
+        const parentTable = tablesByName.get(
+          normalizeSQLiteIdentifier(foreignKey.referencedTable)
+        );
+        const primaryKeyColumns = parentTable?.primaryKey?.columns || [];
+        if (
+          foreignKey.referencedColumns.length === 0 &&
+          primaryKeyColumns.length === foreignKey.columns.length
+        ) {
+          foreignKey.referencedColumns = [...primaryKeyColumns];
+        }
+      }
+    }
   }
 
   private async parseTable(
@@ -234,7 +262,9 @@ export class SQLiteInspector {
       }
       const constraint = fkMap.get(fk.id)!;
       constraint.columns.push(fk.from);
-      constraint.referencedColumns.push(fk.to);
+      if (fk.to !== null) {
+        constraint.referencedColumns.push(fk.to);
+      }
     }
 
     return Array.from(fkMap.values());

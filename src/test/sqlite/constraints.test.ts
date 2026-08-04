@@ -533,4 +533,123 @@ describe("SQLite Foreign Key Constraints", () => {
     const employees = tables.find(t => t.name === "employees");
     expect(employees?.foreignKeys?.[0].referencedTable).toBe("employees");
   });
+
+  test("should resolve omitted parent primary-key columns through recreation", async function () {
+    const shorthandSchema = `
+      CREATE TABLE parents (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      CREATE TABLE regions (
+        country TEXT NOT NULL,
+        code TEXT NOT NULL,
+        PRIMARY KEY (country, code)
+      );
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER,
+        region_country TEXT,
+        region_code TEXT,
+        FOREIGN KEY (parent_id) REFERENCES parents,
+        FOREIGN KEY (region_country, region_code) REFERENCES regions
+      );
+    `;
+    const explicitSchema = shorthandSchema
+      .replace("REFERENCES parents", "REFERENCES parents(id)")
+      .replace(
+        "REFERENCES regions",
+        "REFERENCES regions(country, code)"
+      );
+    const parsed = await provider.parseSchema(shorthandSchema);
+    const parsedChildren = parsed.tables.find(function (table) {
+      return table.name === "children";
+    });
+    expect(parsedChildren?.foreignKeys).toEqual([
+      expect.objectContaining({
+        columns: ["region_country", "region_code"],
+        referencedColumns: ["country", "code"],
+      }),
+      expect.objectContaining({
+        columns: ["parent_id"],
+        referencedColumns: ["id"],
+      }),
+    ]);
+
+    await schemaService.apply(shorthandSchema, ["public"], true);
+    expect((await schemaService.plan(explicitSchema, ["public"])).hasChanges)
+      .toBe(false);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query("INSERT INTO parents(id, name) VALUES (1, 'one')");
+    await seedClient.query(
+      "INSERT INTO regions(country, code) VALUES ('SE', 'AB')"
+    );
+    await seedClient.query(`
+      INSERT INTO children(
+        id,
+        parent_id,
+        region_country,
+        region_code
+      ) VALUES (1, 1, 'SE', 'AB')
+    `);
+    await seedClient.end();
+
+    const recreatedSchema = explicitSchema.replace(
+      "parent_id INTEGER",
+      "parent_id TEXT"
+    );
+    await schemaService.apply(recreatedSchema, ["public"], true);
+
+    const client = await provider.createClient(config);
+    const rows = await client.query(`
+      SELECT id, parent_id, region_country, region_code
+      FROM children
+      ORDER BY id
+    `);
+    const foreignKeyCheck = await client.query("PRAGMA foreign_key_check");
+    await expect(
+      client.query(`
+        INSERT INTO children(
+          id,
+          parent_id,
+          region_country,
+          region_code
+        ) VALUES (2, 999, 'SE', 'AB')
+      `)
+    ).rejects.toThrow("FOREIGN KEY constraint failed");
+    await client.end();
+
+    expect(rows.rows).toEqual([
+      {
+        id: 1,
+        parent_id: "1",
+        region_country: "SE",
+        region_code: "AB",
+      },
+    ]);
+    expect(foreignKeyCheck.rows).toEqual([]);
+    expect((await schemaService.plan(recreatedSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
+
+  test("should reject omitted parent keys with mismatched cardinality", async function () {
+    const parsed = await provider.parseSchema(`
+      CREATE TABLE parents (
+        tenant TEXT NOT NULL,
+        id INTEGER NOT NULL,
+        PRIMARY KEY (tenant, id)
+      );
+      CREATE TABLE children (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER,
+        FOREIGN KEY (parent_id) REFERENCES parents
+      );
+    `);
+    expect(provider.validateSchema(parsed).errors).toContainEqual(
+      expect.objectContaining({
+        code: "SQLITE_FOREIGN_KEY_TARGET_KEY_MISMATCH",
+        object: "children.parent_id",
+      })
+    );
+  });
 });

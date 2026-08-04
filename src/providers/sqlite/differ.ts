@@ -10,6 +10,7 @@ import type { MigrationPlan } from "../../types/migration";
 import {
   extractSQLiteColumnDefinition,
   parseSQLiteTableDefinition,
+  removeSQLiteForeignKeyTargetColumns,
   replaceSQLiteColumnDefinitionName,
   replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
@@ -336,11 +337,11 @@ export class SQLiteDiffer {
         continue;
       }
       const desiredCanonical = replaceSQLiteColumnDefinitionName(
-        column.definition,
+        removeSQLiteForeignKeyTargetColumns(column.definition),
         "__terradb_column__"
       );
       const currentCanonical = replaceSQLiteColumnDefinitionName(
-        currentColumn,
+        removeSQLiteForeignKeyTargetColumns(currentColumn),
         "__terradb_column__"
       );
       if (
@@ -363,7 +364,9 @@ export class SQLiteDiffer {
   private normalizeDefinitions(definitions: string[]): string[] {
     const differ = this;
     return definitions.map(function (definition) {
-      return differ.normalizeSql(definition) || "";
+      return differ.normalizeSql(
+        removeSQLiteForeignKeyTargetColumns(definition)
+      ) || "";
     }).sort();
   }
 

@@ -7,6 +7,7 @@ import {
   isSQLiteRecreationTableStatement,
 } from "../../utils/sqlite-recreation";
 import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
+import { removeSQLiteForeignKeyTargetColumns } from "../../providers/sqlite/sql-parser-utils";
 
 function makeTable(overrides: Partial<Table> = {}): Table {
   return {
@@ -51,6 +52,21 @@ describe("SQLiteDiffer private coverage", () => {
         'CREATE TABLE "_users_new_3" (id INTEGER);',
       ])
     ).toBe(false);
+  });
+
+  test("canonicalizes only actual foreign key target lists", function () {
+    expect(
+      removeSQLiteForeignKeyTargetColumns(
+        `FOREIGN KEY (parent_id) REFERENCES "parents" /* target */ ("id") ON DELETE CASCADE`
+      )
+    ).toBe(
+      `FOREIGN KEY (parent_id) REFERENCES "parents" ON DELETE CASCADE`
+    );
+    expect(
+      removeSQLiteForeignKeyTargetColumns(
+        `CHECK (note = 'REFERENCES parents(id)')`
+      )
+    ).toBe(`CHECK (note = 'REFERENCES parents(id)')`);
   });
 
   test("detectChanges marks check constraint changes for recreation", () => {

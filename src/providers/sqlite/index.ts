@@ -155,9 +155,9 @@ export class SQLiteProvider implements DatabaseProvider {
 
   validateSchema(schema: ParsedSchema): ValidationResult {
     const errors: ValidationError[] = [];
-    const tableNames = new Set(
+    const tablesByName = new Map(
       schema.tables.map(function (table) {
-        return normalizeSQLiteIdentifier(table.name);
+        return [normalizeSQLiteIdentifier(table.name), table] as const;
       })
     );
 
@@ -222,7 +222,8 @@ export class SQLiteProvider implements DatabaseProvider {
         const referencedTableName = normalizeSQLiteIdentifier(
           foreignKey.referencedTable
         );
-        if (!tableNames.has(referencedTableName)) {
+        const referencedTable = tablesByName.get(referencedTableName);
+        if (!referencedTable) {
           errors.push({
             code: "SQLITE_FOREIGN_KEY_TARGET_MISSING",
             message:
@@ -232,6 +233,23 @@ export class SQLiteProvider implements DatabaseProvider {
             suggestion:
               `Add CREATE TABLE "${foreignKey.referencedTable}" or remove ` +
               "the foreign key",
+          });
+          continue;
+        }
+
+        if (
+          foreignKey.referencedColumns.length !== foreignKey.columns.length
+        ) {
+          errors.push({
+            code: "SQLITE_FOREIGN_KEY_TARGET_KEY_MISMATCH",
+            message:
+              `Foreign key on "${table.name}" has ` +
+              `${foreignKey.columns.length} column(s), but the primary key ` +
+              `of "${referencedTable.name}" cannot supply the same target`,
+            object: `${table.name}.${foreignKey.columns.join(",")}`,
+            suggestion:
+              "Specify referenced columns explicitly or use the complete " +
+              "parent primary key",
           });
         }
       }

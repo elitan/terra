@@ -612,6 +612,58 @@ export interface SQLiteTableDefinition {
   constraints: string[];
 }
 
+export function removeSQLiteForeignKeyTargetColumns(
+  definition: string
+): string {
+  const ranges: Array<{ start: number; end: number }> = [];
+  let cursor = 0;
+
+  while (cursor < definition.length) {
+    const skipped = skipQuotedOrComment(definition, cursor);
+    if (skipped !== undefined) {
+      cursor = skipped;
+      continue;
+    }
+    if (!isKeywordAt(definition, cursor, "REFERENCES")) {
+      cursor += 1;
+      continue;
+    }
+
+    const tableStart = cursor + "REFERENCES".length;
+    const referencedTable = readSQLiteIdentifier(
+      definition.slice(tableStart)
+    );
+    if (!referencedTable) {
+      cursor = tableStart;
+      continue;
+    }
+
+    const tableEnd = tableStart + referencedTable.end;
+    const openParenthesis = skipWhitespaceAndComments(definition, tableEnd);
+    if (definition[openParenthesis] !== "(") {
+      cursor = tableEnd;
+      continue;
+    }
+
+    const referencedColumns = readParenthesizedExpression(
+      definition,
+      openParenthesis
+    );
+    if (!referencedColumns) {
+      cursor = openParenthesis + 1;
+      continue;
+    }
+    ranges.push({ start: tableEnd, end: referencedColumns.end });
+    cursor = referencedColumns.end;
+  }
+
+  let result = definition;
+  for (const range of ranges.reverse()) {
+    result = result.slice(0, range.start) + result.slice(range.end);
+  }
+  return result;
+}
+
 function isSQLiteTableConstraint(definition: string): boolean {
   const token = readSQLiteToken(definition, 0);
   return token?.kind === "word" &&
