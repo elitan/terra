@@ -23,6 +23,10 @@ import {
   parseCheckConstraint,
   parseForeignKey,
 } from "./tables/constraint-parser";
+import {
+  extractColumnCollation,
+  extractDataType,
+} from "./tables/column-parser";
 import type {
   Table,
   Index,
@@ -632,12 +636,12 @@ export class SchemaParser {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.CreateDomainStmt) {
-          const sqlObject = this.parseDomainSqlObject(stmt);
+          const sqlObject = this.parseDomainSqlObject(stmt, filePath);
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.CreateRangeStmt) {
-          const sqlObject = this.parseRangeSqlObject(stmt);
+          const sqlObject = this.parseRangeSqlObject(stmt, filePath);
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
@@ -1366,8 +1370,9 @@ export class SchemaParser {
     );
   }
 
-  private parseDomainSqlObject(stmt: any): SqlObject | null {
-    const typeName = stmt?.CreateDomainStmt?.domainname || [];
+  private parseDomainSqlObject(stmt: any, filePath?: string): SqlObject | null {
+    const domain = stmt?.CreateDomainStmt;
+    const typeName = domain?.domainname || [];
     const names = typeName.map(function (item: any) {
       return item?.String?.sval;
     }).filter(Boolean);
@@ -1376,11 +1381,68 @@ export class SchemaParser {
       return null;
     }
     const schema = names.length > 1 ? names[names.length - 2] : undefined;
-    return this.buildSqlObject("domain-type", stmt, name, schema);
+    const constraints = domain.constraints || [];
+    const defaultConstraints = constraints.filter(function isDefault(item: any) {
+      return item?.Constraint?.contype === "CONSTR_DEFAULT";
+    });
+    if (defaultConstraints.length > 1) {
+      throw new ParserError(
+        `PostgreSQL domain '${schema ? `${schema}.` : ""}${name}' declares more than one default`,
+        filePath
+      );
+    }
+    const notNullConstraints = constraints.filter(function isNotNull(item: any) {
+      return item?.Constraint?.contype === "CONSTR_NOTNULL";
+    });
+    if (notNullConstraints.length > 1) {
+      throw new ParserError(
+        `PostgreSQL domain '${schema ? `${schema}.` : ""}${name}' declares NOT NULL more than once`,
+        filePath
+      );
+    }
+    const constraintNames = new Set<string>();
+    const checkConstraints = constraints.flatMap(function parseConstraint(
+      item: any
+    ) {
+      const constraint = item?.Constraint;
+      if (constraint?.contype !== "CONSTR_CHECK" || !constraint.raw_expr) {
+        return [];
+      }
+      if (constraint.conname && constraintNames.has(constraint.conname)) {
+        throw new ParserError(
+          `PostgreSQL domain '${schema ? `${schema}.` : ""}${name}' declares constraint '${constraint.conname}' more than once`,
+          filePath
+        );
+      }
+      if (constraint.conname) constraintNames.add(constraint.conname);
+      return [{
+        ...(constraint.conname ? { name: constraint.conname } : {}),
+        expression: deparseSync([constraint.raw_expr]).trim(),
+        validated:
+          constraint.skip_validation !== true &&
+          constraint.initially_valid !== false,
+      }];
+    });
+    const defaultConstraint = defaultConstraints[0]?.Constraint;
+    const object = this.buildSqlObject("domain-type", stmt, name, schema);
+    return {
+      ...object,
+      typeDefinition: {
+        kind: "domain",
+        baseType: extractDataType(domain.typeName),
+        collation: extractColumnCollation(domain.collClause),
+        ...(defaultConstraint?.raw_expr
+          ? { default: deparseSync([defaultConstraint.raw_expr]).trim() }
+          : {}),
+        notNull: notNullConstraints.length === 1,
+        constraints: checkConstraints,
+      },
+    };
   }
 
-  private parseRangeSqlObject(stmt: any): SqlObject | null {
-    const typeName = stmt?.CreateRangeStmt?.typeName || [];
+  private parseRangeSqlObject(stmt: any, filePath?: string): SqlObject | null {
+    const range = stmt?.CreateRangeStmt;
+    const typeName = range?.typeName || [];
     const names = typeName.map(function (item: any) {
       return item?.String?.sval;
     }).filter(Boolean);
@@ -1389,7 +1451,88 @@ export class SchemaParser {
       return null;
     }
     const schema = names.length > 1 ? names[names.length - 2] : undefined;
-    return this.buildSqlObject("range-type", stmt, name, schema);
+    const params = new Map<string, any>();
+    const supportedOptions = new Set([
+      "subtype",
+      "subtype_opclass",
+      "collation",
+      "canonical",
+      "subtype_diff",
+      "multirange_type_name",
+    ]);
+    for (const item of range.params || []) {
+      const parameter = item?.DefElem;
+      if (!parameter?.defname) continue;
+      if (!supportedOptions.has(parameter.defname)) {
+        throw new ParserError(
+          `PostgreSQL range '${schema ? `${schema}.` : ""}${name}' uses unsupported option '${parameter.defname}'`,
+          filePath
+        );
+      }
+      if (params.has(parameter.defname)) {
+        throw new ParserError(
+          `PostgreSQL range '${schema ? `${schema}.` : ""}${name}' declares option '${parameter.defname}' more than once`,
+          filePath
+        );
+      }
+      params.set(parameter.defname, parameter.arg);
+    }
+    const subtype = params.get("subtype")?.TypeName;
+    if (!subtype) {
+      throw new ParserError(
+        `PostgreSQL range '${schema ? `${schema}.` : ""}${name}' requires a subtype`,
+        filePath
+      );
+    }
+    const object = this.buildSqlObject("range-type", stmt, name, schema);
+    return {
+      ...object,
+      typeDefinition: {
+        kind: "range",
+        subtype: extractDataType(subtype),
+        ...this.parseRangeQualifiedOption(
+          params,
+          "subtype_opclass",
+          "subtypeOperatorClass"
+        ),
+        ...this.parseRangeQualifiedOption(params, "collation", "collation"),
+        ...this.parseRangeQualifiedOption(
+          params,
+          "canonical",
+          "canonicalFunction"
+        ),
+        ...this.parseRangeQualifiedOption(
+          params,
+          "subtype_diff",
+          "subtypeDiffFunction"
+        ),
+        ...this.parseRangeQualifiedOption(
+          params,
+          "multirange_type_name",
+          "multirangeTypeName"
+        ),
+      },
+    };
+  }
+
+  private parseRangeQualifiedOption(
+    params: Map<string, any>,
+    option: string,
+    property: string
+  ): Record<string, QualifiedName> {
+    const names = (params.get(option)?.TypeName?.names || [])
+      .map(function getName(item: any) {
+        return item?.String?.sval;
+      })
+      .filter(Boolean);
+    const name = names.at(-1);
+    if (!name) return {};
+    return {
+      [property]: {
+        name,
+        ...(names.length > 1 ? { schema: names.at(-2) } : {}),
+      },
+    };
   }
 
   private parseForeignServerSqlObject(stmt: any): SqlObject | null {

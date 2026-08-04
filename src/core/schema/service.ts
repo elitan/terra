@@ -627,7 +627,16 @@ export class SchemaService {
 
     const sqlObjectPlan = await this.sqlObjectHandler.generateStatements(
       desiredSqlObjects,
-      currentSqlObjects
+      currentSqlObjects,
+      {
+        desiredTables: desiredSchema,
+        desiredViews: normalizedDesiredViews,
+        desiredCompositeTypes,
+        desiredFunctions,
+        currentFunctions,
+        desiredProcedures,
+        managedSchemas: schemas,
+      }
     );
 
     const transactionalPreview = [
@@ -636,7 +645,9 @@ export class SchemaService {
       ...extensionCreateStatements,
       ...enumCreateStatements,
       ...compositeTypeCreateStatements,
+      ...sqlObjectPlan.typeReplaceDrop,
       ...sqlObjectPlan.typeCreate,
+      ...sqlObjectPlan.typeAlter,
       ...preSequenceStatements,
       ...sqlObjectPlan.earlyDrop,
       ...sqlObjectPlan.preTableCreate,

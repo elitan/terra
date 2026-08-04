@@ -118,8 +118,32 @@ describe("Advanced SQL object inspector", function () {
               type_name: "email_address",
               schema_name: "public",
               base_type: "text",
+              base_type_kind: "b",
+              base_type_schema: "pg_catalog",
+              base_type_name: "text",
+              collation_name: "C",
+              collation_schema: "pg_catalog",
               is_not_null: true,
               default_value: "'n/a'::text",
+              attribute_dependents: [
+                {
+                  schema: "public",
+                  relation: "users",
+                  attribute: "email",
+                  relationKind: "r",
+                },
+              ],
+              type_dependents: [
+                { schema: "public", name: "verified_email", kind: "domain" },
+              ],
+              routine_dependents: [
+                {
+                  schema: "public",
+                  name: "normalize_email",
+                  kind: "function",
+                  identityArguments: "email_address",
+                },
+              ],
             },
           ],
         };
@@ -132,9 +156,16 @@ describe("Advanced SQL object inspector", function () {
             {
               conname: "email_address_check",
               definition: "CHECK ((position(('@'::text), VALUE) > 1))",
+              expression: "position(('@'::text), VALUE) > 1",
+              is_validated: false,
             },
           ],
         };
+      }
+
+      if (sql.includes("WITH RECURSIVE dependent_types")) {
+        expect(params).toEqual([201]);
+        return { rows: [{ has_container_dependents: true }] };
       }
 
       if (sql.includes("FROM pg_range")) {
@@ -145,10 +176,29 @@ describe("Advanced SQL object inspector", function () {
               type_name: "price_window",
               schema_name: "public",
               subtype_name: "numeric",
+              subtype_kind: "b",
+              subtype_schema: "pg_catalog",
+              subtype_type_name: "numeric",
               subtype_opclass_name: "numeric_ops",
+              subtype_opclass_bare_name: "numeric_ops",
+              subtype_opclass_schema: "pg_catalog",
+              subtype_opclass_is_default: false,
               collation_name: "\"C\"",
+              collation_bare_name: "C",
+              collation_schema: "pg_catalog",
               canonical_name: "public.price_window_canonical",
+              canonical_bare_name: "price_window_canonical",
+              canonical_schema: "public",
               diff_name: "public.price_window_diff",
+              diff_bare_name: "price_window_diff",
+              diff_schema: "public",
+              multirange_name: "price_windows",
+              multirange_schema: "public",
+              attribute_dependents: [],
+              type_dependents: [
+                { schema: "public", name: "bounded_price", kind: "domain" },
+              ],
+              routine_dependents: [],
             },
           ],
         };
@@ -331,13 +381,63 @@ describe("Advanced SQL object inspector", function () {
 
     expect(sqlObjects.find(function (item) {
       return item.key === "domain-type:public.email_address";
-    })?.createStatement).toContain('DEFAULT \'n/a\'::text NOT NULL');
+    })).toMatchObject({
+      createStatement:
+        'CREATE DOMAIN "public"."email_address" AS text COLLATE "pg_catalog"."C" DEFAULT \'n/a\'::text NOT NULL CONSTRAINT "email_address_check" CHECK ((position((\'@\'::text), VALUE) > 1));',
+      typeDefinition: {
+        kind: "domain",
+        baseType: "text",
+        collation: { name: "C", schema: "pg_catalog" },
+        default: "'n/a'::text",
+        notNull: true,
+        constraints: [
+          {
+            name: "email_address_check",
+            expression: "position(('@'::text), VALUE) > 1",
+            validated: false,
+          },
+        ],
+      },
+      attributeDependents: [
+        {
+          schema: "public",
+          relation: "users",
+          attribute: "email",
+          relationKind: "r",
+        },
+      ],
+      typeDependents: [
+        { schema: "public", name: "verified_email", kind: "domain" },
+      ],
+      routineDependents: [
+        {
+          schema: "public",
+          name: "normalize_email",
+          kind: "function",
+          identityArguments: "email_address",
+        },
+      ],
+      hasContainerColumnDependents: true,
+    });
 
     expect(sqlObjects.find(function (item) {
       return item.key === "range-type:public.price_window";
-    })?.createStatement).toBe(
-      'CREATE TYPE "public"."price_window" AS RANGE (subtype = numeric, subtype_opclass = numeric_ops, collation = "C", canonical = public.price_window_canonical, subtype_diff = public.price_window_diff);'
-    );
+    })).toMatchObject({
+      createStatement:
+        'CREATE TYPE "public"."price_window" AS RANGE (subtype = numeric, subtype_opclass = numeric_ops, collation = "C", canonical = public.price_window_canonical, subtype_diff = public.price_window_diff, multirange_type_name = "public"."price_windows");',
+      typeDefinition: {
+        kind: "range",
+        subtype: "numeric",
+        subtypeOperatorClass: { name: "numeric_ops", schema: "pg_catalog" },
+        collation: { name: "C", schema: "pg_catalog" },
+        canonicalFunction: { name: "price_window_canonical", schema: "public" },
+        subtypeDiffFunction: { name: "price_window_diff", schema: "public" },
+        multirangeTypeName: { name: "price_windows", schema: "public" },
+      },
+      typeDependents: [
+        { schema: "public", name: "bounded_price", kind: "domain" },
+      ],
+    });
 
     expect(sqlObjects.find(function (item) {
       return item.key === "role:app_reader";

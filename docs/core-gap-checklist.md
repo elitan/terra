@@ -197,6 +197,11 @@
 - done: add PostgreSQL 18 local, PR CI, release-verification, inspector-snapshot, CLI-discovery, and full matrix lanes without changing nightly automation.
 - done: reject PostgreSQL 18 `NOT ENFORCED`, temporal `WITHOUT OVERLAPS`/`PERIOD`, and advanced named/table-level/inheritance/validation `NOT NULL` semantics while parsing desired schemas; reject unenforced, temporal, and `NOT NULL` inheritance/validation flags on managed external tables without confusing supported `NOT VALID` checks and foreign keys, while normalizing ordinary external `NOT NULL` names to column nullability.
 - done: reject unlogged partitioned parents and explicit unlogged leaf partitions in desired schemas and PostgreSQL 14-17 external catalog state, while retaining full ordinary unlogged-table lifecycle support; this avoids the pre-18 mixed-persistence behavior and PostgreSQL 18's parent rejection.
+- done: preserve PostgreSQL domain base types, collations, defaults, nullability, named/generated checks, and validation state, using native transactional alteration with rollback-safe validation.
+- done: preserve PostgreSQL range subtype, effective operator class, collation, support functions, and explicit/automatic multirange names without default-option drift.
+- done: replace unused immutable domain/range definitions in drop-before-create order, reject replacements with relation/type/routine dependents, and use dependency-ordered `RESTRICT` drops instead of data-losing `CASCADE`.
+- done: detect direct, array, multirange, derived type, relation, and routine-signature dependencies for domain/range replacement and removal, while filtering internal range constructors.
+- done: reject same-apply range support-function creation before mutation with a prerequisite/shell-type diagnostic.
 - next: audit remaining PostgreSQL 18 DDL and catalog additions for attributes that the canonical model could silently discard.
 
 ## parser

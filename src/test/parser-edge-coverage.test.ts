@@ -784,6 +784,14 @@ describe("Parser edge coverage", () => {
       expect(parser.parsePolicySqlObject({ CreatePolicyStmt: { policy_name: "tenant_policy" } })).toBeNull();
       expect(parser.parseDomainSqlObject({ CreateDomainStmt: { domainname: [] } })).toBeNull();
       expect(parser.parseRangeSqlObject({ CreateRangeStmt: { typeName: [] } })).toBeNull();
+      expect(function parseRangeWithoutSubtype() {
+        return parser.parseRangeSqlObject({
+          CreateRangeStmt: {
+            typeName: [{ String: { sval: "window" } }],
+            params: [],
+          },
+        });
+      }).toThrow(/requires a subtype/i);
       expect(parser.parseForeignServerSqlObject({ CreateForeignServerStmt: {} })).toBeNull();
       expect(parser.parseConstraintTriggerSqlObject({ CreateTrigStmt: { trigname: "trg" } })).toBeNull();
       expect(parser.parseEventTriggerSqlObject({ CreateEventTrigStmt: {} })).toBeNull();

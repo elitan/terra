@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import fc from "fast-check";
 import { configurePropertyTests } from "./property-test-options";
 import {
+  getStatementCategory,
   getStatementRisk,
   isDestructiveStatement,
   type StatementChannel,
@@ -115,6 +116,20 @@ describe("Property-Based: Destructive Diff Classification", function () {
       ),
       { numRuns: 150, verbose: false }
     );
+  });
+
+  test("classifies native domain alterations as type statements", function () {
+    expect(getStatementCategory("ALTER DOMAIN public.score SET DEFAULT 1;")).toBe(
+      "type"
+    );
+    expect(getStatementCategory("ALTER DOMAIN public.score SET NOT NULL;")).toBe(
+      "type"
+    );
+    expect(
+      getStatementCategory(
+        "ALTER DOMAIN public.score VALIDATE CONSTRAINT positive;"
+      )
+    ).toBe("constraint");
   });
 
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {

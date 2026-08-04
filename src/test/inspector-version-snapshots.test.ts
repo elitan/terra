@@ -570,7 +570,7 @@ async function captureSnapshot(connectionString: string): Promise<unknown> {
     const inspector = new DatabaseInspector();
     const complete = await inspector.getCompleteSchema(client, ["public", "tenant_a"]);
     const normalized = normalizeSnapshot(complete);
-    return sortSnapshot(normalized as any);
+    return JSON.parse(JSON.stringify(sortSnapshot(normalized as any)));
   } finally {
     await cleanDatabase(client, ["public", "tenant_a"]);
     await client.end();

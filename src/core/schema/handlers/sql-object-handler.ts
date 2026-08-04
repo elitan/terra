@@ -1,4 +1,7 @@
-import type { SqlObject, SqlObjectKind } from "../../../types/schema";
+import type {
+  SqlObject,
+  SqlObjectKind,
+} from "../../../types/schema";
 import { ValidationError } from "../../../types/errors";
 import { deparseSync, parse } from "pgsql-parser";
 import { parseCreateTable } from "../parser/tables/table-parser";
@@ -7,6 +10,16 @@ import {
   type PartitionParent,
 } from "./partition-comparator";
 import { buildPartitionKey } from "./partition-key-comparator";
+import {
+  addInferredTypeDependencies,
+  assertRangePrerequisitesExist,
+  assertTypeCanBeRemoved,
+  assertTypeCanBeReplaced,
+  domainDefinitionsRequireReplacement,
+  generateDomainAlterStatements,
+  rangeDefinitionsAreEqual,
+  type PostgresTypeObjectContext,
+} from "./postgres-type-object-handler";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -16,6 +29,8 @@ type SqlObjectPlan = {
   postRoutineCreate: string[];
   finalCreate: string[];
   earlyDrop: string[];
+  typeReplaceDrop: string[];
+  typeAlter: string[];
   typeDrop: string[];
   lateDrop: string[];
 };
@@ -316,8 +331,15 @@ function sortKeys(objects: SqlObject[], reverse: boolean): SqlObject[] {
   const ordered: SqlObject[] = [];
 
   function visit(key: string): void {
-    if (visited.has(key) || visiting.has(key)) {
+    if (visited.has(key)) {
       return;
+    }
+    if (visiting.has(key)) {
+      throw new ValidationError(
+        `PostgreSQL SQL object dependency cycle includes '${key}'`,
+        "sql-object",
+        key
+      );
     }
 
     const item = byKey.get(key);
@@ -348,7 +370,7 @@ function pushStatements(
   objects: SqlObject[],
   useDrop: boolean
 ): void {
-  const ordered = sortKeys(objects, useDrop);
+  const ordered = sortKeys(addInferredTypeDependencies(objects), useDrop);
   for (const item of ordered) {
     const statement = useDrop ? item.dropStatement : item.createStatement;
     if (!statement) {
@@ -361,7 +383,8 @@ function pushStatements(
 export class SqlObjectHandler {
   async generateStatements(
     desiredObjects: SqlObject[],
-    currentObjects: SqlObject[]
+    currentObjects: SqlObject[],
+    context: PostgresTypeObjectContext = {}
   ): Promise<SqlObjectPlan> {
     const plan: SqlObjectPlan = {
       bootstrapCreate: [],
@@ -371,6 +394,8 @@ export class SqlObjectHandler {
       postRoutineCreate: [],
       finalCreate: [],
       earlyDrop: [],
+      typeReplaceDrop: [],
+      typeAlter: [],
       typeDrop: [],
       lateDrop: [],
     };
@@ -381,6 +406,16 @@ export class SqlObjectHandler {
     const desiredMap = new Map(desiredObjects.map(function (item) {
       return [item.key, item] as const;
     }));
+    const desiredTypesByName = new Map(
+      desiredObjects
+        .filter(function isPostgresType(item) {
+          return item.typeDefinition !== undefined;
+        })
+        .map(function mapType(item) {
+          return [`${item.schema || "public"}.${item.name}`, item] as const;
+        })
+    );
+    const replacementDesiredKeys = new Set<string>();
 
     const dropsByBucket = new Map<keyof SqlObjectPlan, SqlObject[]>();
     const createsByBucket = new Map<keyof SqlObjectPlan, SqlObject[]>();
@@ -405,7 +440,82 @@ export class SqlObjectHandler {
     for (const currentObject of currentObjects) {
       const desiredObject = desiredMap.get(currentObject.key);
       if (!desiredObject) {
+        if (
+          currentObject.kind === "domain-type" ||
+          currentObject.kind === "range-type"
+        ) {
+          const replacement = desiredTypesByName.get(
+            `${currentObject.schema || "public"}.${currentObject.name}`
+          );
+          if (replacement && replacement.kind !== currentObject.kind) {
+            assertTypeCanBeReplaced(currentObject);
+            if (replacement.typeDefinition?.kind === "range") {
+              assertRangePrerequisitesExist(
+                replacement,
+                replacement.typeDefinition,
+                context
+              );
+            }
+            addToBucket(dropsByBucket, "typeReplaceDrop", currentObject);
+            addToBucket(createsByBucket, "typeCreate", replacement);
+            replacementDesiredKeys.add(replacement.key);
+            continue;
+          }
+          assertTypeCanBeRemoved(currentObject, desiredObjects, context);
+        }
         addToBucket(dropsByBucket, getDropBucket(currentObject.kind), currentObject);
+        continue;
+      }
+
+      const currentTypeDefinition = currentObject.typeDefinition;
+      const desiredTypeDefinition = desiredObject.typeDefinition;
+      if (
+        currentTypeDefinition?.kind === "domain" &&
+        desiredTypeDefinition?.kind === "domain"
+      ) {
+        if (
+          domainDefinitionsRequireReplacement(
+            desiredTypeDefinition,
+            currentTypeDefinition
+          )
+        ) {
+          assertTypeCanBeReplaced(currentObject);
+          addToBucket(dropsByBucket, "typeReplaceDrop", currentObject);
+          addToBucket(createsByBucket, "typeCreate", desiredObject);
+        } else {
+          plan.typeAlter.push(
+            ...generateDomainAlterStatements(
+              desiredObject,
+              currentTypeDefinition,
+              desiredTypeDefinition,
+              currentObject.hasContainerColumnDependents === true
+            )
+          );
+        }
+        continue;
+      }
+      if (
+        currentTypeDefinition?.kind === "range" &&
+        desiredTypeDefinition?.kind === "range"
+      ) {
+        if (
+          rangeDefinitionsAreEqual(
+            desiredTypeDefinition,
+            currentTypeDefinition,
+            desiredObject.schema || "public",
+            desiredObject.name
+          )
+        ) {
+          continue;
+        }
+        assertTypeCanBeReplaced(currentObject);
+        assertRangePrerequisitesExist(
+          desiredObject,
+          desiredTypeDefinition,
+          context
+        );
+        addToBucket(dropsByBucket, "typeReplaceDrop", currentObject);
+        addToBucket(createsByBucket, "typeCreate", desiredObject);
         continue;
       }
 
@@ -459,8 +569,18 @@ export class SqlObjectHandler {
     }
 
     for (const desiredObject of desiredObjects) {
-      if (currentMap.has(desiredObject.key)) {
+      if (
+        currentMap.has(desiredObject.key) ||
+        replacementDesiredKeys.has(desiredObject.key)
+      ) {
         continue;
+      }
+      if (desiredObject.typeDefinition?.kind === "range") {
+        assertRangePrerequisitesExist(
+          desiredObject,
+          desiredObject.typeDefinition,
+          context
+        );
       }
       addToBucket(createsByBucket, getCreateBucket(desiredObject.kind), desiredObject);
     }
@@ -474,6 +594,8 @@ export class SqlObjectHandler {
     }
 
     plan.earlyDrop = dedupeStatements(plan.earlyDrop);
+    plan.typeReplaceDrop = dedupeStatements(plan.typeReplaceDrop);
+    plan.typeAlter = dedupeStatements(plan.typeAlter);
     plan.typeDrop = dedupeStatements(plan.typeDrop);
     plan.lateDrop = dedupeStatements(plan.lateDrop);
     plan.bootstrapCreate = dedupeStatements(plan.bootstrapCreate);

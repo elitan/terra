@@ -272,6 +272,43 @@ export interface PartitionKeyOperatorClass extends QualifiedName {
   isDefault: boolean;
 }
 
+export interface DomainTypeConstraint {
+  name?: string;
+  expression: string;
+  validated: boolean;
+}
+
+export interface DomainTypeDefinition {
+  kind: "domain";
+  baseType: string;
+  collation?: QualifiedName;
+  default?: string;
+  notNull: boolean;
+  constraints: DomainTypeConstraint[];
+}
+
+export interface RangeTypeDefinition {
+  kind: "range";
+  subtype: string;
+  subtypeOperatorClass?: QualifiedName;
+  subtypeOperatorClassIsDefault?: boolean;
+  collation?: QualifiedName;
+  canonicalFunction?: QualifiedName;
+  subtypeDiffFunction?: QualifiedName;
+  multirangeTypeName?: QualifiedName;
+}
+
+export type PostgresTypeDefinition =
+  | DomainTypeDefinition
+  | RangeTypeDefinition;
+
+export interface PostgresTypeRoutineDependent {
+  schema: string;
+  name: string;
+  kind: "function" | "procedure";
+  identityArguments: string;
+}
+
 export interface SqlObject {
   kind: SqlObjectKind;
   key: string;
@@ -281,6 +318,11 @@ export interface SqlObject {
   dropStatement?: string;
   dependencies?: string[];
   partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
+  typeDefinition?: PostgresTypeDefinition;
+  attributeDependents?: CompositeTypeAttributeDependent[];
+  typeDependents?: CompositeTypeTypeDependent[];
+  routineDependents?: PostgresTypeRoutineDependent[];
+  hasContainerColumnDependents?: boolean;
 }
 
 export interface SchemaDefinition {

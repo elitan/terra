@@ -112,4 +112,90 @@ describe("Advanced SQL object parsing", function () {
       "user",
     ]);
   });
+
+  test("preserves domain and range semantics in the canonical model", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE DOMAIN audit.score AS pg_catalog.numeric(10, 2)
+        COLLATE pg_catalog."C"
+        DEFAULT 1.5
+        CONSTRAINT positive CHECK (VALUE > 0)
+        NOT NULL;
+
+      CREATE TYPE audit.price_window AS RANGE (
+        subtype = pg_catalog.numeric,
+        subtype_opclass = pg_catalog.numeric_ops,
+        collation = pg_catalog."C",
+        canonical = audit.canonical_price,
+        subtype_diff = audit.price_diff,
+        multirange_type_name = audit.price_windows
+      );
+    `);
+
+    expect(parsed.sqlObjects).toHaveLength(2);
+    expect(parsed.sqlObjects?.[0]).toMatchObject({
+      kind: "domain-type",
+      key: "domain-type:audit.score",
+      typeDefinition: {
+        kind: "domain",
+        baseType: "NUMERIC(10,2)",
+        collation: { schema: "pg_catalog", name: "C" },
+        default: "1.5",
+        notNull: true,
+        constraints: [
+          {
+            name: "positive",
+            expression: "value > 0",
+            validated: true,
+          },
+        ],
+      },
+    });
+    expect(parsed.sqlObjects?.[1]).toMatchObject({
+      kind: "range-type",
+      key: "range-type:audit.price_window",
+      typeDefinition: {
+        kind: "range",
+        subtype: "NUMERIC",
+        subtypeOperatorClass: {
+          schema: "pg_catalog",
+          name: "numeric_ops",
+        },
+        collation: { schema: "pg_catalog", name: "C" },
+        canonicalFunction: { schema: "audit", name: "canonical_price" },
+        subtypeDiffFunction: { schema: "audit", name: "price_diff" },
+        multirangeTypeName: { schema: "audit", name: "price_windows" },
+      },
+    });
+  });
+
+  test("rejects duplicate and unsupported domain or range clauses", async function () {
+    const parser = new SchemaParser();
+
+    await expect(
+      parser.parseSchema(`
+        CREATE DOMAIN audit.score AS integer
+          CONSTRAINT positive CHECK (VALUE > 0)
+          CONSTRAINT positive CHECK (VALUE >= 0);
+      `)
+    ).rejects.toThrow(/constraint 'positive' more than once/i);
+    await expect(
+      parser.parseSchema(
+        "CREATE DOMAIN audit.score AS integer DEFAULT 1 DEFAULT 2;"
+      )
+    ).rejects.toThrow(/more than one default/i);
+    await expect(
+      parser.parseSchema(
+        "CREATE TYPE audit.window AS RANGE (subtype = integer, subtype = bigint);"
+      )
+    ).rejects.toThrow(/option 'subtype' more than once/i);
+    await expect(
+      parser.parseSchema(
+        "CREATE TYPE audit.window AS RANGE (subtype = integer, unknown_option = integer);"
+      )
+    ).rejects.toThrow(/unsupported option 'unknown_option'/i);
+    await expect(
+      parser.parseSchema("CREATE TYPE audit.window AS RANGE ();")
+    ).rejects.toThrow(/syntax error/i);
+  });
 });

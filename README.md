@@ -103,6 +103,8 @@ export DATABASE_URL=":memory:"
 | Views | Yes | Yes |
 | ENUM Types | Yes | No |
 | Composite Types | Yes | No |
+| Domain Types | Yes | No |
+| Range & Multirange Types | Yes | No |
 | Sequences | Yes | No |
 | Functions | Yes | No |
 | Procedures | Yes | No |
@@ -193,6 +195,30 @@ through arrays, domains, ranges, and multiranges; TerraDB detects and reports
 those columns during planning so they can be migrated first. Type removal
 likewise protects retained managed and unmanaged relations, domains, and ranges
 while still ordering their coordinated removal in one apply.
+PostgreSQL domains preserve base types, typemods, arrays, collations, defaults,
+nullability, named and generated check constraints, and validation state.
+TerraDB uses native transactional `ALTER DOMAIN` statements for defaults,
+nullability, constraint add/drop/rename, and validation, preserving stored rows
+and rolling the whole change back if existing data violates a new constraint.
+PostgreSQL cannot add or validate a domain constraint or set domain `NOT NULL`
+when that domain (or a derived domain) is stored inside an array, composite, or
+range column; TerraDB detects that catalog state and rejects the change during
+planning with a container-migration diagnostic.
+Changing a domain's base type or collation, or changing between domain and range
+families, requires replacement and is therefore allowed only while no relation,
+derived type, or routine signature depends on it. Domain removal is
+dependency-ordered and always uses `RESTRICT`, never `CASCADE`.
+PostgreSQL ranges preserve subtype, effective default or explicit operator
+class, collation, canonical and subtype-difference functions, and automatic or
+explicit multirange names. Range definition options are immutable in PostgreSQL,
+so TerraDB replaces an unused range in drop-before-create order and rejects the
+change during planning when direct, array, multirange, derived-type, relation,
+or routine dependents exist. Support functions referenced while creating a
+range must already exist; declaring a new support function and its range in the
+same apply fails before mutation with instructions to apply the prerequisite
+first (canonical functions additionally require PostgreSQL's shell-type
+workflow). Range and multirange removal also uses dependency-ordered
+`RESTRICT` drops.
 
 ## Commands
 

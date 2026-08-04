@@ -117,6 +117,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
     normalized.startsWith("CREATE TYPE") ||
     normalized.startsWith("DROP TYPE") ||
     normalized.startsWith("CREATE DOMAIN") ||
+    normalized.startsWith("ALTER DOMAIN") ||
     normalized.startsWith("DROP DOMAIN")
   ) {
     return "type";

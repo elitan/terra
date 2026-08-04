@@ -2808,10 +2808,140 @@ export class DatabaseInspector {
         t.typname as type_name,
         n.nspname as schema_name,
         format_type(t.typbasetype, t.typtypmod) as base_type,
+        CASE
+          WHEN base_type.typtype IN ('d', 'r') THEN base_type.typtype
+          WHEN base_element_type.typtype IN ('d', 'r') THEN base_element_type.typtype
+          WHEN base_range.rngtypid IS NOT NULL THEN 'r'
+          ELSE base_type.typtype
+        END as base_type_kind,
+        CASE
+          WHEN base_type.typtype IN ('d', 'r') THEN base_namespace.nspname
+          WHEN base_element_type.typtype IN ('d', 'r') THEN base_element_namespace.nspname
+          WHEN base_range.rngtypid IS NOT NULL THEN base_range_namespace.nspname
+          ELSE base_namespace.nspname
+        END as base_type_schema,
+        CASE
+          WHEN base_type.typtype IN ('d', 'r') THEN base_type.typname
+          WHEN base_element_type.typtype IN ('d', 'r') THEN base_element_type.typname
+          WHEN base_range.rngtypid IS NOT NULL THEN base_range_type.typname
+          ELSE base_type.typname
+        END as base_type_name,
         t.typnotnull as is_not_null,
-        t.typdefault as default_value
+        t.typdefault as default_value,
+        CASE
+          WHEN domain_collation.oid = 0
+            OR domain_collation.oid = base_type.typcollation
+          THEN NULL
+          ELSE domain_collation.collname
+        END as collation_name,
+        CASE
+          WHEN domain_collation.oid = 0
+            OR domain_collation.oid = base_type.typcollation
+          THEN NULL
+          ELSE collation_namespace.nspname
+        END as collation_schema,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'schema', relation_namespace.nspname,
+              'relation', relation.relname,
+              'attribute', attribute.attname,
+              'relationKind', relation.relkind
+            )
+            ORDER BY relation_namespace.nspname, relation.relname, attribute.attname
+          )
+          FROM pg_depend dependency
+          JOIN pg_class relation
+            ON dependency.classid = 'pg_class'::regclass
+            AND relation.oid = dependency.objid
+          JOIN pg_namespace relation_namespace
+            ON relation_namespace.oid = relation.relnamespace
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = relation.oid
+            AND attribute.attnum = dependency.objsubid
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (t.oid, t.typarray)
+            AND dependency.deptype = 'n'
+            AND NOT attribute.attisdropped
+        ), '[]'::jsonb) as attribute_dependents,
+        COALESCE((
+          SELECT jsonb_agg(type_dependency ORDER BY type_dependency->>'schema', type_dependency->>'name')
+          FROM (
+            SELECT jsonb_build_object(
+              'schema', dependent_namespace.nspname,
+              'name', dependent_type.typname,
+              'kind', 'domain'
+            ) as type_dependency
+            FROM pg_type dependent_type
+            JOIN pg_namespace dependent_namespace
+              ON dependent_namespace.oid = dependent_type.typnamespace
+            WHERE dependent_type.typtype = 'd'
+              AND dependent_type.typbasetype IN (t.oid, t.typarray)
+
+            UNION ALL
+
+            SELECT jsonb_build_object(
+              'schema', dependent_namespace.nspname,
+              'name', dependent_type.typname,
+              'kind', 'range'
+            ) as type_dependency
+            FROM pg_range dependent_range
+            JOIN pg_type dependent_type
+              ON dependent_type.oid = dependent_range.rngtypid
+            JOIN pg_namespace dependent_namespace
+              ON dependent_namespace.oid = dependent_type.typnamespace
+            WHERE dependent_range.rngsubtype IN (t.oid, t.typarray)
+          ) dependencies
+        ), '[]'::jsonb) as type_dependents,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'schema', routine_namespace.nspname,
+              'name', routine.proname,
+              'kind', CASE routine.prokind
+                WHEN 'p' THEN 'procedure'
+                ELSE 'function'
+              END,
+              'identityArguments', pg_get_function_identity_arguments(routine.oid)
+            )
+            ORDER BY routine_namespace.nspname, routine.proname,
+              pg_get_function_identity_arguments(routine.oid)
+          )
+          FROM pg_depend dependency
+          JOIN pg_proc routine
+            ON dependency.classid = 'pg_proc'::regclass
+            AND routine.oid = dependency.objid
+          JOIN pg_namespace routine_namespace
+            ON routine_namespace.oid = routine.pronamespace
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (t.oid, t.typarray)
+            AND dependency.deptype = 'n'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pg_depend internal_dependency
+              WHERE internal_dependency.classid = 'pg_proc'::regclass
+                AND internal_dependency.objid = routine.oid
+                AND internal_dependency.deptype = 'i'
+            )
+        ), '[]'::jsonb) as routine_dependents
       FROM pg_type t
       JOIN pg_namespace n ON n.oid = t.typnamespace
+      JOIN pg_type base_type ON base_type.oid = t.typbasetype
+      JOIN pg_namespace base_namespace ON base_namespace.oid = base_type.typnamespace
+      LEFT JOIN pg_type base_element_type
+        ON base_element_type.oid = base_type.typelem
+        AND base_type.typelem <> 0
+      LEFT JOIN pg_namespace base_element_namespace
+        ON base_element_namespace.oid = base_element_type.typnamespace
+      LEFT JOIN pg_range base_range
+        ON base_range.rngtypid IN (base_type.oid, base_element_type.oid)
+        OR base_range.rngmultitypid IN (base_type.oid, base_element_type.oid)
+      LEFT JOIN pg_type base_range_type ON base_range_type.oid = base_range.rngtypid
+      LEFT JOIN pg_namespace base_range_namespace
+        ON base_range_namespace.oid = base_range_type.typnamespace
+      LEFT JOIN pg_collation domain_collation ON domain_collation.oid = t.typcollation
+      LEFT JOIN pg_namespace collation_namespace
+        ON collation_namespace.oid = domain_collation.collnamespace
       LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND t.typtype = 'd'
@@ -2825,11 +2955,69 @@ export class DatabaseInspector {
       const constraints = await client.query(`
         SELECT
           conname,
-          pg_get_constraintdef(oid) as definition
+          pg_get_constraintdef(oid) as definition,
+          pg_get_expr(conbin, 0) as expression,
+          convalidated as is_validated
         FROM pg_constraint
         WHERE contypid = $1
           AND contype <> 'n'
         ORDER BY conname
+      `, [row.oid]);
+      const containerDependents = await client.query(`
+        WITH RECURSIVE dependent_types(oid, is_container) AS (
+          SELECT $1::oid, false
+
+          UNION
+
+          SELECT
+            candidate.oid,
+            dependent.is_container OR candidate.adds_container
+          FROM dependent_types dependent
+          CROSS JOIN LATERAL (
+            SELECT derived.oid, false AS adds_container
+            FROM pg_type derived
+            WHERE derived.typtype = 'd'
+              AND derived.typbasetype = dependent.oid
+
+            UNION ALL
+
+            SELECT source.typarray, true
+            FROM pg_type source
+            WHERE source.oid = dependent.oid
+              AND source.typarray <> 0
+
+            UNION ALL
+
+            SELECT range_definition.rngtypid, true
+            FROM pg_range range_definition
+            WHERE range_definition.rngsubtype = dependent.oid
+
+            UNION ALL
+
+            SELECT range_definition.rngmultitypid, true
+            FROM pg_range range_definition
+            WHERE range_definition.rngtypid = dependent.oid
+
+            UNION ALL
+
+            SELECT relation.reltype, true
+            FROM pg_attribute attribute
+            JOIN pg_class relation ON relation.oid = attribute.attrelid
+            WHERE relation.relkind = 'c'
+              AND attribute.atttypid = dependent.oid
+              AND NOT attribute.attisdropped
+          ) candidate
+        )
+        SELECT EXISTS (
+          SELECT 1
+          FROM dependent_types dependent
+          JOIN pg_attribute attribute ON attribute.atttypid = dependent.oid
+          JOIN pg_class relation ON relation.oid = attribute.attrelid
+          WHERE dependent.is_container
+            AND relation.relkind IN ('r', 'p', 'f', 'm')
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+        ) AS has_container_dependents
       `, [row.oid]);
 
       const parts = [
@@ -2837,6 +3025,11 @@ export class DatabaseInspector {
         `AS ${row.base_type}`,
       ];
 
+      if (row.collation_name) {
+        parts.push(
+          `COLLATE ${this.qualifyName(row.collation_name, row.collation_schema)}`
+        );
+      }
       if (row.default_value) {
         parts.push(`DEFAULT ${row.default_value}`);
       }
@@ -2847,13 +3040,59 @@ export class DatabaseInspector {
         parts.push(`CONSTRAINT ${this.quoteIdent(constraint.conname)} ${constraint.definition}`);
       }
 
+      const typeDependents = row.type_dependents || [];
+      const dependencies =
+        row.base_type_kind === "d" || row.base_type_kind === "r"
+          ? [
+              `${row.base_type_kind === "d" ? "domain" : "range"}-type:${row.base_type_schema}.${row.base_type_name}`,
+            ]
+          : [];
+
       objects.push({
         kind: "domain-type",
         key: `domain-type:${row.schema_name}.${row.type_name}`,
         name: row.type_name,
         schema: row.schema_name,
         createStatement: `${parts.join(" ")};`,
-        dropStatement: `DROP DOMAIN IF EXISTS ${this.qualifyName(row.type_name, row.schema_name)} CASCADE;`,
+        dropStatement: `DROP DOMAIN IF EXISTS ${this.qualifyName(row.type_name, row.schema_name)} RESTRICT;`,
+        ...(dependencies.length > 0 ? { dependencies } : {}),
+        typeDefinition: {
+          kind: "domain",
+          baseType: row.base_type,
+          ...(row.collation_name
+            ? {
+                collation: {
+                  name: row.collation_name,
+                  schema: row.collation_schema,
+                },
+              }
+            : {}),
+          ...(row.default_value ? { default: row.default_value } : {}),
+          notNull: row.is_not_null,
+          constraints: constraints.rows.map(function mapConstraint(
+            constraint: any
+          ) {
+            return {
+              name: constraint.conname,
+              expression:
+                constraint.expression ||
+                String(constraint.definition || "")
+                  .replace(/^CHECK\s*\(/i, "")
+                  .replace(/\)$/, ""),
+              validated: constraint.is_validated !== false,
+            };
+          }),
+        },
+        ...(row.attribute_dependents?.length > 0
+          ? { attributeDependents: row.attribute_dependents }
+          : {}),
+        ...(typeDependents.length > 0 ? { typeDependents } : {}),
+        ...(row.routine_dependents?.length > 0
+          ? { routineDependents: row.routine_dependents }
+          : {}),
+        ...(containerDependents.rows[0]?.has_container_dependents
+          ? { hasContainerColumnDependents: true }
+          : {}),
       });
     }
 
@@ -2863,43 +3102,177 @@ export class DatabaseInspector {
   private async getCurrentRangeObjects(client: Client, schemas: string[]): Promise<SqlObject[]> {
     const result = await client.query(`
       SELECT
+        t.oid,
         t.typname as type_name,
         n.nspname as schema_name,
         format_type(r.rngsubtype, NULL) as subtype_name,
+        subtype.typtype as subtype_kind,
+        subtype_namespace.nspname as subtype_schema,
+        subtype.typname as subtype_type_name,
         CASE
-          WHEN opclass.oid IS NULL THEN NULL
+          WHEN opclass.oid IS NULL OR opclass.opcdefault THEN NULL
           WHEN opclass_ns.nspname = 'public' THEN quote_ident(opclass.opcname)
           ELSE quote_ident(opclass_ns.nspname) || '.' || quote_ident(opclass.opcname)
         END as subtype_opclass_name,
+        opclass.opcname as subtype_opclass_bare_name,
+        opclass_ns.nspname as subtype_opclass_schema,
+        COALESCE(opclass.opcdefault, false) as subtype_opclass_is_default,
         CASE
-          WHEN coll.oid IS NULL THEN NULL
+          WHEN coll.oid IS NULL OR coll.oid = subtype.typcollation THEN NULL
           WHEN coll_ns.nspname = 'public' THEN quote_ident(coll.collname)
           ELSE quote_ident(coll_ns.nspname) || '.' || quote_ident(coll.collname)
         END as collation_name,
         CASE
+          WHEN coll.oid IS NULL OR coll.oid = subtype.typcollation THEN NULL
+          ELSE coll.collname
+        END as collation_bare_name,
+        CASE
+          WHEN coll.oid IS NULL OR coll.oid = subtype.typcollation THEN NULL
+          ELSE coll_ns.nspname
+        END as collation_schema,
+        CASE
           WHEN canonical.oid IS NULL THEN NULL
-          ELSE canonical.oid::regproc::text
+          ELSE quote_ident(canonical_ns.nspname) || '.' || quote_ident(canonical.proname)
         END as canonical_name,
+        canonical.proname as canonical_bare_name,
+        canonical_ns.nspname as canonical_schema,
         CASE
           WHEN diff.oid IS NULL THEN NULL
-          ELSE diff.oid::regproc::text
-        END as diff_name
+          ELSE quote_ident(diff_ns.nspname) || '.' || quote_ident(diff.proname)
+        END as diff_name,
+        diff.proname as diff_bare_name,
+        diff_ns.nspname as diff_schema,
+        multirange.typname as multirange_name,
+        multirange_namespace.nspname as multirange_schema,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'schema', relation_namespace.nspname,
+              'relation', relation.relname,
+              'attribute', attribute.attname,
+              'relationKind', relation.relkind
+            )
+            ORDER BY relation_namespace.nspname, relation.relname, attribute.attname
+          )
+          FROM pg_depend dependency
+          JOIN pg_class relation
+            ON dependency.classid = 'pg_class'::regclass
+            AND relation.oid = dependency.objid
+          JOIN pg_namespace relation_namespace
+            ON relation_namespace.oid = relation.relnamespace
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = relation.oid
+            AND attribute.attnum = dependency.objsubid
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (
+              t.oid,
+              t.typarray,
+              r.rngmultitypid,
+              multirange.typarray
+            )
+            AND dependency.deptype = 'n'
+            AND NOT attribute.attisdropped
+        ), '[]'::jsonb) as attribute_dependents,
+        COALESCE((
+          SELECT jsonb_agg(type_dependency ORDER BY type_dependency->>'schema', type_dependency->>'name')
+          FROM (
+            SELECT jsonb_build_object(
+              'schema', dependent_namespace.nspname,
+              'name', dependent_type.typname,
+              'kind', 'domain'
+            ) as type_dependency
+            FROM pg_type dependent_type
+            JOIN pg_namespace dependent_namespace
+              ON dependent_namespace.oid = dependent_type.typnamespace
+            WHERE dependent_type.typtype = 'd'
+              AND dependent_type.typbasetype IN (
+                t.oid,
+                t.typarray,
+                r.rngmultitypid,
+                multirange.typarray
+              )
+
+            UNION ALL
+
+            SELECT jsonb_build_object(
+              'schema', dependent_namespace.nspname,
+              'name', dependent_type.typname,
+              'kind', 'range'
+            ) as type_dependency
+            FROM pg_range dependent_range
+            JOIN pg_type dependent_type
+              ON dependent_type.oid = dependent_range.rngtypid
+            JOIN pg_namespace dependent_namespace
+              ON dependent_namespace.oid = dependent_type.typnamespace
+            WHERE dependent_range.rngsubtype IN (
+              t.oid,
+              t.typarray,
+              r.rngmultitypid,
+              multirange.typarray
+            )
+          ) dependencies
+        ), '[]'::jsonb) as type_dependents,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'schema', routine_namespace.nspname,
+              'name', routine.proname,
+              'kind', CASE routine.prokind
+                WHEN 'p' THEN 'procedure'
+                ELSE 'function'
+              END,
+              'identityArguments', pg_get_function_identity_arguments(routine.oid)
+            )
+            ORDER BY routine_namespace.nspname, routine.proname,
+              pg_get_function_identity_arguments(routine.oid)
+          )
+          FROM pg_depend dependency
+          JOIN pg_proc routine
+            ON dependency.classid = 'pg_proc'::regclass
+            AND routine.oid = dependency.objid
+          JOIN pg_namespace routine_namespace
+            ON routine_namespace.oid = routine.pronamespace
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (
+              t.oid,
+              t.typarray,
+              r.rngmultitypid,
+              multirange.typarray
+            )
+            AND dependency.deptype = 'n'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pg_depend internal_dependency
+              WHERE internal_dependency.classid = 'pg_proc'::regclass
+                AND internal_dependency.objid = routine.oid
+                AND internal_dependency.deptype = 'i'
+            )
+        ), '[]'::jsonb) as routine_dependents
       FROM pg_range r
       JOIN pg_type t ON t.oid = r.rngtypid
       JOIN pg_namespace n ON n.oid = t.typnamespace
+      JOIN pg_type subtype ON subtype.oid = r.rngsubtype
+      JOIN pg_namespace subtype_namespace
+        ON subtype_namespace.oid = subtype.typnamespace
+      JOIN pg_type multirange ON multirange.oid = r.rngmultitypid
+      JOIN pg_namespace multirange_namespace
+        ON multirange_namespace.oid = multirange.typnamespace
       LEFT JOIN pg_opclass opclass ON opclass.oid = r.rngsubopc
       LEFT JOIN pg_namespace opclass_ns ON opclass_ns.oid = opclass.opcnamespace
       LEFT JOIN pg_collation coll ON coll.oid = r.rngcollation AND r.rngcollation <> 0
       LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = coll.collnamespace
       LEFT JOIN pg_proc canonical ON canonical.oid = r.rngcanonical AND r.rngcanonical <> 0
+      LEFT JOIN pg_namespace canonical_ns ON canonical_ns.oid = canonical.pronamespace
       LEFT JOIN pg_proc diff ON diff.oid = r.rngsubdiff AND r.rngsubdiff <> 0
+      LEFT JOIN pg_namespace diff_ns ON diff_ns.oid = diff.pronamespace
       LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND d.objid IS NULL
       ORDER BY n.nspname, t.typname
     `, [schemas]);
 
-    return result.rows.map((row: any) => {
+    const inspector = this;
+    return result.rows.map(function mapRange(row: any) {
       const params = [`subtype = ${row.subtype_name}`];
       if (row.subtype_opclass_name) {
         params.push(`subtype_opclass = ${row.subtype_opclass_name}`);
@@ -2913,14 +3286,90 @@ export class DatabaseInspector {
       if (row.diff_name) {
         params.push(`subtype_diff = ${row.diff_name}`);
       }
+      const automaticMultirangeName = row.type_name.includes("range")
+        ? row.type_name.replace("range", "multirange")
+        : `${row.type_name}_multirange`;
+      const hasCustomMultirangeName =
+        row.multirange_name &&
+        (row.multirange_name !== automaticMultirangeName ||
+          row.multirange_schema !== row.schema_name);
+      if (hasCustomMultirangeName) {
+        params.push(
+          `multirange_type_name = ${inspector.qualifyName(row.multirange_name, row.multirange_schema)}`
+        );
+      }
+
+      const dependencies =
+        row.subtype_kind === "d" || row.subtype_kind === "r"
+          ? [
+              `${row.subtype_kind === "d" ? "domain" : "range"}-type:${row.subtype_schema}.${row.subtype_type_name}`,
+            ]
+          : [];
 
       return {
         kind: "range-type" as const,
         key: `range-type:${row.schema_name}.${row.type_name}`,
         name: row.type_name,
         schema: row.schema_name,
-        createStatement: `CREATE TYPE ${this.qualifyName(row.type_name, row.schema_name)} AS RANGE (${params.join(", ")});`,
-        dropStatement: `DROP TYPE IF EXISTS ${this.qualifyName(row.type_name, row.schema_name)} CASCADE;`,
+        createStatement: `CREATE TYPE ${inspector.qualifyName(row.type_name, row.schema_name)} AS RANGE (${params.join(", ")});`,
+        dropStatement: `DROP TYPE IF EXISTS ${inspector.qualifyName(row.type_name, row.schema_name)} RESTRICT;`,
+        ...(dependencies.length > 0 ? { dependencies } : {}),
+        typeDefinition: {
+          kind: "range" as const,
+          subtype: row.subtype_name,
+          ...(row.subtype_opclass_bare_name
+            ? {
+                subtypeOperatorClass: {
+                  name: row.subtype_opclass_bare_name,
+                  schema: row.subtype_opclass_schema,
+                },
+                ...(row.subtype_opclass_is_default
+                  ? { subtypeOperatorClassIsDefault: true }
+                  : {}),
+              }
+            : {}),
+          ...(row.collation_bare_name
+            ? {
+                collation: {
+                  name: row.collation_bare_name,
+                  schema: row.collation_schema,
+                },
+              }
+            : {}),
+          ...(row.canonical_bare_name
+            ? {
+                canonicalFunction: {
+                  name: row.canonical_bare_name,
+                  schema: row.canonical_schema,
+                },
+              }
+            : {}),
+          ...(row.diff_bare_name
+            ? {
+                subtypeDiffFunction: {
+                  name: row.diff_bare_name,
+                  schema: row.diff_schema,
+                },
+              }
+            : {}),
+          ...(hasCustomMultirangeName
+            ? {
+                multirangeTypeName: {
+                  name: row.multirange_name,
+                  schema: row.multirange_schema,
+                },
+              }
+            : {}),
+        },
+        ...(row.attribute_dependents?.length > 0
+          ? { attributeDependents: row.attribute_dependents }
+          : {}),
+        ...(row.type_dependents?.length > 0
+          ? { typeDependents: row.type_dependents }
+          : {}),
+        ...(row.routine_dependents?.length > 0
+          ? { routineDependents: row.routine_dependents }
+          : {}),
       };
     });
   }

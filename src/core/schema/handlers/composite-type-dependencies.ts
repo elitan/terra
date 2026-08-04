@@ -17,7 +17,7 @@ function getBaseTypeName(type: string): string {
     .replace(/\([^)]*\)$/, "");
 }
 
-function parseTypeReference(type: string): string[] | undefined {
+export function parseTypeReference(type: string): string[] | undefined {
   const baseType = getBaseTypeName(type);
   const parts: string[] = [];
   let part = "";
