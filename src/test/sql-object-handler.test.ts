@@ -59,6 +59,7 @@ describe("SqlObjectHandler", function () {
       dependencies: [],
       foreignServerDefinition: {
         foreignDataWrapper: "postgres_fdw",
+        owner: "Current Owner",
         version: "14",
         options: [],
       },
@@ -70,6 +71,7 @@ describe("SqlObjectHandler", function () {
         "OPTIONS (host '127.0.0.1');",
       foreignServerDefinition: {
         foreignDataWrapper: "postgres_fdw",
+        owner: "Desired Owner",
         version: "15'beta",
         options: [{ name: "host", value: "db'host" }],
       },
@@ -88,6 +90,48 @@ describe("SqlObjectHandler", function () {
     expect(plan.preTableCreate).toEqual([
       'ALTER SERVER "analytics" VERSION \'15\'\'beta\' OPTIONS ' +
         '(ADD "host" \'db\'\'host\');',
+    ]);
+    expect(plan.finalCreate).toEqual([
+      'ALTER SERVER "analytics" OWNER TO "Desired Owner";',
+    ]);
+  });
+
+  test("orders new foreign server owners after deterministic creation", async function () {
+    const handler = new SqlObjectHandler();
+    const zeta = makeSqlObject({
+      kind: "foreign-server",
+      key: "foreign-server:zeta",
+      name: "zeta",
+      createStatement:
+        "CREATE SERVER zeta FOREIGN DATA WRAPPER postgres_fdw;",
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        owner: "Zeta Owner",
+        options: [],
+      },
+    });
+    const alpha = makeSqlObject({
+      kind: "foreign-server",
+      key: "foreign-server:alpha",
+      name: "alpha",
+      createStatement:
+        "CREATE SERVER alpha FOREIGN DATA WRAPPER postgres_fdw;",
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        owner: "Alpha Owner",
+        options: [],
+      },
+    });
+
+    const plan = await handler.generateStatements([zeta, alpha], []);
+
+    expect(plan.preTableCreate).toEqual([
+      alpha.createStatement,
+      zeta.createStatement,
+    ]);
+    expect(plan.finalCreate).toEqual([
+      'ALTER SERVER "alpha" OWNER TO "Alpha Owner";',
+      'ALTER SERVER "zeta" OWNER TO "Zeta Owner";',
     ]);
   });
 

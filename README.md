@@ -137,8 +137,11 @@ their type, version, foreign-data wrapper, and complete option map. Version and
 option changes use native `ALTER SERVER`, preserving the server OID, user
 mappings, foreign tables, and grants; unsupported type or wrapper changes fail
 before mutation. `IF NOT EXISTS` and option order normalize declaratively, while
-duplicates fail during parsing. Unrelated global foreign servers remain outside
-a managed-schema plan unless declared by name.
+duplicates fail during parsing. A following `ALTER SERVER ... OWNER TO` with a
+concrete role makes ownership declarative and repairs drift in place; contextual
+session roles are rejected before mutation, while omitted ownership remains
+unmanaged. Unrelated global foreign servers remain outside a managed-schema plan
+unless declared by name.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

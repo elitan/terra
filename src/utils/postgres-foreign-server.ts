@@ -127,6 +127,14 @@ export function renderPostgresForeignServerAlter(
   return `ALTER SERVER ${quoteIdentifier(serverName)} ${clauses.join(" ")};`;
 }
 
+export function renderPostgresForeignServerOwnerAlter(
+  serverName: string,
+  owner: string
+): string {
+  return `ALTER SERVER ${quoteIdentifier(serverName)} OWNER TO ` +
+    `${quoteIdentifier(owner)};`;
+}
+
 function renderCreateOption(option: PostgresForeignServerOption): string {
   return `${quoteIdentifier(option.name)} ${quoteLiteral(option.value)}`;
 }

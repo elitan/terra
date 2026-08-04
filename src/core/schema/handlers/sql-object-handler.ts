@@ -35,6 +35,7 @@ import {
 } from "../../../utils/postgres-replica-identity";
 import {
   renderPostgresForeignServerAlter,
+  renderPostgresForeignServerOwnerAlter,
 } from "../../../utils/postgres-foreign-server";
 
 type SqlObjectPlan = {
@@ -658,10 +659,10 @@ function partitionReplicaIdentityChanged(
     );
 }
 
-function generateForeignServerAlterStatements(
+function generateForeignServerAlterPlan(
   desired: SqlObject,
   current: SqlObject
-): string[] {
+): { state: string[]; changesOwner: boolean } {
   const desiredDefinition = desired.foreignServerDefinition;
   const currentDefinition = current.foreignServerDefinition;
   if (!desiredDefinition || !currentDefinition) {
@@ -691,12 +692,21 @@ function generateForeignServerAlterStatements(
       desired.createStatement
     );
   }
-  const statement = renderPostgresForeignServerAlter(
+  const state: string[] = [];
+  const stateStatement = renderPostgresForeignServerAlter(
     desired.name,
     currentDefinition,
     desiredDefinition
   );
-  return statement ? [statement] : [];
+  if (stateStatement) {
+    state.push(stateStatement);
+  }
+  return {
+    state,
+    changesOwner:
+      desiredDefinition.owner !== undefined &&
+      desiredDefinition.owner !== currentDefinition.owner,
+  };
 }
 
 export class SqlObjectHandler {
@@ -738,6 +748,7 @@ export class SqlObjectHandler {
         })
     );
     const replacementDesiredKeys = new Set<string>();
+    const newForeignServerOwners: SqlObject[] = [];
 
     const dropsByBucket = new Map<SqlObjectStatementBucket, SqlObject[]>();
     const createsByBucket = new Map<SqlObjectStatementBucket, SqlObject[]>();
@@ -845,12 +856,14 @@ export class SqlObjectHandler {
         currentObject.kind === "foreign-server" &&
         desiredObject.kind === "foreign-server"
       ) {
-        plan.preTableCreate.push(
-          ...generateForeignServerAlterStatements(
-            desiredObject,
-            currentObject
-          )
+        const foreignServerAlter = generateForeignServerAlterPlan(
+          desiredObject,
+          currentObject
         );
+        plan.preTableCreate.push(...foreignServerAlter.state);
+        if (foreignServerAlter.changesOwner) {
+          newForeignServerOwners.push(desiredObject);
+        }
         continue;
       }
 
@@ -963,6 +976,12 @@ export class SqlObjectHandler {
         );
       }
       addToBucket(createsByBucket, getCreateBucket(desiredObject.kind), desiredObject);
+      if (
+        desiredObject.kind === "foreign-server" &&
+        desiredObject.foreignServerDefinition?.owner !== undefined
+      ) {
+        newForeignServerOwners.push(desiredObject);
+      }
     }
 
     for (const [bucket, objects] of dropsByBucket) {
@@ -977,6 +996,15 @@ export class SqlObjectHandler {
       if (bucket === "typeCreate") {
         plan.typeCreateOperations.push(...operations);
       }
+    }
+    for (const server of sortKeys(newForeignServerOwners, false)) {
+      const owner = server.foreignServerDefinition?.owner;
+      if (owner === undefined) {
+        continue;
+      }
+      plan.finalCreate.push(
+        renderPostgresForeignServerOwnerAlter(server.name, owner)
+      );
     }
 
     plan.earlyDrop = dedupeStatements(plan.earlyDrop);

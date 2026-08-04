@@ -231,6 +231,7 @@ describe("Advanced SQL object inspector", function () {
             {
               server_name: "analytics_server",
               fdw_name: "postgres_fdw",
+              owner_name: "server_owner",
               server_type: "postgresql",
               server_version: "14",
               server_options: ["host=127.0.0.1", "dbname=analytics", "port=5432"],
@@ -389,6 +390,7 @@ describe("Advanced SQL object inspector", function () {
       dropStatement: 'DROP SERVER IF EXISTS "analytics_server" RESTRICT;',
       foreignServerDefinition: {
         foreignDataWrapper: "postgres_fdw",
+        owner: "server_owner",
         type: "postgresql",
         version: "14",
         options: [

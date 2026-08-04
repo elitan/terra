@@ -5,6 +5,7 @@ import { createTestClient, createTestSchemaService } from "./utils";
 const MANAGED_SCHEMA = "foreign_server_contract";
 const EXTERNAL_SCHEMA = "foreign_server_external";
 const SERVER_NAME = "Remote Server";
+const OWNER_ROLE = "TerraDB Foreign Server Owner";
 
 describe("PostgreSQL foreign server lifecycle", function () {
   let client!: Client;
@@ -162,6 +163,62 @@ describe("PostgreSQL foreign server lifecycle", function () {
       options: { host: "localhost" },
     });
   });
+
+  test("creates inspects and repairs explicit ownership without replacing dependents", async function () {
+    await client.query(`CREATE ROLE "${OWNER_ROLE}" NOLOGIN`);
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE EXTENSION postgres_fdw;
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE SERVER "${SERVER_NAME}"
+        FOREIGN DATA WRAPPER postgres_fdw
+        OPTIONS (host 'localhost');
+      ALTER SERVER "${SERVER_NAME}" OWNER TO "${OWNER_ROLE}";
+      GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;
+    `;
+    const initialPlan = await service.plan(desired, [MANAGED_SCHEMA]);
+    const createIndex = initialPlan.transactional.findIndex(isServerCreate);
+    const grantIndex = initialPlan.transactional.indexOf(
+      `GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;`
+    );
+    const ownerIndex = initialPlan.transactional.indexOf(
+      `ALTER SERVER "${SERVER_NAME}" OWNER TO "${OWNER_ROLE}";`
+    );
+
+    expect(createIndex).toBeGreaterThanOrEqual(0);
+    expect(grantIndex).toBeGreaterThan(createIndex);
+    expect(ownerIndex).toBeGreaterThan(grantIndex);
+    await service.apply(desired, [MANAGED_SCHEMA], true);
+    expect(await foreignServerOwner(client)).toBe(OWNER_ROLE);
+    expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
+
+    await client.query(
+      `CREATE USER MAPPING FOR CURRENT_USER SERVER "${SERVER_NAME}"`
+    );
+    await client.query(`
+      CREATE SCHEMA ${EXTERNAL_SCHEMA};
+      CREATE FOREIGN TABLE ${EXTERNAL_SCHEMA}.remote_rows (id integer)
+        SERVER "${SERVER_NAME}"
+        OPTIONS (schema_name 'public', table_name 'rows');
+      ALTER SERVER "${SERVER_NAME}" OWNER TO CURRENT_USER;
+    `);
+    const originalOid = await foreignServerOid(client);
+    const repairPlan = await service.plan(desired, [MANAGED_SCHEMA]);
+
+    expect(repairPlan.transactional).toContain(
+      `ALTER SERVER "${SERVER_NAME}" OWNER TO "${OWNER_ROLE}";`
+    );
+    expect(repairPlan.transactional.some(isServerCreate)).toBe(false);
+    expect(repairPlan.transactional.some(isServerDrop)).toBe(false);
+
+    await service.apply(desired, [MANAGED_SCHEMA], true);
+    expect(await foreignServerOid(client)).toBe(originalOid);
+    expect(await foreignServerOwner(client)).toBe(OWNER_ROLE);
+    expect(await userMappingExists(client)).toBe(true);
+    expect(await foreignTableUsesServer(client)).toBe(true);
+    expect(await publicHasUsage(client)).toBe(true);
+    expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
+  });
 });
 
 function desiredServer(type: string, wrapper: string): string {
@@ -220,6 +277,18 @@ async function inspectForeignServer(client: Client): Promise<{
   return result.rows[0];
 }
 
+async function foreignServerOwner(client: Client): Promise<string | null> {
+  const result = await client.query(
+    `
+      SELECT pg_get_userbyid(srvowner) AS owner
+      FROM pg_foreign_server
+      WHERE srvname = $1
+    `,
+    [SERVER_NAME]
+  );
+  return result.rows[0]?.owner || null;
+}
+
 async function userMappingExists(client: Client): Promise<boolean> {
   const result = await client.query(
     `
@@ -275,4 +344,5 @@ async function cleanup(client: Client): Promise<void> {
   await client.query(`DROP SERVER IF EXISTS "${SERVER_NAME}" CASCADE`);
   await client.query(`DROP SCHEMA IF EXISTS ${EXTERNAL_SCHEMA} CASCADE`);
   await client.query(`DROP SCHEMA IF EXISTS ${MANAGED_SCHEMA} CASCADE`);
+  await client.query(`DROP ROLE IF EXISTS "${OWNER_ROLE}"`);
 }

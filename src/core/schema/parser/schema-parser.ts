@@ -84,6 +84,11 @@ import {
   renderPostgresForeignServerCreate,
   sortPostgresForeignServerOptions,
 } from "../../../utils/postgres-foreign-server";
+import {
+  mergeForeignServerOwners,
+  parseForeignServerOwner,
+  type PendingForeignServerOwner,
+} from "./foreign-server-owner-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -737,6 +742,7 @@ export class SchemaParser {
     const pendingReplicaIdentities: PendingReplicaIdentity[] = [];
     const pendingClusteringChoices: PendingClusteringChoice[] = [];
     const pendingPostgresStatistics: PendingPostgresStatisticsChange[] = [];
+    const pendingForeignServerOwners: PendingForeignServerOwner[] = [];
     const partitionDefinitions = new Map<string, Table>();
 
     // Auto-quote reserved keywords that are commonly used as column names
@@ -928,6 +934,12 @@ export class SchemaParser {
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
+        } else if (
+          stmt.AlterOwnerStmt?.objectType === "OBJECT_FOREIGN_SERVER"
+        ) {
+          pendingForeignServerOwners.push(
+            parseForeignServerOwner(stmt.AlterOwnerStmt, filePath)
+          );
         } else if (stmt.AlterEventTrigStmt) {
           pendingTriggerModes.push(
             parseAlterEventTriggerMode(stmt.AlterEventTrigStmt, filePath)
@@ -1043,6 +1055,11 @@ export class SchemaParser {
     this.rejectDuplicateSchemas(schemas, filePath);
     this.rejectDuplicateExtensions(extensions, filePath);
     this.rejectDuplicateComments(comments, filePath);
+    mergeForeignServerOwners(
+      sqlObjects,
+      pendingForeignServerOwners,
+      filePath
+    );
     rejectDuplicateTriggerDeclarations(triggers, sqlObjects, filePath);
     mergePendingTriggerModes(
       triggers,

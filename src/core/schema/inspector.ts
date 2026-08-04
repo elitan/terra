@@ -4024,6 +4024,7 @@ export class DatabaseInspector {
       SELECT
         srvname as server_name,
         fdw.fdwname as fdw_name,
+        pg_get_userbyid(srvowner) as owner_name,
         srvtype as server_type,
         srvversion as server_version,
         srvoptions as server_options
@@ -4035,6 +4036,7 @@ export class DatabaseInspector {
     return result.rows.map((row: any) => {
       const foreignServerDefinition = {
         foreignDataWrapper: row.fdw_name,
+        owner: row.owner_name,
         ...(typeof row.server_type === "string"
           ? { type: row.server_type }
           : {}),

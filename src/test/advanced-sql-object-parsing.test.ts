@@ -11,6 +11,7 @@ describe("Advanced SQL object parsing", function () {
         VERSION '14'
         FOREIGN DATA WRAPPER postgres_fdw
         OPTIONS (port '5432', host 'localhost');
+      ALTER SERVER "Remote Server" OWNER TO "Server Owner";
     `);
     const server = parsed.sqlObjects?.[0];
 
@@ -18,9 +19,10 @@ describe("Advanced SQL object parsing", function () {
       kind: "foreign-server",
       key: "foreign-server:Remote Server",
       name: "Remote Server",
-      foreignServerDefinition: {
-        foreignDataWrapper: "postgres_fdw",
-        type: "postgresql",
+        foreignServerDefinition: {
+          foreignDataWrapper: "postgres_fdw",
+          owner: "Server Owner",
+          type: "postgresql",
         version: "14",
         options: [
           { name: "host", value: "localhost" },
@@ -53,6 +55,32 @@ describe("Advanced SQL object parsing", function () {
           OPTIONS (host 'one', host 'two');
       `)
     ).rejects.toThrow(/option.*host.*more than once/i);
+  });
+
+  test("rejects ambiguous or contextual foreign server ownership", async function () {
+    const parser = new SchemaParser();
+
+    await expect(
+      parser.parseSchema(`
+        CREATE SERVER owned_server FOREIGN DATA WRAPPER postgres_fdw;
+        ALTER SERVER owned_server OWNER TO first_owner;
+        ALTER SERVER owned_server OWNER TO second_owner;
+      `)
+    ).rejects.toThrow(/owner.*more than once/i);
+    await expect(
+      parser.parseSchema(
+        `ALTER SERVER missing_server OWNER TO concrete_owner;`
+      )
+    ).rejects.toThrow(/has no matching CREATE SERVER/i);
+
+    for (const owner of ["CURRENT_ROLE", "CURRENT_USER", "SESSION_USER"]) {
+      await expect(
+        parser.parseSchema(`
+          CREATE SERVER contextual_owner FOREIGN DATA WRAPPER postgres_fdw;
+          ALTER SERVER contextual_owner OWNER TO ${owner};
+        `)
+      ).rejects.toThrow(/depends on the apply session/i);
+    }
   });
 
   test("quotes unusual foreign server fields losslessly", async function () {

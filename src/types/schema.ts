@@ -368,6 +368,7 @@ export interface PostgresForeignServerOption {
 
 export interface PostgresForeignServerDefinition {
   foreignDataWrapper: string;
+  owner?: string;
   type?: string;
   version?: string;
   options: PostgresForeignServerOption[];
