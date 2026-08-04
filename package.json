@@ -107,6 +107,7 @@
     "libsql": "^0.5.22",
     "ora": "^9.0.0",
     "pg": "^8.11.3",
+    "pg-connection-string": "^2.9.0",
     "pgsql-parser": "^18.2.3"
   },
   "devDependencies": {

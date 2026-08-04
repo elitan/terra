@@ -58,6 +58,15 @@ terradb compares your schema file against the current database state and generat
 export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
 ```
 
+PostgreSQL URLs may use either the `postgres://` or `postgresql://` scheme.
+Percent-encode special characters in the user, password, database name, or
+Unix-socket host. TerraDB preserves driver parameters such as
+`application_name`, `connect_timeout`, `keepalives`, and TLS certificate paths.
+The supported TLS modes follow `node-postgres`: `disable`, `prefer`, `require`,
+`verify-ca`, `verify-full`, and `no-verify`; other values fail before a
+connection is attempted. Multi-host libpq URLs are not supported by the driver,
+so use a single load-balanced or failover endpoint.
+
 Or individual variables:
 
 ```bash

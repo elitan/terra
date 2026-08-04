@@ -2,6 +2,7 @@ import { Client } from "pg";
 import type { DatabaseConfig } from "../../types/config";
 import { Logger } from "../../utils/logger";
 import { MigrationError } from "../../types/errors";
+import { parsePostgresClientConfig } from "../../providers/postgres/connection";
 
 export interface AdvisoryLockOptions {
   lockName: string;
@@ -16,7 +17,9 @@ export class DatabaseService {
   }
 
   async createClient(): Promise<Client> {
-    const client = new Client(this.config);
+    const client = this.config.connectionString
+      ? new Client(parsePostgresClientConfig(this.config.connectionString))
+      : new Client(this.config);
     try {
       await client.connect();
       return client;

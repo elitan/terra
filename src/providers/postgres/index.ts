@@ -1,4 +1,5 @@
 import { Client } from "pg";
+import { parsePostgresClientConfig } from "./connection";
 import type {
   DatabaseProvider,
   DatabaseClient,
@@ -73,14 +74,16 @@ export class PostgresProvider implements DatabaseProvider {
       throw new Error("PostgresProvider requires postgres config");
     }
     const pgConfig = config as PostgresConnectionConfig;
-    const client = new Client({
-      host: pgConfig.host,
-      port: pgConfig.port,
-      database: pgConfig.database,
-      user: pgConfig.user,
-      password: pgConfig.password,
-      ssl: pgConfig.ssl,
-    });
+    const client = pgConfig.connectionString
+      ? new Client(parsePostgresClientConfig(pgConfig.connectionString))
+      : new Client({
+          host: pgConfig.host,
+          port: pgConfig.port,
+          database: pgConfig.database,
+          user: pgConfig.user,
+          password: pgConfig.password,
+          ssl: pgConfig.ssl,
+        });
     await client.connect();
     return new PostgresClient(client);
   }

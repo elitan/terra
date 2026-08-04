@@ -51,5 +51,11 @@ export const mutationRiskManifest: MutationRiskManifest = {
       level: "critical",
       reason: "controls SQLite migration atomicity and integrity verification",
     },
+    {
+      path: "src/providers/postgres/connection.ts",
+      owner: "postgres-provider",
+      level: "high",
+      reason: "connection parsing controls endpoint, credentials, and TLS semantics",
+    },
   ],
 };

@@ -227,6 +227,42 @@ describe("CLI Contract", () => {
     }
   });
 
+  test("should reject unsupported PostgreSQL connection options before connecting", async function () {
+    const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+    try {
+      const schemaPath = join(dir, "schema.sql");
+      await writeFile(schemaPath, "CREATE TABLE users (id INTEGER PRIMARY KEY);\n");
+
+      const result = await runCli(
+        [
+          "run",
+          "src/index.ts",
+          "plan",
+          "-f",
+          schemaPath,
+          "-u",
+          "postgres://user:secret@unreachable.invalid/database?sslmode=allow",
+          "--format",
+          "json",
+          "--no-color",
+        ],
+        { DATABASE_URL: "" }
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toBe("");
+      const payload = parseJsonOutput(result.stdout);
+      expect(payload.error).toEqual({
+        code: "VALIDATION_ERROR",
+        name: "ValidationError",
+        message: "Unsupported PostgreSQL sslmode: allow",
+      });
+      expect(result.stdout).not.toContain("secret");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("should write json errors to stdout and keep stderr empty", async () => {
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {

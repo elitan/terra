@@ -13,17 +13,19 @@ import type {
   SqlObject,
 } from "../types/schema";
 import type { MigrationContext, MigrationPlan } from "../types/migration";
+import type { ClientConfig } from "pg";
 
 export type DatabaseDialect = "postgres" | "sqlite";
 
 export interface PostgresConnectionConfig {
   dialect: "postgres";
+  connectionString?: string;
   host: string;
   port: number;
   database: string;
   user: string;
   password: string;
-  ssl?: boolean | { rejectUnauthorized?: boolean };
+  ssl?: ClientConfig["ssl"];
 }
 
 export interface SQLiteConnectionConfig {

@@ -242,7 +242,7 @@ describe("Database Configuration", () => {
 
       const config = loadConfig();
 
-      expect(config.ssl).toEqual({ rejectUnauthorized: false });
+      expect(config.ssl).toEqual({});
     });
 
     test("should parse sslmode=prefer", () => {
@@ -250,7 +250,7 @@ describe("Database Configuration", () => {
 
       const config = loadConfig();
 
-      expect(config.ssl).toEqual({ rejectUnauthorized: false });
+      expect(config.ssl).toEqual({});
     });
 
     test("should parse sslmode=disable", () => {
@@ -266,7 +266,7 @@ describe("Database Configuration", () => {
 
       const config = loadConfig();
 
-      expect(config.ssl).toEqual({ rejectUnauthorized: true });
+      expect(config.ssl).toEqual({});
     });
 
     test("should parse sslmode=verify-full", () => {
@@ -274,7 +274,7 @@ describe("Database Configuration", () => {
 
       const config = loadConfig();
 
-      expect(config.ssl).toEqual({ rejectUnauthorized: true });
+      expect(config.ssl).toEqual({});
     });
 
     test("should not set ssl when sslmode is not specified", () => {
@@ -292,7 +292,7 @@ describe("Database Configuration", () => {
 
       expect(config.host).toBe("ep-twilight-moon.eu-central-1.aws.neon.tech");
       expect(config.database).toBe("neondb");
-      expect(config.ssl).toEqual({ rejectUnauthorized: false });
+      expect(config.ssl).toEqual({});
     });
   });
 

@@ -213,6 +213,9 @@ function resolveTestCommand(file: string, override?: string): string {
   if (normalized.endsWith("/src/providers/sqlite/index.ts")) {
     return "bun --env-file=.env test src/test/sqlite/table-recreation.test.ts src/test/sqlite/validation.test.ts";
   }
+  if (normalized.endsWith("/src/providers/postgres/connection.ts")) {
+    return "bun --env-file=.env test src/test/postgres-connection-strings.test.ts src/test/database-config.test.ts";
+  }
   return "bun --env-file=.env test src/test/schema-service-private-coverage.test.ts";
 }
 

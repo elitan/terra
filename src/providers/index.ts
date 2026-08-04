@@ -5,6 +5,8 @@ import type {
   PostgresConnectionConfig,
   SQLiteConnectionConfig,
 } from "./types";
+import { ValidationError } from "../types/errors";
+import { parsePostgresClientConfig } from "./postgres/connection";
 
 export * from "./types";
 
@@ -44,16 +46,35 @@ export function parseConnectionString(connectionString: string): ConnectionConfi
     } as SQLiteConnectionConfig;
   }
 
-  const url = new URL(connectionString);
-  return {
-    dialect: "postgres",
-    host: url.hostname,
-    port: parseInt(url.port, 10) || 5432,
-    database: url.pathname.slice(1),
-    user: url.username,
-    password: url.password,
-    ssl: url.searchParams.get("sslmode") === "require",
-  } as PostgresConnectionConfig;
+  try {
+    const parsed = parsePostgresClientConfig(connectionString);
+    const user = typeof parsed.user === "string" ? parsed.user : "postgres";
+    const password =
+      typeof parsed.password === "string" ? parsed.password : "";
+    const config: PostgresConnectionConfig = {
+      dialect: "postgres",
+      connectionString,
+      host: parsed.host ?? "localhost",
+      port: parsed.port ?? 5432,
+      database: parsed.database ?? user,
+      user,
+      password,
+    };
+    if (parsed.ssl !== undefined) {
+      config.ssl = parsed.ssl;
+    }
+    return config;
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new ValidationError(
+      `Invalid PostgreSQL connection string: ${reason}`,
+      "connection",
+      "url"
+    );
+  }
 }
 
 export async function createProvider(

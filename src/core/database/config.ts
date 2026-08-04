@@ -1,25 +1,12 @@
 import type { DatabaseConfig } from "../../types/config";
+import { parseConnectionString } from "../../providers";
 
 function parseDatabaseUrl(url: string): DatabaseConfig {
-  const parsed = new URL(url);
-
-  const config: DatabaseConfig = {
-    host: parsed.hostname || "localhost",
-    port: parseInt(parsed.port || "5432"),
-    database: parsed.pathname.slice(1) || "postgres",
-    user: parsed.username ? decodeURIComponent(parsed.username) : "postgres",
-    password: parsed.password ? decodeURIComponent(parsed.password) : "",
-  };
-
-  const sslmode = parsed.searchParams.get("sslmode");
-  if (sslmode === "disable") {
-    config.ssl = false;
-  } else if (sslmode === "require" || sslmode === "prefer") {
-    config.ssl = { rejectUnauthorized: false };
-  } else if (sslmode === "verify-ca" || sslmode === "verify-full") {
-    config.ssl = { rejectUnauthorized: true };
+  const parsed = parseConnectionString(url);
+  if (parsed.dialect !== "postgres") {
+    throw new Error("DatabaseService requires a PostgreSQL connection URL");
   }
-
+  const { dialect: _dialect, ...config } = parsed;
   return config;
 }
 
