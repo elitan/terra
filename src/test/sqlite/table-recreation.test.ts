@@ -152,6 +152,175 @@ describe("SQLite Table Recreation", () => {
     expect(result.rows[1].name).toBe("Bob");
   });
 
+  test("should preserve hidden rowids during table recreation", async function () {
+    await schemaService.apply(`
+      CREATE TABLE notes (
+        body TEXT NOT NULL,
+        obsolete TEXT
+      );
+    `, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(
+      `INSERT INTO notes(rowid, body, obsolete) VALUES (7, 'first', 'x')`
+    );
+    await seedClient.query(
+      `INSERT INTO notes(rowid, body, obsolete) VALUES (42, 'second', 'y')`
+    );
+    await seedClient.end();
+
+    await schemaService.apply(`
+      CREATE TABLE notes (
+        body TEXT NOT NULL
+      );
+    `, ["public"], true);
+
+    const client = await provider.createClient(config);
+    const rows = await client.query<{ rowid: number; body: string }>(
+      "SELECT rowid, body FROM notes ORDER BY rowid"
+    );
+    await client.end();
+
+    expect(rows.rows).toEqual([
+      { rowid: 7, body: "first" },
+      { rowid: 42, body: "second" },
+    ]);
+  });
+
+  test("should preserve rowids through shadowed names and descending primary keys", async function () {
+    const initialSchema = `
+      CREATE TABLE shadowed_names (
+        rowid TEXT NOT NULL,
+        oid TEXT NOT NULL,
+        body TEXT NOT NULL,
+        obsolete TEXT
+      );
+
+      CREATE TABLE descending_primary_key (
+        id INTEGER PRIMARY KEY DESC,
+        body TEXT NOT NULL,
+        obsolete TEXT
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`
+      INSERT INTO shadowed_names(_rowid_, rowid, oid, body, obsolete)
+      VALUES (17, 'declared rowid', 'declared oid', 'shadowed', 'x')
+    `);
+    await seedClient.query(`
+      INSERT INTO descending_primary_key(rowid, id, body, obsolete)
+      VALUES (23, 900, 'descending', 'y')
+    `);
+    await seedClient.end();
+
+    await schemaService.apply(
+      initialSchema.replaceAll(",\n        obsolete TEXT", ""),
+      ["public"],
+      true
+    );
+
+    const client = await provider.createClient(config);
+    const shadowedRows = await client.query(
+      `SELECT _rowid_ AS hidden_rowid, rowid, oid, body FROM shadowed_names`
+    );
+    const descendingRows = await client.query(
+      `SELECT rowid AS hidden_rowid, id, body FROM descending_primary_key`
+    );
+    await client.end();
+
+    expect(shadowedRows.rows).toEqual([{
+      hidden_rowid: 17,
+      rowid: "declared rowid",
+      oid: "declared oid",
+      body: "shadowed",
+    }]);
+    expect(descendingRows.rows).toEqual([{
+      hidden_rowid: 23,
+      id: 900,
+      body: "descending",
+    }]);
+  });
+
+  test("should preserve named values when promoting a column to rowid alias", async function () {
+    await schemaService.apply(`
+      CREATE TABLE items (
+        id INTEGER NOT NULL UNIQUE,
+        obsolete TEXT
+      );
+    `, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(
+      `INSERT INTO items(rowid, id, obsolete) VALUES (7, 100, 'remove')`
+    );
+    await seedClient.end();
+
+    await schemaService.apply(`
+      CREATE TABLE items (
+        id INTEGER PRIMARY KEY
+      );
+    `, ["public"], true);
+
+    const client = await provider.createClient(config);
+    const rows = await client.query(
+      "SELECT rowid AS hidden_rowid, id FROM items"
+    );
+    await client.end();
+
+    expect(rows.rows).toEqual([{ hidden_rowid: 100, id: 100 }]);
+  });
+
+  test("should reject recreation when every hidden rowid name is shadowed", async function () {
+    const initialSchema = `
+      CREATE TABLE inaccessible_rowid (
+        rowid TEXT NOT NULL,
+        oid TEXT NOT NULL,
+        _rowid_ TEXT NOT NULL,
+        obsolete TEXT
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`
+      INSERT INTO inaccessible_rowid(rowid, oid, _rowid_, obsolete)
+      VALUES ('rowid value', 'oid value', '_rowid_ value', 'keep')
+    `);
+    await seedClient.end();
+
+    const desiredSchema = initialSchema.replace(",\n        obsolete TEXT", "");
+    const failedApply = schemaService.apply(desiredSchema, ["public"], true);
+    await expect(failedApply).rejects.toThrow(
+      'Unable to preserve hidden SQLite ROWID for table "inaccessible_rowid"'
+    );
+    await expect(failedApply).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      entity: "inaccessible_rowid",
+      field: "rowid",
+    });
+
+    const client = await provider.createClient(config);
+    const columns = await client.query<{ name: string }>(
+      "PRAGMA table_info(inaccessible_rowid)"
+    );
+    const rows = await client.query(
+      "SELECT rowid, oid, _rowid_, obsolete FROM inaccessible_rowid"
+    );
+    await client.end();
+
+    expect(columns.rows.map(function (column) {
+      return column.name;
+    })).toEqual(["rowid", "oid", "_rowid_", "obsolete"]);
+    expect(rows.rows).toEqual([{
+      rowid: "rowid value",
+      oid: "oid value",
+      _rowid_: "_rowid_ value",
+      obsolete: "keep",
+    }]);
+  });
+
   test("should recreate referenced table with existing child rows", async () => {
     await schemaService.apply(`
       CREATE TABLE users (

@@ -7,10 +7,12 @@ import type {
   CheckConstraint,
 } from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
+import { ValidationError } from "../../types/errors";
 import {
   canonicalizeSQLiteDefinitionIdentifiers,
   canonicalizeSQLiteForeignKeyDefinition,
   extractSQLiteColumnDefinition,
+  isSQLiteRowidAliasColumnDefinition,
   parseSQLiteTableDefinition,
   replaceSQLiteColumnDefinitionName,
   replaceSQLiteCreateTableName,
@@ -36,6 +38,13 @@ interface TableChanges {
   checkConstraintsChanged: boolean;
   uniqueConstraintsChanged: boolean;
 }
+
+interface SQLiteRecreationCopyColumns {
+  target: string[];
+  source: string[];
+}
+
+const SQLITE_ROWID_NAMES = ["rowid", "oid", "_rowid_"] as const;
 
 function indexBySQLiteIdentifier<T extends { name: string }>(
   items: readonly T[]
@@ -634,22 +643,12 @@ export class SQLiteDiffer {
     const tempTable = { ...desired, name: tempName };
     statements.push(this.generateCreateTable(tempTable));
 
-    const differ = this;
-    const commonColumns = desired.columns
-      .filter(function (column) {
-        const normalizedName = normalizeSQLiteIdentifier(column.name);
-        return !column.generated && current.columns.some(function (currentColumn) {
-          return normalizeSQLiteIdentifier(currentColumn.name) === normalizedName;
-        });
-      })
-      .map(function (column) {
-        return differ.quoteIdentifier(column.name);
-      })
-      .join(', ');
+    const copyColumns = this.getRecreationCopyColumns(desired, current);
 
-    if (commonColumns) {
+    if (copyColumns.target.length > 0) {
       statements.push(
-        `INSERT INTO ${this.quoteIdentifier(tempName)} (${commonColumns}) SELECT ${commonColumns} FROM ${this.quoteIdentifier(desired.name)};`
+        `INSERT INTO ${this.quoteIdentifier(tempName)} (${copyColumns.target.join(", ")}) ` +
+        `SELECT ${copyColumns.source.join(", ")} FROM ${this.quoteIdentifier(current.name)};`
       );
     }
 
@@ -672,6 +671,112 @@ export class SQLiteDiffer {
     }
 
     return statements;
+  }
+
+  private isOrdinaryRowidTable(table: Table): boolean {
+    return !table.virtual && !table.withoutRowid;
+  }
+
+  private getRecreationCopyColumns(
+    desired: Table,
+    current: Table
+  ): SQLiteRecreationCopyColumns {
+    const desiredRowidAlias = this.getRowidAlias(desired);
+    const currentRowidAlias = this.getRowidAlias(current);
+    const normalizedDesiredAlias = desiredRowidAlias
+      ? normalizeSQLiteIdentifier(desiredRowidAlias)
+      : undefined;
+    const normalizedCurrentAlias = currentRowidAlias
+      ? normalizeSQLiteIdentifier(currentRowidAlias)
+      : undefined;
+    const currentColumnNames = new Set(
+      current.columns.map(function (column) {
+        return normalizeSQLiteIdentifier(column.name);
+      })
+    );
+    const promotesExistingColumnToRowidAlias =
+      normalizedDesiredAlias !== undefined &&
+      normalizedDesiredAlias !== normalizedCurrentAlias &&
+      currentColumnNames.has(normalizedDesiredAlias);
+    const transfersRowid =
+      this.isOrdinaryRowidTable(desired) &&
+      this.isOrdinaryRowidTable(current) &&
+      !promotesExistingColumnToRowidAlias;
+    const target: string[] = [];
+    const source: string[] = [];
+
+    if (transfersRowid) {
+      const targetRowid = desiredRowidAlias ?? this.getVisibleRowidName(desired);
+      const sourceRowid = currentRowidAlias ?? this.getVisibleRowidName(current);
+      if (!targetRowid || !sourceRowid) {
+        throw new ValidationError(
+          `Unable to preserve hidden SQLite ROWID for table "${desired.name}" ` +
+          "because all ROWID names are shadowed by declared columns. " +
+          "Migrate the table manually or intentionally promote an existing " +
+          "INTEGER column to INTEGER PRIMARY KEY",
+          desired.name,
+          "rowid"
+        );
+      }
+      target.push(this.quoteIdentifier(targetRowid));
+      source.push(this.quoteIdentifier(sourceRowid));
+    }
+
+    for (const column of desired.columns) {
+      const normalizedName = normalizeSQLiteIdentifier(column.name);
+      if (
+        column.generated ||
+        (transfersRowid && normalizedName === normalizedDesiredAlias) ||
+        !currentColumnNames.has(normalizedName)
+      ) {
+        continue;
+      }
+      const quotedName = this.quoteIdentifier(column.name);
+      target.push(quotedName);
+      source.push(quotedName);
+    }
+
+    return { target, source };
+  }
+
+  private getRowidAlias(table: Table): string | undefined {
+    if (!this.isOrdinaryRowidTable(table) || table.primaryKey?.columns.length !== 1) {
+      return undefined;
+    }
+
+    const primaryKeyName = table.primaryKey.columns[0] || "";
+    const primaryKeyColumn = table.columns.find(function (column) {
+      return normalizeSQLiteIdentifier(column.name) ===
+        normalizeSQLiteIdentifier(primaryKeyName);
+    });
+    if (!primaryKeyColumn) {
+      return undefined;
+    }
+
+    if (!table.createStatement) {
+      return primaryKeyColumn.type.toUpperCase() === "INTEGER"
+        ? primaryKeyColumn.name
+        : undefined;
+    }
+
+    const definition = extractSQLiteColumnDefinition(
+      table.createStatement,
+      primaryKeyColumn.name
+    );
+    return definition && isSQLiteRowidAliasColumnDefinition(definition)
+      ? primaryKeyColumn.name
+      : undefined;
+  }
+
+  private getVisibleRowidName(table: Table): string | undefined {
+    const declaredNames = new Set(
+      table.columns.map(function (column) {
+        return normalizeSQLiteIdentifier(column.name);
+      })
+    );
+    return SQLITE_ROWID_NAMES.find(function (name) {
+      return !declaredNames.has(name);
+    });
   }
 
   private generateSequencePreservation(tableName: string, tempName: string): string[] {

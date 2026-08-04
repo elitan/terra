@@ -14,6 +14,7 @@ import {
   canonicalizeSQLiteDefinitionIdentifiers,
   extractSQLiteColumnCollations,
   extractSQLiteForeignKeyMatchClauses,
+  isSQLiteRowidAliasColumnDefinition,
   removeSQLiteForeignKeyMatchSimpleClauses,
   removeSQLiteForeignKeyTargetColumns,
   normalizeSQLiteSchemaDefinition,
@@ -88,6 +89,29 @@ describe("SQLiteDiffer private coverage", () => {
       )
     `);
     expect(Array.from(collations.entries())).toEqual([["name", "NOCASE"]]);
+  });
+
+  test("recognizes exact SQLite rowid alias column definitions", function () {
+    expect(
+      isSQLiteRowidAliasColumnDefinition(
+        `"id" /* type */ [INTEGER] CONSTRAINT pk PRIMARY KEY ASC`
+      )
+    ).toBe(true);
+    expect(
+      isSQLiteRowidAliasColumnDefinition(`id INTEGER`)
+    ).toBe(true);
+    expect(
+      isSQLiteRowidAliasColumnDefinition(`id INT PRIMARY KEY`)
+    ).toBe(false);
+    expect(
+      isSQLiteRowidAliasColumnDefinition(`id INTEGER PRIMARY KEY DESC`)
+    ).toBe(false);
+    expect(
+      isSQLiteRowidAliasColumnDefinition(`id INTEGER(8) PRIMARY KEY`)
+    ).toBe(false);
+    expect(
+      isSQLiteRowidAliasColumnDefinition(`id TEXT PRIMARY KEY`)
+    ).toBe(false);
   });
 
   test("canonicalizes only supported foreign key match clauses", function () {
@@ -311,7 +335,8 @@ describe("SQLiteDiffer private coverage", () => {
       makeTable()
     ) as string[];
     expect(recreation[1]).toBe(
-      'INSERT INTO "_users_new" ("id") SELECT "id" FROM "users";'
+      'INSERT INTO "_users_new" ("rowid", "id") ' +
+      'SELECT "rowid", "id" FROM "users";'
     );
   });
 

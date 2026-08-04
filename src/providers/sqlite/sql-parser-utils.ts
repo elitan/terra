@@ -16,6 +16,19 @@ const SQLITE_TABLE_CONSTRAINT_KEYWORDS = new Set([
   "UNIQUE",
 ]);
 
+const SQLITE_COLUMN_CONSTRAINT_KEYWORDS = new Set([
+  "AS",
+  "CHECK",
+  "COLLATE",
+  "CONSTRAINT",
+  "DEFAULT",
+  "GENERATED",
+  "NOT",
+  "PRIMARY",
+  "REFERENCES",
+  "UNIQUE",
+]);
+
 function isKeywordAt(sql: string, index: number, keyword: string): boolean {
   const candidate = sql.slice(index, index + keyword.length);
   if (candidate.toUpperCase() !== keyword) {
@@ -640,6 +653,49 @@ export function extractSQLiteColumnDefinition(
   }
 
   return undefined;
+}
+
+export function isSQLiteRowidAliasColumnDefinition(
+  definition: string
+): boolean {
+  const column = readSQLiteIdentifier(definition);
+  if (!column) {
+    return false;
+  }
+
+  const declaredType = readSQLiteIdentifier(definition.slice(column.end));
+  if (
+    !declaredType ||
+    normalizeSQLiteIdentifier(declaredType.name) !== "integer"
+  ) {
+    return false;
+  }
+
+  let cursor = column.end + declaredType.end;
+  const nextToken = readSQLiteToken(definition, cursor);
+  if (
+    nextToken &&
+    (nextToken.kind !== "word" ||
+      !SQLITE_COLUMN_CONSTRAINT_KEYWORDS.has(nextToken.value))
+  ) {
+    return false;
+  }
+
+  while (cursor < definition.length) {
+    const token = readSQLiteToken(definition, cursor);
+    if (!token) {
+      break;
+    }
+    if (isWord(token, "PRIMARY")) {
+      const keyToken = readSQLiteToken(definition, token.end);
+      if (isWord(keyToken, "KEY")) {
+        return !isWord(readSQLiteToken(definition, keyToken.end), "DESC");
+      }
+    }
+    cursor = token.end;
+  }
+
+  return true;
 }
 
 export function replaceSQLiteColumnDefinitionName(

@@ -210,6 +210,46 @@ async function runTriggerViewIndexScenario(config: SQLiteConnectionConfig): Prom
   }
 }
 
+async function runRowidRecreationScenario(
+  config: SQLiteConnectionConfig
+): Promise<Array<{ rowid: number; body: string }>> {
+  const provider = new SQLiteProvider();
+  const client = await provider.createClient(config);
+
+  try {
+    await client.query(
+      "CREATE TABLE notes(body TEXT NOT NULL, obsolete TEXT)"
+    );
+    await client.query(
+      "INSERT INTO notes(rowid, body, obsolete) VALUES (9, 'first', 'x')"
+    );
+    await client.query(
+      "INSERT INTO notes(rowid, body, obsolete) VALUES (31, 'second', 'y')"
+    );
+
+    const desired = await provider.parseSchema(
+      "CREATE TABLE notes(body TEXT NOT NULL)"
+    );
+    const current = await provider.getCurrentSchema(client);
+    const plan = provider.generateMigrationPlan(desired.tables, current);
+    expect(plan.hasChanges).toBe(true);
+    await provider.executeInTransaction(client, plan.transactional);
+
+    const reapplied = provider.generateMigrationPlan(
+      desired.tables,
+      await provider.getCurrentSchema(client)
+    );
+    expect(reapplied.hasChanges).toBe(false);
+
+    const rows = await client.query<{ rowid: number; body: string }>(
+      "SELECT rowid, body FROM notes ORDER BY rowid"
+    );
+    return rows.rows;
+  } finally {
+    await client.end();
+  }
+}
+
 describe("SQLite in-memory/file parity", function () {
   test("matches core apply and idempotency behavior", async function () {
     const dbPath = path.join(os.tmpdir(), `sqlite-parity-${Date.now()}.db`);
@@ -246,6 +286,31 @@ describe("SQLite in-memory/file parity", function () {
       });
 
       expect(memorySnapshot).toEqual(fileSnapshot);
+    } finally {
+      if (fs.existsSync(dbPath)) {
+        fs.unlinkSync(dbPath);
+      }
+    }
+  });
+
+  test("preserves hidden rowids in memory and on disk", async function () {
+    const dbPath = path.join(os.tmpdir(), `sqlite-parity-rowid-${Date.now()}.db`);
+
+    try {
+      const fileRows = await runRowidRecreationScenario({
+        dialect: "sqlite",
+        filename: dbPath,
+      });
+      const memoryRows = await runRowidRecreationScenario({
+        dialect: "sqlite",
+        filename: ":memory:",
+      });
+
+      expect(fileRows).toEqual([
+        { rowid: 9, body: "first" },
+        { rowid: 31, body: "second" },
+      ]);
+      expect(memoryRows).toEqual(fileRows);
     } finally {
       if (fs.existsSync(dbPath)) {
         fs.unlinkSync(dbPath);
