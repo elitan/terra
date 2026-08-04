@@ -42,6 +42,7 @@ type SqlObjectPlan = {
   postRoutineCreate: string[];
   finalCreate: string[];
   earlyDrop: string[];
+  partitionDrop: string[];
   typeReplaceDrop: string[];
   typeAlter: string[];
   typeDrop: string[];
@@ -488,13 +489,16 @@ function getDropBucket(kind: SqlObjectKind): SqlObjectStatementBucket {
   if (kind === "domain-type" || kind === "range-type") {
     return "typeDrop";
   }
+  if (kind === "partition") {
+    return "partitionDrop";
+  }
   if (
+    kind === "foreign-server" ||
     kind === "grant" ||
     kind === "policy" ||
     kind === "constraint-trigger" ||
     kind === "event-trigger" ||
-    kind === "row-level-security" ||
-    kind === "partition"
+    kind === "row-level-security"
   ) {
     return "earlyDrop";
   }
@@ -665,6 +669,7 @@ export class SqlObjectHandler {
       postRoutineCreate: [],
       finalCreate: [],
       earlyDrop: [],
+      partitionDrop: [],
       typeReplaceDrop: [],
       typeAlter: [],
       typeDrop: [],
@@ -918,6 +923,7 @@ export class SqlObjectHandler {
     }
 
     plan.earlyDrop = dedupeStatements(plan.earlyDrop);
+    plan.partitionDrop = dedupeStatements(plan.partitionDrop);
     plan.typeReplaceDrop = dedupeStatements(plan.typeReplaceDrop);
     plan.typeAlter = dedupeStatements(plan.typeAlter);
     plan.typeDrop = dedupeStatements(plan.typeDrop);

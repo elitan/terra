@@ -740,6 +740,27 @@ export class SchemaService {
       currentSqlObjects,
       true
     );
+    const hasPartitionDrops = sqlObjectPlan.partitionDrop.length > 0;
+    const prePartitionTriggerStatements = hasPartitionDrops
+      ? preTableTriggerStatements
+      : [];
+    const postPartitionTriggerStatements = hasPartitionDrops
+      ? []
+      : preTableTriggerStatements;
+    const prePartitionViewStatements = hasPartitionDrops
+      ? preTableViewStatements
+      : [];
+    const postPartitionViewStatements = hasPartitionDrops
+      ? []
+      : preTableViewStatements;
+    const prePartitionTableStatements = hasPartitionDrops
+      ? tableStatements.filter(isPostgresConstraintDrop)
+      : [];
+    const postPartitionTableStatements = hasPartitionDrops
+      ? tableStatements.filter(function isNotConstraintDrop(statement) {
+          return !isPostgresConstraintDrop(statement);
+        })
+      : tableStatements;
 
     const transactionalPreview = [
       ...sqlObjectPlan.bootstrapCreate,
@@ -750,10 +771,14 @@ export class SchemaService {
       ...sqlObjectPlan.typeAlter,
       ...preSequenceStatements,
       ...sqlObjectPlan.earlyDrop,
+      ...prePartitionTriggerStatements,
+      ...prePartitionViewStatements,
+      ...prePartitionTableStatements,
+      ...sqlObjectPlan.partitionDrop,
       ...sqlObjectPlan.preTableCreate,
-      ...preTableTriggerStatements,
-      ...preTableViewStatements,
-      ...tableStatements,
+      ...postPartitionTriggerStatements,
+      ...postPartitionViewStatements,
+      ...postPartitionTableStatements,
       ...sqlObjectPlan.postTableCreate,
       ...postSequenceStatements,
       ...functionStatements,
@@ -967,4 +992,8 @@ export class SchemaService {
 
 function isPostgresViewDrop(statement: string): boolean {
   return /^DROP\s+(?:MATERIALIZED\s+)?VIEW\b/i.test(statement.trim());
+}
+
+function isPostgresConstraintDrop(statement: string): boolean {
+  return /^ALTER\s+TABLE\b[\s\S]*\bDROP\s+CONSTRAINT\b/i.test(statement.trim());
 }

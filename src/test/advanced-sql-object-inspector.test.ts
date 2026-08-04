@@ -350,7 +350,7 @@ describe("Advanced SQL object inspector", function () {
       name: "accounts",
       schema: "public",
       createStatement: 'CREATE TABLE "public"."accounts" (\n  "id" integer NOT NULL,\n  "region_id" integer NOT NULL,\n  CONSTRAINT "accounts_pkey" PRIMARY KEY (id)\n) PARTITION BY RANGE (region_id);',
-      dropStatement: 'DROP TABLE IF EXISTS "public"."accounts" CASCADE;',
+      dropStatement: 'DROP TABLE IF EXISTS "public"."accounts" RESTRICT;',
     });
 
     expect(sqlObjects.find(function (item) {

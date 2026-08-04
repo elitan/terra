@@ -9,7 +9,7 @@ function makeSqlObject(overrides: Partial<SqlObject>): SqlObject {
     name: "accounts",
     schema: "public",
     createStatement: 'CREATE TABLE "public"."accounts" (id integer) PARTITION BY RANGE (id);',
-    dropStatement: 'DROP TABLE IF EXISTS "public"."accounts" CASCADE;',
+    dropStatement: 'DROP TABLE IF EXISTS "public"."accounts" RESTRICT;',
     ...overrides,
   };
 }
@@ -35,6 +35,49 @@ function makePolicy(overrides: Partial<SqlObject> = {}): SqlObject {
 }
 
 describe("SqlObjectHandler", function () {
+  test("separates partition and foreign-server replacement drops", async function () {
+    const handler = new SqlObjectHandler();
+    const parent = makeSqlObject({});
+    const child = makeSqlObject({
+      key: "partition:public.accounts_eu",
+      name: "accounts_eu",
+      createStatement:
+        'CREATE TABLE "public"."accounts_eu" PARTITION OF "public"."accounts" ' +
+        "FOR VALUES FROM (0) TO (100);",
+      dropStatement:
+        'DROP TABLE IF EXISTS "public"."accounts_eu" RESTRICT;',
+      dependencies: [parent.key],
+    });
+    const currentServer = makeSqlObject({
+      kind: "foreign-server",
+      key: "foreign-server:analytics",
+      name: "analytics",
+      schema: undefined,
+      createStatement:
+        "CREATE SERVER analytics FOREIGN DATA WRAPPER postgres_fdw;",
+      dropStatement: 'DROP SERVER IF EXISTS "analytics" RESTRICT;',
+      dependencies: [],
+    });
+    const desiredServer = {
+      ...currentServer,
+      createStatement:
+        "CREATE SERVER analytics FOREIGN DATA WRAPPER postgres_fdw " +
+        "OPTIONS (host '127.0.0.1');",
+    };
+
+    const plan = await handler.generateStatements(
+      [desiredServer],
+      [parent, child, currentServer]
+    );
+
+    expect(plan.earlyDrop).toEqual([currentServer.dropStatement]);
+    expect(plan.partitionDrop).toEqual([
+      child.dropStatement,
+      parent.dropStatement,
+    ]);
+    expect(plan.preTableCreate).toEqual([desiredServer.createStatement]);
+  });
+
   test("separates dependent type drops from unrelated late drops", async function () {
     const handler = new SqlObjectHandler();
     const current = [
@@ -79,7 +122,7 @@ describe("SqlObjectHandler", function () {
         key: "partition:public.accounts_eu",
         name: "accounts_eu",
         createStatement: 'CREATE TABLE "public"."accounts_eu" PARTITION OF "public"."accounts" FOR VALUES FROM (0) TO (100);',
-        dropStatement: 'DROP TABLE IF EXISTS "public"."accounts_eu" CASCADE;',
+        dropStatement: 'DROP TABLE IF EXISTS "public"."accounts_eu" RESTRICT;',
         dependencies: ["partition:public.accounts"],
       }),
       makeSqlObject({}),
@@ -90,7 +133,7 @@ describe("SqlObjectHandler", function () {
         key: "partition:public.accounts_eu",
         name: "accounts_eu",
         createStatement: 'CREATE TABLE "public"."accounts_eu" PARTITION OF "public"."accounts" FOR VALUES FROM (0) TO (50);',
-        dropStatement: 'DROP TABLE IF EXISTS "public"."accounts_eu" CASCADE;',
+        dropStatement: 'DROP TABLE IF EXISTS "public"."accounts_eu" RESTRICT;',
         dependencies: ["partition:public.accounts"],
       }),
     ];

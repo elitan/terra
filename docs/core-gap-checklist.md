@@ -225,6 +225,7 @@
 - done: preserve concrete PostgreSQL `CREATE SCHEMA AUTHORIZATION` owners and authorization-derived schema names, order same-apply roles before owned schemas, normalize conditional existence, repair external owner drift, and reject contextual owners, inline schema elements, or duplicate declarations before mutation across PostgreSQL 14-18.
 - done: treat PostgreSQL extension names as database-wide identities, inspect recursive extension dependencies, retain cascade-installed requirements, relocate desired externally installed extensions, order removals dependent-first with `RESTRICT`, roll back on unmanaged dependents, escape version literals, and reject ambiguous duplicate declarations or options across PostgreSQL 14-18.
 - done: replace PostgreSQL table-removal `CASCADE` with `RESTRICT`, order managed ordinary/materialized view drops and foreign-key removal before referenced tables, and roll back without deleting unmanaged views or stripping unmanaged foreign keys across PostgreSQL 14-18.
+- done: eliminate the remaining generated PostgreSQL `CASCADE` drops for partition hierarchies and foreign servers; separate partition removal from bound detachment, order managed triggers/views/constraints and leaves first, run foreign-server replacement drops before creates, and block on unmanaged views, foreign keys, user mappings, or foreign tables with `RESTRICT` across PostgreSQL 14-18.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

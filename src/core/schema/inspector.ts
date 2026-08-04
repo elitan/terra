@@ -3191,7 +3191,7 @@ export class DatabaseInspector {
         name: row.table_name,
         schema: row.schema_name,
         createStatement,
-        dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`,
+        dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} RESTRICT;`,
         ...(Array.isArray(row.partition_key_operator_classes)
           ? {
               partitionKeyOperatorClasses:
@@ -3340,7 +3340,7 @@ export class DatabaseInspector {
         name: row.table_name,
         schema: row.schema_name,
         createStatement: `CREATE TABLE ${qualifiedTable} PARTITION OF ${parentTable} ${row.partition_bound};`,
-        dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`,
+        dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} RESTRICT;`,
         dependencies: [`partition:${row.parent_schema}.${row.parent_name}`],
         ...(replicaIdentity ? { replicaIdentity } : {}),
       });
@@ -4034,7 +4034,7 @@ export class DatabaseInspector {
         key: `foreign-server:${row.server_name}`,
         name: row.server_name,
         createStatement: `CREATE SERVER ${this.quoteIdent(row.server_name)} FOREIGN DATA WRAPPER ${this.quoteIdent(row.fdw_name)}${suffix};`,
-        dropStatement: `DROP SERVER IF EXISTS ${this.quoteIdent(row.server_name)} CASCADE;`,
+        dropStatement: `DROP SERVER IF EXISTS ${this.quoteIdent(row.server_name)} RESTRICT;`,
       };
     });
   }
