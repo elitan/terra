@@ -27,6 +27,15 @@ describe("normalizeDefault", () => {
     expect(normalizeDefault("'hello'::text")).toBe("'hello'");
   });
 
+  test("should strip schema-qualified enum type casts", () => {
+    expect(normalizeDefault("'can''t wait'::enum_lifecycle.priority")).toBe(
+      "'can''t wait'"
+    );
+    expect(
+      normalizeDefault("'can''t wait'::\"enum lifecycle\".\"priority type\"")
+    ).toBe("'can''t wait'");
+  });
+
   test("should strip ::numeric type cast with params", () => {
     expect(normalizeDefault("0.00::numeric(10,2)")).toBe("0.00");
   });

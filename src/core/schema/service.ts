@@ -166,6 +166,7 @@ export class SchemaService {
       if (totalChanges === 0) {
         Logger.success("No changes needed - database is up to date");
         return {
+          preTransactional: [],
           transactional: [],
           concurrent: [],
           deferred: [],
@@ -186,6 +187,15 @@ export class SchemaService {
       const { OutputFormatter } = await import("../../utils/output-formatter");
 
       Logger.print(OutputFormatter.summary(`${totalChanges} changes`));
+
+      if (result.preTransactionalPreview.length > 0) {
+        Logger.print(
+          OutputFormatter.warningSection(
+            "Pre-transactional (committed before remaining changes)"
+          )
+        );
+        Logger.print(OutputFormatter.box(result.preTransactionalPreview));
+      }
 
       if (result.transactionalPreview.length > 0) {
         Logger.print(OutputFormatter.section("Transactional"));
@@ -240,6 +250,11 @@ export class SchemaService {
     plan: MigrationPlan,
     autoApprove: boolean
   ): Promise<void> {
+    const preTransactional = plan.preTransactional ?? [];
+    if (preTransactional.length > 0) {
+      await this.provider.executeInTransaction(client, preTransactional);
+    }
+
     if (plan.transactional.length > 0) {
       await this.provider.executeInTransaction(client, plan.transactional);
     }
@@ -332,6 +347,7 @@ export class SchemaService {
 
   private getDestructiveStatements(plan: MigrationPlan): string[] {
     const statements = [
+      ...(plan.preTransactional ?? []),
       ...plan.transactional,
       ...plan.deferred,
       ...plan.concurrent,
@@ -393,6 +409,7 @@ export class SchemaService {
   ): Promise<{
     plan: MigrationPlan;
     totalChanges: number;
+    preTransactionalPreview: string[];
     transactionalPreview: string[];
     deferredPreview: string[];
     concurrentPreview: string[];
@@ -437,7 +454,7 @@ export class SchemaService {
     let extensionCreateStatements: string[] = [];
     let extensionDropStatements: string[] = [];
     let enumCreateStatements: string[] = [];
-    let enumAddValueStatements: string[] = [];
+    let enumPreTransactionalStatements: string[] = [];
     let compositeTypeCreateStatements: string[] = [];
     let sequenceStatements: string[] = [];
     let functionStatements: string[] = [];
@@ -458,7 +475,7 @@ export class SchemaService {
     if (this.provider.supportsFeature("enums")) {
       const enumResult = this.enumHandler.generateStatements(desiredEnums, currentEnums);
       enumCreateStatements = enumResult.transactional;
-      enumAddValueStatements = enumResult.concurrent;
+      enumPreTransactionalStatements = enumResult.preTransactional;
     }
 
     if (this.provider.supportsFeature("composite_types")) {
@@ -477,7 +494,7 @@ export class SchemaService {
     );
     const tableStatements = tablePlan.transactional;
     const deferredTableStatements = tablePlan.deferred;
-    const concurrentStatements = [...enumAddValueStatements, ...tablePlan.concurrent];
+    const concurrentStatements = tablePlan.concurrent;
 
     if (this.provider.supportsFeature("sequences")) {
       sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
@@ -638,6 +655,7 @@ export class SchemaService {
     ];
 
     const totalChanges =
+      enumPreTransactionalStatements.length +
       transactionalPreview.length +
       deferredTableStatements.length +
       concurrentStatements.length;
@@ -645,12 +663,14 @@ export class SchemaService {
     if (totalChanges === 0) {
       return {
         plan: {
+          preTransactional: [],
           transactional: [],
           concurrent: [],
           deferred: [],
           hasChanges: false,
         },
         totalChanges: 0,
+        preTransactionalPreview: [],
         transactionalPreview: [],
         deferredPreview: [],
         concurrentPreview: [],
@@ -659,12 +679,14 @@ export class SchemaService {
 
     return {
       plan: {
+        preTransactional: enumPreTransactionalStatements,
         transactional: transactionalPreview,
         concurrent: concurrentStatements,
         deferred: deferredTableStatements,
         hasChanges: true,
       },
       totalChanges,
+      preTransactionalPreview: enumPreTransactionalStatements,
       transactionalPreview,
       deferredPreview: deferredTableStatements,
       concurrentPreview: concurrentStatements,

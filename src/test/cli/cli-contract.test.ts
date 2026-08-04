@@ -218,7 +218,7 @@ describe("CLI Contract", () => {
 
       expect(result.exitCode).toBe(1);
       const payload = parseJsonOutput(result.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("VALIDATION_ERROR");
       expect(payload.error.name).toBe("ValidationError");
       expect(payload.error.message).toContain("Invalid lock timeout");
@@ -363,7 +363,7 @@ describe("CLI Contract", () => {
 
       expect(result.exitCode).toBe(1);
       const payload = parseJsonOutput(result.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("PARSER_ERROR");
       expect(payload.error.name).toBe("ParserError");
     } finally {
@@ -443,7 +443,7 @@ describe("CLI Contract", () => {
 
       expect(result.exitCode).toBe(1);
       const payload = parseJsonOutput(result.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("MIGRATION_ERROR");
       expect(payload.error.name).toBe("MigrationError");
       expect(payload.error.message).toContain("NOT NULL");
@@ -579,7 +579,7 @@ describe("CLI Contract", () => {
       expect(result.exitCode).toBe(1);
       expect(result.stderr.trim()).toBe("");
       const payload = parseJsonOutput(result.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("VALIDATION_ERROR");
       expect(payload.error.name).toBe("ValidationError");
       expect(payload.error.message).toContain("Confirmation prompt requires interactive terminal");
@@ -725,7 +725,7 @@ describe("CLI Contract", () => {
       expect(result.exitCode).toBe(1);
       expect(result.stderr.trim()).toBe("");
       const payload = parseJsonOutput(result.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("STRICT_MODE_ERROR");
       expect(payload.error.name).toBe("StrictModeError");
       expect(payload.error.message).toContain("Strict mode blocked destructive migration statements");
@@ -807,7 +807,7 @@ describe("CLI Contract", () => {
             "--no-color",
           ],
           expected: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             error: {
               code: "VALIDATION_ERROR",
               name: "ValidationError",
@@ -829,7 +829,7 @@ describe("CLI Contract", () => {
             "--no-color",
           ],
           expected: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             error: {
               code: "VALIDATION_ERROR",
               name: "ValidationError",
@@ -854,7 +854,7 @@ describe("CLI Contract", () => {
             "--no-color",
           ],
           expected: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             error: {
               code: "STRICT_MODE_ERROR",
               name: "StrictModeError",
@@ -972,19 +972,21 @@ describe("CLI Contract", () => {
           email TEXT NOT NULL
         );`;
       expect(payload).toEqual({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: "plan",
         dialect: "sqlite",
         file: schemaPath,
         schemas: ["public"],
         hasChanges: true,
         counts: {
+          preTransactional: 0,
           transactional: 1,
           deferred: 0,
           concurrent: 0,
           total: 1,
         },
         statements: {
+          preTransactional: [],
           transactional: [createUsersSql],
           deferred: [],
           concurrent: [],
@@ -1140,7 +1142,7 @@ describe("CLI Contract", () => {
           email TEXT NOT NULL
         );`;
       expect(payload).toEqual({
-        schemaVersion: 1,
+        schemaVersion: 2,
         command: "apply",
         dialect: "sqlite",
         file: schemaPath,
@@ -1149,12 +1151,14 @@ describe("CLI Contract", () => {
         strict: false,
         hasChanges: true,
         counts: {
+          preTransactional: 0,
           transactional: 1,
           deferred: 0,
           concurrent: 0,
           total: 1,
         },
         statements: {
+          preTransactional: [],
           transactional: [createUsersSql],
           deferred: [],
           concurrent: [],
@@ -1446,7 +1450,7 @@ describe("CLI Contract", () => {
 
       expect(strictResult.exitCode).toBe(1);
       const payload = parseJsonOutput(strictResult.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("STRICT_MODE_ERROR");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1509,12 +1513,116 @@ describe("CLI Contract", () => {
 
       expect(strictDryRunResult.exitCode).toBe(1);
       const payload = parseJsonOutput(strictDryRunResult.output);
-      expect(payload.schemaVersion).toBe(1);
+      expect(payload.schemaVersion).toBe(2);
       expect(payload.error.code).toBe("STRICT_MODE_ERROR");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test.skipIf(reachablePostgresUrls.length === 0)(
+    "should expose ordered enum additions in the pre-transactional plan channel",
+    async function () {
+      const postgresUrl = reachablePostgresUrls[0];
+      if (!postgresUrl) return;
+
+      const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+      const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+      const schemaName = `cli_enum_phase_${suffix}`;
+      const seedSchemaPath = join(dir, `enum-phase-seed-${suffix}.sql`);
+      const nextSchemaPath = join(dir, `enum-phase-next-${suffix}.sql`);
+      const client = new Client({ connectionString: postgresUrl });
+
+      try {
+        await writeFile(
+          seedSchemaPath,
+          `
+          CREATE SCHEMA ${schemaName};
+          CREATE TYPE ${schemaName}.priority AS ENUM ('low', 'high');
+          CREATE TABLE ${schemaName}.tasks (
+            id INTEGER PRIMARY KEY,
+            priority ${schemaName}.priority NOT NULL DEFAULT 'low'
+          );
+          `.trim() + "\n"
+        );
+        await writeFile(
+          nextSchemaPath,
+          `
+          CREATE SCHEMA ${schemaName};
+          CREATE TYPE ${schemaName}.priority AS ENUM ('low', 'can''t wait', 'high');
+          CREATE TABLE ${schemaName}.tasks (
+            id INTEGER PRIMARY KEY,
+            priority ${schemaName}.priority NOT NULL DEFAULT 'can''t wait'
+          );
+          `.trim() + "\n"
+        );
+
+        const seedResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "apply",
+            "-f",
+            seedSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--auto-approve",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(seedResult.exitCode).toBe(0);
+
+        const planResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "plan",
+            "-f",
+            nextSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--format",
+            "json",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(planResult.exitCode).toBe(0);
+
+        const payload = parseJsonOutput(planResult.output);
+        const enumStatement =
+          `ALTER TYPE "${schemaName}"."priority" ` +
+          `ADD VALUE 'can''t wait' BEFORE 'high';`;
+        expect(payload.schemaVersion).toBe(2);
+        expect(payload.counts.preTransactional).toBe(1);
+        expect(payload.statements.preTransactional).toEqual([enumStatement]);
+        expect(payload.statementMetadata[0]).toEqual({
+          order: 1,
+          channel: "pre-transactional",
+          category: "enum",
+          risk: "safe",
+          sql: enumStatement,
+        });
+        expect(payload.counts.transactional).toBe(1);
+      } finally {
+        try {
+          await client.connect();
+          await client.query(`DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`);
+        } finally {
+          try {
+            await client.end();
+          } catch {
+          }
+          await rm(dir, { recursive: true, force: true });
+        }
+      }
+    }
+  );
 
   test.skipIf(reachablePostgresUrls.length === 0)(
     "should release advisory lock after strict mode failure in postgres apply path",
@@ -1579,7 +1687,7 @@ describe("CLI Contract", () => {
 
             expect(strictResult.exitCode).toBe(1);
             const strictPayload = parseJsonOutput(strictResult.output);
-            expect(strictPayload.schemaVersion).toBe(1);
+            expect(strictPayload.schemaVersion).toBe(2);
             expect(strictPayload.error.code).toBe("STRICT_MODE_ERROR");
 
             const lockProbeClient = new Client({
@@ -1676,7 +1784,7 @@ describe("CLI Contract", () => {
 
           expect(parserFailure.exitCode).toBe(1);
           const parserPayload = parseJsonOutput(parserFailure.output);
-          expect(parserPayload.schemaVersion).toBe(1);
+          expect(parserPayload.schemaVersion).toBe(2);
           expect(parserPayload.error.code).toBe("PARSER_ERROR");
 
           const lockProbeClient = new Client({
@@ -1778,7 +1886,7 @@ describe("CLI Contract", () => {
 
           expect(dryRunResult.exitCode).toBe(0);
           const dryRunPayload = parseJsonOutput(dryRunResult.output);
-          expect(dryRunPayload.schemaVersion).toBe(1);
+          expect(dryRunPayload.schemaVersion).toBe(2);
           expect(dryRunPayload.command).toBe("apply");
           expect(dryRunPayload.dryRun).toBe(true);
           expect(dryRunPayload.hasChanges).toBe(true);

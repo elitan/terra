@@ -263,12 +263,14 @@ describe("CLI synthetic schema idempotency", () => {
       expect(secondPayload.file).toBe(file);
       expect(secondPayload.hasChanges).toBe(false);
       expect(secondPayload.counts).toEqual({
+        preTransactional: 0,
         transactional: 0,
         deferred: 0,
         concurrent: 0,
         total: 0,
       });
       expect(secondPayload.statements).toEqual({
+        preTransactional: [],
         transactional: [],
         deferred: [],
         concurrent: [],

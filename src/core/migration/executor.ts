@@ -45,10 +45,14 @@ export class MigrationExecutor {
       Logger.success("No changes needed - database is up to date");
       return;
     }
-
-
     try {
-      // Step 1: Execute all transactional statements within a single transaction
+      // Step 1: Commit prerequisite statements before the main transaction.
+      const preTransactional = plan.preTransactional ?? [];
+      if (preTransactional.length > 0) {
+        await this.databaseService.executeInTransaction(client, preTransactional);
+      }
+
+      // Step 2: Execute all transactional statements within a single transaction
       if (plan.transactional.length > 0) {
         await this.databaseService.executeInTransaction(
           client,
@@ -56,7 +60,7 @@ export class MigrationExecutor {
         );
       }
 
-      // Step 2: Execute deferred FK statements (for circular dependencies)
+      // Step 3: Execute deferred FK statements (for circular dependencies)
       // These must run after all tables are created but are still transactional
       if (plan.deferred && plan.deferred.length > 0) {
         await this.databaseService.executeInTransaction(
@@ -65,7 +69,7 @@ export class MigrationExecutor {
         );
       }
 
-      // Step 3: Execute all concurrent statements individually
+      // Step 4: Execute all concurrent statements individually
       if (plan.concurrent.length > 0) {
         const ora = (await import("ora")).default;
 

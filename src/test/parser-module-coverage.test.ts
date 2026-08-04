@@ -86,17 +86,21 @@ describe("Parser module coverage", () => {
 
     test("returns null for missing required fields", () => {
       expect(parseCreateType({})).toBeNull();
-      expect(parseCreateType({ typeName: [{ String: { sval: "status" } }] })).toBeNull();
       expect(parseCreateType({ vals: [{ String: { sval: "x" } }] })).toBeNull();
     });
 
-    test("throws for empty enum values", () => {
-      expect(() =>
+    test("preserves empty labels and zero-label enums", () => {
+      expect(
         parseCreateType({
           typeName: [{ String: { sval: "status" } }],
           vals: [{ String: { sval: "" } }],
         })
-      ).toThrow("Invalid ENUM type");
+      ).toEqual({ name: "status", schema: undefined, values: [""] });
+      expect(
+        parseCreateType({
+          typeName: [{ String: { sval: "empty_status" } }],
+        })
+      ).toEqual({ name: "empty_status", schema: undefined, values: [] });
     });
 
     test("returns null on unexpected parse errors", () => {

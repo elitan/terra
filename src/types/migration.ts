@@ -1,4 +1,6 @@
 export interface MigrationPlan {
+  // Statements committed before the main transaction, such as enum labels used by later DDL.
+  preTransactional?: string[];
   transactional: string[];
   concurrent: string[];
   deferred: string[]; // FK statements that must be executed after all tables are created (for circular dependencies)

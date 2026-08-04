@@ -12,7 +12,7 @@ import type { EnumType } from "../../../types/schema";
  */
 export function parseCreateType(stmt: any): EnumType | null {
   try {
-    if (!stmt.typeName || !stmt.vals) return null;
+    if (!stmt.typeName) return null;
 
     const typeNames = stmt.typeName.map((n: any) => n.String?.sval || '');
 
@@ -28,14 +28,9 @@ export function parseCreateType(stmt: any): EnumType | null {
 
     if (!typeName) return null;
 
-    const values = stmt.vals.map((v: any) => v.String?.sval || '').filter(Boolean);
-
-    if (values.length === 0) {
-      throw new Error(
-        `Invalid ENUM type '${typeName}': ENUM types must have at least one value. ` +
-          `Empty ENUM types are not allowed in PostgreSQL.`
-      );
-    }
+    const values = (stmt.vals || []).map(
+      (value: any) => value.String?.sval ?? ""
+    );
 
     return {
       name: typeName,
@@ -43,10 +38,6 @@ export function parseCreateType(stmt: any): EnumType | null {
       values,
     };
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Invalid ENUM type")) {
-      throw error;
-    }
-
     Logger.warning(
       `Failed to parse CREATE TYPE: ${error instanceof Error ? error.message : String(error)}`
     );

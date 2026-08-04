@@ -31,14 +31,16 @@ function normalizeFormat(format: string): CliOutputFormat {
 }
 
 function toCounts(plan: MigrationPlan): CliPlanCounts {
+  const preTransactional = plan.preTransactional?.length ?? 0;
   const transactional = plan.transactional.length;
   const deferred = plan.deferred.length;
   const concurrent = plan.concurrent.length;
   return {
+    preTransactional,
     transactional,
     deferred,
     concurrent,
-    total: transactional + deferred + concurrent,
+    total: preTransactional + transactional + deferred + concurrent,
   };
 }
 
@@ -132,6 +134,7 @@ export async function applyCommand(
     hasChanges: plan.hasChanges,
     counts: toCounts(plan),
     statements: {
+      preTransactional: plan.preTransactional ?? [],
       transactional: plan.transactional,
       deferred: plan.deferred,
       concurrent: plan.concurrent,

@@ -1,9 +1,10 @@
 import type { DatabaseDialect } from "../providers/types";
 
 export type CliOutputFormat = "text" | "json";
-export const CLI_OUTPUT_SCHEMA_VERSION = 1;
+export const CLI_OUTPUT_SCHEMA_VERSION = 2;
 
 export interface CliPlanCounts {
+  preTransactional: number;
   transactional: number;
   deferred: number;
   concurrent: number;
@@ -11,12 +12,17 @@ export interface CliPlanCounts {
 }
 
 export interface CliPlanStatements {
+  preTransactional: string[];
   transactional: string[];
   deferred: string[];
   concurrent: string[];
 }
 
-export type CliStatementChannel = "transactional" | "deferred" | "concurrent";
+export type CliStatementChannel =
+  | "pre-transactional"
+  | "transactional"
+  | "deferred"
+  | "concurrent";
 export type CliStatementRisk = "safe" | "destructive" | "concurrent";
 export type CliStatementCategory =
   | "table"

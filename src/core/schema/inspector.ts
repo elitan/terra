@@ -1321,10 +1321,11 @@ export class DatabaseInspector {
         e.enumlabel as enum_value,
         e.enumsortorder
       FROM pg_type t
-      JOIN pg_enum e ON t.oid = e.enumtypid
       JOIN pg_namespace n ON t.typnamespace = n.oid
+      LEFT JOIN pg_enum e ON t.oid = e.enumtypid
       LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
+        AND t.typtype = 'e'
         AND d.objid IS NULL  -- Exclude extension-owned types
       ORDER BY n.nspname, t.typname, e.enumsortorder
     `, [schemas]);
@@ -1340,7 +1341,9 @@ export class DatabaseInspector {
       if (!enumGroups.has(enumKey)) {
         enumGroups.set(enumKey, { name: enumName, schema: schemaName, values: [] });
       }
-      enumGroups.get(enumKey)!.values.push(enumValue);
+      if (typeof enumValue === "string") {
+        enumGroups.get(enumKey)!.values.push(enumValue);
+      }
     }
 
     const enums: EnumType[] = [];

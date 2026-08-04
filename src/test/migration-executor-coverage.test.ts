@@ -48,4 +48,33 @@ describe("MigrationExecutor coverage", () => {
     promptAnswer = "no";
     expect(await (executor as any).promptConfirmation("continue?")).toBe(false);
   });
+
+  test("executes prerequisite transactions before the main and deferred phases", async function () {
+    const MigrationExecutor = await loadExecutor();
+    const calls: string[][] = [];
+    const executor = new MigrationExecutor({
+      executeInTransaction: async function (_client: unknown, statements: string[]) {
+        calls.push([...statements]);
+      },
+    } as any);
+    const client = {
+      query: async function () {
+        return { rows: [] };
+      },
+    } as any;
+
+    await executor.executePlan(
+      client,
+      {
+        preTransactional: ["PRE"],
+        transactional: ["TX"],
+        deferred: ["DEFER"],
+        concurrent: [],
+        hasChanges: true,
+      },
+      true
+    );
+
+    expect(calls).toEqual([["PRE"], ["TX"], ["DEFER"]]);
+  });
 });

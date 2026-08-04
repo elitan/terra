@@ -58,8 +58,8 @@
 - done: add deterministic multi-table mixed-operation ordering regression test in `SchemaDiffer`.
 - done: make `SchemaDiffer` table processing order deterministic across input table ordering.
 - done: rerun `test:core` and full `test:coverage` gate green (`1308` pass, `98.02%` line, `96.72%` function).
-- done: add enum integration regression for unsafe middle-value insertion (reordering contract).
-- done: fix enum unsafe-change classification to report reordering for non-append insertions.
+- done: add enum integration regression for ordered middle-value insertion.
+- done: support insertion-only enum evolution while rejecting retained-label reordering.
 - done: add schema-qualified same-name enum integration test for scoped append behavior.
 - done: fix enum introspection grouping by schema+name to avoid cross-schema enum value merge.
 - done: harden enum suite cleanup to include `tenant_a` schema.

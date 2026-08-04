@@ -324,7 +324,7 @@ describe("ENUM Types", () => {
       );
     });
 
-    it("should reject inserting ENUM value in the middle as unsafe reordering", async () => {
+    it("should insert an ENUM value in the middle without reordering existing values", async () => {
       const initialSchema = `
         CREATE TYPE priority AS ENUM ('low', 'medium', 'high');
 
@@ -347,9 +347,17 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow(
-        /ENUM type 'priority' modification requires manual intervention.*reordering values/
-      );
+      await schemaService.apply(updatedSchema, ['public'], true);
+
+      const values = await client.query<{ enumlabel: string }>(`
+        SELECT enumlabel
+        FROM pg_enum
+        WHERE enumtypid = 'priority'::regtype
+        ORDER BY enumsortorder
+      `);
+      expect(values.rows.map(function getLabel(row) {
+        return row.enumlabel;
+      })).toEqual(['low', 'urgent', 'medium', 'high']);
     });
   });
 
@@ -573,7 +581,7 @@ describe("ENUM Types", () => {
       await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
     });
 
-    it("should reject empty ENUM types", async () => {
+    it("should support empty ENUM types", async () => {
       const schema = `
         CREATE TYPE empty_enum AS ENUM ();
 
@@ -583,7 +591,17 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await expect(schemaService.apply(schema, ['public'], true)).rejects.toThrow();
+      await schemaService.apply(schema, ['public'], true);
+
+      const result = await client.query(`
+        SELECT t.typname, count(e.enumlabel)::int AS value_count
+        FROM pg_type t
+        LEFT JOIN pg_enum e ON e.enumtypid = t.oid
+        WHERE t.typnamespace = 'public'::regnamespace
+          AND t.typname = 'empty_enum'
+        GROUP BY t.typname
+      `);
+      expect(result.rows).toEqual([{ typname: "empty_enum", value_count: 0 }]);
     });
   });
 

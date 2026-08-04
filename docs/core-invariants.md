@@ -10,7 +10,7 @@
 
 1. json output must include `schemaVersion`.
 2. statement ordering must be stable across repeated runs.
-3. statement metadata must include `order`, `category`, `risk`.
+3. statement metadata must include `order`, `channel`, `category`, `risk`.
 
 ## destructive safety
 
@@ -23,6 +23,7 @@
 1. transactional statements must execute atomically.
 2. failures must leave database in previous consistent state.
 3. concurrent statements must report exact failing statement.
+4. pre-transactional statements must commit before main transactional statements.
 
 ## error contract
 

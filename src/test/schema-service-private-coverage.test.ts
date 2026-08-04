@@ -50,6 +50,7 @@ function createParsedSchema(overrides: Partial<ParsedSchema> = {}): ParsedSchema
 
 function createPlan(overrides: Partial<MigrationPlan> = {}): MigrationPlan {
   return {
+    preTransactional: [],
     transactional: [],
     concurrent: [],
     deferred: [],
@@ -416,8 +417,21 @@ describe("SchemaService private coverage", function () {
       },
     };
 
-    await privateService.executePlan(okClient, createPlan({ transactional: ["TX1"], concurrent: ["C1"] }), true);
-    expect(mock.state.executeInTransactionCalls).toEqual([["TX1"]]);
+    await privateService.executePlan(
+      okClient,
+      createPlan({
+        preTransactional: ["PRE1"],
+        transactional: ["TX1"],
+        deferred: ["DEFER1"],
+        concurrent: ["C1"],
+      }),
+      true
+    );
+    expect(mock.state.executeInTransactionCalls).toEqual([
+      ["PRE1"],
+      ["TX1"],
+      ["DEFER1"],
+    ]);
     expect(mock.state.clientQueries).toContain("C1");
 
     const badClient: DatabaseClient = {

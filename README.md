@@ -167,6 +167,18 @@ use an identity column so sequence semantics remain declarative. Imperative
 also rejected in desired schemas; add or remove the declarative leaf instead.
 Equivalent unsupported state created outside TerraDB is detected from the
 PostgreSQL catalogs and rejected before diffing.
+PostgreSQL enums preserve empty, quoted, backslash, and Unicode labels, including
+valid zero-label enum types. TerraDB can add labels at any position while
+preserving the relative order of existing labels. Removing or reordering
+existing labels is rejected before execution because PostgreSQL has no safe
+in-place operation for those changes. Enum additions are committed in a
+pre-transactional phase before the main schema transaction, allowing later DDL
+in the same apply to use a newly added label. JSON plan/apply output schema
+version 2 exposes this phase through `counts.preTransactional`,
+`statements.preTransactional`, and the `pre-transactional` metadata channel.
+Because this phase commits first, an added label remains as a safe additive
+change if a later transactional statement fails; rerunning apply resumes the
+remaining work.
 
 ## Commands
 
@@ -213,6 +225,8 @@ CREATE INDEX idx_email_bytewise ON users (email COLLATE "C");  -- PostgreSQL
 ```sql
 -- ENUM types
 CREATE TYPE status AS ENUM ('pending', 'active', 'inactive');
+-- Adding a label between existing labels is supported on a later apply:
+CREATE TYPE status AS ENUM ('pending', 'in_review', 'active', 'inactive');
 
 -- Views
 CREATE VIEW active_users AS SELECT * FROM users WHERE active = true;

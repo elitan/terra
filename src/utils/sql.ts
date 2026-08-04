@@ -217,8 +217,14 @@ export function normalizeDefault(value: string | null | undefined): string | und
     return undefined;
   }
 
-  // Strip PostgreSQL's type cast suffix (::typename or ::typename(params) or ::typename[])
-  normalized = normalized.replace(/::[a-z_]+(\s+[a-z_]+)*(\([^)]*\))?(\[\])?$/i, '');
+  // Strip PostgreSQL's type cast suffix, including schema-qualified and quoted types.
+  const identifier = '(?:"(?:[^"]|"")*"|[a-z_][a-z0-9_$]*)';
+  const typeCastSuffix = new RegExp(
+    `::${identifier}(?:\\s*\\.\\s*${identifier})?` +
+      `(?:\\s+${identifier})*(?:\\([^)]*\\))?(?:\\[\\])*$`,
+    "i"
+  );
+  normalized = normalized.replace(typeCastSuffix, '');
 
   // Handle CAST(expr AS type) syntax
   const castMatch = normalized.match(/^CAST\((.+)\s+AS\s+[a-z_]+(\[\])?\)$/i);
@@ -1393,6 +1399,13 @@ export function generateDropSequenceSQL(sequenceName: string, schema?: string): 
 }
 
 // ENUM TYPE SQL generation functions
+export function quotePostgresStringLiteral(value: string): string {
+  if (value.includes("\\")) {
+    return `E'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
+  }
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 export function generateCreateTypeSQL(enumType: EnumType): string {
   const builder = new SQLBuilder();
 
@@ -1403,7 +1416,7 @@ export function generateCreateTypeSQL(enumType: EnumType): string {
   }
   builder.ident(enumType.name);
 
-  const values = enumType.values.map(value => `'${value}'`).join(', ');
+  const values = enumType.values.map(quotePostgresStringLiteral).join(', ');
   builder.p(`AS ENUM (${values});`);
 
   return builder.build();

@@ -3,7 +3,11 @@ import type {
   CliStatementRisk,
 } from "../types/cli-output";
 
-export type StatementChannel = "transactional" | "deferred" | "concurrent";
+export type StatementChannel =
+  | "pre-transactional"
+  | "transactional"
+  | "deferred"
+  | "concurrent";
 
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();

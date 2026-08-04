@@ -1,5 +1,6 @@
 import type { MigrationPlan } from "../types/migration";
 import type {
+  CliStatementChannel,
   CliStatementMetadata,
 } from "../types/cli-output";
 import {
@@ -10,7 +11,7 @@ import {
 function appendChannelMetadata(
   target: CliStatementMetadata[],
   statements: string[],
-  channel: "transactional" | "deferred" | "concurrent",
+  channel: CliStatementChannel,
   offset: number
 ): number {
   let order = offset;
@@ -30,6 +31,12 @@ function appendChannelMetadata(
 export function buildStatementMetadata(plan: MigrationPlan): CliStatementMetadata[] {
   const metadata: CliStatementMetadata[] = [];
   let order = 0;
+  order = appendChannelMetadata(
+    metadata,
+    plan.preTransactional ?? [],
+    "pre-transactional",
+    order
+  );
   order = appendChannelMetadata(metadata, plan.transactional, "transactional", order);
   order = appendChannelMetadata(metadata, plan.deferred, "deferred", order);
   appendChannelMetadata(metadata, plan.concurrent, "concurrent", order);
