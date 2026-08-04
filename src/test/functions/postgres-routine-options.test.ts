@@ -167,6 +167,38 @@ describe("PostgreSQL routine security options", function () {
           LANGUAGE sql BEGIN ATOMIC SELECT 1; END;
         `,
       },
+      {
+        label: "parameter %TYPE reference",
+        sql: `
+          CREATE FUNCTION public.unsupported_routine(
+            value public.routine_type_source.amount%TYPE
+          ) RETURNS numeric LANGUAGE sql AS $$ SELECT value $$;
+        `,
+      },
+      {
+        label: "return %TYPE reference",
+        sql: `
+          CREATE FUNCTION public.unsupported_routine(value numeric)
+          RETURNS public.routine_type_source.amount%TYPE
+          LANGUAGE sql AS $$ SELECT value $$;
+        `,
+      },
+      {
+        label: "parameter %TYPE reference",
+        sql: `
+          CREATE FUNCTION public.unsupported_routine(value numeric)
+          RETURNS TABLE (result public.routine_type_source.amount%TYPE)
+          LANGUAGE sql AS $$ SELECT value $$;
+        `,
+      },
+      {
+        label: "parameter %TYPE reference",
+        sql: `
+          CREATE PROCEDURE public.unsupported_routine(
+            value "Type Schema"."Type Source"."Amount"%TYPE
+          ) LANGUAGE sql AS $$ SELECT 1 $$;
+        `,
+      },
     ];
 
     for (const scenario of scenarios) {
@@ -228,6 +260,66 @@ describe("PostgreSQL routine security options", function () {
       { name: "empty_body_procedure", body: "" },
     ]);
     expect((await service.plan(schema, ["public"])).hasChanges).toBe(false);
+  });
+
+  test("rejects creation-time %TYPE resolution before database mutation", async function () {
+    await client.query(`
+      CREATE TABLE public.routine_type_source (
+        amount numeric(10,2) NOT NULL
+      );
+      INSERT INTO public.routine_type_source VALUES (12.34);
+      CREATE FUNCTION public.external_percent_type(
+        value public.routine_type_source.amount%TYPE
+      ) RETURNS public.routine_type_source.amount%TYPE
+      LANGUAGE sql AS $$ SELECT value $$;
+    `);
+    const metadataSql = `
+      SELECT
+        p.oid::integer AS oid,
+        pg_get_function_arguments(p.oid) AS arguments,
+        pg_get_function_result(p.oid) AS result,
+        EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_proc'::regclass
+            AND d.objid = p.oid
+            AND d.refobjid = 'public.routine_type_source'::regclass
+        ) AS has_table_dependency
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname = 'external_percent_type'
+    `;
+    const before = (await client.query(metadataSql)).rows[0];
+    expect(before).toMatchObject({
+      arguments: "value numeric",
+      result: "numeric",
+      has_table_dependency: false,
+    });
+
+    const desired = `
+      CREATE TABLE public.routine_type_source (
+        amount numeric(10,2) NOT NULL
+      );
+      CREATE FUNCTION public.external_percent_type(
+        value public.routine_type_source.amount%TYPE
+      ) RETURNS public.routine_type_source.amount%TYPE
+      LANGUAGE sql AS $$ SELECT value $$;
+    `;
+    const service = createTestSchemaService();
+    try {
+      await service.apply(desired, ["public"], true);
+      throw new Error("Expected the %TYPE reference to be rejected");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "PARSER_ERROR" });
+      expect((error as Error).message).toContain("parameter %TYPE reference");
+    }
+
+    expect((await client.query(metadataSql)).rows[0]).toEqual(before);
+    expect(
+      (await client.query("SELECT count(*)::integer AS count FROM public.routine_type_source"))
+        .rows[0]?.count
+    ).toBe(1);
   });
 
   test("changes and resets routine options without losing OIDs or dependents", async function () {

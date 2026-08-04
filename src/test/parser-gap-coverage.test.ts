@@ -264,6 +264,34 @@ describe("Parser gap coverage", function () {
     }).toThrow("linked object AS syntax");
   });
 
+  test("rejects routine column %TYPE references", function () {
+    const percentType = {
+      names: [
+        { String: { sval: "public" } },
+        { String: { sval: "source" } },
+        { String: { sval: "amount" } },
+      ],
+      pct_type: true,
+    };
+    expect(function parsePercentTypeParameter() {
+      return parseCreateFunction(makeFunctionBase({
+        parameters: [
+          { FunctionParameter: { name: "value", argType: percentType } },
+        ],
+      }));
+    }).toThrow("parameter %TYPE reference");
+    expect(function parsePercentTypeReturn() {
+      return parseCreateFunction(makeFunctionBase({ returnType: percentType }));
+    }).toThrow("return %TYPE reference");
+    expect(function parseProcedurePercentTypeParameter() {
+      return parseCreateProcedure(makeProcedureBase({
+        parameters: [
+          { FunctionParameter: { name: "value", argType: percentType } },
+        ],
+      }));
+    }).toThrow("parameter %TYPE reference");
+  });
+
   test("preserves set-returning and bare strict function options", function () {
     const parsed = parseCreateFunction(
       makeFunctionBase({

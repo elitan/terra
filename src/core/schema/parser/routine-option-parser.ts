@@ -44,6 +44,27 @@ function extractSettingValue(node: any): string | undefined {
   return undefined;
 }
 
+function hasPercentTypeParameter(node: any): boolean {
+  try {
+    if (!Array.isArray(node.parameters)) {
+      return false;
+    }
+    return node.parameters.some(function isPercentTypeParameter(parameter: any) {
+      return parameter.FunctionParameter?.argType?.pct_type === true;
+    });
+  } catch {
+    return false;
+  }
+}
+
+function hasPercentTypeReturn(node: any): boolean {
+  try {
+    return node.returnType?.pct_type === true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateRoutineDefinition(
   node: any,
   kind: RoutineKind,
@@ -51,6 +72,21 @@ export function validateRoutineDefinition(
   originalSql: string,
   filePath?: string
 ): void {
+  if (hasPercentTypeParameter(node)) {
+    throw routineError(
+      `PostgreSQL ${kind} parameter %TYPE reference is not supported in desired schemas because PostgreSQL resolves it to a concrete type at creation without retaining the source-column relationship; specify the concrete parameter type instead`,
+      originalSql,
+      filePath
+    );
+  }
+  if (kind === "function" && hasPercentTypeReturn(node)) {
+    throw routineError(
+      "PostgreSQL function return %TYPE reference is not supported in desired schemas because PostgreSQL resolves it to a concrete type at creation without retaining the source-column relationship; specify the concrete return type instead",
+      originalSql,
+      filePath
+    );
+  }
+
   if (node.sql_body) {
     throw routineError(
       `PostgreSQL ${kind} SQL-standard body syntax is not supported in desired schemas because its parsed dependency semantics are not modeled; use a quoted AS body instead`,
