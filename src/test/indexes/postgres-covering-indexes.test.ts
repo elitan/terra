@@ -60,6 +60,13 @@ describe("PostgreSQL covering indexes", function () {
         concurrent: false,
         where: "active",
         expression: undefined,
+        dependentColumns: [
+          "active",
+          "display_name",
+          "email",
+          "tenant_id",
+          "updated_at",
+        ],
         storageParameters: { fillfactor: "80" },
         tablespace: undefined,
       },

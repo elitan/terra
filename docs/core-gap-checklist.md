@@ -203,6 +203,7 @@
 - done: detect direct, array, multirange, derived type, relation, and routine-signature dependencies for domain/range replacement and removal, while filtering internal range constructors.
 - done: reject same-apply range support-function creation before mutation with a prerequisite/shell-type diagnostic.
 - done: unify enum, composite, domain, range, and generated-multirange dependency ordering across same-apply creation, composite alteration, and coordinated removal; reject cross-family cycles, ambiguous references, and physical type-name collisions before mutation.
+- done: inspect enum dependencies through direct/array relation attributes, composites, derived domains/ranges, routine signatures, owning defaults/constraints/indexes, and machine-readable catalog identities; reject retained or unmodeled dependents before mutation while allowing coordinated removal, and suppress index drops made redundant by a column drop.
 - next: audit remaining PostgreSQL 18 DDL and catalog additions for attributes that the canonical model could silently discard.
 
 ## parser

@@ -121,6 +121,7 @@ export interface Index {
   concurrent?: boolean;
   where?: string; // For partial indexes
   expression?: string; // For expression indexes
+  dependentColumns?: string[]; // PostgreSQL columns that make this index auto-drop with DROP COLUMN
   storageParameters?: Record<string, string>;
   tablespace?: string;
   // Marks if this index is backed by a constraint (e.g., UNIQUE constraint).
@@ -136,6 +137,10 @@ export interface EnumType {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
   values: string[];
+  attributeDependents?: CompositeTypeAttributeDependent[];
+  typeDependents?: CompositeTypeTypeDependent[];
+  routineDependents?: PostgresTypeRoutineDependent[];
+  catalogDependents?: PostgresTypeCatalogDependent[];
 }
 
 export interface CompositeTypeAttribute {
@@ -307,6 +312,17 @@ export interface PostgresTypeRoutineDependent {
   name: string;
   kind: "function" | "procedure";
   identityArguments: string;
+}
+
+export interface PostgresTypeCatalogDependent {
+  type: string;
+  schema?: string;
+  name?: string;
+  identity: string;
+  ownerSchema?: string;
+  ownerRelation?: string;
+  ownerRelationKind?: string;
+  ownerAttributes?: string[];
 }
 
 export interface SqlObject {

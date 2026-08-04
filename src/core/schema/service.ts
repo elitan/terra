@@ -614,7 +614,16 @@ export class SchemaService {
     if (this.provider.supportsFeature("enums")) {
       enumTypeRemovalOperations = this.enumHandler.generateRemovalTypeStatements(
         desiredEnums,
-        currentEnums
+        currentEnums,
+        {
+          desiredTables: desiredSchema,
+          desiredCompositeTypes,
+          desiredViews: normalizedDesiredViews,
+          desiredSqlObjects,
+          desiredFunctions,
+          desiredProcedures,
+          managedSchemas: schemas,
+        }
       );
     }
 

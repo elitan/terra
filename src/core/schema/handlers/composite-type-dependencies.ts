@@ -6,6 +6,11 @@ import type {
   View,
 } from "../../../types/schema";
 
+interface PostgresTypeIdentity {
+  name: string;
+  schema?: string;
+}
+
 export function getCompositeTypeKey(compositeType: CompositeType): string {
   return `${compositeType.schema || "public"}.${compositeType.name}`;
 }
@@ -53,19 +58,19 @@ export function parseTypeReference(type: string): string[] | undefined {
   return parts;
 }
 
-function typeReferencesComposite(
+export function typeReferenceMatches(
   type: string,
-  compositeType: CompositeType
+  target: PostgresTypeIdentity
 ): boolean {
-  const reference = parseTypeReference(type);
+  const reference = parseTypeReference(type.replace(/^SETOF\s+/i, ""));
   if (!reference) return false;
   if (reference.length === 1) {
-    return reference[0] === compositeType.name;
+    return reference[0] === target.name;
   }
   return (
     reference.length === 2 &&
-    reference[0] === (compositeType.schema || "public") &&
-    reference[1] === compositeType.name
+    reference[0] === (target.schema || "public") &&
+    reference[1] === target.name
   );
 }
 
@@ -146,7 +151,7 @@ export function sortCompositeTypesForCreation(
 
 export function attributeDependentIsRetained(
   dependent: CompositeTypeAttributeDependent,
-  removedType: CompositeType,
+  removedType: PostgresTypeIdentity,
   desiredCompositeTypes: CompositeType[],
   desiredTables: Table[],
   desiredViews: View[],
@@ -170,7 +175,7 @@ export function attributeDependentIsRetained(
     );
     return Boolean(
       desiredAttribute &&
-        typeReferencesComposite(desiredAttribute.type, removedType)
+        typeReferenceMatches(desiredAttribute.type, removedType)
     );
   }
 
@@ -187,7 +192,7 @@ export function attributeDependentIsRetained(
       }
     );
     return Boolean(
-      desiredColumn && typeReferencesComposite(desiredColumn.type, removedType)
+      desiredColumn && typeReferenceMatches(desiredColumn.type, removedType)
     );
   }
 

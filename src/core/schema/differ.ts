@@ -530,9 +530,21 @@ export class SchemaDiffer {
         }
 
         // Handle index changes separately (they use CONCURRENTLY which can't be batched)
+        const removedColumnNames = new Set(
+          currentTable.columns
+            .filter(function isRemovedColumn(column) {
+              return !table.columns.some(function hasDesiredColumn(desired) {
+                return desired.name === column.name;
+              });
+            })
+            .map(function getColumnName(column) {
+              return column.name;
+            })
+        );
         const indexStatements = this.generateStandaloneIndexStatements(
           table.indexes || [],
-          currentTable.indexes || []
+          currentTable.indexes || [],
+          removedColumnNames
         );
         statements.push(...indexStatements);
       }
@@ -1486,7 +1498,8 @@ export class SchemaDiffer {
    */
   generateStandaloneIndexStatements(
     desiredIndexes: Index[],
-    currentIndexes: Index[]
+    currentIndexes: Index[],
+    removedColumnNames: ReadonlySet<string> = new Set()
   ): string[] {
     const statements: string[] = [];
 
@@ -1495,9 +1508,18 @@ export class SchemaDiffer {
       currentIndexes
     );
 
-    const toRemove = [...indexComparison.toRemove].sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
+    function indexDropsWithRemovedColumn(
+      index: Index
+    ): boolean {
+      return (index.dependentColumns || []).some(function isRemoved(column) {
+        return removedColumnNames.has(column);
+      });
+    }
+    const toRemove = [...indexComparison.toRemove]
+      .filter(function requiresExplicitDrop(index) {
+        return !indexDropsWithRemovedColumn(index);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
     const toAdd = [...indexComparison.toAdd].sort((a, b) =>
       a.name.localeCompare(b.name)
     );
@@ -1517,15 +1539,17 @@ export class SchemaDiffer {
 
     // Handle modified indexes (drop + create) - use non-concurrent to keep in same transaction
     for (const mod of toModify) {
-      const dropBuilder = new SQLBuilder();
-      dropBuilder.p("DROP INDEX");
-      if (mod.current.schema) {
-        dropBuilder.table(mod.current.name, mod.current.schema);
-      } else {
-        dropBuilder.ident(mod.current.name);
+      if (!indexDropsWithRemovedColumn(mod.current)) {
+        const dropBuilder = new SQLBuilder();
+        dropBuilder.p("DROP INDEX");
+        if (mod.current.schema) {
+          dropBuilder.table(mod.current.name, mod.current.schema);
+        } else {
+          dropBuilder.ident(mod.current.name);
+        }
+        dropBuilder.p(";");
+        statements.push(dropBuilder.build());
       }
-      dropBuilder.p(";");
-      statements.push(dropBuilder.build());
       statements.push(this.generateCreateIndexSQL(mod.desired, false));
     }
 

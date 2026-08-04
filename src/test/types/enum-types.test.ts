@@ -466,7 +466,9 @@ describe("ENUM Types", () => {
         );
       `;
 
-      await expect(schemaService.apply(updatedSchema, ['public'], true)).rejects.toThrow();
+      await expect(
+        schemaService.apply(updatedSchema, ['public'], true)
+      ).rejects.toThrow(/enum 'public\.priority'.*public\.users\.p/i);
 
       const result = await client.query(`
         SELECT typname FROM pg_type WHERE typname = 'priority' AND typtype = 'e'

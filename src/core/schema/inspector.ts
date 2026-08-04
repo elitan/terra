@@ -844,6 +844,20 @@ export class DatabaseInspector {
           WHERE included_column.position > ix.indnkeyatts
           ORDER BY included_column.position
         ) as included_columns,
+        ARRAY(
+          SELECT DISTINCT attribute.attname::text
+          FROM pg_depend dependency
+          JOIN pg_attribute attribute
+            ON dependency.refclassid = 'pg_class'::regclass
+            AND attribute.attrelid = dependency.refobjid
+            AND attribute.attnum = dependency.refobjsubid
+          WHERE dependency.classid = 'pg_class'::regclass
+            AND dependency.objid = ix.indexrelid
+            AND dependency.refobjid = ix.indrelid
+            AND dependency.refobjsubid > 0
+            AND dependency.deptype = 'a'
+          ORDER BY attribute.attname::text
+        ) as dependent_columns,
         -- Get operator class names for each column (non-default only)
         CASE
           WHEN ix.indexprs IS NULL THEN
@@ -953,6 +967,9 @@ export class DatabaseInspector {
         concurrent: false,
         where: row.where_clause || undefined,
         expression: row.has_expressions ? row.expression_def : undefined,
+        ...(row.dependent_columns?.length > 0
+          ? { dependentColumns: row.dependent_columns }
+          : {}),
         storageParameters: this.parseStorageOptions(row.storage_options),
         tablespace: row.tablespace_name || undefined,
       });
@@ -1375,7 +1392,182 @@ export class DatabaseInspector {
       ORDER BY n.nspname, t.typname, e.enumsortorder
     `, [schemas]);
 
-    const enumGroups = new Map<string, { name: string; schema: string; values: string[] }>();
+    const dependencyResult = await client.query(`
+      SELECT
+        t.typname as enum_name,
+        n.nspname as schema_name,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'schema', relation_namespace.nspname,
+              'relation', relation.relname,
+              'attribute', attribute.attname,
+              'relationKind', relation.relkind
+            )
+            ORDER BY relation_namespace.nspname, relation.relname, attribute.attnum
+          )
+          FROM pg_depend dependency
+          JOIN pg_class relation
+            ON dependency.classid = 'pg_class'::regclass
+            AND relation.oid = dependency.objid
+          JOIN pg_namespace relation_namespace
+            ON relation_namespace.oid = relation.relnamespace
+          JOIN pg_attribute attribute
+            ON attribute.attrelid = relation.oid
+            AND attribute.attnum = dependency.objsubid
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (t.oid, t.typarray)
+            AND dependency.deptype = 'n'
+            AND NOT attribute.attisdropped
+        ), '[]'::jsonb) as attribute_dependents,
+        COALESCE((
+          SELECT jsonb_agg(
+            type_dependency
+            ORDER BY type_dependency->>'schema', type_dependency->>'name'
+          )
+          FROM (
+            SELECT jsonb_build_object(
+              'schema', dependent_namespace.nspname,
+              'name', dependent_type.typname,
+              'kind', 'domain'
+            ) as type_dependency
+            FROM pg_type dependent_type
+            JOIN pg_namespace dependent_namespace
+              ON dependent_namespace.oid = dependent_type.typnamespace
+            WHERE dependent_type.typtype = 'd'
+              AND dependent_type.typbasetype IN (t.oid, t.typarray)
+
+            UNION ALL
+
+            SELECT jsonb_build_object(
+              'schema', dependent_namespace.nspname,
+              'name', dependent_type.typname,
+              'kind', 'range'
+            ) as type_dependency
+            FROM pg_range dependent_range
+            JOIN pg_type dependent_type
+              ON dependent_type.oid = dependent_range.rngtypid
+            JOIN pg_namespace dependent_namespace
+              ON dependent_namespace.oid = dependent_type.typnamespace
+            WHERE dependent_range.rngsubtype IN (t.oid, t.typarray)
+          ) dependencies
+        ), '[]'::jsonb) as type_dependents,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'schema', routine_namespace.nspname,
+              'name', routine.proname,
+              'kind', CASE routine.prokind
+                WHEN 'p' THEN 'procedure'
+                ELSE 'function'
+              END,
+              'identityArguments', pg_get_function_identity_arguments(routine.oid)
+            )
+            ORDER BY routine_namespace.nspname, routine.proname,
+              pg_get_function_identity_arguments(routine.oid)
+          )
+          FROM pg_depend dependency
+          JOIN pg_proc routine
+            ON dependency.classid = 'pg_proc'::regclass
+            AND routine.oid = dependency.objid
+          JOIN pg_namespace routine_namespace
+            ON routine_namespace.oid = routine.pronamespace
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (t.oid, t.typarray)
+            AND dependency.deptype = 'n'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pg_depend internal_dependency
+              WHERE internal_dependency.classid = 'pg_proc'::regclass
+                AND internal_dependency.objid = routine.oid
+                AND internal_dependency.deptype = 'i'
+            )
+        ), '[]'::jsonb) as routine_dependents,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_strip_nulls(jsonb_build_object(
+              'type', identified.type,
+              'schema', identified.schema,
+              'name', COALESCE(identified.name, dependent_constraint.conname),
+              'identity', identified.identity,
+              'ownerSchema', owner_relation.owner_schema,
+              'ownerRelation', owner_relation.owner_relation,
+              'ownerRelationKind', owner_relation.owner_relation_kind,
+              'ownerAttributes', owner_relation.owner_attributes
+            ))
+            ORDER BY identified.type, identified.identity
+          )
+          FROM pg_depend dependency
+          CROSS JOIN LATERAL pg_identify_object(
+            dependency.classid,
+            dependency.objid,
+            dependency.objsubid
+          ) identified
+          LEFT JOIN pg_constraint dependent_constraint
+            ON dependency.classid = 'pg_constraint'::regclass
+            AND dependent_constraint.oid = dependency.objid
+          LEFT JOIN LATERAL (
+            SELECT
+              owner_namespace.nspname as owner_schema,
+              owner_class.relname as owner_relation,
+              owner_class.relkind as owner_relation_kind,
+              array_agg(DISTINCT owner_attribute.attname ORDER BY owner_attribute.attname)
+                FILTER (WHERE owner_attribute.attname IS NOT NULL)
+                as owner_attributes
+            FROM pg_depend owner_dependency
+            JOIN pg_class owner_class
+              ON owner_dependency.refclassid = 'pg_class'::regclass
+              AND owner_class.oid = owner_dependency.refobjid
+            JOIN pg_namespace owner_namespace
+              ON owner_namespace.oid = owner_class.relnamespace
+            LEFT JOIN pg_attribute owner_attribute
+              ON owner_attribute.attrelid = owner_class.oid
+              AND owner_attribute.attnum = owner_dependency.refobjsubid
+            WHERE owner_dependency.classid = dependency.classid
+              AND owner_dependency.objid = dependency.objid
+              AND owner_dependency.deptype IN ('a', 'i', 'P', 'S')
+            GROUP BY
+              owner_namespace.nspname,
+              owner_class.relname,
+              owner_class.relkind
+            ORDER BY owner_namespace.nspname, owner_class.relname
+            LIMIT 1
+          ) owner_relation ON true
+          WHERE dependency.refclassid = 'pg_type'::regclass
+            AND dependency.refobjid IN (t.oid, t.typarray)
+            AND dependency.deptype = 'n'
+            AND NOT (
+              dependency.classid = 'pg_class'::regclass
+              AND dependency.objsubid > 0
+            )
+            AND dependency.classid <> 'pg_proc'::regclass
+            AND NOT (
+              dependency.classid = 'pg_type'::regclass
+              AND EXISTS (
+                SELECT 1
+                FROM pg_type dependent_type
+                LEFT JOIN pg_range dependent_range
+                  ON dependent_range.rngtypid = dependent_type.oid
+                WHERE dependent_type.oid = dependency.objid
+                  AND (
+                    dependent_type.typtype = 'd'
+                    OR dependent_range.rngtypid IS NOT NULL
+                  )
+              )
+            )
+        ), '[]'::jsonb) as catalog_dependents
+      FROM pg_type t
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      LEFT JOIN pg_depend extension_dependency
+        ON extension_dependency.objid = t.oid
+        AND extension_dependency.deptype = 'e'
+      WHERE n.nspname = ANY($1::text[])
+        AND t.typtype = 'e'
+        AND extension_dependency.objid IS NULL
+      ORDER BY n.nspname, t.typname
+    `, [schemas]);
+
+    const enumGroups = new Map<string, EnumType>();
 
     for (const row of enumsResult.rows) {
       const enumName = row.enum_name;
@@ -1391,12 +1583,24 @@ export class DatabaseInspector {
       }
     }
 
-    const enums: EnumType[] = [];
-    for (const data of enumGroups.values()) {
-      enums.push({ name: data.name, schema: data.schema, values: data.values });
+    for (const row of dependencyResult.rows) {
+      const enumType = enumGroups.get(`${row.schema_name}.${row.enum_name}`);
+      if (!enumType) continue;
+      if (row.attribute_dependents?.length > 0) {
+        enumType.attributeDependents = row.attribute_dependents;
+      }
+      if (row.type_dependents?.length > 0) {
+        enumType.typeDependents = row.type_dependents;
+      }
+      if (row.routine_dependents?.length > 0) {
+        enumType.routineDependents = row.routine_dependents;
+      }
+      if (row.catalog_dependents?.length > 0) {
+        enumType.catalogDependents = row.catalog_dependents;
+      }
     }
 
-    return enums;
+    return [...enumGroups.values()];
   }
 
   async getCurrentCompositeTypes(client: Client, schemas: string[] = ['public']): Promise<CompositeType[]> {
@@ -2750,7 +2954,7 @@ export class DatabaseInspector {
         CASE
           WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['PUBLIC']::text[]
           ELSE ARRAY(
-            SELECT rolname
+            SELECT rolname::text
             FROM pg_roles
             WHERE oid = ANY(pol.polroles)
             ORDER BY rolname
@@ -2763,8 +2967,12 @@ export class DatabaseInspector {
       ORDER BY n.nspname, c.relname, pol.polname
     `, [schemas]);
 
-    return result.rows.map((row: any) => {
-      const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
+    const inspector = this;
+    return result.rows.map(function mapPolicy(row: any) {
+      const qualifiedTable = inspector.qualifyName(
+        row.table_name,
+        row.schema_name
+      );
       const commandMap: Record<string, string> = {
         r: "SELECT",
         a: "INSERT",
@@ -2773,7 +2981,7 @@ export class DatabaseInspector {
         "*": "ALL",
       };
       const parts = [
-        `CREATE POLICY ${this.quoteIdent(row.policy_name)}`,
+        `CREATE POLICY ${inspector.quoteIdent(row.policy_name)}`,
         `ON ${qualifiedTable}`,
         `AS ${row.is_permissive ? "PERMISSIVE" : "RESTRICTIVE"}`,
         `FOR ${commandMap[row.policy_command] || "ALL"}`,
@@ -2781,7 +2989,11 @@ export class DatabaseInspector {
 
       const roles = row.policy_roles || [];
       if (roles.length > 0) {
-        parts.push(`TO ${roles.map((role: string) => this.quoteRole(role)).join(", ")}`);
+        parts.push(
+          `TO ${roles.map(function quotePolicyRole(role: string) {
+            return inspector.quoteRole(role);
+          }).join(", ")}`
+        );
       }
       if (row.using_expression) {
         parts.push(`USING (${row.using_expression})`);
@@ -2796,7 +3008,7 @@ export class DatabaseInspector {
         name: row.policy_name,
         schema: row.schema_name,
         createStatement: `${parts.join(" ")};`,
-        dropStatement: `DROP POLICY IF EXISTS ${this.quoteIdent(row.policy_name)} ON ${qualifiedTable};`,
+        dropStatement: `DROP POLICY IF EXISTS ${inspector.quoteIdent(row.policy_name)} ON ${qualifiedTable};`,
       };
     });
   }

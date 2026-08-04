@@ -17,6 +17,7 @@ import { normalizeType } from "../../../utils/sql";
 import {
   attributeDependentIsRetained,
   parseTypeReference,
+  typeReferenceMatches,
 } from "./composite-type-dependencies";
 import { getAutomaticMultirangeName } from "./postgres-type-ordering";
 
@@ -347,29 +348,18 @@ function getTypeDependentDescriptions(object: SqlObject): string[] {
   ];
 }
 
-function typeReferenceMatchesObject(type: string, object: SqlObject): boolean {
-  const reference = parseTypeReference(type.replace(/^SETOF\s+/i, ""));
-  if (!reference) return false;
-  if (reference.length === 1) return reference[0] === object.name;
-  return (
-    reference.length === 2 &&
-    reference[0] === (object.schema || "public") &&
-    reference[1] === object.name
-  );
-}
-
 function functionUsesType(func: Function, object: SqlObject): boolean {
   return (
-    typeReferenceMatchesObject(func.returnType, object) ||
+    typeReferenceMatches(func.returnType, object) ||
     func.parameters.some(function parameterUsesType(parameter) {
-      return typeReferenceMatchesObject(parameter.type, object);
+      return typeReferenceMatches(parameter.type, object);
     })
   );
 }
 
 function procedureUsesType(procedure: Procedure, object: SqlObject): boolean {
   return procedure.parameters.some(function parameterUsesType(parameter) {
-    return typeReferenceMatchesObject(parameter.type, object);
+    return typeReferenceMatches(parameter.type, object);
   });
 }
 

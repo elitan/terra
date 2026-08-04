@@ -182,6 +182,15 @@ version 2 exposes this phase through `counts.preTransactional`,
 Because this phase commits first, an added label remains as a safe additive
 change if a later transactional statement fails; rerunning apply resumes the
 remaining work.
+Enum removal inspects direct and array relation attributes, composite
+attributes, derived domains and ranges, function/procedure signatures, and
+owning defaults, constraints, and indexes.
+Retained managed or unmanaged dependents fail during planning with their exact
+identity, while coordinated column, routine, derived-type, and enum removal is
+ordered in one apply. Index dependency columns come from PostgreSQL's catalogs,
+so a column drop neither double-drops an index nor prevents a replacement index
+from being created. Unmodeled catalog dependents such as casts are also reported
+before mutation and must be removed explicitly first.
 PostgreSQL composite types preserve zero-attribute definitions, attribute order,
 quoted names, schema-qualified types, arrays, typemods, and explicit collations.
 TerraDB dependency-orders composite creation and removal, and uses native
