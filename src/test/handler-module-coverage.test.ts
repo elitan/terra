@@ -116,21 +116,18 @@ describe("Handler module coverage", () => {
       expect(handler).toBeInstanceOf(SchemaHandler);
     });
 
-    test("creates schemas with options and skips existing schemas", () => {
+    test("creates owned schemas and skips existing schemas", () => {
       const handler = new SchemaHandler();
       const desired: SchemaDefinition[] = [
-        { name: "analytics", ifNotExists: true, owner: "reporter" },
+        { name: "analytics", owner: "reporter" },
         { name: "public" },
       ];
       const current: SchemaDefinition[] = [{ name: "public" }];
 
       const statements = handler.generateStatements(desired, current);
-      expect(statements).toHaveLength(1);
-      expect(statements[0]).toContain("CREATE SCHEMA");
-      expect(statements[0]).toContain("IF NOT EXISTS");
-      expect(statements[0]).toContain("\"analytics\"");
-      expect(statements[0]).toContain("AUTHORIZATION");
-      expect(statements[0]).toContain("\"reporter\"");
+      expect(statements).toEqual([
+        'CREATE SCHEMA "analytics" AUTHORIZATION "reporter";',
+      ]);
     });
   });
 

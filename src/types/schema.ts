@@ -403,7 +403,6 @@ export interface SqlObject {
 export interface SchemaDefinition {
   name: string;
   owner?: string;
-  ifNotExists?: boolean;
 }
 
 export type CommentObjectType =

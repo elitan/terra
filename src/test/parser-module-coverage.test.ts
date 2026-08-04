@@ -201,18 +201,22 @@ describe("Parser module coverage", () => {
       expect(parseCreateSchema({ schemaname: "analytics" })).toEqual({ name: "analytics" });
     });
 
-    test("returns null for missing schema name", () => {
-      expect(parseCreateSchema({})).toBeNull();
+    test("rejects a missing schema identity", () => {
+      expect(function parseMissingSchema() {
+        return parseCreateSchema({});
+      }).toThrow("has no concrete schema name");
     });
 
-    test("returns null when schema parse throws", () => {
+    test("does not hide schema parser failures", () => {
       const stmt: any = {};
       Object.defineProperty(stmt, "schemaname", {
         get() {
           throw new Error("boom");
         },
       });
-      expect(parseCreateSchema(stmt)).toBeNull();
+      expect(function parseBrokenSchema() {
+        return parseCreateSchema(stmt);
+      }).toThrow("boom");
     });
   });
 

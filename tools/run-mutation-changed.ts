@@ -218,7 +218,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sequences/sequence-parsing.test.ts src/test/parser-module-coverage.test.ts";
   }
   if (normalized.includes("/src/core/schema/parser")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-parser-private-coverage.test.ts src/test/postgres-comments-lossless.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/advanced-sql-object-parsing.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-parser-private-coverage.test.ts src/test/postgres-comments-lossless.test.ts src/test/postgres-schema-authorization.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/advanced-sql-object-parsing.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/enum-handler.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/enums/enum-handler-schema-scope.test.ts src/test/enums/postgres-enum-evolution.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/enum-types.test.ts src/test/types/postgres-type-ordering.test.ts";
@@ -240,6 +240,9 @@ function resolveTestCommand(file: string, override?: string): string {
   }
   if (normalized.endsWith("/src/core/schema/handlers/sequence-handler.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/handler-module-coverage.test.ts";
+  }
+  if (normalized.endsWith("/src/core/schema/handlers/schema-handler.ts")) {
+    return "bun --env-file=.env test --max-concurrency=1 src/test/postgres-schema-authorization.test.ts src/test/handler-module-coverage.test.ts src/test/regressions/schema-owner-diff.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/view-handler.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/views/sql-generation.test.ts src/test/views/view-definition-normalization-matrix.test.ts src/test/views/postgres-view-column-names.test.ts src/test/views/postgres-view-options.test.ts src/test/views/materialized-views.test.ts src/test/tables/postgres-clustering.test.ts src/test/indexes/postgres-materialized-view-indexes.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts";

@@ -156,6 +156,14 @@ statements combine a synthesized table definition with initial query rows,
 which cannot be represented by TerraDB's declarative schema model; define the
 columns explicitly and load data separately.
 PostgreSQL desired schemas also describe persistent database state. Session-local temporary tables, views, and sequences are rejected before migration planning instead of being converted into persistent objects. Query-derived tables created with `CREATE TABLE AS` or `SELECT INTO` are also rejected because their structure and optional initial data cannot be reconciled declaratively; define their table structure explicitly and load data separately. `CREATE TABLE LIKE` and typed `CREATE TABLE OF` declarations must likewise be expanded to explicit columns and constraints so copied options or persistent type dependencies are never discarded. Other top-level data, query, session, transaction, maintenance, and untracked DDL commands fail explicitly instead of being silently ignored; SQL inside managed routine bodies remains supported.
+PostgreSQL schema declarations preserve a concrete `AUTHORIZATION` owner,
+including `CREATE SCHEMA AUTHORIZATION role` where the role also supplies the
+schema name. Owner drift is repaired with `ALTER SCHEMA ... OWNER TO`.
+`IF NOT EXISTS` is normalized to declarative existence rather than retained as
+a conditional migration no-op. Contextual owners (`CURRENT_ROLE`,
+`CURRENT_USER`, and `SESSION_USER`), duplicate schema declarations, and inline
+schema elements fail before planning; use a concrete role and separate,
+schema-qualified `CREATE` statements.
 PostgreSQL object comments are declarative for schemas, ordinary and partitioned
 tables, table/view/materialized-view/composite columns, ordinary and
 materialized views, indexes, sequences, and user-defined types including enums,

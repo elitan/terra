@@ -2922,7 +2922,6 @@ export class DatabaseInspector {
     return result.rows.map((row: any) => ({
       name: row.schema_name,
       owner: row.owner || undefined,
-      ifNotExists: false,
     }));
   }
 

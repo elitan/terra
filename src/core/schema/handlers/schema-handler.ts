@@ -12,9 +12,6 @@ export class SchemaHandler {
 
       if (!currentSchema) {
         const builder = new SQLBuilder().p("CREATE SCHEMA");
-        if (desiredSchema.ifNotExists) {
-          builder.p("IF NOT EXISTS");
-        }
         builder.ident(desiredSchema.name);
 
         if (desiredSchema.owner) {
