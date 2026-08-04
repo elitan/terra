@@ -7,6 +7,7 @@ import {
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import {
   assertRoutineHasNoDependents,
+  normalizeRoutineType,
   retainBlockingRoutineDependents,
   routineConfigurationsEqual,
   routineParametersCanBeReplaced,
@@ -14,28 +15,6 @@ import {
 
 function normalizeBody(body: string): string {
   return body.replace(/\s+/g, ' ').trim();
-}
-
-function normalizeParameterType(type: string): string {
-  const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
-  const arraySuffixMatch = normalized.match(/(\[\])+$/);
-  const arraySuffix = arraySuffixMatch ? arraySuffixMatch[0] : "";
-  const baseType = arraySuffix ? normalized.slice(0, -arraySuffix.length).trim() : normalized;
-  const lowerType = baseType.toLowerCase();
-
-  const aliases: Record<string, string> = {
-    "timestamp with time zone": "timestamptz",
-    timestamptz: "timestamptz",
-    "timestamp without time zone": "timestamp",
-    timestamp: "timestamp",
-    "time with time zone": "timetz",
-    timetz: "timetz",
-    "time without time zone": "time",
-    time: "time",
-  };
-
-  const canonical = aliases[lowerType] || baseType;
-  return `${canonical}${arraySuffix}`;
 }
 
 function normalizeParameterMode(mode: Procedure["parameters"][number]["mode"]): string {
@@ -56,7 +35,7 @@ function getProcedureSignature(proc: Procedure): string {
       return isIdentityParameterMode(param.mode);
     })
     .map(function (param) {
-      return normalizeParameterType(param.type);
+      return normalizeRoutineType(param.type);
     })
     .join(",");
 }
@@ -68,7 +47,7 @@ function normalizeProcedureParameters(
     return {
       name: param.name || undefined,
       mode: normalizeParameterMode(param.mode),
-      type: normalizeParameterType(param.type),
+      type: normalizeRoutineType(param.type),
       default: normalizeParameterDefault(param.default),
     };
   });
@@ -103,7 +82,7 @@ function procedureCanBeReplaced(
   return routineParametersCanBeReplaced(
     desired.parameters,
     current.parameters,
-    normalizeParameterType,
+    normalizeRoutineType,
     normalizeParameterMode
   );
 }

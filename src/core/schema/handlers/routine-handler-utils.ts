@@ -1,6 +1,35 @@
 import type { FunctionParameter } from "../../../types/schema";
 import { ValidationError } from "../../../types/errors";
 
+const ROUTINE_TYPE_ALIASES: Record<string, string> = {
+  "timestamp with time zone": "timestamptz",
+  timestamptz: "timestamptz",
+  "timestamp without time zone": "timestamp",
+  timestamp: "timestamp",
+  "time with time zone": "timetz",
+  timetz: "timetz",
+  "time without time zone": "time",
+  time: "time",
+};
+
+export function normalizeRoutineType(type: string): string {
+  const normalized = type
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^pg_catalog\./i, "");
+  const setOfType = normalized.match(/^setof\s+(.+)$/i)?.[1];
+  if (setOfType) {
+    return `SETOF ${normalizeRoutineType(setOfType)}`;
+  }
+
+  const arraySuffix = normalized.match(/(\[[^\]]*\])+$/)?.[0];
+  const baseType = arraySuffix
+    ? normalized.slice(0, -arraySuffix.length).trim()
+    : normalized;
+  const canonical = ROUTINE_TYPE_ALIASES[baseType.toLowerCase()] || baseType;
+  return `${canonical}${arraySuffix ? "[]" : ""}`;
+}
+
 export function routineParametersCanBeReplaced(
   desired: FunctionParameter[],
   current: FunctionParameter[],

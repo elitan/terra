@@ -91,6 +91,34 @@ describe("routine handler signature scope", function () {
     ).toStartWith("CREATE OR REPLACE FUNCTION");
   });
 
+  test("treats decorative array dimensions as one routine type", function () {
+    const functionHandler = new FunctionHandler();
+    const procedureHandler = new ProcedureHandler();
+
+    expect(
+      functionHandler.generateStatements(
+        [makeFunction({
+          parameters: [{ name: "value", type: "integer[2][3]" }],
+          returnType: "SETOF text[][]",
+        })],
+        [makeFunction({
+          parameters: [{ name: "value", type: "integer[]" }],
+          returnType: "SETOF text[]",
+        })]
+      )
+    ).toEqual([]);
+    expect(
+      procedureHandler.generateStatements(
+        [makeProcedure({
+          parameters: [{ name: "value", type: "integer[][]" }],
+        })],
+        [makeProcedure({
+          parameters: [{ name: "value", type: "integer[]" }],
+        })]
+      )
+    ).toEqual([]);
+  });
+
   test("adds names to unnamed input parameters with replacement", function () {
     const functionHandler = new FunctionHandler();
     const procedureHandler = new ProcedureHandler();

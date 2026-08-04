@@ -322,6 +322,46 @@ describe("PostgreSQL routine security options", function () {
     ).toBe(1);
   });
 
+  test("normalizes decorative array dimensions in routine signatures", async function () {
+    const decoratedSchema = `
+      CREATE FUNCTION public.array_dimensions(value integer[2][3])
+      RETURNS integer[4][5]
+      LANGUAGE sql AS $$ SELECT value $$;
+
+      CREATE PROCEDURE public.array_dimension_procedure(value integer[][])
+      LANGUAGE sql AS $$ SELECT 1 $$;
+    `;
+    const canonicalSchema = decoratedSchema
+      .replace("integer[2][3]", "integer[]")
+      .replace("integer[4][5]", "integer[]")
+      .replace("integer[][]", "integer[]");
+    const service = createTestSchemaService();
+    await service.apply(decoratedSchema, ["public"], true);
+
+    const routines = await client.query(`
+      SELECT
+        p.prokind,
+        pg_get_function_identity_arguments(p.oid) AS arguments,
+        pg_get_function_result(p.oid) AS result
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN ('array_dimensions', 'array_dimension_procedure')
+      ORDER BY p.prokind
+    `);
+    expect(routines.rows).toEqual([
+      { prokind: "f", arguments: "value integer[]", result: "integer[]" },
+      { prokind: "p", arguments: "IN value integer[]", result: null },
+    ]);
+
+    const repeatedPlan = await service.plan(decoratedSchema, ["public"]);
+    expect(repeatedPlan.hasChanges).toBe(false);
+    expect(repeatedPlan.transactional).toEqual([]);
+    const canonicalPlan = await service.plan(canonicalSchema, ["public"]);
+    expect(canonicalPlan.hasChanges).toBe(false);
+    expect(canonicalPlan.transactional).toEqual([]);
+  });
+
   test("changes and resets routine options without losing OIDs or dependents", async function () {
     const initialSchema = `
       CREATE TABLE public.routine_config_log (value text NOT NULL);

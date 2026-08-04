@@ -7,6 +7,7 @@ import {
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import {
   assertRoutineHasNoDependents,
+  normalizeRoutineType,
   retainBlockingRoutineDependents,
   routineConfigurationsEqual,
   routineParametersCanBeReplaced,
@@ -42,47 +43,11 @@ function normalizeCost(value: Function['cost'], language: string): number {
 }
 
 function normalizeRows(value: Function['rows'], returnType: string): number | undefined {
-  if (!normalizeReturnType(returnType).toUpperCase().startsWith("SETOF ")) {
+  if (!normalizeRoutineType(returnType).toUpperCase().startsWith("SETOF ")) {
     return undefined;
   }
 
   return value ?? 1000;
-}
-
-function normalizeType(type: string): string {
-  const normalized = type.replace(/\s+/g, " ").trim().replace(/^pg_catalog\./i, "");
-  const setOfMatch = normalized.match(/^setof\s+(.+)$/i);
-  const setOfType = setOfMatch?.[1];
-  if (setOfType) {
-    return `SETOF ${normalizeType(setOfType)}`;
-  }
-
-  const arraySuffixMatch = normalized.match(/(\[\])+$/);
-  const arraySuffix = arraySuffixMatch ? arraySuffixMatch[0] : "";
-  const baseType = arraySuffix ? normalized.slice(0, -arraySuffix.length).trim() : normalized;
-  const lowerType = baseType.toLowerCase();
-
-  const aliases: Record<string, string> = {
-    "timestamp with time zone": "timestamptz",
-    timestamptz: "timestamptz",
-    "timestamp without time zone": "timestamp",
-    timestamp: "timestamp",
-    "time with time zone": "timetz",
-    timetz: "timetz",
-    "time without time zone": "time",
-    time: "time",
-  };
-
-  const canonical = aliases[lowerType] || baseType;
-  return `${canonical}${arraySuffix}`;
-}
-
-function normalizeParameterType(type: string): string {
-  return normalizeType(type);
-}
-
-function normalizeReturnType(type: string): string {
-  return normalizeType(type);
 }
 
 function normalizeParameterMode(mode: Function["parameters"][number]["mode"]): string {
@@ -103,7 +68,7 @@ function getFunctionSignature(func: Function): string {
       return isIdentityParameterMode(param.mode);
     })
     .map(function (param) {
-      return normalizeParameterType(param.type);
+      return normalizeRoutineType(param.type);
     })
     .join(",");
 }
@@ -115,7 +80,7 @@ function normalizeFunctionParameters(
     return {
       name: param.name || undefined,
       mode: normalizeParameterMode(param.mode),
-      type: normalizeParameterType(param.type),
+      type: normalizeRoutineType(param.type),
       default: normalizeParameterDefault(param.default),
     };
   });
@@ -155,15 +120,15 @@ function dedupeFunctions(functions: Function[]): Function[] {
 
 function functionCanBeReplaced(desired: Function, current: Function): boolean {
   if (
-    normalizeReturnType(desired.returnType) !==
-    normalizeReturnType(current.returnType)
+    normalizeRoutineType(desired.returnType) !==
+    normalizeRoutineType(current.returnType)
   ) {
     return false;
   }
   return routineParametersCanBeReplaced(
     desired.parameters,
     current.parameters,
-    normalizeParameterType,
+    normalizeRoutineType,
     normalizeParameterMode
   );
 }
@@ -200,7 +165,7 @@ const config: HandlerConfig<Function> = {
     return JSON.stringify(normalizeFunctionParameters(desired)) !==
       JSON.stringify(normalizeFunctionParameters(current)) ||
     normalizeBody(desired.body) !== normalizeBody(current.body) ||
-    normalizeReturnType(desired.returnType) !== normalizeReturnType(current.returnType) ||
+    normalizeRoutineType(desired.returnType) !== normalizeRoutineType(current.returnType) ||
     desired.language !== current.language ||
     normalizeVolatility(desired.volatility) !== normalizeVolatility(current.volatility) ||
     normalizeParallel(desired.parallel) !== normalizeParallel(current.parallel) ||
