@@ -517,4 +517,82 @@ describe("PostgreSQL routine security options", function () {
         .rows[0]?.name
     ).toBe("dependent_return_change_index");
   });
+
+  test("rejects unsupported routines already present in managed schemas", async function () {
+    const scenarios = [
+      {
+        feature: "SQL-standard body",
+        identity: "public.external_sql_body(value integer)",
+        sql: `
+          CREATE FUNCTION public.external_sql_body(value integer)
+          RETURNS integer LANGUAGE sql RETURN value + 1;
+        `,
+      },
+      {
+        feature: "SQL-standard body",
+        identity: "public.external_sql_procedure(IN value integer)",
+        sql: `
+          CREATE TABLE public.external_procedure_log(value integer);
+          CREATE PROCEDURE public.external_sql_procedure(value integer)
+          LANGUAGE sql
+          BEGIN ATOMIC
+            INSERT INTO public.external_procedure_log VALUES (value);
+          END;
+        `,
+      },
+      {
+        feature: "WINDOW",
+        identity: "public.external_window()",
+        sql: `
+          CREATE FUNCTION public.external_window()
+          RETURNS bigint LANGUAGE internal WINDOW
+          AS 'window_row_number';
+        `,
+      },
+      {
+        feature: "SUPPORT",
+        identity: "public.external_support(value text)",
+        sql: `
+          CREATE FUNCTION public.external_support(value text)
+          RETURNS text LANGUAGE sql SUPPORT varchar_support
+          AS $$ SELECT value $$;
+        `,
+      },
+      {
+        feature: "aggregate",
+        identity: "public.external_sum(integer)",
+        sql: `
+          CREATE AGGREGATE public.external_sum(integer) (
+            SFUNC = int4pl,
+            STYPE = integer,
+            INITCOND = '0'
+          );
+        `,
+        cleanup: "DROP AGGREGATE IF EXISTS public.external_sum(integer)",
+      },
+    ];
+    const service = createTestSchemaService();
+
+    for (const scenario of scenarios) {
+      try {
+        await client.query(scenario.sql);
+        try {
+          await service.plan("", ["public"]);
+          throw new Error(`Expected ${scenario.feature} to be rejected`);
+        } catch (error) {
+          expect(error).toMatchObject({
+            code: "VALIDATION_ERROR",
+            field: "definition",
+          });
+          expect((error as Error).message).toContain(scenario.feature);
+          expect((error as Error).message).toContain(scenario.identity);
+        }
+      } finally {
+        if (scenario.cleanup) {
+          await client.query(scenario.cleanup);
+        }
+        await cleanDatabase(client);
+      }
+    }
+  });
 });

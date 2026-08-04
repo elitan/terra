@@ -22,6 +22,7 @@ import type {
   Comment,
   SqlObject,
 } from "../../types/schema";
+import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
 import { renderCollationName } from "../../utils/collation";
 import { parseIndexCollations } from "./parser/index-parser";
@@ -132,6 +133,59 @@ function parseRoutineDependentObjects(value: unknown): string[] | undefined {
     })
     .sort();
   return objects.length > 0 ? objects : undefined;
+}
+
+interface RoutineFeatureCatalogRow {
+  routine_kind?: string;
+  has_sql_body?: boolean;
+  object_file?: unknown;
+  transform_types?: unknown;
+  has_support?: boolean;
+  routine_identity?: string;
+  function_name?: string;
+  procedure_name?: string;
+}
+
+function getUnsupportedRoutineFeatures(
+  row: RoutineFeatureCatalogRow
+): string[] {
+  const features: string[] = [];
+  if (row.routine_kind === "w") {
+    features.push("WINDOW");
+  } else if (row.routine_kind === "a") {
+    features.push("aggregate");
+  }
+  if (row.has_sql_body === true) {
+    features.push("SQL-standard body");
+  }
+  if (row.object_file !== null && row.object_file !== undefined) {
+    features.push("linked-object AS");
+  }
+  if (Array.isArray(row.transform_types) && row.transform_types.length > 0) {
+    features.push("TRANSFORM");
+  }
+  if (row.has_support === true) {
+    features.push("SUPPORT");
+  }
+  return features;
+}
+
+function assertRoutineRowsAreSupported(rows: RoutineFeatureCatalogRow[]): void {
+  for (const row of rows) {
+    const features = getUnsupportedRoutineFeatures(row);
+    if (features.length === 0) {
+      continue;
+    }
+
+    const identity = row.routine_identity || row.function_name ||
+      row.procedure_name || "unknown routine";
+    throw new ValidationError(
+      `Unsupported PostgreSQL routine ${identity} is present in a managed schema: ${features.join(", ")}. TerraDB cannot inspect this routine losslessly; remove it from the managed schema or replace it with a fully supported routine definition before planning`,
+      `routine ${identity}`,
+      "definition",
+      features
+    );
+  }
 }
 
 export class DatabaseInspector {
@@ -1255,11 +1309,22 @@ export class DatabaseInspector {
     const result = await client.query(`
       SELECT
         p.proname as function_name,
+        format(
+          '%I.%I(%s)',
+          n.nspname,
+          p.proname,
+          pg_get_function_identity_arguments(p.oid)
+        ) as routine_identity,
         n.nspname as schema_name,
         pg_get_function_arguments(p.oid) as arguments,
         pg_get_function_result(p.oid) as return_type,
         l.lanname as language,
         p.prosrc as source_code,
+        p.prokind as routine_kind,
+        p.probin as object_file,
+        p.prosqlbody IS NOT NULL as has_sql_body,
+        p.protrftypes as transform_types,
+        p.prosupport <> 0 as has_support,
         CASE p.provolatile
           WHEN 'i' THEN 'IMMUTABLE'
           WHEN 's' THEN 'STABLE'
@@ -1282,11 +1347,12 @@ export class DatabaseInspector {
       JOIN pg_language l ON p.prolang = l.oid
       LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
-        AND p.prokind = 'f'
+        AND p.prokind IN ('f', 'w', 'a')
         AND d.objid IS NULL
       ORDER BY n.nspname, p.proname
     `, [schemas]);
 
+    assertRoutineRowsAreSupported(result.rows);
     return result.rows.map((row: any) => {
       const dependentObjects = parseRoutineDependentObjects(
         row.dependent_objects
@@ -1318,10 +1384,21 @@ export class DatabaseInspector {
     const result = await client.query(`
       SELECT
         p.proname as procedure_name,
+        format(
+          '%I.%I(%s)',
+          n.nspname,
+          p.proname,
+          pg_get_function_identity_arguments(p.oid)
+        ) as routine_identity,
         n.nspname as schema_name,
         pg_get_function_arguments(p.oid) as arguments,
         l.lanname as language,
         p.prosrc as source_code,
+        p.prokind as routine_kind,
+        p.probin as object_file,
+        p.prosqlbody IS NOT NULL as has_sql_body,
+        p.protrftypes as transform_types,
+        p.prosupport <> 0 as has_support,
         p.prosecdef as security_definer,
         p.proconfig as configuration,
         ${ROUTINE_DEPENDENT_OBJECTS_SQL} as dependent_objects
@@ -1335,6 +1412,7 @@ export class DatabaseInspector {
       ORDER BY n.nspname, p.proname
     `, [schemas]);
 
+    assertRoutineRowsAreSupported(result.rows);
     return result.rows.map((row: any) => {
       const dependentObjects = parseRoutineDependentObjects(
         row.dependent_objects

@@ -360,7 +360,7 @@ describe("DatabaseInspector coverage", () => {
   test("queries routines with schema-qualified deterministic ordering", async () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql, params) => {
-      if (sql.includes("FROM pg_proc p") && sql.includes("p.prokind = 'f'")) {
+      if (sql.includes("FROM pg_proc p") && sql.includes("p.prokind IN ('f', 'w', 'a')")) {
         expect(sql).toContain("ORDER BY n.nspname, p.proname");
         expect(params).toEqual([["public", "tenant_a"]]);
         return {
@@ -507,6 +507,69 @@ describe("DatabaseInspector coverage", () => {
       "index dependent_function_index",
       "rule _RETURN on view dependent_function_view",
     ]);
+  });
+
+  test("rejects unmodeled routine catalog forms", async function () {
+    const inspector = new DatabaseInspector();
+    const baseFunction = {
+      function_name: "advanced_function",
+      routine_identity: "public.advanced_function(integer)",
+      schema_name: "public",
+      arguments: "integer",
+      return_type: "integer",
+      language: "c",
+      source_code: "advanced_function",
+      routine_kind: "f",
+      volatility: "VOLATILE",
+      parallel: "UNSAFE",
+      cost: 1,
+      rows: 0,
+    };
+    const scenarios = [
+      {
+        feature: "linked-object AS",
+        row: { ...baseFunction, object_file: "$libdir/advanced" },
+      },
+      {
+        feature: "TRANSFORM",
+        row: { ...baseFunction, transform_types: [23] },
+      },
+      {
+        feature: "SUPPORT",
+        row: { ...baseFunction, has_support: true },
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const client = createClient(function query(sql) {
+        expect(sql).toContain("p.probin as object_file");
+        expect(sql).toContain("p.protrftypes as transform_types");
+        return { rows: [scenario.row] };
+      });
+      await expect(
+        inspector.getCurrentFunctions(client, ["public"])
+      ).rejects.toThrow(scenario.feature);
+    }
+
+    const procedureClient = createClient(function query(sql) {
+      expect(sql).toContain("p.prosqlbody IS NOT NULL as has_sql_body");
+      return {
+        rows: [
+          {
+            procedure_name: "advanced_procedure",
+            routine_identity: "public.advanced_procedure(integer)",
+            schema_name: "public",
+            arguments: "integer",
+            language: "sql",
+            source_code: "",
+            has_sql_body: true,
+          },
+        ],
+      };
+    });
+    await expect(
+      inspector.getCurrentProcedures(procedureClient, ["public"])
+    ).rejects.toThrow("SQL-standard body");
   });
 
   test("parses trigger when clause and function args from trigger definition", async () => {
