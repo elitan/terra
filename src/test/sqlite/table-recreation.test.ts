@@ -34,6 +34,15 @@ async function getDeferredForeignKeysSetting(
   return result.rows[0]?.defer_foreign_keys ?? -1;
 }
 
+async function getWritableSchemaSetting(
+  client: DatabaseClient
+): Promise<number> {
+  const result = await client.query<{ writable_schema: number }>(
+    "PRAGMA writable_schema"
+  );
+  return result.rows[0]?.writable_schema ?? -1;
+}
+
 async function createReferencedUsersMigration(
   provider: SQLiteProvider,
   filename = ":memory:"
@@ -618,6 +627,7 @@ describe("SQLite Table Recreation", () => {
     expect(await getForeignKeysSetting(client)).toBe(0);
     expect(await getIgnoreCheckConstraintsSetting(client)).toBe(0);
     expect(await getDeferredForeignKeysSetting(client)).toBe(0);
+    expect(await getWritableSchemaSetting(client)).toBe(0);
 
     await expect(
       provider.executeInTransaction(client, [
@@ -627,6 +637,7 @@ describe("SQLite Table Recreation", () => {
     expect(await getForeignKeysSetting(client)).toBe(0);
     expect(await getIgnoreCheckConstraintsSetting(client)).toBe(0);
     expect(await getDeferredForeignKeysSetting(client)).toBe(0);
+    expect(await getWritableSchemaSetting(client)).toBe(0);
     await client.end();
   });
 
@@ -668,6 +679,57 @@ describe("SQLite Table Recreation", () => {
     ).rejects.toThrow("missing_table");
     expect(await getDeferredForeignKeysSetting(recreationClient)).toBe(1);
     await recreationClient.end();
+  });
+
+  test("should enforce schema validation and restore writable_schema", async function () {
+    for (const filename of [":memory:", dbPath]) {
+      const client = await provider.createClient({
+        dialect: "sqlite",
+        filename,
+      });
+      await client.query("PRAGMA writable_schema = ON");
+
+      await provider.executeInTransaction(client, [
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)",
+      ]);
+      expect(await getWritableSchemaSetting(client)).toBe(1);
+
+      await client.query(
+        "CREATE VIEW broken_view AS SELECT id FROM users"
+      );
+      const schemaVersion = await client.query<{ schema_version: number }>(
+        "PRAGMA schema_version"
+      );
+      await client.query(
+        "UPDATE sqlite_schema SET sql = ? WHERE name = ?",
+        ["CREATE VIEW broken_view AS SELECT FROM", "broken_view"]
+      );
+      await client.query(
+        `PRAGMA schema_version = ${schemaVersion.rows[0]!.schema_version + 1}`
+      );
+
+      await expect(
+        provider.executeInTransaction(client, [
+          "CREATE TABLE _users_new (id INTEGER PRIMARY KEY, age TEXT)",
+          "INSERT INTO _users_new SELECT * FROM users",
+          "DROP TABLE users",
+          "ALTER TABLE _users_new RENAME TO users",
+        ])
+      ).rejects.toThrow("malformed database schema");
+      expect(await getWritableSchemaSetting(client)).toBe(1);
+
+      const tables = await client.query<{ name: string; sql: string }>(`
+        SELECT name, sql
+        FROM sqlite_schema
+        WHERE type = 'table' AND name IN ('users', '_users_new')
+        ORDER BY name
+      `);
+      expect(tables.rows).toEqual([{
+        name: "users",
+        sql: "CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)",
+      }]);
+      await client.end();
+    }
   });
 
   test("should reject migrations inside an active transaction or savepoint", async function () {

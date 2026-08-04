@@ -484,12 +484,26 @@ export class SQLiteProvider implements DatabaseProvider {
     let foreignKeysSuspended = false;
     let checkConstraintsTemporarilyEnforced = false;
     let deferredForeignKeysNeedRestoration = false;
+    let writableSchemaTemporarilyDisabled = false;
 
     try {
       if (sqliteClient.raw.inTransaction) {
         throw new Error(
           "SQLite migrations must run outside an active transaction or savepoint"
         );
+      }
+
+      currentStatement = "PRAGMA writable_schema";
+      const writableSchemaResult = await sqliteClient.query<{
+        writable_schema: number;
+      }>("PRAGMA writable_schema");
+      const writableSchemaWasEnabled =
+        writableSchemaResult.rows[0]?.writable_schema === 1;
+
+      if (writableSchemaWasEnabled) {
+        currentStatement = "PRAGMA writable_schema = OFF";
+        sqliteClient.execMultiple("PRAGMA writable_schema = OFF");
+        writableSchemaTemporarilyDisabled = true;
       }
 
       currentStatement = "PRAGMA ignore_check_constraints";
@@ -560,6 +574,12 @@ export class SQLiteProvider implements DatabaseProvider {
         deferredForeignKeysNeedRestoration = false;
       }
 
+      if (writableSchemaTemporarilyDisabled) {
+        currentStatement = "PRAGMA writable_schema = ON";
+        sqliteClient.execMultiple("PRAGMA writable_schema = ON");
+        writableSchemaTemporarilyDisabled = false;
+      }
+
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       if (spinner) {
         spinner.stopAndPersist({ symbol: "✔", text: `Applied (${elapsed}s)` });
@@ -578,6 +598,11 @@ export class SQLiteProvider implements DatabaseProvider {
       if (deferredForeignKeysNeedRestoration) {
         try {
           sqliteClient.execMultiple("PRAGMA defer_foreign_keys = ON");
+        } catch {}
+      }
+      if (writableSchemaTemporarilyDisabled) {
+        try {
+          sqliteClient.execMultiple("PRAGMA writable_schema = ON");
         } catch {}
       }
       if (spinner) {
