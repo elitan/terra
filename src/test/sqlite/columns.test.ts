@@ -35,6 +35,133 @@ describe("SQLite Column Types", () => {
     expect(tables[0].columns.find(c => c.name === "val")?.type).toBe("INTEGER");
   });
 
+  test("should distinguish declared INT and INTEGER types", async function () {
+    const schema = await provider.parseSchema(`
+      CREATE TABLE declared_types (
+        int_value int,
+        integer_value INTEGER,
+        text_value VARCHAR(255),
+        tricky_integer_value FLOATING POINT,
+        numeric_value STRING,
+        untyped_value,
+        any_value ANY
+      );
+      CREATE TABLE strict_types (
+        int_value INT,
+        integer_value INTEGER,
+        any_value ANY
+      ) STRICT;
+    `);
+
+    const declaredTypes = schema.tables.find(function (table) {
+      return table.name === "declared_types";
+    });
+    const strictTypes = schema.tables.find(function (table) {
+      return table.name === "strict_types";
+    });
+    expect(declaredTypes?.columns.map(function (column) {
+      return column.type;
+    })).toEqual([
+      "INT",
+      "INTEGER",
+      "VARCHAR(255)",
+      "FLOATING POINT",
+      "STRING",
+      "",
+      "ANY",
+    ]);
+    expect(strictTypes?.columns.map(function (column) {
+      return column.type;
+    })).toEqual(["INT", "INTEGER", "ANY"]);
+    expect(strictTypes?.strict).toBe(true);
+  });
+
+  test("should preserve STRICT and ordinary ANY behavior through recreation", async function () {
+    const initialSchema = `
+      CREATE TABLE flexible_values (
+        id INTEGER PRIMARY KEY,
+        value ANY,
+        tricky_value FLOATING POINT,
+        marker INTEGER
+      );
+      CREATE TABLE strict_values (
+        id INTEGER PRIMARY KEY,
+        value ANY,
+        coerced_value INT,
+        marker INTEGER
+      ) STRICT;
+    `;
+    const recreatedSchema = initialSchema.replaceAll(
+      "marker INTEGER",
+      "marker TEXT"
+    );
+
+    await schemaService.apply(initialSchema, ["public"], true);
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`
+      INSERT INTO flexible_values(value, tricky_value, marker)
+      VALUES ('000123', '500.0', 1)
+    `);
+    await seedClient.query(`
+      INSERT INTO strict_values(value, coerced_value, marker)
+      VALUES ('000123', '500', 1)
+    `);
+    await expect(seedClient.query(`
+      INSERT INTO strict_values(value, coerced_value, marker)
+      VALUES ('kept', 'not-an-integer', 2)
+    `)).rejects.toThrow();
+    await seedClient.end();
+
+    await schemaService.apply(recreatedSchema, ["public"], true);
+    const client = await provider.createClient(config);
+    const flexibleRows = await client.query(`
+      SELECT
+        typeof(value) AS value_type,
+        quote(value) AS value_sql,
+        typeof(tricky_value) AS tricky_type,
+        quote(tricky_value) AS tricky_sql,
+        typeof(marker) AS marker_type
+      FROM flexible_values
+    `);
+    const strictRows = await client.query(`
+      SELECT
+        typeof(value) AS value_type,
+        quote(value) AS value_sql,
+        typeof(coerced_value) AS coerced_type,
+        quote(coerced_value) AS coerced_sql,
+        typeof(marker) AS marker_type
+      FROM strict_values
+    `);
+    const tables = await provider.getCurrentSchema(client);
+    await client.end();
+
+    expect(flexibleRows.rows).toEqual([{
+      value_type: "integer",
+      value_sql: "123",
+      tricky_type: "integer",
+      tricky_sql: "500",
+      marker_type: "text",
+    }]);
+    expect(strictRows.rows).toEqual([{
+      value_type: "text",
+      value_sql: "'000123'",
+      coerced_type: "integer",
+      coerced_sql: "500",
+      marker_type: "text",
+    }]);
+    expect(tables.find(function (table) {
+      return table.name === "flexible_values";
+    })?.columns.map(function (column) {
+      return column.type;
+    })).toEqual(["INTEGER", "ANY", "FLOATING POINT", "TEXT"]);
+    expect(tables.find(function (table) {
+      return table.name === "strict_values";
+    })?.columns.map(function (column) {
+      return column.type;
+    })).toEqual(["INTEGER", "ANY", "INT", "TEXT"]);
+    expect((await schemaService.plan(recreatedSchema)).hasChanges).toBe(false);
+  });
+
   test("should handle TEXT type", async () => {
     await schemaService.apply(`
       CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);

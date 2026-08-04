@@ -175,7 +175,7 @@ describe("SQLiteInspector unit coverage", () => {
 
     const users = tables[0]!;
     expect(users.primaryKey).toEqual({ columns: ["id"] });
-    expect(users.columns[0]?.type).toBe("INTEGER");
+    expect(users.columns[0]?.type).toBe("INT");
     expect(users.columns[1]?.default).toBe("'x'");
     expect(users.foreignKeys).toHaveLength(2);
     expect(users.foreignKeys?.[0]?.onDelete).toBe("SET DEFAULT");
@@ -275,14 +275,14 @@ describe("SQLiteInspector unit coverage", () => {
     expect(columns).toEqual([
       {
         name: "base",
-        type: "INTEGER",
+        type: "INT",
         nullable: true,
         default: undefined,
         generated: undefined,
       },
       {
         name: "dynamic",
-        type: "INTEGER",
+        type: "INT",
         nullable: true,
         default: undefined,
         generated: {
@@ -293,7 +293,7 @@ describe("SQLiteInspector unit coverage", () => {
       },
       {
         name: "materialized",
-        type: "INTEGER",
+        type: "INT",
         nullable: false,
         default: undefined,
         generated: {

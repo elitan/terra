@@ -86,11 +86,23 @@ export class SQLiteDiffer {
             occupiedSchemaNames
           );
           occupiedSchemaNames.add(temporaryTableName);
+          const nullableRowidPromotion =
+            this.getNullableRowidAliasPromotionColumn(table, currentTable);
+          const rowidGuardTableName = nullableRowidPromotion
+            ? chooseSQLiteRecreationTableName(
+                `${table.name}_rowid_guard`,
+                occupiedSchemaNames
+              )
+            : undefined;
+          if (rowidGuardTableName) {
+            occupiedSchemaNames.add(rowidGuardTableName);
+          }
           statements.push(
             ...this.generateTableRecreation(
               table,
               currentTable,
-              temporaryTableName
+              temporaryTableName,
+              rowidGuardTableName
             )
           );
         } else {
@@ -645,9 +657,21 @@ export class SQLiteDiffer {
   private generateTableRecreation(
     desired: Table,
     current: Table,
-    tempName: string = `_${desired.name}_new`
+    tempName: string = `_${desired.name}_new`,
+    rowidGuardTableName: string = `_${desired.name}_rowid_guard_new`
   ): string[] {
     const statements: string[] = [];
+    const nullableRowidPromotion =
+      this.getNullableRowidAliasPromotionColumn(desired, current);
+    if (nullableRowidPromotion) {
+      statements.push(
+        ...this.generateNullableRowidPromotionGuard(
+          current.name,
+          nullableRowidPromotion,
+          rowidGuardTableName
+        )
+      );
+    }
 
     const tempTable = { ...desired, name: tempName };
     statements.push(this.generateCreateTable(tempTable));
@@ -682,8 +706,50 @@ export class SQLiteDiffer {
     return statements;
   }
 
+  private generateNullableRowidPromotionGuard(
+    tableName: string,
+    columnName: string,
+    guardTableName: string
+  ): string[] {
+    const quotedGuard = this.quoteIdentifier(guardTableName);
+    const quotedColumn = this.quoteIdentifier(columnName);
+    return [
+      `CREATE TABLE ${quotedGuard} (${quotedColumn} INTEGER NOT NULL);`,
+      `INSERT INTO ${quotedGuard} (${quotedColumn}) SELECT ${quotedColumn} ` +
+        `FROM ${this.quoteIdentifier(tableName)} ` +
+        `WHERE ${quotedColumn} IS NULL LIMIT 1;`,
+      `DROP TABLE ${quotedGuard};`,
+    ];
+  }
+
   private isOrdinaryRowidTable(table: Table): boolean {
     return !table.virtual && !table.withoutRowid;
+  }
+
+  private getNullableRowidAliasPromotionColumn(
+    desired: Table,
+    current: Table
+  ): string | undefined {
+    const desiredAlias = this.getRowidAlias(desired);
+    if (!desiredAlias) {
+      return undefined;
+    }
+
+    const currentAlias = this.getRowidAlias(current);
+    const normalizedDesiredAlias = normalizeSQLiteIdentifier(desiredAlias);
+    if (
+      currentAlias &&
+      normalizeSQLiteIdentifier(currentAlias) ===
+        normalizedDesiredAlias
+    ) {
+      return undefined;
+    }
+
+    const currentColumn = current.columns.find(function (column) {
+      return normalizeSQLiteIdentifier(column.name) ===
+        normalizedDesiredAlias;
+    });
+    return currentColumn?.nullable ? currentColumn.name : undefined;
   }
 
   private getRecreationCopyColumns(
@@ -798,9 +864,7 @@ export class SQLiteDiffer {
   }
 
   private normalizeType(type: string): string {
-    const upper = type.toUpperCase();
-    if (upper === 'INT') return 'INTEGER';
-    return upper;
+    return type.toUpperCase();
   }
 
   private normalizeDefault(value: string | undefined): string | undefined {

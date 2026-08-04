@@ -572,9 +572,7 @@ export class SQLiteInspector {
   }
 
   private normalizeType(type: string): string {
-    const upper = type.toUpperCase();
-    if (upper === 'INT') return 'INTEGER';
-    return type;
+    return type.toUpperCase();
   }
 
   private normalizeDefault(value: string): string {

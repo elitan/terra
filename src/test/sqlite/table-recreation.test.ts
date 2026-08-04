@@ -271,13 +271,24 @@ describe("SQLite Table Recreation", () => {
     }]);
   });
 
-  test("should preserve named values when promoting a column to rowid alias", async function () {
-    await schemaService.apply(`
+  test("should preserve named values across INT and INTEGER primary keys", async function () {
+    const initialSchema = `
       CREATE TABLE items (
-        id INTEGER NOT NULL UNIQUE,
+        id INT PRIMARY KEY,
         obsolete TEXT
       );
-    `, ["public"], true);
+    `;
+    const rowidAliasSchema = `
+      CREATE TABLE items (
+        id INTEGER PRIMARY KEY
+      );
+    `;
+    const intPrimaryKeySchema = `
+      CREATE TABLE items (
+        id INT PRIMARY KEY NOT NULL
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
 
     const seedClient = await provider.createClient(config);
     await seedClient.query(
@@ -285,19 +296,110 @@ describe("SQLite Table Recreation", () => {
     );
     await seedClient.end();
 
-    await schemaService.apply(`
-      CREATE TABLE items (
-        id INTEGER PRIMARY KEY
-      );
-    `, ["public"], true);
+    await schemaService.apply(rowidAliasSchema, ["public"], true);
 
     const client = await provider.createClient(config);
-    const rows = await client.query(
+    const rowidAliasRows = await client.query(
       "SELECT rowid AS hidden_rowid, id FROM items"
     );
     await client.end();
 
-    expect(rows.rows).toEqual([{ hidden_rowid: 100, id: 100 }]);
+    expect(rowidAliasRows.rows).toEqual([{ hidden_rowid: 100, id: 100 }]);
+
+    await schemaService.apply(intPrimaryKeySchema, ["public"], true);
+    const reversedClient = await provider.createClient(config);
+    const intPrimaryKeyRows = await reversedClient.query(
+      "SELECT rowid AS hidden_rowid, id FROM items"
+    );
+    await expect(
+      reversedClient.query("INSERT INTO items(id) VALUES (NULL)")
+    ).rejects.toThrow("NOT NULL constraint failed");
+    const tables = await provider.getCurrentSchema(reversedClient);
+    await reversedClient.end();
+
+    expect(intPrimaryKeyRows.rows).toEqual([{ hidden_rowid: 100, id: 100 }]);
+    expect(tables[0]?.columns[0]).toMatchObject({
+      name: "id",
+      type: "INT",
+      nullable: false,
+    });
+    expect((await schemaService.plan(intPrimaryKeySchema)).hasChanges)
+      .toBe(false);
+  });
+
+  test("should reject rowid alias promotion when nullable keys exist", async function () {
+    const initialSchema = `
+      CREATE TABLE nullable_keys (
+        id INT PRIMARY KEY,
+        payload TEXT
+      );
+      CREATE TABLE "_nullable_keys_rowid_guard_new" (
+        marker TEXT NOT NULL
+      );
+    `;
+    const rowidAliasSchema = `
+      CREATE TABLE nullable_keys (
+        id INTEGER PRIMARY KEY,
+        payload TEXT
+      );
+      CREATE TABLE "_nullable_keys_rowid_guard_new" (
+        marker TEXT NOT NULL
+      );
+    `;
+
+    await schemaService.apply(initialSchema, ["public"], true);
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(`
+      INSERT INTO nullable_keys(id, payload)
+      VALUES (NULL, 'first'), (NULL, 'second')
+    `);
+    await seedClient.query(`
+      INSERT INTO "_nullable_keys_rowid_guard_new"(marker)
+      VALUES ('user table')
+    `);
+    await seedClient.end();
+
+    const plan = await schemaService.plan(rowidAliasSchema);
+    expect(plan.transactional[0]).toContain(
+      'CREATE TABLE "_nullable_keys_rowid_guard_new_2"'
+    );
+    await expect(
+      schemaService.apply(rowidAliasSchema, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "MIGRATION_ERROR",
+      message: expect.stringContaining("NOT NULL constraint failed"),
+      statement: expect.stringContaining(
+        'SELECT "id" FROM "nullable_keys" WHERE "id" IS NULL'
+      ),
+    });
+
+    const client = await provider.createClient(config);
+    const tableSql = await client.query<{ sql: string }>(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'nullable_keys'
+    `);
+    const rows = await client.query(
+      "SELECT id, payload FROM nullable_keys ORDER BY rowid"
+    );
+    const artifacts = await client.query(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name LIKE '_nullable_keys%'
+    `);
+    const userGuardRows = await client.query(
+      'SELECT marker FROM "_nullable_keys_rowid_guard_new"'
+    );
+    await client.end();
+
+    expect(tableSql.rows[0]?.sql).toContain("id INT PRIMARY KEY");
+    expect(rows.rows).toEqual([
+      { id: null, payload: "first" },
+      { id: null, payload: "second" },
+    ]);
+    expect(artifacts.rows).toEqual([{
+      name: "_nullable_keys_rowid_guard_new",
+    }]);
+    expect(userGuardRows.rows).toEqual([{ marker: "user table" }]);
+    expect((await schemaService.plan(rowidAliasSchema)).hasChanges).toBe(true);
   });
 
   test("should reject recreation when every hidden rowid name is shadowed", async function () {
