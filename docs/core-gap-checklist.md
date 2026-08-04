@@ -126,6 +126,7 @@
 - done: add mutation scripts and usage docs (`test:mutation:changed:report`, `test:mutation:changed:gate`, `docs/mutation-gate.md`).
 - done: add escaped mutant rollup tool by module/reason (`tools/summarize-escaped-mutants.ts`).
 - done: add escaped mutant report script (`test:mutation:escaped:report`) and validate with sample mutation report input.
+- done: make escaped mutant rollups consume native changed-file runner results, direct locations/operators, and absolute manifest paths without hiding survivors.
 - done: add schema-service advisory lock recovery regression for failed apply then successful retry with same lock.
 - done: rerun advisory integration suite and `test:core` green after lock recovery coverage (`103` pass).
 - done: add cli command help output contract tests for root/apply/plan command surfaces.

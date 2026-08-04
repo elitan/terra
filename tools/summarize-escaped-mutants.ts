@@ -45,8 +45,11 @@ type ReportMutant = {
   id?: unknown;
   status?: unknown;
   mutatorName?: unknown;
+  operator?: unknown;
   replacement?: unknown;
   location?: unknown;
+  line?: unknown;
+  column?: unknown;
 };
 
 type UnknownObject = Record<string, unknown>;
@@ -101,19 +104,26 @@ function toStringOrNull(value: unknown): string | null {
   return null;
 }
 
-function toLocation(raw: unknown): Location {
-  if (!isObject(raw)) {
-    return { line: null, column: null };
+function toNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function toLocation(
+  raw: unknown,
+  directLine?: unknown,
+  directColumn?: unknown
+): Location {
+  if (isObject(raw) && isObject(raw.start)) {
+    return {
+      line: toNumberOrNull(raw.start.line),
+      column: toNumberOrNull(raw.start.column),
+    };
   }
 
-  const start = raw.start;
-  if (!isObject(start)) {
-    return { line: null, column: null };
-  }
-
-  const line = typeof start.line === "number" ? start.line : null;
-  const column = typeof start.column === "number" ? start.column : null;
-  return { line, column };
+  return {
+    line: toNumberOrNull(directLine),
+    column: toNumberOrNull(directColumn),
+  };
 }
 
 function isEscapedStatus(status: string): boolean {
@@ -127,7 +137,9 @@ function matchManifestEntry(file: string): MutationRiskEntry | null {
     const normalizedManifestPath = normalizePath(entry.path);
     if (
       normalizedFile === normalizedManifestPath ||
-      normalizedFile.startsWith(`${normalizedManifestPath}/`)
+      normalizedFile.startsWith(`${normalizedManifestPath}/`) ||
+      normalizedFile.endsWith(`/${normalizedManifestPath}`) ||
+      normalizedFile.includes(`/${normalizedManifestPath}/`)
     ) {
       return entry;
     }
@@ -168,9 +180,11 @@ function mapMutant(file: string, mutant: ReportMutant, index: number): EscapedMu
     id,
     file: normalizePath(file),
     status: statusRaw,
-    mutator: toStringOrNull(mutant.mutatorName),
+    mutator:
+      toStringOrNull(mutant.mutatorName) ||
+      toStringOrNull(mutant.operator),
     replacement: toStringOrNull(mutant.replacement),
-    location: toLocation(mutant.location),
+    location: toLocation(mutant.location, mutant.line, mutant.column),
     module,
     reason,
   };
@@ -227,8 +241,13 @@ function extractEscapedMutants(parsed: unknown): EscapedMutant[] {
     return [];
   }
 
+  const resultsNode = parsed.results;
+  if (Array.isArray(resultsNode)) {
+    return extractFromMutantsArray(resultsNode);
+  }
+
   const filesNode = parsed.files;
-  if (isObject(filesNode)) {
+  if (isObject(filesNode) && !Array.isArray(filesNode)) {
     return extractFromFilesNode(filesNode);
   }
 

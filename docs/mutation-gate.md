@@ -50,3 +50,5 @@ escaped mutant report output:
 1. file: `coverage/mutation/escaped-mutants.json`
 2. top-level fields: `totalEscaped`, `modules`, `mutants`
 3. module rollup groups escaped mutants by owner/path mapping from `tools/mutation-risk-manifest.ts`
+4. accepts native changed-file runner `results`, Stryker `files.*.mutants`, and generic top-level `mutants` reports
+5. normalizes native `operator` plus direct line/column fields and both absolute and repository-relative source paths
