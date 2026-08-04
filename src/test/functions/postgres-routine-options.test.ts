@@ -362,4 +362,47 @@ describe("PostgreSQL routine security options", function () {
       },
     });
   });
+
+  test("normalizes language-dependent function cost defaults", async function () {
+    const desiredSchema = `
+      CREATE FUNCTION public.default_internal_cost(value integer)
+      RETURNS integer LANGUAGE internal
+      AS 'int4abs';
+
+      CREATE FUNCTION public.explicit_internal_cost(value integer)
+      RETURNS integer LANGUAGE internal COST 100
+      AS 'int4abs';
+    `;
+    await client.query(desiredSchema);
+
+    const catalog = await client.query(`
+      SELECT p.proname AS name, p.procost::double precision AS cost
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+      ORDER BY p.proname
+    `);
+    expect(catalog.rows).toEqual([
+      { name: "default_internal_cost", cost: 1 },
+      { name: "explicit_internal_cost", cost: 100 },
+    ]);
+
+    const inspected = await new DatabaseInspector().getCurrentFunctions(
+      client,
+      ["public"]
+    );
+    expect(
+      inspected.find(function findDefaultCost(func) {
+        return func.name === "default_internal_cost";
+      })?.cost
+    ).toBeUndefined();
+    expect(
+      inspected.find(function findExplicitCost(func) {
+        return func.name === "explicit_internal_cost";
+      })?.cost
+    ).toBe(100);
+
+    const plan = await createTestSchemaService().plan(desiredSchema, ["public"]);
+    expect(plan.hasChanges).toBe(false);
+  });
 });

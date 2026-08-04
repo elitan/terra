@@ -9,6 +9,7 @@ import {
   routineConfigurationsEqual,
   routineParameterIdentitiesEqual,
 } from "./routine-handler-utils";
+import { getDefaultFunctionCost } from "../../../utils/function-cost";
 
 function normalizeBody(body: string): string {
   return body.replace(/\s+/g, ' ').trim();
@@ -34,8 +35,8 @@ function normalizeStrict(value: Function['strict']): boolean {
   return Boolean(value);
 }
 
-function normalizeCost(value: Function['cost']): number {
-  return value ?? 100;
+function normalizeCost(value: Function['cost'], language: string): number {
+  return value ?? getDefaultFunctionCost(language);
 }
 
 function normalizeRows(value: Function['rows'], returnType: string): number | undefined {
@@ -197,7 +198,8 @@ const config: HandlerConfig<Function> = {
     normalizeSecurityDefiner(desired.securityDefiner) !==
       normalizeSecurityDefiner(current.securityDefiner) ||
     normalizeStrict(desired.strict) !== normalizeStrict(current.strict) ||
-    normalizeCost(desired.cost) !== normalizeCost(current.cost) ||
+    normalizeCost(desired.cost, desired.language) !==
+      normalizeCost(current.cost, current.language) ||
     normalizeRows(desired.rows, desired.returnType) !==
       normalizeRows(current.rows, current.returnType) ||
     !routineConfigurationsEqual(

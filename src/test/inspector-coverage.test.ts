@@ -437,6 +437,45 @@ describe("DatabaseInspector coverage", () => {
     ]);
   });
 
+  test("normalizes catalog function costs using the language default", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function query(sql) {
+      expect(sql).toContain("FROM pg_proc p");
+      return {
+        rows: [
+          {
+            function_name: "default_internal_cost",
+            schema_name: "public",
+            arguments: "",
+            return_type: "integer",
+            language: "internal",
+            source_code: "int4abs",
+            volatility: "VOLATILE",
+            parallel: "UNSAFE",
+            cost: 1,
+            rows: 0,
+          },
+          {
+            function_name: "explicit_internal_cost",
+            schema_name: "public",
+            arguments: "",
+            return_type: "integer",
+            language: "internal",
+            source_code: "int4abs",
+            volatility: "VOLATILE",
+            parallel: "UNSAFE",
+            cost: 100,
+            rows: 0,
+          },
+        ],
+      };
+    });
+
+    const functions = await inspector.getCurrentFunctions(client, ["public"]);
+    expect(functions[0]?.cost).toBeUndefined();
+    expect(functions[1]?.cost).toBe(100);
+  });
+
   test("parses trigger when clause and function args from trigger definition", async () => {
     const inspector = new DatabaseInspector();
     const client = createClient((sql, params) => {

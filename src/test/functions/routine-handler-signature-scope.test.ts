@@ -70,6 +70,27 @@ describe("routine handler signature scope", function () {
     expect(statements[0]).toStartWith("CREATE OR REPLACE FUNCTION");
   });
 
+  test("uses language-dependent function cost defaults", function () {
+    const handler = new FunctionHandler();
+    const internal = makeFunction({
+      language: "internal",
+      body: "int4abs",
+    });
+
+    expect(
+      handler.generateStatements(
+        [internal],
+        [{ ...internal, cost: 1 }]
+      )
+    ).toEqual([]);
+    expect(
+      handler.generateStatements(
+        [{ ...internal, cost: 100 }],
+        [{ ...internal, cost: 1 }]
+      )[0]
+    ).toStartWith("CREATE OR REPLACE FUNCTION");
+  });
+
   test("recreates a function when its return type cannot be replaced", function () {
     const handler = new FunctionHandler();
     const statements = handler.generateStatements(

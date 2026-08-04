@@ -30,7 +30,7 @@
 | schemas | covered | gap | sqlite unsupported by design |
 | enums | covered | gap | sqlite unsupported by design |
 | sequences | covered | gap | sqlite unsupported by design |
-| functions | covered | gap | PostgreSQL `LEAKPROOF` and deterministic per-function `SET` configuration are parsed, inspected, behavior-tested, changed/reset with dependency-safe replacement, externally converged, rolled back, and reapplied idempotently; environment-capturing `SET FROM CURRENT`, SQL-standard bodies, linked-object bodies, `SUPPORT`, `WINDOW`, and `TRANSFORM` fail before planning while unmodeled; SQLite unsupported by design |
+| functions | covered | gap | PostgreSQL `LEAKPROOF`, language-dependent `COST` defaults, and deterministic per-function `SET` configuration are parsed, inspected, behavior-tested, changed/reset with dependency-safe replacement, externally converged, rolled back, and reapplied idempotently; environment-capturing `SET FROM CURRENT`, SQL-standard bodies, linked-object bodies, `SUPPORT`, `WINDOW`, and `TRANSFORM` fail before planning while unmodeled; SQLite unsupported by design |
 | procedures | covered | gap | PostgreSQL deterministic per-procedure `SET` configuration is parsed, inspected, behavior-tested, changed/reset with OID-preserving replacement, externally converged, rolled back, and reapplied idempotently; environment-capturing and other unmodeled routine forms fail before planning; SQLite unsupported by design |
 | triggers | covered | covered | sqlite header metadata, literal-safe bodies, table/view recreation restoration, execution, rollback, and repeated reapply tested in memory and on disk |
 | materialized views | covered | gap | sqlite unsupported by design |

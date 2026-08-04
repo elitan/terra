@@ -29,6 +29,7 @@ import {
   columnCompressionFromCatalog,
   columnStorageFromCatalog,
 } from "../../utils/column-physical";
+import { getDefaultFunctionCost } from "../../utils/function-cost";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -1265,7 +1266,9 @@ export class DatabaseInspector {
       leakproof: row.leakproof || undefined,
       securityDefiner: row.security_definer || undefined,
       strict: row.is_strict || undefined,
-      cost: row.cost !== 100 ? row.cost : undefined,
+      cost: row.cost !== getDefaultFunctionCost(row.language)
+        ? row.cost
+        : undefined,
       rows: row.rows !== 1000 ? row.rows : undefined,
       configuration: parseRoutineConfiguration(row.configuration),
     }));
