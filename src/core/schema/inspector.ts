@@ -122,6 +122,110 @@ const ROUTINE_DEPENDENT_OBJECTS_SQL = `
   )
 `;
 
+const ROUTINE_ARGUMENT_TYPES_SQL = `
+  ARRAY(
+    SELECT
+      CASE
+        WHEN argument_namespace.nspname = 'pg_catalog'
+          THEN pg_catalog.format_type(argument_type.oid, NULL)
+        WHEN element_type.oid IS NOT NULL
+          THEN pg_catalog.format(
+            '%I.%I[]',
+            element_namespace.nspname,
+            element_type.typname
+          )
+        ELSE pg_catalog.format(
+          '%I.%I',
+          argument_namespace.nspname,
+          argument_type.typname
+        )
+      END
+    FROM unnest(
+      COALESCE(p.proallargtypes, p.proargtypes::oid[])
+    ) WITH ORDINALITY AS routine_argument(type_oid, position)
+    JOIN pg_type argument_type ON argument_type.oid = routine_argument.type_oid
+    JOIN pg_namespace argument_namespace
+      ON argument_namespace.oid = argument_type.typnamespace
+    LEFT JOIN pg_type element_type
+      ON element_type.oid = argument_type.typelem
+      AND element_type.typarray = argument_type.oid
+    LEFT JOIN pg_namespace element_namespace
+      ON element_namespace.oid = element_type.typnamespace
+    ORDER BY routine_argument.position
+  )
+`;
+
+const ROUTINE_RETURN_TYPE_SQL = `
+  CASE
+    WHEN p.proretset THEN 'SETOF ' ELSE ''
+  END ||
+  CASE
+    WHEN return_namespace.nspname = 'pg_catalog'
+      THEN pg_catalog.format_type(return_type.oid, NULL)
+    WHEN return_element_type.oid IS NOT NULL
+      THEN pg_catalog.format(
+        '%I.%I[]',
+        return_element_namespace.nspname,
+        return_element_type.typname
+      )
+    ELSE pg_catalog.format(
+      '%I.%I',
+      return_namespace.nspname,
+      return_type.typname
+    )
+  END
+`;
+
+type RoutineParameter = Function["parameters"][number];
+
+function catalogRoutineMode(value: unknown): RoutineParameter["mode"] {
+  if (value === "i") return "IN";
+  if (value === "o" || value === "t") return "OUT";
+  if (value === "b") return "INOUT";
+  if (value === "v") return "VARIADIC";
+  return undefined;
+}
+
+function canonicalRoutineParameters(
+  row: {
+    argument_types?: unknown;
+    argument_modes?: unknown;
+    argument_names?: unknown;
+  },
+  parsedParameters: RoutineParameter[]
+): RoutineParameter[] {
+  if (!Array.isArray(row.argument_types)) {
+    return parsedParameters;
+  }
+
+  const argumentTypes = row.argument_types;
+  const argumentModes = Array.isArray(row.argument_modes)
+    ? row.argument_modes
+    : [];
+  const argumentNames = Array.isArray(row.argument_names)
+    ? row.argument_names
+    : [];
+  let displayedPosition = 0;
+
+  return argumentTypes.map(function canonicalizeParameter(type, position) {
+    const modeCode = argumentModes[position];
+    const displayed = modeCode === "t"
+      ? undefined
+      : parsedParameters[displayedPosition++];
+    const catalogName = argumentNames[position];
+    const name = typeof catalogName === "string" && catalogName.length > 0
+      ? catalogName
+      : displayed?.name;
+
+    return {
+      name,
+      type: typeof type === "string" ? type : displayed?.type || "unknown",
+      mode: catalogRoutineMode(modeCode) || displayed?.mode,
+      default: displayed?.default,
+    };
+  });
+}
+
 function parseRoutineDependentObjects(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) {
     return undefined;
@@ -1318,6 +1422,10 @@ export class DatabaseInspector {
         n.nspname as schema_name,
         pg_get_function_arguments(p.oid) as arguments,
         pg_get_function_result(p.oid) as return_type,
+        ${ROUTINE_ARGUMENT_TYPES_SQL} as argument_types,
+        p.proargmodes::text[] as argument_modes,
+        p.proargnames as argument_names,
+        ${ROUTINE_RETURN_TYPE_SQL} as canonical_return_type,
         l.lanname as language,
         p.prosrc as source_code,
         p.prokind as routine_kind,
@@ -1345,6 +1453,14 @@ export class DatabaseInspector {
       FROM pg_proc p
       JOIN pg_namespace n ON p.pronamespace = n.oid
       JOIN pg_language l ON p.prolang = l.oid
+      JOIN pg_type return_type ON return_type.oid = p.prorettype
+      JOIN pg_namespace return_namespace
+        ON return_namespace.oid = return_type.typnamespace
+      LEFT JOIN pg_type return_element_type
+        ON return_element_type.oid = return_type.typelem
+        AND return_element_type.typarray = return_type.oid
+      LEFT JOIN pg_namespace return_element_namespace
+        ON return_element_namespace.oid = return_element_type.typnamespace
       LEFT JOIN pg_depend d ON d.objid = p.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND p.prokind IN ('f', 'w', 'a')
@@ -1360,8 +1476,11 @@ export class DatabaseInspector {
       return {
         name: row.function_name,
         schema: row.schema_name,
-        parameters: this.parseFunctionArguments(row.arguments),
-        returnType: row.return_type,
+        parameters: canonicalRoutineParameters(
+          row,
+          this.parseFunctionArguments(row.arguments)
+        ),
+        returnType: row.canonical_return_type || row.return_type,
         language: row.language,
         body: row.source_code,
         volatility: row.volatility,
@@ -1392,6 +1511,9 @@ export class DatabaseInspector {
         ) as routine_identity,
         n.nspname as schema_name,
         pg_get_function_arguments(p.oid) as arguments,
+        ${ROUTINE_ARGUMENT_TYPES_SQL} as argument_types,
+        p.proargmodes::text[] as argument_modes,
+        p.proargnames as argument_names,
         l.lanname as language,
         p.prosrc as source_code,
         p.prokind as routine_kind,
@@ -1420,7 +1542,10 @@ export class DatabaseInspector {
       return {
         name: row.procedure_name,
         schema: row.schema_name,
-        parameters: this.parseFunctionArguments(row.arguments),
+        parameters: canonicalRoutineParameters(
+          row,
+          this.parseFunctionArguments(row.arguments)
+        ),
         language: row.language,
         body: row.source_code,
         securityDefiner: row.security_definer || undefined,

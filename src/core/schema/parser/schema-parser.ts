@@ -41,6 +41,7 @@ import type {
 } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 import { DEFAULT_COLLATION } from "../../../utils/collation";
+import { qualifyDeclaredRoutineTypes } from "./routine-type-canonicalizer";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -199,6 +200,15 @@ export class SchemaParser {
     const { tables, indexes, enums, compositeTypes, views, functions, procedures, triggers, sequences, extensions, schemas, comments, sqlObjects } = await this.parseWithPgsql(sql, filePath);
 
     this.associateIndexes(tables, views, indexes, filePath);
+    qualifyDeclaredRoutineTypes({
+      tables,
+      enums,
+      compositeTypes,
+      sqlObjects,
+      functions,
+      procedures,
+      filePath,
+    });
 
     return {
       tables,

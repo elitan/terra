@@ -18,25 +18,39 @@ describe("Regression: function returns table is supported", function () {
     await client?.end();
   });
 
-  test("applies function with RETURNS TABLE signature", async function () {
+  test("converges an externally created multi-column RETURNS TABLE function", async function () {
     const schema = `
       CREATE OR REPLACE FUNCTION fn_table_ret(a integer)
-      RETURNS TABLE (value integer)
+      RETURNS TABLE (value integer, label text)
       LANGUAGE sql
       AS $$
-      SELECT a
+      SELECT a, a::text
       $$;
     `;
 
-    await service.apply(schema, ["public"], true);
-
-    const result = await client.query(`
-      SELECT COUNT(*)::int AS count
+    await client.query(schema);
+    const oidBefore = await client.query(`
+      SELECT p.oid::integer AS oid
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public' AND p.proname = 'fn_table_ret'
     `);
 
-    expect(result.rows[0].count).toBe(1);
+    const externalPlan = await service.plan(schema, ["public"]);
+    expect(externalPlan.hasChanges).toBe(false);
+    expect(externalPlan.transactional).toEqual([]);
+    await service.apply(schema, ["public"], true);
+
+    const result = await client.query(`
+      SELECT p.oid::integer AS oid
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = 'fn_table_ret'
+    `);
+
+    expect(result.rows).toEqual(oidBefore.rows);
+    expect(
+      await client.query("SELECT * FROM public.fn_table_ret(7)")
+    ).toMatchObject({ rows: [{ value: 7, label: "7" }] });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SchemaParser } from "../core/schema/parser";
+import { qualifyDeclaredRoutineTypes } from "../core/schema/parser/routine-type-canonicalizer";
 import type { Index, View } from "../types/schema";
 
 function makeParseResult(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -20,6 +21,77 @@ function makeParseResult(overrides: Partial<Record<string, unknown>> = {}): Reco
 }
 
 describe("SchemaParser private coverage", () => {
+  test("qualifies unambiguous declared routine types across object kinds", function () {
+    const functions = [
+      {
+        name: "typed_function",
+        parameters: [
+          { type: "row_type[]" },
+          { type: '"StateType"' },
+          { type: "domain_type" },
+          { type: "range_type" },
+          { type: "integer" },
+        ],
+        returnType: "SETOF composite_type",
+      },
+    ];
+    const procedures = [
+      {
+        name: "typed_procedure",
+        parameters: [{ type: '"StateType"[][]' }],
+      },
+    ];
+
+    qualifyDeclaredRoutineTypes({
+      tables: [{ name: "row_type", schema: "tenant", columns: [] }],
+      enums: [{ name: "StateType", schema: "public", values: ["a"] }],
+      compositeTypes: [{ name: "composite_type", schema: "public", attributes: [] }],
+      sqlObjects: [
+        { kind: "domain-type", name: "domain_type", schema: "public" },
+        { kind: "range-type", name: "range_type", schema: "tenant" },
+        { kind: "policy", name: "ignored", schema: "public" },
+      ],
+      functions: functions as any,
+      procedures: procedures as any,
+      filePath: "schema.sql",
+    });
+
+    expect(functions[0]?.parameters.map(function getType(parameter) {
+      return parameter.type;
+    })).toEqual([
+      "tenant.row_type[]",
+      'public."StateType"',
+      "public.domain_type",
+      "tenant.range_type",
+      "integer",
+    ]);
+    expect(functions[0]?.returnType).toBe("SETOF public.composite_type");
+    expect(procedures[0]?.parameters[0]?.type).toBe('public."StateType"[][]');
+  });
+
+  test("rejects ambiguous unqualified declared routine types", function () {
+    expect(function qualifyAmbiguousType() {
+      qualifyDeclaredRoutineTypes({
+        tables: [],
+        enums: [
+          { name: "state", schema: "tenant_a", values: ["a"] },
+          { name: "state", schema: "tenant_b", values: ["b"] },
+        ],
+        compositeTypes: [],
+        sqlObjects: [],
+        functions: [{
+          name: "read_state",
+          parameters: [],
+          returnType: "state",
+        }] as any,
+        procedures: [],
+        filePath: "schema.sql",
+      });
+    }).toThrow(
+      "PostgreSQL routine type state is ambiguous across desired schemas (tenant_a.state, tenant_b.state); schema-qualify the routine type"
+    );
+  });
+
   test("parseCreateIndexStatements delegates to parsed indexes", async function () {
     const parser = new SchemaParser() as any;
     const indexes: Index[] = [{ name: "idx_users_email", tableName: "users", columns: ["email"], type: "btree" }];

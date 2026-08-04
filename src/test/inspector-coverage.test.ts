@@ -437,6 +437,85 @@ describe("DatabaseInspector coverage", () => {
     ]);
   });
 
+  test("uses catalog type identities for routine parameters and returns", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function query(sql) {
+      expect(sql).toContain("COALESCE(p.proallargtypes, p.proargtypes::oid[])");
+      expect(sql).toContain("p.proargmodes::text[] as argument_modes");
+
+      if (sql.includes("p.prokind IN ('f', 'w', 'a')")) {
+        expect(sql).toContain("as canonical_return_type");
+        return {
+          rows: [
+            {
+              function_name: "external_table_function",
+              schema_name: "public",
+              arguments: "input \"StateType\" DEFAULT 'a'::\"StateType\"",
+              argument_types: ['public."StateType"', "integer", "text"],
+              argument_modes: ["i", "t", "t"],
+              argument_names: ["input", "value", "label"],
+              return_type: "TABLE(value integer, label text)",
+              canonical_return_type: "SETOF record",
+              language: "sql",
+              source_code: "SELECT 1, 'one'",
+              volatility: "VOLATILE",
+              parallel: "UNSAFE",
+              cost: 100,
+              rows: 1000,
+            },
+          ],
+        };
+      }
+
+      if (sql.includes("p.prokind = 'p'")) {
+        return {
+          rows: [
+            {
+              procedure_name: "typed_procedure",
+              schema_name: "public",
+              arguments:
+                "IN source \"StateType\", INOUT changed \"StateType\"[], OUT result text, VARIADIC extras integer[]",
+              argument_types: [
+                'public."StateType"',
+                'public."StateType"[]',
+                "text",
+                "integer[]",
+              ],
+              argument_modes: ["i", "b", "o", "v"],
+              argument_names: ["source", "changed", "result", "extras"],
+              language: "sql",
+              source_code: "SELECT 1",
+              security_definer: false,
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const functions = await inspector.getCurrentFunctions(client, ["public"]);
+    expect(functions[0]?.parameters).toEqual([
+      {
+        name: "input",
+        type: 'public."StateType"',
+        mode: "IN",
+        default: `'a'::"StateType"`,
+      },
+      { name: "value", type: "integer", mode: "OUT" },
+      { name: "label", type: "text", mode: "OUT" },
+    ]);
+    expect(functions[0]?.returnType).toBe("SETOF record");
+
+    const procedures = await inspector.getCurrentProcedures(client, ["public"]);
+    expect(procedures[0]?.parameters).toEqual([
+      { name: "source", type: 'public."StateType"', mode: "IN" },
+      { name: "changed", type: 'public."StateType"[]', mode: "INOUT" },
+      { name: "result", type: "text", mode: "OUT" },
+      { name: "extras", type: "integer[]", mode: "VARIADIC" },
+    ]);
+  });
+
   test("normalizes catalog function costs using the language default", async function () {
     const inspector = new DatabaseInspector();
     const client = createClient(function query(sql) {

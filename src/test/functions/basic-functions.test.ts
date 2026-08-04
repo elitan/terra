@@ -200,6 +200,72 @@ describe("Functions", () => {
     }
   });
 
+  test("should converge declared custom routine types independently of search path", async function () {
+    const schema = `
+      CREATE TYPE public."StateType" AS ENUM ('a', 'b');
+
+      CREATE FUNCTION public.fn_public_state(i public."StateType")
+      RETURNS public."StateType"
+      AS $$
+        SELECT i
+      $$
+      LANGUAGE SQL;
+
+      CREATE FUNCTION public.fn_public_states(i "StateType"[])
+      RETURNS "StateType"[]
+      AS $$
+        SELECT i
+      $$
+      LANGUAGE SQL;
+
+      CREATE PROCEDURE public.sync_public_state(IN p_state "StateType"[])
+      LANGUAGE SQL
+      AS $$
+        SELECT 1
+      $$;
+    `;
+
+    await schemaService.apply(schema, ["public"], true);
+
+    const repeatedPlan = await schemaService.plan(schema, ["public"]);
+    expect(repeatedPlan.hasChanges).toBe(false);
+    expect(repeatedPlan.transactional).toEqual([]);
+  });
+
+  test("should reject ambiguous unqualified routine types before mutation", async function () {
+    const schema = `
+      CREATE SCHEMA tenant_a;
+      CREATE SCHEMA tenant_b;
+      CREATE TYPE tenant_a.state AS ENUM ('a');
+      CREATE TYPE tenant_b.state AS ENUM ('b');
+
+      CREATE FUNCTION public.read_state()
+      RETURNS state
+      AS $$ SELECT 'a' $$
+      LANGUAGE SQL;
+    `;
+    const client = await databaseService.createClient();
+
+    try {
+      await expect(
+        schemaService.apply(schema, ["public", "tenant_a", "tenant_b"], true)
+      ).rejects.toThrow(
+        "PostgreSQL routine type state is ambiguous across desired schemas (tenant_a.state, tenant_b.state); schema-qualify the routine type"
+      );
+
+      const schemas = await client.query(`
+        SELECT nspname
+        FROM pg_namespace
+        WHERE nspname IN ('tenant_a', 'tenant_b')
+      `);
+      expect(schemas.rows).toEqual([]);
+    } finally {
+      await client.query("DROP SCHEMA IF EXISTS tenant_a CASCADE");
+      await client.query("DROP SCHEMA IF EXISTS tenant_b CASCADE");
+      await client.end();
+    }
+  });
+
   test("should handle overloaded function and procedure lifecycle by signature", async () => {
     const initialSchema = `
       CREATE FUNCTION public.calc(v INTEGER)
