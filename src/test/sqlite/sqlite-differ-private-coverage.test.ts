@@ -8,6 +8,7 @@ import {
 } from "../../utils/sqlite-recreation";
 import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 import {
+  canonicalizeSQLiteDefinitionIdentifiers,
   extractSQLiteColumnCollations,
   extractSQLiteForeignKeyMatchClauses,
   removeSQLiteForeignKeyMatchSimpleClauses,
@@ -111,6 +112,27 @@ describe("SQLiteDiffer private coverage", () => {
         "FOREIGN KEY (parent_id) REFERENCES parents(id) MATCH FULL"
       )
     ).toBe("FOREIGN KEY (parent_id) REFERENCES parents(id) MATCH FULL");
+  });
+
+  test("canonicalizes SQLite identifiers with ASCII-only folding", function () {
+    expect(
+      canonicalizeSQLiteDefinitionIdentifiers(
+        `FOREIGN KEY ("AccountID") REFERENCES Accounts("ID") ` +
+        `CHECK (note <> 'ID' AND note <> "literal")`,
+        ["accountid", "accounts", "id", "note"]
+      )
+    ).toBe(
+      `FOREIGN KEY ("accountid") REFERENCES "accounts"("id") ` +
+      `CHECK ("note" <> 'ID' AND "note" <> "literal")`
+    );
+    expect(
+      canonicalizeSQLiteDefinitionIdentifiers(
+        `REFERENCES "Äccounts"("ID") REFERENCES "äccounts"("id")`,
+        ["Äccounts", "äccounts", "id"]
+      )
+    ).toBe(
+      `REFERENCES "Äccounts"("id") REFERENCES "äccounts"("id")`
+    );
   });
 
   test("detectChanges marks check constraint changes for recreation", () => {

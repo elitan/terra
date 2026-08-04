@@ -1,5 +1,11 @@
+import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
+
 function isIdentifierCharacter(character: string | undefined): boolean {
   return character !== undefined && /[\p{L}\p{N}_$]/u.test(character);
+}
+
+function quoteCanonicalSQLiteIdentifier(identifier: string): string {
+  return `"${identifier.replace(/"/g, '""')}"`;
 }
 
 const SQLITE_TABLE_CONSTRAINT_KEYWORDS = new Set([
@@ -766,6 +772,69 @@ export function canonicalizeSQLiteForeignKeyDefinition(
   return removeSQLiteForeignKeyMatchSimpleClauses(
     removeSQLiteForeignKeyTargetColumns(definition)
   );
+}
+
+export function canonicalizeSQLiteDefinitionIdentifiers(
+  definition: string,
+  identifiers: readonly string[]
+): string {
+  const normalizedIdentifiers = new Set(
+    identifiers.map(normalizeSQLiteIdentifier)
+  );
+  let result = "";
+  let cursor = 0;
+
+  while (cursor < definition.length) {
+    if (definition[cursor] === "'") {
+      const end = skipQuoted(definition, cursor, "'");
+      result += definition.slice(cursor, end);
+      cursor = end;
+      continue;
+    }
+    if (
+      definition.startsWith("--", cursor) ||
+      definition.startsWith("/*", cursor)
+    ) {
+      const end = definition.startsWith("--", cursor)
+        ? skipLineComment(definition, cursor)
+        : skipBlockComment(definition, cursor);
+      result += definition.slice(cursor, end);
+      cursor = end;
+      continue;
+    }
+    if (
+      definition[cursor] === '"' ||
+      definition[cursor] === "`" ||
+      definition[cursor] === "["
+    ) {
+      const identifier = readSQLiteIdentifier(definition.slice(cursor));
+      if (identifier) {
+        const normalized = normalizeSQLiteIdentifier(identifier.name);
+        result += normalizedIdentifiers.has(normalized)
+          ? quoteCanonicalSQLiteIdentifier(normalized)
+          : definition.slice(cursor, cursor + identifier.end);
+        cursor += identifier.end;
+        continue;
+      }
+    }
+    if (isIdentifierCharacter(definition[cursor])) {
+      let end = cursor + 1;
+      while (isIdentifierCharacter(definition[end])) {
+        end += 1;
+      }
+      const token = definition.slice(cursor, end);
+      const normalized = normalizeSQLiteIdentifier(token);
+      result += normalizedIdentifiers.has(normalized)
+        ? quoteCanonicalSQLiteIdentifier(normalized)
+        : token;
+      cursor = end;
+      continue;
+    }
+    result += definition[cursor];
+    cursor += 1;
+  }
+
+  return result;
 }
 
 export function removeSQLiteForeignKeyTargetColumns(

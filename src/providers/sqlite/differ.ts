@@ -8,6 +8,7 @@ import type {
 } from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
 import {
+  canonicalizeSQLiteDefinitionIdentifiers,
   canonicalizeSQLiteForeignKeyDefinition,
   extractSQLiteColumnDefinition,
   parseSQLiteTableDefinition,
@@ -33,11 +34,19 @@ interface TableChanges {
   uniqueConstraintsChanged: boolean;
 }
 
+function indexBySQLiteIdentifier<T extends { name: string }>(
+  items: readonly T[]
+): Map<string, T> {
+  return new Map(items.map(function (item) {
+    return [normalizeSQLiteIdentifier(item.name), item] as const;
+  }));
+}
+
 export class SQLiteDiffer {
   generateMigrationPlan(desired: Table[], current: Table[]): MigrationPlan {
     const statements: string[] = [];
-    const currentMap = new Map(current.map(t => [t.name, t]));
-    const desiredMap = new Map(desired.map(t => [t.name, t]));
+    const currentMap = indexBySQLiteIdentifier(current);
+    const desiredMap = indexBySQLiteIdentifier(desired);
     const occupiedSchemaNames = new Set<string>();
     for (const table of [...desired, ...current]) {
       occupiedSchemaNames.add(table.name);
@@ -47,7 +56,7 @@ export class SQLiteDiffer {
     }
 
     for (const table of desired) {
-      const currentTable = currentMap.get(table.name);
+      const currentTable = currentMap.get(normalizeSQLiteIdentifier(table.name));
 
       if (!currentTable) {
         statements.push(this.generateCreateTable(table));
@@ -89,7 +98,7 @@ export class SQLiteDiffer {
     }
 
     for (const table of current) {
-      if (!desiredMap.has(table.name)) {
+      if (!desiredMap.has(normalizeSQLiteIdentifier(table.name))) {
         statements.push(`DROP TABLE IF EXISTS ${this.quoteIdentifier(table.name)};`);
       }
     }
@@ -113,11 +122,11 @@ export class SQLiteDiffer {
       uniqueConstraintsChanged: false,
     };
 
-    const currentColMap = new Map(current.columns.map(c => [c.name, c]));
-    const desiredColMap = new Map(desired.columns.map(c => [c.name, c]));
+    const currentColMap = indexBySQLiteIdentifier(current.columns);
+    const desiredColMap = indexBySQLiteIdentifier(desired.columns);
 
     for (const col of desired.columns) {
-      const currentCol = currentColMap.get(col.name);
+      const currentCol = currentColMap.get(normalizeSQLiteIdentifier(col.name));
       if (!currentCol) {
         changes.columnChanges.push({ type: 'add', column: col });
         if (col.generated?.stored) {
@@ -130,7 +139,7 @@ export class SQLiteDiffer {
     }
 
     for (const col of current.columns) {
-      if (!desiredColMap.has(col.name)) {
+      if (!desiredColMap.has(normalizeSQLiteIdentifier(col.name))) {
         changes.requiresRecreate = true;
         changes.columnChanges.push({ type: 'drop', column: col });
       }
@@ -163,12 +172,14 @@ export class SQLiteDiffer {
       changes.requiresRecreate = true;
     }
 
-    const currentIndexMap = new Map((current.indexes || []).map(i => [i.name, i]));
-    const desiredIndexMap = new Map((desired.indexes || []).map(i => [i.name, i]));
+    const currentIndexMap = indexBySQLiteIdentifier(current.indexes || []);
+    const desiredIndexMap = indexBySQLiteIdentifier(desired.indexes || []);
 
     for (const index of desired.indexes || []) {
       if (!index.constraint) {
-        const currentIndex = currentIndexMap.get(index.name);
+        const currentIndex = currentIndexMap.get(
+          normalizeSQLiteIdentifier(index.name)
+        );
         if (!currentIndex || this.indexesDiffer(index, currentIndex)) {
           changes.indexesToAdd.push(index);
           if (currentIndex) {
@@ -179,7 +190,10 @@ export class SQLiteDiffer {
     }
 
     for (const index of current.indexes || []) {
-      if (!index.constraint && !desiredIndexMap.has(index.name)) {
+      if (
+        !index.constraint &&
+        !desiredIndexMap.has(normalizeSQLiteIdentifier(index.name))
+      ) {
         changes.indexesToDrop.push(index);
       }
     }
@@ -222,7 +236,10 @@ export class SQLiteDiffer {
     const currentPk = current.primaryKey?.columns || [];
 
     if (desiredPk.length !== currentPk.length) return true;
-    return desiredPk.some((col, i) => col !== currentPk[i]);
+    return desiredPk.some(function (column, index) {
+      return normalizeSQLiteIdentifier(column) !==
+        normalizeSQLiteIdentifier(currentPk[index] || "");
+    });
   }
 
   private foreignKeysDiffer(desired?: ForeignKeyConstraint[], current?: ForeignKeyConstraint[]): boolean {
@@ -230,20 +247,25 @@ export class SQLiteDiffer {
     const c = current || [];
     if (d.length !== c.length) return true;
 
-    const dSorted = [...d].sort((a, b) => a.columns.join(',').localeCompare(b.columns.join(',')));
-    const cSorted = [...c].sort((a, b) => a.columns.join(',').localeCompare(b.columns.join(',')));
+    const desiredSignatures = d.map(function (foreignKey) {
+      return SQLiteDiffer.foreignKeySignature(foreignKey);
+    }).sort();
+    const currentSignatures = c.map(function (foreignKey) {
+      return SQLiteDiffer.foreignKeySignature(foreignKey);
+    }).sort();
+    return desiredSignatures.some(function (signature, index) {
+      return signature !== currentSignatures[index];
+    });
+  }
 
-    for (let i = 0; i < dSorted.length; i++) {
-      const dItem = dSorted[i]!;
-      const cItem = cSorted[i]!;
-      if (dItem.columns.join(',') !== cItem.columns.join(',')) return true;
-      if (dItem.referencedTable !== cItem.referencedTable) return true;
-      if (dItem.referencedColumns.join(',') !== cItem.referencedColumns.join(',')) return true;
-      if (dItem.onDelete !== cItem.onDelete) return true;
-      if (dItem.onUpdate !== cItem.onUpdate) return true;
-    }
-
-    return false;
+  private static foreignKeySignature(foreignKey: ForeignKeyConstraint): string {
+    return [
+      foreignKey.columns.map(normalizeSQLiteIdentifier).join("\0"),
+      normalizeSQLiteIdentifier(foreignKey.referencedTable),
+      foreignKey.referencedColumns.map(normalizeSQLiteIdentifier).join("\0"),
+      foreignKey.onDelete || "NO ACTION",
+      foreignKey.onUpdate || "NO ACTION",
+    ].join("\u0001");
   }
 
   private checkConstraintsDiffer(desired?: CheckConstraint[], current?: CheckConstraint[]): boolean {
@@ -265,7 +287,7 @@ export class SQLiteDiffer {
       .map(function (constraint) {
         return constraint.columns.map(function (column, index) {
           const collation = constraint.collations?.[index] || "BINARY";
-          return `${column}\0${normalizeSQLiteIdentifier(collation)}`;
+          return `${normalizeSQLiteIdentifier(column)}\0${normalizeSQLiteIdentifier(collation)}`;
         }).join("\0");
       })
       .sort();
@@ -273,7 +295,7 @@ export class SQLiteDiffer {
       .map(function (constraint) {
         return constraint.columns.map(function (column, index) {
           const collation = constraint.collations?.[index] || "BINARY";
-          return `${column}\0${normalizeSQLiteIdentifier(collation)}`;
+          return `${normalizeSQLiteIdentifier(column)}\0${normalizeSQLiteIdentifier(collation)}`;
         }).join("\0");
       })
       .sort();
@@ -313,8 +335,12 @@ export class SQLiteDiffer {
       return true;
     }
 
-    const desiredAutoincrement = [...(desired.autoincrementColumns || [])].sort();
-    const currentAutoincrement = [...(current.autoincrementColumns || [])].sort();
+    const desiredAutoincrement = (desired.autoincrementColumns || [])
+      .map(normalizeSQLiteIdentifier)
+      .sort();
+    const currentAutoincrement = (current.autoincrementColumns || [])
+      .map(normalizeSQLiteIdentifier)
+      .sort();
     return desiredAutoincrement.join("\0") !== currentAutoincrement.join("\0");
   }
 
@@ -338,23 +364,35 @@ export class SQLiteDiffer {
 
     const desiredDefinition = parseSQLiteTableDefinition(desired.createStatement);
     const currentDefinition = parseSQLiteTableDefinition(current.createStatement);
+    const identifiers = SQLiteDiffer.collectTableIdentifiers(desired, current);
     const currentColumns = new Map(
       currentDefinition.columns.map(function (column) {
-        return [column.name, column.definition] as const;
+        return [
+          normalizeSQLiteIdentifier(column.name),
+          column.definition,
+        ] as const;
       })
     );
 
     for (const column of desiredDefinition.columns) {
-      const currentColumn = currentColumns.get(column.name);
+      const currentColumn = currentColumns.get(
+        normalizeSQLiteIdentifier(column.name)
+      );
       if (!currentColumn) {
         continue;
       }
       const desiredCanonical = replaceSQLiteColumnDefinitionName(
-        canonicalizeSQLiteForeignKeyDefinition(column.definition),
+        canonicalizeSQLiteDefinitionIdentifiers(
+          canonicalizeSQLiteForeignKeyDefinition(column.definition),
+          identifiers
+        ),
         "__terradb_column__"
       );
       const currentCanonical = replaceSQLiteColumnDefinitionName(
-        canonicalizeSQLiteForeignKeyDefinition(currentColumn),
+        canonicalizeSQLiteDefinitionIdentifiers(
+          canonicalizeSQLiteForeignKeyDefinition(currentColumn),
+          identifiers
+        ),
         "__terradb_column__"
       );
       if (
@@ -366,19 +404,50 @@ export class SQLiteDiffer {
     }
 
     const desiredConstraints = this.normalizeDefinitions(
-      desiredDefinition.constraints
+      desiredDefinition.constraints,
+      identifiers
     );
     const currentConstraints = this.normalizeDefinitions(
-      currentDefinition.constraints
+      currentDefinition.constraints,
+      identifiers
     );
     return desiredConstraints.join("\0") !== currentConstraints.join("\0");
   }
 
-  private normalizeDefinitions(definitions: string[]): string[] {
+  private static collectTableIdentifiers(
+    desired: Table,
+    current: Table
+  ): string[] {
+    const identifiers = [desired.name, current.name];
+    for (const table of [desired, current]) {
+      for (const column of table.columns) {
+        identifiers.push(column.name);
+        if (column.collation) {
+          identifiers.push(column.collation.name);
+        }
+      }
+      for (const foreignKey of table.foreignKeys || []) {
+        identifiers.push(
+          ...foreignKey.columns,
+          foreignKey.referencedTable,
+          ...foreignKey.referencedColumns
+        );
+      }
+    }
+    return identifiers;
+  }
+
+  private normalizeDefinitions(
+    definitions: string[],
+    identifiers: readonly string[]
+  ): string[] {
     const differ = this;
     return definitions.map(function (definition) {
       return differ.normalizeSql(
-        canonicalizeSQLiteForeignKeyDefinition(definition)
+        canonicalizeSQLiteDefinitionIdentifiers(
+          canonicalizeSQLiteForeignKeyDefinition(definition),
+          identifiers
+        )
       ) || "";
     }).sort();
   }
@@ -392,7 +461,8 @@ export class SQLiteDiffer {
       const term = desired[index]!;
       const currentTerm = current[index];
       if (!currentTerm ||
-        term.column !== currentTerm.column ||
+        normalizeSQLiteIdentifier(term.column || "") !==
+          normalizeSQLiteIdentifier(currentTerm.column || "") ||
         this.normalizeSql(term.expression) !== this.normalizeSql(currentTerm.expression) ||
         (term.collation || "BINARY").toUpperCase() !==
           (currentTerm.collation || "BINARY").toUpperCase() ||
@@ -522,7 +592,12 @@ export class SQLiteDiffer {
 
     const differ = this;
     const commonColumns = desired.columns
-      .filter(c => !c.generated && current.columns.some(cc => cc.name === c.name))
+      .filter(function (column) {
+        const normalizedName = normalizeSQLiteIdentifier(column.name);
+        return !column.generated && current.columns.some(function (currentColumn) {
+          return normalizeSQLiteIdentifier(currentColumn.name) === normalizedName;
+        });
+      })
       .map(function (column) {
         return differ.quoteIdentifier(column.name);
       })
@@ -538,7 +613,7 @@ export class SQLiteDiffer {
       (desired.autoincrementColumns || []).length > 0 &&
       (current.autoincrementColumns || []).length > 0
     ) {
-      statements.push(...this.generateSequencePreservation(desired.name, tempName));
+      statements.push(...this.generateSequencePreservation(current.name, tempName));
     }
 
     statements.push(`DROP TABLE ${this.quoteIdentifier(desired.name)};`);

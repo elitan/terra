@@ -120,6 +120,80 @@ describe("SQLite Edge Cases - Empty and Special", () => {
 
     expect(tables).toHaveLength(1);
   });
+
+  test("should match ASCII-case identifier variants without losing data", async function () {
+    const externalClient = await provider.createClient(config);
+    await externalClient.query(`
+      CREATE TABLE "Accounts" (
+        "ID" INTEGER PRIMARY KEY AUTOINCREMENT,
+        "DisplayName" TEXT NOT NULL,
+        "Status" INTEGER,
+        UNIQUE ("DisplayName")
+      )
+    `);
+    await externalClient.query(`
+      CREATE INDEX "Accounts_Status_IDX" ON "Accounts"("Status")
+    `);
+    await externalClient.query(`
+      CREATE TABLE "Orders" (
+        "ID" INTEGER PRIMARY KEY,
+        "AccountID" INTEGER REFERENCES "Accounts"("ID")
+      )
+    `);
+    await externalClient.query(`
+      INSERT INTO "Accounts"("ID", "DisplayName", "Status")
+      VALUES (41, 'kept', 1), (100, 'deleted-high-water', 0)
+    `);
+    await externalClient.query(`DELETE FROM "Accounts" WHERE "ID" = 100`);
+    await externalClient.query(`
+      INSERT INTO "Orders"("ID", "AccountID") VALUES (1, 41)
+    `);
+    await externalClient.end();
+
+    const equivalentSchema = `
+      CREATE TABLE accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        displayname TEXT NOT NULL,
+        status INTEGER,
+        UNIQUE (displayname)
+      );
+      CREATE INDEX accounts_status_idx ON accounts(status);
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        accountid INTEGER REFERENCES accounts(id)
+      );
+    `;
+    expect((await schemaService.plan(equivalentSchema, ["public"])).hasChanges)
+      .toBe(false);
+
+    const recreatedSchema = equivalentSchema.replace(
+      "status INTEGER",
+      "status TEXT"
+    );
+    await schemaService.apply(recreatedSchema, ["public"], true);
+
+    const client = await provider.createClient(config);
+    await client.query(`
+      INSERT INTO accounts(displayname, status) VALUES ('next', 'ready')
+    `);
+    const accounts = await client.query(`
+      SELECT id, displayname, status FROM accounts ORDER BY id
+    `);
+    const orders = await client.query(`
+      SELECT id AS "id", accountid AS "accountid" FROM orders ORDER BY id
+    `);
+    const foreignKeyCheck = await client.query("PRAGMA foreign_key_check");
+    await client.end();
+
+    expect(accounts.rows).toEqual([
+      { id: 41, displayname: "kept", status: "1" },
+      { id: 101, displayname: "next", status: "ready" },
+    ]);
+    expect(orders.rows).toEqual([{ id: 1, accountid: 41 }]);
+    expect(foreignKeyCheck.rows).toEqual([]);
+    expect((await schemaService.plan(recreatedSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
 });
 
 describe("SQLite Idempotency", () => {
