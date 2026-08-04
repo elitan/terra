@@ -8,9 +8,9 @@ import type {
 } from "../../types/schema";
 import type { MigrationPlan } from "../../types/migration";
 import {
+  canonicalizeSQLiteForeignKeyDefinition,
   extractSQLiteColumnDefinition,
   parseSQLiteTableDefinition,
-  removeSQLiteForeignKeyTargetColumns,
   replaceSQLiteColumnDefinitionName,
   replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
@@ -350,11 +350,11 @@ export class SQLiteDiffer {
         continue;
       }
       const desiredCanonical = replaceSQLiteColumnDefinitionName(
-        removeSQLiteForeignKeyTargetColumns(column.definition),
+        canonicalizeSQLiteForeignKeyDefinition(column.definition),
         "__terradb_column__"
       );
       const currentCanonical = replaceSQLiteColumnDefinitionName(
-        removeSQLiteForeignKeyTargetColumns(currentColumn),
+        canonicalizeSQLiteForeignKeyDefinition(currentColumn),
         "__terradb_column__"
       );
       if (
@@ -378,7 +378,7 @@ export class SQLiteDiffer {
     const differ = this;
     return definitions.map(function (definition) {
       return differ.normalizeSql(
-        removeSQLiteForeignKeyTargetColumns(definition)
+        canonicalizeSQLiteForeignKeyDefinition(definition)
       ) || "";
     }).sort();
   }

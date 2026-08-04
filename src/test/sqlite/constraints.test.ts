@@ -750,4 +750,68 @@ describe("SQLite Foreign Key Constraints", () => {
     await client.end();
     expect(tables.rows).toEqual([]);
   });
+
+  test("should treat explicit MATCH SIMPLE as the SQLite default", async function () {
+    const defaultSchema = `
+      CREATE TABLE parents (
+        tenant TEXT NOT NULL,
+        id INTEGER NOT NULL,
+        PRIMARY KEY (tenant, id)
+      );
+      CREATE TABLE children (
+        tenant TEXT,
+        parent_id INTEGER,
+        FOREIGN KEY (tenant, parent_id)
+          REFERENCES parents(tenant, id)
+      );
+    `;
+    const explicitSimpleSchema = defaultSchema.replace(
+      "REFERENCES parents(tenant, id)",
+      "REFERENCES parents(tenant, id) MATCH SIMPLE"
+    );
+    const client = await provider.createClient(config);
+    for (const statement of defaultSchema.split(";")) {
+      if (statement.trim()) {
+        await client.query(statement);
+      }
+    }
+    await client.end();
+
+    expect(
+      (await schemaService.plan(explicitSimpleSchema, ["public"])).hasChanges
+    ).toBe(false);
+    expect((await schemaService.plan(defaultSchema, ["public"])).hasChanges)
+      .toBe(false);
+  });
+
+  test("should reject unsupported MATCH modes before database mutation", async function () {
+    const matchFullSchema = `
+      CREATE TABLE surrounding_table (id INTEGER PRIMARY KEY);
+      CREATE TABLE parents (
+        tenant TEXT NOT NULL,
+        id INTEGER NOT NULL,
+        PRIMARY KEY (tenant, id)
+      );
+      CREATE TABLE children (
+        tenant TEXT,
+        parent_id INTEGER,
+        FOREIGN KEY (tenant, parent_id)
+          REFERENCES parents(tenant, id) MATCH FULL
+      );
+    `;
+
+    await expect(
+      schemaService.apply(matchFullSchema, ["public"], true)
+    ).rejects.toThrow("Schema validation failed");
+
+    const client = await provider.createClient(config);
+    const tables = await client.query<{ name: string }>(`
+      SELECT name
+      FROM sqlite_schema
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `);
+    await client.end();
+    expect(tables.rows).toEqual([]);
+  });
 });

@@ -394,6 +394,62 @@ describe("SQLite Unsupported Features Validation", () => {
     expect(provider.validateSchema(parsed).errors).toEqual([]);
   });
 
+  test("should reject foreign key match modes SQLite does not enforce", async function () {
+    const schemaSql = `
+      CREATE TABLE parents (
+        tenant TEXT NOT NULL,
+        id INTEGER NOT NULL,
+        PRIMARY KEY (tenant, id)
+      );
+      CREATE TABLE full_children (
+        tenant TEXT,
+        parent_id INTEGER,
+        FOREIGN KEY (tenant, parent_id)
+          REFERENCES parents(tenant, id) MATCH FULL
+      );
+      CREATE TABLE partial_children (
+        tenant TEXT,
+        parent_id INTEGER,
+        FOREIGN KEY (tenant, parent_id)
+          REFERENCES parents(tenant, id) MATCH PARTIAL
+      );
+    `;
+    const parsed = await provider.parseSchema(schemaSql);
+
+    expect(provider.validateSchema(parsed).errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SQLITE_FOREIGN_KEY_MATCH_UNSUPPORTED",
+          object: "full_children",
+        }),
+        expect.objectContaining({
+          code: "SQLITE_FOREIGN_KEY_MATCH_UNSUPPORTED",
+          object: "partial_children",
+        }),
+      ])
+    );
+
+    const runtimeClient = await provider.createClient({
+      dialect: "sqlite",
+      filename: ":memory:",
+    });
+    try {
+      for (const statement of schemaSql.split(";")) {
+        if (statement.trim()) {
+          await runtimeClient.query(statement);
+        }
+      }
+      await runtimeClient.query(
+        "INSERT INTO full_children(tenant, parent_id) VALUES (?, ?)",
+        [null, 999]
+      );
+      expect((await runtimeClient.query("SELECT * FROM full_children")).rows)
+        .toEqual([{ tenant: null, parent_id: 999 }]);
+    } finally {
+      await runtimeClient.end();
+    }
+  });
+
   test("should collect multiple errors", () => {
     const schema = {
       tables: [],

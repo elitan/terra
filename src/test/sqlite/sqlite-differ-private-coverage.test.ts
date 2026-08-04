@@ -9,6 +9,8 @@ import {
 import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 import {
   extractSQLiteColumnCollations,
+  extractSQLiteForeignKeyMatchClauses,
+  removeSQLiteForeignKeyMatchSimpleClauses,
   removeSQLiteForeignKeyTargetColumns,
 } from "../../providers/sqlite/sql-parser-utils";
 
@@ -81,6 +83,34 @@ describe("SQLiteDiffer private coverage", () => {
       )
     `);
     expect(Array.from(collations.entries())).toEqual([["name", "NOCASE"]]);
+  });
+
+  test("canonicalizes only supported foreign key match clauses", function () {
+    expect(
+      extractSQLiteForeignKeyMatchClauses(`
+        CREATE TABLE children (
+          note TEXT CHECK (note <> 'MATCH FULL'),
+          first_parent_id INTEGER
+            REFERENCES parents(id) MATCH /* semantics */ SIMPLE
+            CONSTRAINT match CHECK (first_parent_id > 0),
+          second_parent_id INTEGER COLLATE "MATCH"
+            REFERENCES parents(id) MATCH [FULL]
+        )
+      `)
+    ).toEqual(["SIMPLE", "FULL"]);
+    expect(
+      removeSQLiteForeignKeyMatchSimpleClauses(
+        "FOREIGN KEY (parent_id) REFERENCES parents(id) " +
+        "MATCH /* semantics */ SIMPLE ON DELETE CASCADE"
+      )
+    ).toBe(
+      "FOREIGN KEY (parent_id) REFERENCES parents(id)  ON DELETE CASCADE"
+    );
+    expect(
+      removeSQLiteForeignKeyMatchSimpleClauses(
+        "FOREIGN KEY (parent_id) REFERENCES parents(id) MATCH FULL"
+      )
+    ).toBe("FOREIGN KEY (parent_id) REFERENCES parents(id) MATCH FULL");
   });
 
   test("detectChanges marks check constraint changes for recreation", () => {

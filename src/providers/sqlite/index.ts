@@ -30,6 +30,7 @@ import { SQLiteDiffer } from "./differ";
 import { MigrationError } from "../../types/errors";
 import { Logger } from "../../utils/logger";
 import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
+import { extractSQLiteForeignKeyMatchClauses } from "./sql-parser-utils";
 
 const UNSUPPORTED_FEATURES: DatabaseFeature[] = [
   "schemas",
@@ -313,6 +314,29 @@ export class SQLiteProvider implements DatabaseProvider {
     }
 
     for (const table of schema.tables) {
+      const matchClauses = new Set(
+        extractSQLiteForeignKeyMatchClauses(table.createStatement || "")
+      );
+      for (const foreignKey of table.foreignKeys || []) {
+        if (foreignKey.matchType) {
+          matchClauses.add(foreignKey.matchType);
+        }
+      }
+      for (const matchClause of matchClauses) {
+        if (matchClause === "SIMPLE") {
+          continue;
+        }
+        errors.push({
+          code: "SQLITE_FOREIGN_KEY_MATCH_UNSUPPORTED",
+          message:
+            `SQLite parses MATCH ${matchClause} on "${table.name}" but ` +
+            "enforces MATCH SIMPLE semantics instead",
+          object: table.name,
+          suggestion:
+            "Remove the MATCH clause or use MATCH SIMPLE explicitly",
+        });
+      }
+
       for (const foreignKey of table.foreignKeys || []) {
         const referencedTableName = normalizeSQLiteIdentifier(
           foreignKey.referencedTable

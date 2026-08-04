@@ -655,6 +655,119 @@ export interface SQLiteTableDefinition {
   constraints: string[];
 }
 
+interface SQLiteForeignKeyMatchClause {
+  name: string;
+  start: number;
+  end: number;
+}
+
+function findSQLiteForeignKeyMatchClauses(
+  definition: string
+): SQLiteForeignKeyMatchClause[] {
+  const clauses: SQLiteForeignKeyMatchClause[] = [];
+  let cursor = 0;
+
+  while (cursor < definition.length) {
+    const skipped = skipQuotedOrComment(definition, cursor);
+    if (skipped !== undefined) {
+      cursor = skipped;
+      continue;
+    }
+    if (!isKeywordAt(definition, cursor, "REFERENCES")) {
+      cursor += 1;
+      continue;
+    }
+
+    const tableStart = cursor + "REFERENCES".length;
+    const referencedTable = readSQLiteIdentifier(
+      definition.slice(tableStart)
+    );
+    if (!referencedTable) {
+      cursor = tableStart;
+      continue;
+    }
+
+    let clauseCursor = tableStart + referencedTable.end;
+    const openParenthesis = skipWhitespaceAndComments(
+      definition,
+      clauseCursor
+    );
+    if (definition[openParenthesis] === "(") {
+      const referencedColumns = readParenthesizedExpression(
+        definition,
+        openParenthesis
+      );
+      clauseCursor = referencedColumns?.end || openParenthesis + 1;
+    }
+
+    while (clauseCursor < definition.length) {
+      const token = readSQLiteToken(definition, clauseCursor);
+      if (!token) {
+        break;
+      }
+      if (token.kind === "symbol" && token.value === "(") {
+        const expression = readParenthesizedExpression(
+          definition,
+          token.start
+        );
+        clauseCursor = expression?.end || token.end;
+        continue;
+      }
+      if (isWord(token, "CONSTRAINT") || isWord(token, "COLLATE")) {
+        clauseCursor = readSQLiteToken(definition, token.end)?.end || token.end;
+        continue;
+      }
+      if (isWord(token, "MATCH")) {
+        const matchName = readSQLiteIdentifier(definition.slice(token.end));
+        if (matchName) {
+          clauses.push({
+            name: matchName.name.toUpperCase(),
+            start: token.start,
+            end: token.end + matchName.end,
+          });
+          clauseCursor = token.end + matchName.end;
+          continue;
+        }
+      }
+      clauseCursor = token.end;
+    }
+
+    cursor = definition.length;
+  }
+
+  return clauses;
+}
+
+export function extractSQLiteForeignKeyMatchClauses(sql: string): string[] {
+  return splitSQLiteTableDefinitions(sql).flatMap(function (definition) {
+    return findSQLiteForeignKeyMatchClauses(definition).map(function (clause) {
+      return clause.name;
+    });
+  });
+}
+
+export function removeSQLiteForeignKeyMatchSimpleClauses(
+  definition: string
+): string {
+  const ranges = findSQLiteForeignKeyMatchClauses(definition)
+    .filter(function (clause) {
+      return clause.name === "SIMPLE";
+    });
+  let result = definition;
+  for (const range of ranges.reverse()) {
+    result = result.slice(0, range.start) + result.slice(range.end);
+  }
+  return result;
+}
+
+export function canonicalizeSQLiteForeignKeyDefinition(
+  definition: string
+): string {
+  return removeSQLiteForeignKeyMatchSimpleClauses(
+    removeSQLiteForeignKeyTargetColumns(definition)
+  );
+}
+
 export function removeSQLiteForeignKeyTargetColumns(
   definition: string
 ): string {
