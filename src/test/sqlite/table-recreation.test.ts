@@ -1,10 +1,20 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { SQLiteProvider } from "../../providers/sqlite";
 import { SchemaService } from "../../core/schema/service";
-import type { SQLiteConnectionConfig } from "../../providers/types";
+import type {
+  DatabaseClient,
+  SQLiteConnectionConfig,
+} from "../../providers/types";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+
+async function getForeignKeysSetting(client: DatabaseClient): Promise<number> {
+  const result = await client.query<{ foreign_keys: number }>(
+    "PRAGMA foreign_keys"
+  );
+  return result.rows[0]?.foreign_keys ?? -1;
+}
 
 describe("SQLite Table Recreation", () => {
   let provider: SQLiteProvider;
@@ -183,6 +193,92 @@ describe("SQLite Table Recreation", () => {
       client.query(`INSERT INTO posts (id, user_id) VALUES (2, 999)`)
     ).rejects.toThrow("FOREIGN KEY constraint failed");
     await client.end();
+  });
+
+  test("should restore the caller's foreign_keys setting after success and rollback", async function () {
+    const initialSchema = `
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        age INTEGER
+      );
+
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+    `;
+    const desired = await provider.parseSchema(
+      initialSchema.replace("age INTEGER", "age TEXT")
+    );
+
+    for (const initialSetting of [0, 1]) {
+      const client = await provider.createClient({
+        dialect: "sqlite",
+        filename: ":memory:",
+      });
+      await client.query("CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)");
+      await client.query(`
+        CREATE TABLE posts (
+          id INTEGER PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `);
+      await client.query("INSERT INTO users(id, age) VALUES (1, 10)");
+      await client.query("INSERT INTO posts(id, user_id) VALUES (1, 1)");
+
+      const current = await provider.getCurrentSchema(client);
+      const migration = provider.generateMigrationPlan(desired.tables, current);
+      await client.query(`PRAGMA foreign_keys = ${initialSetting}`);
+      if (initialSetting === 0) {
+        await client.query("UPDATE posts SET user_id = 999 WHERE id = 1");
+      }
+
+      await provider.executeInTransaction(client, migration.transactional);
+      expect(await getForeignKeysSetting(client)).toBe(initialSetting);
+      const violations = await client.query("PRAGMA foreign_key_check");
+      expect(violations.rows).toHaveLength(initialSetting === 0 ? 1 : 0);
+
+      const failingStatements = [...migration.transactional];
+      failingStatements.splice(
+        failingStatements.length - 1,
+        0,
+        "INSERT INTO missing_table DEFAULT VALUES;"
+      );
+      await expect(
+        provider.executeInTransaction(client, failingStatements)
+      ).rejects.toThrow("missing_table");
+      expect(await getForeignKeysSetting(client)).toBe(initialSetting);
+
+      if (initialSetting === 1) {
+        const integrityFailureStatements = [...migration.transactional];
+        integrityFailureStatements.splice(
+          integrityFailureStatements.length - 1,
+          0,
+          "UPDATE posts SET user_id = 999 WHERE id = 1;"
+        );
+        await expect(
+          provider.executeInTransaction(client, integrityFailureStatements)
+        ).rejects.toThrow("Foreign key integrity check failed");
+        expect(await getForeignKeysSetting(client)).toBe(1);
+      }
+
+      const rows = await client.query(`
+        SELECT users.id, users.age, posts.user_id
+        FROM users
+        JOIN posts ON posts.id = users.id
+        ORDER BY users.id
+      `);
+      expect(rows.rows).toEqual([
+        {
+          id: 1,
+          age: "10",
+          user_id: initialSetting === 0 ? 999 : 1,
+        },
+      ]);
+      await client.end();
+    }
   });
 
   test("should avoid collisions with user tables named like recreation artifacts", async function () {
