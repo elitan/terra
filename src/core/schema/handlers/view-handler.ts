@@ -191,7 +191,41 @@ function postgresViewDefinitionNeedsUpdate(
     normalizeDefinition(desiredDefinition, desired.schema) !==
       normalizeDefinition(currentDefinition, current.schema) ||
     desired.checkOption !== current.checkOption ||
-    desired.securityBarrier !== current.securityBarrier;
+    (desired.securityBarrier ?? false) !==
+      (current.securityBarrier ?? false) ||
+    (desired.securityInvoker ?? false) !==
+      (current.securityInvoker ?? false);
+}
+
+function validateSecurityInvokerSupport(
+  desiredViews: View[],
+  context: MigrationContext
+): void {
+  const unsupportedView = desiredViews.find(function findSecurityInvoker(view) {
+    return !view.materialized && view.securityInvoker !== undefined;
+  });
+  if (!unsupportedView) {
+    return;
+  }
+
+  const qualifiedName = `${unsupportedView.schema || "public"}.${unsupportedView.name}`;
+  if (context.postgresVersionNum === undefined) {
+    throw new ValidationError(
+      `Cannot safely manage security_invoker view ${qualifiedName} without the PostgreSQL server version`,
+      qualifiedName,
+      "securityInvoker",
+      unsupportedView.securityInvoker
+    );
+  }
+  if (context.postgresVersionNum < 150000) {
+    const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+    throw new ValidationError(
+      `PostgreSQL ${serverMajor} does not support security_invoker views; PostgreSQL 15 or newer is required for ${qualifiedName}`,
+      qualifiedName,
+      "securityInvoker",
+      unsupportedView.securityInvoker
+    );
+  }
 }
 
 function postgresViewWillBeRecreated(desired: View, current: View): boolean {
@@ -570,6 +604,9 @@ export class ViewHandler {
   ): string[] {
     const usesCreateStatements = desiredViews.some(hasCreateStatement) ||
       currentViews.some(hasCreateStatement);
+    if (!usesCreateStatements) {
+      validateSecurityInvokerSupport(desiredViews, context);
+    }
     const statements = generateStatements(
       desiredViews,
       currentViews,

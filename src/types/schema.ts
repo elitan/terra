@@ -163,6 +163,7 @@ export interface View {
   accessMethod?: string; // Materialized view table access method
   checkOption?: 'CASCADED' | 'LOCAL'; // WITH CHECK OPTION
   securityBarrier?: boolean; // security_barrier option
+  securityInvoker?: boolean; // security_invoker option (PostgreSQL 15+)
   dependencies?: string[]; // Tables/views this view depends on
 }
 

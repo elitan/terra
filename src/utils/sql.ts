@@ -910,6 +910,27 @@ function appendViewColumnNames(builder: SQLBuilder, view: View): void {
   builder.p(`(${columnNames.join(", ")})`);
 }
 
+function appendOrdinaryViewOptions(builder: SQLBuilder, view: View): void {
+  if (view.materialized) {
+    return;
+  }
+
+  const options: string[] = [];
+  if (view.securityBarrier !== undefined) {
+    options.push(
+      `security_barrier = ${view.securityBarrier ? "true" : "false"}`
+    );
+  }
+  if (view.securityInvoker !== undefined) {
+    options.push(
+      `security_invoker = ${view.securityInvoker ? "true" : "false"}`
+    );
+  }
+  if (options.length > 0) {
+    builder.p(`WITH (${options.join(", ")})`);
+  }
+}
+
 export function generateCreateViewSQL(view: View): string {
   const builder = new SQLBuilder();
 
@@ -936,9 +957,7 @@ export function generateCreateViewSQL(view: View): string {
     builder.p("TABLESPACE").ident(view.tablespace);
   }
 
-  if (!view.materialized && view.securityBarrier !== undefined) {
-    builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
-  }
+  appendOrdinaryViewOptions(builder, view);
 
   builder.p(`AS ${cleanViewDefinition(view.definition)}`);
 
@@ -978,9 +997,7 @@ export function generateCreateOrReplaceViewSQL(view: View): string {
     .table(view.name, view.schema);
   appendViewColumnNames(builder, view);
 
-  if (view.securityBarrier !== undefined) {
-    builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
-  }
+  appendOrdinaryViewOptions(builder, view);
 
   builder.p(`AS ${cleanViewDefinition(view.definition)}`);
 

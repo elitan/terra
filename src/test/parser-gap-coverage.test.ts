@@ -144,7 +144,7 @@ describe("Parser gap coverage", function () {
   });
 
   test("covers view security_barrier option value variants", function () {
-    const cases: Array<{ arg: Record<string, unknown>; expected: boolean | undefined }> = [
+    const cases: Array<{ arg: Record<string, unknown>; expected: boolean }> = [
       { arg: { Integer: { ival: 1 } }, expected: true },
       { arg: { Integer: { ival: 0 } }, expected: false },
       { arg: { A_Const: { String: { sval: "on" } } }, expected: true },
@@ -154,12 +154,20 @@ describe("Parser gap coverage", function () {
       { arg: { A_Const: { Integer: { ival: 1 } } }, expected: true },
       { arg: { TypeName: { names: [{ String: { sval: "on" } }] } }, expected: true },
       { arg: { TypeName: { names: [{ String: { sval: "off" } }] } }, expected: false },
-      { arg: { String: { sval: "unknown" } }, expected: undefined },
     ];
 
     for (const item of cases) {
       const parsed = parseCreateView(makeViewStmt(item.arg), "");
       expect(parsed?.securityBarrier).toBe(item.expected);
     }
+
+    expect(function parseInvalidBoolean() {
+      return parseCreateView(
+        makeViewStmt({ String: { sval: "unknown" } }),
+        ""
+      );
+    }).toThrow(
+      'PostgreSQL view option "security_barrier" requires a boolean value'
+    );
   });
 });

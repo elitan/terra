@@ -341,6 +341,7 @@ function normalizeSnapshot(input: any): unknown {
       definition: normalizeSpace(String(view.definition || "")),
       checkOption: view.checkOption,
       securityBarrier: view.securityBarrier,
+      securityInvoker: view.securityInvoker,
       indexes: (view.indexes || []).map(function mapViewIndex(index: any) {
         return {
           name: index.name,

@@ -67,6 +67,22 @@ const COLUMN_COLLATION_JOIN_SQL = `
     ON column_collation_namespace.oid = column_collation.collnamespace
 `;
 
+function parseBooleanRelationOption(
+  options: string[] | null,
+  name: string
+): boolean | undefined {
+  if (!Array.isArray(options)) {
+    return undefined;
+  }
+  const option = options.find(function findOption(candidate) {
+    return candidate.startsWith(`${name}=`);
+  });
+  if (!option) {
+    return undefined;
+  }
+  return option.slice(name.length + 1) === "true";
+}
+
 export class DatabaseInspector {
   async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
     const tables: Table[] = [];
@@ -1052,14 +1068,19 @@ export class DatabaseInspector {
         view.checkOption = row.check_option as 'CASCADED' | 'LOCAL';
       }
 
-      if (Array.isArray(row.reloptions)) {
-        const securityBarrierOption = row.reloptions.find((option: string) =>
-          option.startsWith("security_barrier=")
-        );
-        if (securityBarrierOption) {
-          const [, value] = securityBarrierOption.split("=");
-          view.securityBarrier = value === "true";
-        }
+      const securityBarrier = parseBooleanRelationOption(
+        row.reloptions,
+        "security_barrier"
+      );
+      if (securityBarrier !== undefined) {
+        view.securityBarrier = securityBarrier;
+      }
+      const securityInvoker = parseBooleanRelationOption(
+        row.reloptions,
+        "security_invoker"
+      );
+      if (securityInvoker !== undefined) {
+        view.securityInvoker = securityInvoker;
       }
 
       views.push(view);

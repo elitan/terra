@@ -494,7 +494,7 @@ export class SchemaParser {
             compositeTypes.push(compositeType);
           }
         } else if (stmt.ViewStmt) {
-          const view = parseCreateView(stmt.ViewStmt, sql);
+          const view = parseCreateView(stmt.ViewStmt, sql, filePath);
           if (view) {
             views.push(view);
           }

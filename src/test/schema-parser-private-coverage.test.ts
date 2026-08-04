@@ -44,6 +44,33 @@ describe("SchemaParser private coverage", () => {
     expect(parsed).toEqual(views);
   });
 
+  test("normalizes index collations against the referenced column", function () {
+    const parser = new SchemaParser() as any;
+    const table = {
+      name: "documents",
+      columns: [
+        { name: "title", type: "text", nullable: true, collation: { name: "C" } },
+        { name: "summary", type: "text", nullable: true, collation: { name: "POSIX" } },
+      ],
+    };
+    const index: Index = {
+      name: "documents_summary_idx",
+      tableName: "documents",
+      columns: ["summary"],
+      collations: [{ name: "POSIX" }],
+    };
+
+    parser.normalizeIndexCollations(index, table);
+
+    expect(index.collations).toBeUndefined();
+    expect(parser.getExpressionNaturalCollation("'fixed'::text", table)).toEqual({
+      name: "default",
+    });
+    expect(parser.getExpressionNaturalCollation("lower(summary)", table)).toEqual({
+      name: "POSIX",
+    });
+  });
+
   test("extractErrorContext returns empty when token is not found", function () {
     const parser = new SchemaParser() as any;
     const result = parser.extractErrorContext('syntax error at or near "missing"', "CREATE TABLE users (id INT)");

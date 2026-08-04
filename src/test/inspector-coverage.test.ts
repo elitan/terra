@@ -116,7 +116,10 @@ describe("DatabaseInspector coverage", () => {
               view_definition: " SELECT id FROM users ",
               column_names: ["id"],
               check_option: "LOCAL",
-              reloptions: ["security_barrier=true"],
+              reloptions: [
+                "security_barrier=true",
+                "security_invoker=true",
+              ],
               is_updatable: "YES",
               is_insertable_into: "YES",
             },
@@ -229,6 +232,7 @@ describe("DatabaseInspector coverage", () => {
         columnNames: ["id"],
         checkOption: "LOCAL",
         securityBarrier: true,
+        securityInvoker: true,
       },
       {
         name: "v_orders",
