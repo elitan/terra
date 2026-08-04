@@ -6,6 +6,7 @@ import {
   hasSQLiteTableRecreation,
   isSQLiteRecreationTableStatement,
 } from "../../utils/sqlite-recreation";
+import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 
 function makeTable(overrides: Partial<Table> = {}): Table {
   return {
@@ -17,6 +18,7 @@ function makeTable(overrides: Partial<Table> = {}): Table {
 
 describe("SQLiteDiffer private coverage", () => {
   test("selects and recognizes collision-safe recreation table names", function () {
+    expect(normalizeSQLiteIdentifier("MiXeD_Ä")).toBe("mixed_Ä");
     expect(
       chooseSQLiteRecreationTableName(
         "users",

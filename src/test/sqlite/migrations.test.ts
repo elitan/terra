@@ -274,6 +274,86 @@ describe("SQLite Foreign Key Evolution", () => {
     expect(posts?.foreignKeys || []).toHaveLength(0);
   });
 
+  test("should drop related tables without foreign-key order failures", async function () {
+    await schemaService.apply(`
+      CREATE TABLE accounts (id INTEGER PRIMARY KEY);
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
+    `, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query("INSERT INTO accounts(id) VALUES (1)");
+    await seedClient.query("INSERT INTO orders(id, account_id) VALUES (1, 1)");
+    await seedClient.end();
+
+    const migration = await schemaService.apply("", ["public"], true);
+    expect(migration.transactional).toEqual([
+      'DROP TABLE IF EXISTS "accounts";',
+      'DROP TABLE IF EXISTS "orders";',
+    ]);
+
+    const client = await provider.createClient(config);
+    const tables = await client.query<{ name: string }>(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+      ORDER BY name
+    `);
+    const foreignKeys = await client.query("PRAGMA foreign_key_check");
+    const foreignKeysSetting = await client.query<{ foreign_keys: number }>(
+      "PRAGMA foreign_keys"
+    );
+    await client.end();
+
+    expect(tables.rows).toEqual([]);
+    expect(foreignKeys.rows).toEqual([]);
+    expect(foreignKeysSetting.rows).toEqual([{ foreign_keys: 1 }]);
+  });
+
+  test("should reject a desired foreign key whose parent table is missing", async function () {
+    const initialSchema = `
+      CREATE TABLE accounts (id INTEGER PRIMARY KEY);
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER,
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
+    `;
+    const invalidSchema = `
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER,
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const parsed = await provider.parseSchema(invalidSchema);
+    const validation = provider.validateSchema(parsed);
+    expect(validation.errors).toContainEqual(
+      expect.objectContaining({
+        code: "SQLITE_FOREIGN_KEY_TARGET_MISSING",
+        object: "orders.account_id",
+      })
+    );
+    await expect(
+      schemaService.apply(invalidSchema, ["public"], true)
+    ).rejects.toThrow("Schema validation failed");
+
+    const client = await provider.createClient(config);
+    const tables = await client.query<{ name: string }>(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name IN ('accounts', 'orders')
+      ORDER BY name
+    `);
+    await client.end();
+    expect(tables.rows).toEqual([{ name: "accounts" }, { name: "orders" }]);
+  });
+
   test("should change ON DELETE action", async () => {
     await schemaService.apply(`
       CREATE TABLE users (id INTEGER PRIMARY KEY);

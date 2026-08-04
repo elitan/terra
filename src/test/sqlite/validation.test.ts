@@ -253,6 +253,37 @@ describe("SQLite Unsupported Features Validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
+  test("should validate foreign key targets with SQLite identifier folding", async function () {
+    const asciiCaseVariant = await provider.parseSchema(`
+      CREATE TABLE "Accounts" (id INTEGER PRIMARY KEY);
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER,
+        FOREIGN KEY (account_id) REFERENCES accounts(id)
+      );
+    `);
+    expect(
+      provider.validateSchema(asciiCaseVariant).errors.some(function (error) {
+        return error.code === "SQLITE_FOREIGN_KEY_TARGET_MISSING";
+      })
+    ).toBe(false);
+
+    const distinctUnicodeNames = await provider.parseSchema(`
+      CREATE TABLE "Äccounts" (id INTEGER PRIMARY KEY);
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER,
+        FOREIGN KEY (account_id) REFERENCES "äccounts"(id)
+      );
+    `);
+    expect(provider.validateSchema(distinctUnicodeNames).errors).toContainEqual(
+      expect.objectContaining({
+        code: "SQLITE_FOREIGN_KEY_TARGET_MISSING",
+        object: "orders.account_id",
+      })
+    );
+  });
+
   test("should collect multiple errors", () => {
     const schema = {
       tables: [],

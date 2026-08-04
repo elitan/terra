@@ -28,7 +28,7 @@ import { SQLiteParser } from "./parser";
 import { SQLiteDiffer } from "./differ";
 import { MigrationError } from "../../types/errors";
 import { Logger } from "../../utils/logger";
-import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
+import { normalizeSQLiteIdentifier } from "../../utils/sqlite-identifier";
 
 const UNSUPPORTED_FEATURES: DatabaseFeature[] = [
   "schemas",
@@ -155,6 +155,11 @@ export class SQLiteProvider implements DatabaseProvider {
 
   validateSchema(schema: ParsedSchema): ValidationResult {
     const errors: ValidationError[] = [];
+    const tableNames = new Set(
+      schema.tables.map(function (table) {
+        return normalizeSQLiteIdentifier(table.name);
+      })
+    );
 
     if (schema.schemas && schema.schemas.length > 0) {
       errors.push({
@@ -213,6 +218,24 @@ export class SQLiteProvider implements DatabaseProvider {
     }
 
     for (const table of schema.tables) {
+      for (const foreignKey of table.foreignKeys || []) {
+        const referencedTableName = normalizeSQLiteIdentifier(
+          foreignKey.referencedTable
+        );
+        if (!tableNames.has(referencedTableName)) {
+          errors.push({
+            code: "SQLITE_FOREIGN_KEY_TARGET_MISSING",
+            message:
+              `Foreign key on "${table.name}" references missing table ` +
+              `"${foreignKey.referencedTable}"`,
+            object: `${table.name}.${foreignKey.columns.join(",")}`,
+            suggestion:
+              `Add CREATE TABLE "${foreignKey.referencedTable}" or remove ` +
+              "the foreign key",
+          });
+        }
+      }
+
       for (const index of table.indexes || []) {
         if (index.type && index.type !== "btree") {
           errors.push({
@@ -333,11 +356,9 @@ export class SQLiteProvider implements DatabaseProvider {
   }
 
   private requiresForeignKeySuspension(statements: string[]): boolean {
-    const hasTempRecreateTable = hasSQLiteTableRecreation(statements);
-    const hasDropTable = statements.some((statement) =>
-      /^DROP TABLE\s+/i.test(statement.trim())
-    );
-    return hasTempRecreateTable && hasDropTable;
+    return statements.some(function (statement) {
+      return /^DROP TABLE\s+/i.test(statement.trim());
+    });
   }
 }
 

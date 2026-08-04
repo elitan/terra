@@ -1,3 +1,5 @@
+import { normalizeSQLiteIdentifier } from "./sqlite-identifier";
+
 const SQLITE_RECREATION_TABLE_PATTERN =
   /^CREATE\s+(?:VIRTUAL\s+)?TABLE\s+"_(?:""|[^"])+_new(?:_\d+)?"(?=\s*(?:\(|USING\b))/i;
 
@@ -8,13 +10,13 @@ export function chooseSQLiteRecreationTableName(
   const baseName = `_${tableName}_new`;
   const normalizedOccupiedNames = new Set(
     [...occupiedNames].map(function (name) {
-      return name.toLowerCase();
+      return normalizeSQLiteIdentifier(name);
     })
   );
   let candidate = baseName;
   let suffix = 2;
 
-  while (normalizedOccupiedNames.has(candidate.toLowerCase())) {
+  while (normalizedOccupiedNames.has(normalizeSQLiteIdentifier(candidate))) {
     candidate = `${baseName}_${suffix}`;
     suffix += 1;
   }
@@ -38,7 +40,9 @@ export function hasSQLiteTableRecreation(
       /^CREATE\s+(?:VIRTUAL\s+)?TABLE\s+"((?:""|[^"])+)"/i
     );
     if (match?.[1]) {
-      temporaryTableNames.add(match[1].replace(/""/g, '"').toLowerCase());
+      temporaryTableNames.add(
+        normalizeSQLiteIdentifier(match[1].replace(/""/g, '"'))
+      );
     }
   }
 
@@ -48,7 +52,9 @@ export function hasSQLiteTableRecreation(
     );
     return Boolean(
       match?.[1] &&
-        temporaryTableNames.has(match[1].replace(/""/g, '"').toLowerCase())
+        temporaryTableNames.has(
+          normalizeSQLiteIdentifier(match[1].replace(/""/g, '"'))
+        )
     );
   });
 }
