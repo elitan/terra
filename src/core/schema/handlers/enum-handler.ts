@@ -6,6 +6,7 @@ import {
   generateDropTypeSQL,
   quotePostgresStringLiteral,
 } from "../../../utils/sql";
+import type { PostgresTypeStatement } from "./postgres-type-ordering";
 
 function getEnumKey(enumType: EnumType): string {
   return `${enumType.schema || "public"}.${enumType.name}`;
@@ -30,9 +31,11 @@ export class EnumHandler {
   generateStatements(desiredEnums: EnumType[], currentEnums: EnumType[]): {
     transactional: string[];
     preTransactional: string[];
+    typeStatements: PostgresTypeStatement[];
   } {
     const transactional: string[] = [];
     const preTransactional: string[] = [];
+    const typeStatements: PostgresTypeStatement[] = [];
     const currentEnumMap = new Map(currentEnums.map((enumType) => [getEnumKey(enumType), enumType]));
 
     for (const desiredEnum of desiredEnums) {
@@ -40,7 +43,13 @@ export class EnumHandler {
       const currentEnum = currentEnumMap.get(getEnumKey(desiredEnum));
 
       if (!currentEnum) {
-        transactional.push(generateCreateTypeSQL(desiredEnum));
+        const statement = generateCreateTypeSQL(desiredEnum);
+        transactional.push(statement);
+        typeStatements.push({
+          name: desiredEnum.name,
+          schema: desiredEnum.schema,
+          statement,
+        });
       } else {
         const currentValues = currentEnum.values;
         const desiredValues = desiredEnum.values;
@@ -54,19 +63,34 @@ export class EnumHandler {
       }
     }
 
-    return { transactional, preTransactional };
+    return { transactional, preTransactional, typeStatements };
   }
 
   generateRemovalStatements(
     desiredEnums: EnumType[],
     currentEnums: EnumType[]
   ): string[] {
-    const statements: string[] = [];
+    return this.generateRemovalTypeStatements(desiredEnums, currentEnums).map(
+      function getStatement(item) {
+        return item.statement;
+      }
+    );
+  }
+
+  generateRemovalTypeStatements(
+    desiredEnums: EnumType[],
+    currentEnums: EnumType[]
+  ): PostgresTypeStatement[] {
+    const statements: PostgresTypeStatement[] = [];
     const desiredEnumNames = new Set(desiredEnums.map((enumType) => getEnumKey(enumType)));
 
     for (const currentEnum of currentEnums) {
       if (!desiredEnumNames.has(getEnumKey(currentEnum))) {
-        statements.push(generateDropTypeSQL(currentEnum.name, currentEnum.schema));
+        statements.push({
+          name: currentEnum.name,
+          schema: currentEnum.schema,
+          statement: generateDropTypeSQL(currentEnum.name, currentEnum.schema),
+        });
         Logger.info(`Dropping ENUM type '${currentEnum.name}'`);
       }
     }

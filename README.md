@@ -219,6 +219,11 @@ same apply fails before mutation with instructions to apply the prerequisite
 first (canonical functions additionally require PostgreSQL's shell-type
 workflow). Range and multirange removal also uses dependency-ordered
 `RESTRICT` drops.
+Enums, composites, domains, ranges, and generated multiranges share one
+schema-qualified dependency graph. TerraDB therefore orders same-apply type
+creation and composite alteration from referenced type to dependent type,
+orders coordinated removal in reverse, and rejects cross-family cycles,
+ambiguous references, and generated-name collisions before mutation.
 
 ## Commands
 

@@ -20,6 +20,7 @@ import {
   getCompositeTypeKey,
   sortCompositeTypesForCreation,
 } from "./composite-type-dependencies";
+import type { PostgresTypeStatement } from "./postgres-type-ordering";
 
 function quoteIdentifier(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
@@ -130,8 +131,10 @@ export class CompositeTypeHandler {
   ): {
     transactional: string[];
     concurrent: string[];
+    typeStatements: PostgresTypeStatement[];
   } {
     const transactional: string[] = [];
+    const typeStatements: PostgresTypeStatement[] = [];
     const currentCompositeTypeMap = new Map(
       currentCompositeTypes.map(function mapCurrent(compositeType) {
         return [getCompositeTypeKey(compositeType), compositeType];
@@ -147,7 +150,13 @@ export class CompositeTypeHandler {
       );
 
       if (!currentCompositeType) {
-        transactional.push(generateCreateCompositeTypeSQL(desiredCompositeType));
+        const statement = generateCreateCompositeTypeSQL(desiredCompositeType);
+        transactional.push(statement);
+        typeStatements.push({
+          name: desiredCompositeType.name,
+          schema: desiredCompositeType.schema,
+          statement,
+        });
         continue;
       }
 
@@ -157,16 +166,24 @@ export class CompositeTypeHandler {
           currentCompositeType.attributes
         )
       ) {
-        transactional.push(
-          ...this.generateModificationStatements(
-            desiredCompositeType,
-            currentCompositeType
-          )
+        const statements = this.generateModificationStatements(
+          desiredCompositeType,
+          currentCompositeType
+        );
+        transactional.push(...statements);
+        typeStatements.push(
+          ...statements.map(function mapStatement(statement) {
+            return {
+              name: desiredCompositeType.name,
+              schema: desiredCompositeType.schema,
+              statement,
+            };
+          })
         );
       }
     }
 
-    return { transactional, concurrent: [] };
+    return { transactional, concurrent: [], typeStatements };
   }
 
   generateRemovalStatements(
@@ -177,6 +194,26 @@ export class CompositeTypeHandler {
     desiredSqlObjects: SqlObject[] = [],
     desiredViews: View[] = []
   ): string[] {
+    return this.generateRemovalTypeStatements(
+      desiredCompositeTypes,
+      currentCompositeTypes,
+      desiredTables,
+      managedSchemas,
+      desiredSqlObjects,
+      desiredViews
+    ).map(function getStatement(item) {
+      return item.statement;
+    });
+  }
+
+  generateRemovalTypeStatements(
+    desiredCompositeTypes: CompositeType[],
+    currentCompositeTypes: CompositeType[],
+    desiredTables: Table[] = [],
+    managedSchemas: string[] = ["public"],
+    desiredSqlObjects: SqlObject[] = [],
+    desiredViews: View[] = []
+  ): PostgresTypeStatement[] {
     const desiredCompositeTypeNames = new Set(
       desiredCompositeTypes.map(function getDesiredKey(compositeType) {
         return getCompositeTypeKey(compositeType);
@@ -240,7 +277,14 @@ export class CompositeTypeHandler {
     return sortCompositeTypesForCreation(removedTypes)
       .reverse()
       .map(function generateDrop(compositeType) {
-        return generateDropTypeSQL(compositeType.name, compositeType.schema);
+        return {
+          name: compositeType.name,
+          schema: compositeType.schema,
+          statement: generateDropTypeSQL(
+            compositeType.name,
+            compositeType.schema
+          ),
+        };
       });
   }
 

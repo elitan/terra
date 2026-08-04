@@ -20,6 +20,7 @@ import {
   rangeDefinitionsAreEqual,
   type PostgresTypeObjectContext,
 } from "./postgres-type-object-handler";
+import type { PostgresTypeStatement } from "./postgres-type-ordering";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -32,8 +33,15 @@ type SqlObjectPlan = {
   typeReplaceDrop: string[];
   typeAlter: string[];
   typeDrop: string[];
+  typeCreateOperations: PostgresTypeStatement[];
+  typeDropOperations: PostgresTypeStatement[];
   lateDrop: string[];
 };
+
+type SqlObjectStatementBucket = Exclude<
+  keyof SqlObjectPlan,
+  "typeCreateOperations" | "typeDropOperations"
+>;
 
 type CanonicalSqlObject = {
   normalized: string;
@@ -286,7 +294,7 @@ function getPartitionBoundReplacement(
   };
 }
 
-function getCreateBucket(kind: SqlObjectKind): keyof SqlObjectPlan {
+function getCreateBucket(kind: SqlObjectKind): SqlObjectStatementBucket {
   if (kind === "role" || kind === "user") {
     return "bootstrapCreate";
   }
@@ -305,7 +313,7 @@ function getCreateBucket(kind: SqlObjectKind): keyof SqlObjectPlan {
   return "finalCreate";
 }
 
-function getDropBucket(kind: SqlObjectKind): keyof SqlObjectPlan {
+function getDropBucket(kind: SqlObjectKind): SqlObjectStatementBucket {
   if (kind === "domain-type" || kind === "range-type") {
     return "typeDrop";
   }
@@ -366,10 +374,11 @@ function sortKeys(objects: SqlObject[], reverse: boolean): SqlObject[] {
 
 function pushStatements(
   target: SqlObjectPlan,
-  bucket: keyof SqlObjectPlan,
+  bucket: SqlObjectStatementBucket,
   objects: SqlObject[],
   useDrop: boolean
-): void {
+): PostgresTypeStatement[] {
+  const operations: PostgresTypeStatement[] = [];
   const ordered = sortKeys(addInferredTypeDependencies(objects), useDrop);
   for (const item of ordered) {
     const statement = useDrop ? item.dropStatement : item.createStatement;
@@ -377,7 +386,13 @@ function pushStatements(
       continue;
     }
     target[bucket].push(statement);
+    operations.push({
+      name: item.name,
+      schema: item.schema,
+      statement,
+    });
   }
+  return operations;
 }
 
 export class SqlObjectHandler {
@@ -397,6 +412,8 @@ export class SqlObjectHandler {
       typeReplaceDrop: [],
       typeAlter: [],
       typeDrop: [],
+      typeCreateOperations: [],
+      typeDropOperations: [],
       lateDrop: [],
     };
 
@@ -417,8 +434,8 @@ export class SqlObjectHandler {
     );
     const replacementDesiredKeys = new Set<string>();
 
-    const dropsByBucket = new Map<keyof SqlObjectPlan, SqlObject[]>();
-    const createsByBucket = new Map<keyof SqlObjectPlan, SqlObject[]>();
+    const dropsByBucket = new Map<SqlObjectStatementBucket, SqlObject[]>();
+    const createsByBucket = new Map<SqlObjectStatementBucket, SqlObject[]>();
     const canonicalObjects = new Map<SqlObject, CanonicalSqlObject>();
 
     await Promise.all(
@@ -428,8 +445,8 @@ export class SqlObjectHandler {
     );
 
     function addToBucket(
-      buckets: Map<keyof SqlObjectPlan, SqlObject[]>,
-      bucket: keyof SqlObjectPlan,
+      buckets: Map<SqlObjectStatementBucket, SqlObject[]>,
+      bucket: SqlObjectStatementBucket,
       item: SqlObject
     ): void {
       const list = buckets.get(bucket) || [];
@@ -586,11 +603,17 @@ export class SqlObjectHandler {
     }
 
     for (const [bucket, objects] of dropsByBucket) {
-      pushStatements(plan, bucket, objects, true);
+      const operations = pushStatements(plan, bucket, objects, true);
+      if (bucket === "typeDrop") {
+        plan.typeDropOperations.push(...operations);
+      }
     }
 
     for (const [bucket, objects] of createsByBucket) {
-      pushStatements(plan, bucket, objects, false);
+      const operations = pushStatements(plan, bucket, objects, false);
+      if (bucket === "typeCreate") {
+        plan.typeCreateOperations.push(...operations);
+      }
     }
 
     plan.earlyDrop = dedupeStatements(plan.earlyDrop);
@@ -604,9 +627,24 @@ export class SqlObjectHandler {
     plan.postTableCreate = dedupeStatements(plan.postTableCreate);
     plan.postRoutineCreate = dedupeStatements(plan.postRoutineCreate);
     plan.finalCreate = dedupeStatements(plan.finalCreate);
+    plan.typeCreateOperations = dedupeTypeStatements(
+      plan.typeCreateOperations
+    );
+    plan.typeDropOperations = dedupeTypeStatements(plan.typeDropOperations);
 
     return plan;
   }
+}
+
+function dedupeTypeStatements(
+  statements: PostgresTypeStatement[]
+): PostgresTypeStatement[] {
+  const seen = new Set<string>();
+  return statements.filter(function isFirst(item) {
+    if (seen.has(item.statement)) return false;
+    seen.add(item.statement);
+    return true;
+  });
 }
 
 function dedupeStatements(statements: string[]): string[] {

@@ -18,6 +18,7 @@ import {
   attributeDependentIsRetained,
   parseTypeReference,
 } from "./composite-type-dependencies";
+import { getAutomaticMultirangeName } from "./postgres-type-ordering";
 
 export type PostgresTypeObjectContext = {
   desiredTables?: Table[];
@@ -83,12 +84,6 @@ function rangeOperatorClassesAreEqual(
     current.subtypeOperatorClass,
     localSchema
   );
-}
-
-function getAutomaticMultirangeName(rangeName: string): string {
-  return rangeName.includes("range")
-    ? rangeName.replace("range", "multirange")
-    : `${rangeName}_multirange`;
 }
 
 function multirangeNamesAreEqual(

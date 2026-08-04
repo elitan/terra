@@ -25,6 +25,10 @@ import {
   TriggerHandler,
   ViewHandler,
 } from "./handlers";
+import {
+  orderPostgresTypeStatements,
+  type PostgresTypeStatement,
+} from "./handlers/postgres-type-ordering";
 
 export class SchemaService {
   private provider: DatabaseProvider;
@@ -453,9 +457,9 @@ export class SchemaService {
     let schemaStatements: string[] = [];
     let extensionCreateStatements: string[] = [];
     let extensionDropStatements: string[] = [];
-    let enumCreateStatements: string[] = [];
+    let enumTypeCreateOperations: PostgresTypeStatement[] = [];
     let enumPreTransactionalStatements: string[] = [];
-    let compositeTypeCreateStatements: string[] = [];
+    let compositeTypeCreateOperations: PostgresTypeStatement[] = [];
     let sequenceStatements: string[] = [];
     let functionStatements: string[] = [];
     let procedureStatements: string[] = [];
@@ -474,7 +478,7 @@ export class SchemaService {
 
     if (this.provider.supportsFeature("enums")) {
       const enumResult = this.enumHandler.generateStatements(desiredEnums, currentEnums);
-      enumCreateStatements = enumResult.transactional;
+      enumTypeCreateOperations = enumResult.typeStatements;
       enumPreTransactionalStatements = enumResult.preTransactional;
     }
 
@@ -483,7 +487,7 @@ export class SchemaService {
         desiredCompositeTypes,
         currentCompositeTypes
       );
-      compositeTypeCreateStatements = compositeTypeResult.transactional;
+      compositeTypeCreateOperations = compositeTypeResult.typeStatements;
     }
 
     const migrationContext = await this.provider.getMigrationContext?.(client);
@@ -605,24 +609,25 @@ export class SchemaService {
 
     commentStatements = this.commentHandler.generateStatements(desiredComments, currentComments);
 
-    let enumRemovalStatements: string[] = [];
-    let compositeTypeRemovalStatements: string[] = [];
+    let enumTypeRemovalOperations: PostgresTypeStatement[] = [];
+    let compositeTypeRemovalOperations: PostgresTypeStatement[] = [];
     if (this.provider.supportsFeature("enums")) {
-      enumRemovalStatements = this.enumHandler.generateRemovalStatements(
+      enumTypeRemovalOperations = this.enumHandler.generateRemovalTypeStatements(
         desiredEnums,
         currentEnums
       );
     }
 
     if (this.provider.supportsFeature("composite_types")) {
-      compositeTypeRemovalStatements = this.compositeTypeHandler.generateRemovalStatements(
-        desiredCompositeTypes,
-        currentCompositeTypes,
-        desiredSchema,
-        schemas,
-        desiredSqlObjects,
-        normalizedDesiredViews
-      );
+      compositeTypeRemovalOperations =
+        this.compositeTypeHandler.generateRemovalTypeStatements(
+          desiredCompositeTypes,
+          currentCompositeTypes,
+          desiredSchema,
+          schemas,
+          desiredSqlObjects,
+          normalizedDesiredViews
+        );
     }
 
     const sqlObjectPlan = await this.sqlObjectHandler.generateStatements(
@@ -639,14 +644,34 @@ export class SchemaService {
       }
     );
 
+    const typeCreateStatements = orderPostgresTypeStatements(
+      [
+        ...enumTypeCreateOperations,
+        ...compositeTypeCreateOperations,
+        ...sqlObjectPlan.typeCreateOperations,
+      ],
+      desiredEnums,
+      desiredCompositeTypes,
+      desiredSqlObjects
+    );
+    const typeRemovalStatements = orderPostgresTypeStatements(
+      [
+        ...enumTypeRemovalOperations,
+        ...compositeTypeRemovalOperations,
+        ...sqlObjectPlan.typeDropOperations,
+      ],
+      currentEnums,
+      currentCompositeTypes,
+      currentSqlObjects,
+      true
+    );
+
     const transactionalPreview = [
       ...sqlObjectPlan.bootstrapCreate,
       ...schemaStatements,
       ...extensionCreateStatements,
-      ...enumCreateStatements,
-      ...compositeTypeCreateStatements,
       ...sqlObjectPlan.typeReplaceDrop,
-      ...sqlObjectPlan.typeCreate,
+      ...typeCreateStatements,
       ...sqlObjectPlan.typeAlter,
       ...preSequenceStatements,
       ...sqlObjectPlan.earlyDrop,
@@ -663,9 +688,7 @@ export class SchemaService {
       ...sqlObjectPlan.postRoutineCreate,
       ...commentStatements,
       ...sqlObjectPlan.finalCreate,
-      ...sqlObjectPlan.typeDrop,
-      ...enumRemovalStatements,
-      ...compositeTypeRemovalStatements,
+      ...typeRemovalStatements,
       ...sqlObjectPlan.lateDrop,
       ...extensionDropStatements,
     ];

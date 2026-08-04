@@ -202,6 +202,7 @@
 - done: replace unused immutable domain/range definitions in drop-before-create order, reject replacements with relation/type/routine dependents, and use dependency-ordered `RESTRICT` drops instead of data-losing `CASCADE`.
 - done: detect direct, array, multirange, derived type, relation, and routine-signature dependencies for domain/range replacement and removal, while filtering internal range constructors.
 - done: reject same-apply range support-function creation before mutation with a prerequisite/shell-type diagnostic.
+- done: unify enum, composite, domain, range, and generated-multirange dependency ordering across same-apply creation, composite alteration, and coordinated removal; reject cross-family cycles, ambiguous references, and physical type-name collisions before mutation.
 - next: audit remaining PostgreSQL 18 DDL and catalog additions for attributes that the canonical model could silently discard.
 
 ## parser
