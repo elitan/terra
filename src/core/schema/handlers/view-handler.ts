@@ -1,4 +1,6 @@
 import type { View } from "../../../types/schema";
+import type { MigrationContext } from "../../../types/migration";
+import { ValidationError } from "../../../types/errors";
 import { deparseSync, parseSync } from "pgsql-parser";
 import {
   generateCreateViewSQL,
@@ -6,6 +8,10 @@ import {
   generateCreateOrReplaceViewSQL,
   generateRefreshMaterializedViewSQL,
   generateRenameViewColumnSQL,
+  generateResetMaterializedViewStorageParametersSQL,
+  generateSetMaterializedViewAccessMethodSQL,
+  generateSetMaterializedViewStorageParametersSQL,
+  generateSetMaterializedViewTablespaceSQL,
 } from "../../../utils/sql";
 import { generateStatements, type HandlerConfig } from "./base-handler";
 import { SchemaDiffer } from "../differ";
@@ -204,6 +210,136 @@ function postgresViewWillBeRecreated(desired: View, current: View): boolean {
   );
 }
 
+function stringRecordsEqual(
+  desired: Record<string, string> | undefined,
+  current: Record<string, string> | undefined
+): boolean {
+  const desiredEntries = Object.entries(desired || {}).sort();
+  const currentEntries = Object.entries(current || {}).sort();
+  return desiredEntries.length === currentEntries.length &&
+    desiredEntries.every(function hasSameEntry(entry, index) {
+      return currentEntries[index]?.[0] === entry[0] &&
+        currentEntries[index]?.[1] === entry[1];
+    });
+}
+
+function materializedViewPhysicalPropertiesNeedUpdate(
+  desired: View,
+  current: View,
+  context: MigrationContext
+): boolean {
+  if (!desired.materialized || !current.materialized) {
+    return false;
+  }
+
+  const defaultAccessMethod = context.defaultTableAccessMethod || "heap";
+  const storageParametersChanged = !stringRecordsEqual(
+    desired.storageParameters,
+    current.storageParameters
+  );
+  const tablespaceChanged = (desired.tablespace || "pg_default") !==
+    (current.tablespace || "pg_default");
+  const accessMethodChanged =
+    (desired.accessMethod || defaultAccessMethod) !==
+    (current.accessMethod || defaultAccessMethod);
+  return storageParametersChanged || tablespaceChanged || accessMethodChanged;
+}
+
+function generateMaterializedViewAccessMethodAlteration(
+  desired: View,
+  current: View,
+  context: MigrationContext
+): string | undefined {
+  const defaultAccessMethod = context.defaultTableAccessMethod || "heap";
+  const desiredAccessMethod = desired.accessMethod || defaultAccessMethod;
+  const currentAccessMethod = current.accessMethod || defaultAccessMethod;
+  if (desiredAccessMethod === currentAccessMethod) {
+    return undefined;
+  }
+
+  const qualifiedName = `${desired.schema || "public"}.${desired.name}`;
+  if (context.postgresVersionNum === undefined) {
+    throw new ValidationError(
+      `Cannot safely change the access method of existing materialized view ${qualifiedName} without the PostgreSQL server version`,
+      qualifiedName,
+      "accessMethod",
+      desiredAccessMethod
+    );
+  }
+  if (context.postgresVersionNum < 150000) {
+    const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+    throw new ValidationError(
+      `PostgreSQL ${serverMajor} cannot change the access method of existing materialized view ${qualifiedName}; PostgreSQL 15 or newer is required for an in-place change`,
+      qualifiedName,
+      "accessMethod",
+      desiredAccessMethod
+    );
+  }
+  return generateSetMaterializedViewAccessMethodSQL(
+    desired,
+    desiredAccessMethod
+  );
+}
+
+function generateMaterializedViewPhysicalAlterations(
+  desired: View,
+  current: View,
+  context: MigrationContext
+): string[] {
+  if (!desired.materialized || !current.materialized) {
+    return [];
+  }
+
+  const statements: string[] = [];
+  const desiredParameters = desired.storageParameters || {};
+  const currentParameters = current.storageParameters || {};
+  const parametersToSet = Object.fromEntries(
+    Object.entries(desiredParameters).filter(function filterChanged([name, value]) {
+      return currentParameters[name] !== value;
+    })
+  );
+  const parametersToReset = Object.keys(currentParameters).filter(
+    function filterRemoved(name) {
+      return desiredParameters[name] === undefined;
+    }
+  );
+
+  if (Object.keys(parametersToSet).length > 0) {
+    statements.push(
+      generateSetMaterializedViewStorageParametersSQL(
+        desired,
+        parametersToSet
+      )
+    );
+  }
+  if (parametersToReset.length > 0) {
+    statements.push(
+      generateResetMaterializedViewStorageParametersSQL(
+        desired,
+        parametersToReset
+      )
+    );
+  }
+
+  const desiredTablespace = desired.tablespace || "pg_default";
+  const currentTablespace = current.tablespace || "pg_default";
+  if (desiredTablespace !== currentTablespace) {
+    statements.push(
+      generateSetMaterializedViewTablespaceSQL(desired, desiredTablespace)
+    );
+  }
+
+  const accessMethodAlteration = generateMaterializedViewAccessMethodAlteration(
+    desired,
+    current,
+    context
+  );
+  if (accessMethodAlteration) {
+    statements.push(accessMethodAlteration);
+  }
+  return statements;
+}
+
 function generateViewColumnRenameStatements(
   desired: View,
   current: View
@@ -272,7 +408,8 @@ function recreateView(desired: View, current: View): string {
 
 function generatePostgresViewUpdateStatements(
   desired: View,
-  current: View
+  current: View,
+  context: MigrationContext
 ): string | string[] {
   if (postgresViewWillBeRecreated(desired, current)) {
     return recreateView(desired, current);
@@ -282,6 +419,9 @@ function generatePostgresViewUpdateStatements(
   if (postgresViewDefinitionNeedsUpdate(desired, current)) {
     statements.push(generateCreateOrReplaceViewSQL(desired));
   }
+  statements.push(
+    ...generateMaterializedViewPhysicalAlterations(desired, current, context)
+  );
   return statements;
 }
 
@@ -322,19 +462,30 @@ function sqliteViewNeedsUpdate(desired: View, current: View): boolean {
     cleanCreateStatement(current.createStatement || "");
 }
 
-const config: HandlerConfig<View> = {
-  name: "view",
-  getKey: getViewKey,
-  generateDrop: function generatePostgresViewDrop(view) {
-    return generateDropViewSQL(view.name, view.materialized, view.schema);
-  },
-  generateCreate: generateCreateViewSQL,
-  generateUpdate: generatePostgresViewUpdateStatements,
-  needsUpdate: function postgresViewNeedsUpdate(desired, current) {
-    return postgresViewDefinitionNeedsUpdate(desired, current) ||
-      !haveSameColumnNames(desired, current);
-  },
-};
+function createPostgresConfig(
+  context: MigrationContext
+): HandlerConfig<View> {
+  return {
+    name: "view",
+    getKey: getViewKey,
+    generateDrop: function generatePostgresViewDrop(view) {
+      return generateDropViewSQL(view.name, view.materialized, view.schema);
+    },
+    generateCreate: generateCreateViewSQL,
+    generateUpdate: function generatePostgresViewUpdate(desired, current) {
+      return generatePostgresViewUpdateStatements(desired, current, context);
+    },
+    needsUpdate: function postgresViewNeedsUpdate(desired, current) {
+      return postgresViewDefinitionNeedsUpdate(desired, current) ||
+        !haveSameColumnNames(desired, current) ||
+        materializedViewPhysicalPropertiesNeedUpdate(
+          desired,
+          current,
+          context
+        );
+    },
+  };
+}
 
 const sqliteConfig: HandlerConfig<View> = {
   name: "view",
@@ -412,13 +563,17 @@ function generateMaterializedViewPopulationStatements(
 }
 
 export class ViewHandler {
-  generateStatements(desiredViews: View[], currentViews: View[]): string[] {
+  generateStatements(
+    desiredViews: View[],
+    currentViews: View[],
+    context: MigrationContext = {}
+  ): string[] {
     const usesCreateStatements = desiredViews.some(hasCreateStatement) ||
       currentViews.some(hasCreateStatement);
     const statements = generateStatements(
       desiredViews,
       currentViews,
-      usesCreateStatements ? sqliteConfig : config
+      usesCreateStatements ? sqliteConfig : createPostgresConfig(context)
     );
     if (usesCreateStatements) {
       return statements;

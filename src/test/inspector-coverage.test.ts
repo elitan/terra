@@ -144,6 +144,10 @@ describe("DatabaseInspector coverage", () => {
               definition: " SELECT id FROM users ",
               ispopulated: true,
               column_names: ["id"],
+              access_method: "custom_heap",
+              table_storage_options: ["fillfactor=72", "autovacuum_enabled=false"],
+              toast_storage_options: ["autovacuum_enabled=false"],
+              tablespace_name: "fast_tables",
             },
             {
               view_name: "mv_orders",
@@ -151,6 +155,10 @@ describe("DatabaseInspector coverage", () => {
               definition: " SELECT id FROM orders ",
               ispopulated: false,
               column_names: ["id"],
+              access_method: "heap",
+              table_storage_options: null,
+              toast_storage_options: null,
+              tablespace_name: null,
             },
           ],
         };
@@ -236,6 +244,13 @@ describe("DatabaseInspector coverage", () => {
         materialized: true,
         columnNames: ["id"],
         populated: true,
+        storageParameters: {
+          fillfactor: "72",
+          autovacuum_enabled: "false",
+          "toast.autovacuum_enabled": "false",
+        },
+        accessMethod: "custom_heap",
+        tablespace: "fast_tables",
         indexes: [
           {
             name: "mv_users_idx",
@@ -259,6 +274,7 @@ describe("DatabaseInspector coverage", () => {
         materialized: true,
         columnNames: ["id"],
         populated: false,
+        accessMethod: "heap",
         indexes: [
           {
             name: "mv_orders_idx",

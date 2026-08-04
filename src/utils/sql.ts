@@ -922,6 +922,20 @@ export function generateCreateViewSQL(view: View): string {
   builder.table(view.name, view.schema);
   appendViewColumnNames(builder, view);
 
+  if (view.materialized && view.accessMethod) {
+    builder.p("USING").ident(view.accessMethod);
+  }
+
+  if (view.materialized && view.storageParameters) {
+    builder.p(
+      `WITH (${renderStorageParameterAssignments(view.storageParameters)})`
+    );
+  }
+
+  if (view.materialized && view.tablespace) {
+    builder.p("TABLESPACE").ident(view.tablespace);
+  }
+
   if (!view.materialized && view.securityBarrier !== undefined) {
     builder.p(`WITH (security_barrier = ${view.securityBarrier ? 'true' : 'false'})`);
   }
@@ -988,6 +1002,54 @@ export function generateRenameViewColumnSQL(
   builder.table(view.name, view.schema);
   builder.p("RENAME COLUMN").ident(currentName).p("TO").ident(desiredName);
   return builder.p(";").build();
+}
+
+function createAlterMaterializedViewBuilder(view: View): SQLBuilder {
+  return new SQLBuilder()
+    .p("ALTER MATERIALIZED VIEW")
+    .table(view.name, view.schema);
+}
+
+export function generateSetMaterializedViewStorageParametersSQL(
+  view: View,
+  parameters: Record<string, string>
+): string {
+  return createAlterMaterializedViewBuilder(view)
+    .p(`SET (${renderStorageParameterAssignments(parameters)})`)
+    .p(";")
+    .build();
+}
+
+export function generateResetMaterializedViewStorageParametersSQL(
+  view: View,
+  parameters: string[]
+): string {
+  return createAlterMaterializedViewBuilder(view)
+    .p(`RESET (${[...parameters].sort().join(", ")})`)
+    .p(";")
+    .build();
+}
+
+export function generateSetMaterializedViewTablespaceSQL(
+  view: View,
+  tablespace: string
+): string {
+  return createAlterMaterializedViewBuilder(view)
+    .p("SET TABLESPACE")
+    .ident(tablespace)
+    .p(";")
+    .build();
+}
+
+export function generateSetMaterializedViewAccessMethodSQL(
+  view: View,
+  accessMethod: string
+): string {
+  return createAlterMaterializedViewBuilder(view)
+    .p("SET ACCESS METHOD")
+    .ident(accessMethod)
+    .p(";")
+    .build();
 }
 
 export function generateRefreshMaterializedViewSQL(

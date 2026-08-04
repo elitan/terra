@@ -7,6 +7,7 @@
 import { Logger } from "../../../utils/logger";
 import { deparseSync } from "pgsql-parser";
 import type { View } from "../../../types/schema";
+import { parseStorageParameterOptions } from "../../../utils/storage-parameters";
 
 function parseColumnNames(nodes: any[] | undefined): string[] | undefined {
   if (!Array.isArray(nodes) || nodes.length === 0) {
@@ -141,6 +142,12 @@ export function parseCreateMaterializedView(stmt: any): View | null {
     const definition = stmt.query ? deparseSync([stmt.query]).trim() : '';
     if (!definition) return null;
     const columnNames = parseColumnNames(into.colNames);
+    const storageParameters = parseStorageParameterOptions(into.options);
+    const accessMethod = into.accessMethod || undefined;
+    const tablespace =
+      into.tableSpaceName && into.tableSpaceName !== "pg_default"
+        ? into.tableSpaceName
+        : undefined;
 
     return {
       name: viewName,
@@ -149,6 +156,9 @@ export function parseCreateMaterializedView(stmt: any): View | null {
       materialized: true,
       ...(columnNames ? { columnNames } : {}),
       populated: !Boolean(into.skipData),
+      storageParameters,
+      accessMethod,
+      tablespace,
     };
   } catch (error) {
     Logger.warning(

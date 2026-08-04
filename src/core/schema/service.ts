@@ -494,7 +494,11 @@ export class SchemaService {
       desiredViews,
       currentViews
     );
-    let viewStatements = this.viewHandler.generateStatements(normalizedDesiredViews, currentViews);
+    let viewStatements = this.viewHandler.generateStatements(
+      normalizedDesiredViews,
+      currentViews,
+      migrationContext
+    );
 
     if (this.provider.supportsFeature("triggers")) {
       triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, currentTriggers);
@@ -513,7 +517,11 @@ export class SchemaService {
       if (recreatesTable) {
         preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);
         preTableViewStatements = this.viewHandler.generateStatements([], currentViews);
-        viewStatements = this.viewHandler.generateStatements(normalizedDesiredViews, []);
+        viewStatements = this.viewHandler.generateStatements(
+          normalizedDesiredViews,
+          [],
+          migrationContext
+        );
         triggerStatements = this.triggerHandler.generateStatements(desiredTriggers, []);
       } else if (replacesOrDropsView && this.provider.supportsFeature("triggers")) {
         preTableTriggerStatements = this.triggerHandler.generateStatements([], currentTriggers);

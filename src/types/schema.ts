@@ -158,6 +158,9 @@ export interface View {
   columns?: Column[]; // For typed views or materialized views
   indexes?: Index[]; // Only for materialized views
   populated?: boolean; // Materialized view scannability from WITH [NO] DATA
+  storageParameters?: Record<string, string>; // Materialized view storage parameters
+  tablespace?: string; // Materialized view tablespace; undefined means pg_default
+  accessMethod?: string; // Materialized view table access method
   checkOption?: 'CASCADED' | 'LOCAL'; // WITH CHECK OPTION
   securityBarrier?: boolean; // security_barrier option
   dependencies?: string[]; // Tables/views this view depends on

@@ -1072,6 +1072,10 @@ export class DatabaseInspector {
         m.schemaname as schema_name,
         m.definition,
         m.ispopulated,
+        c.reloptions as table_storage_options,
+        toast_relation.reloptions as toast_storage_options,
+        am.amname as access_method,
+        m.tablespace as tablespace_name,
         ARRAY(
           SELECT attribute.attname::text
           FROM pg_attribute attribute
@@ -1083,6 +1087,8 @@ export class DatabaseInspector {
       FROM pg_matviews m
       JOIN pg_class c ON c.relname = m.matviewname
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = m.schemaname
+      LEFT JOIN pg_class toast_relation ON toast_relation.oid = c.reltoastrelid
+      JOIN pg_am am ON am.oid = c.relam
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE m.schemaname = ANY($1::text[])
         AND d.objid IS NULL  -- Exclude extension-owned materialized views
@@ -1090,6 +1096,7 @@ export class DatabaseInspector {
     `, [schemas]);
 
     for (const row of matViewsResult.rows) {
+      const storageParameters = this.parseTableStorageOptions(row);
       const view: View = {
         name: row.view_name,
         schema: row.schema_name,
@@ -1097,6 +1104,9 @@ export class DatabaseInspector {
         materialized: true,
         columnNames: row.column_names,
         populated: row.ispopulated,
+        ...(storageParameters ? { storageParameters } : {}),
+        ...(row.access_method ? { accessMethod: row.access_method } : {}),
+        ...(row.tablespace_name ? { tablespace: row.tablespace_name } : {}),
       };
 
       const indexes = await this.getTableIndexes(

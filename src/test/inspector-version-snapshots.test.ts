@@ -333,6 +333,11 @@ function normalizeSnapshot(input: any): unknown {
         ? [...view.columnNames]
         : undefined,
       populated: view.populated,
+      accessMethod: view.accessMethod,
+      storageParameters: view.storageParameters
+        ? normalizeObject(view.storageParameters)
+        : undefined,
+      tablespace: view.tablespace,
       definition: normalizeSpace(String(view.definition || "")),
       checkOption: view.checkOption,
       securityBarrier: view.securityBarrier,

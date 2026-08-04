@@ -237,6 +237,7 @@
           "id"
         ],
         "populated": true,
+        "accessMethod": "heap",
         "definition": "SELECT users.id FROM users;",
         "indexes": []
       },
@@ -259,6 +260,7 @@
           "id"
         ],
         "populated": false,
+        "accessMethod": "heap",
         "definition": "SELECT users.id FROM tenant_a.users;",
         "indexes": []
       }
@@ -630,6 +632,7 @@
           "id"
         ],
         "populated": true,
+        "accessMethod": "heap",
         "definition": "SELECT users.id FROM users;",
         "indexes": []
       },
@@ -652,6 +655,7 @@
           "id"
         ],
         "populated": false,
+        "accessMethod": "heap",
         "definition": "SELECT users.id FROM tenant_a.users;",
         "indexes": []
       }
@@ -1023,6 +1027,7 @@
           "id"
         ],
         "populated": true,
+        "accessMethod": "heap",
         "definition": "SELECT id FROM users;",
         "indexes": []
       },
@@ -1045,6 +1050,7 @@
           "id"
         ],
         "populated": false,
+        "accessMethod": "heap",
         "definition": "SELECT id FROM tenant_a.users;",
         "indexes": []
       }
@@ -1416,6 +1422,7 @@
           "id"
         ],
         "populated": true,
+        "accessMethod": "heap",
         "definition": "SELECT id FROM users;",
         "indexes": []
       },
@@ -1438,6 +1445,7 @@
           "id"
         ],
         "populated": false,
+        "accessMethod": "heap",
         "definition": "SELECT id FROM tenant_a.users;",
         "indexes": []
       }
