@@ -25,6 +25,7 @@ import type {
   PostgresPolicyDefinition,
   IdentityColumn,
   PostgresTriggerEnabledMode,
+  PostgresReplicaIdentity,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
@@ -91,6 +92,34 @@ function getPostgresTriggerMode(
     );
   }
   return mode === "origin" ? undefined : mode;
+}
+
+function getPostgresReplicaIdentity(
+  code: unknown,
+  indexName: unknown,
+  identity: string
+): PostgresReplicaIdentity | undefined {
+  switch (code) {
+    case undefined:
+    case null:
+    case "d":
+      return undefined;
+    case "f":
+      return { mode: "full" };
+    case "n":
+      return { mode: "nothing" };
+    case "i":
+      return typeof indexName === "string" && indexName.length > 0
+        ? { mode: "index", indexName }
+        : { mode: "index-missing" };
+    default:
+      throw new ValidationError(
+        `Unsupported PostgreSQL replica identity mode '${String(code)}' is present on ${identity}`,
+        identity,
+        "replicaIdentity",
+        code
+      );
+  }
 }
 
 const COLUMN_COLLATION_JOIN_SQL = `
@@ -674,6 +703,8 @@ export class DatabaseInspector {
         table_access_method.amname as table_access_method,
         table_tablespace.spcname as table_tablespace_name,
         inheritance.parents as inheritance_parents,
+        c.relreplident as replica_identity_mode,
+        replica_identity_index.index_name as replica_identity_index_name,
         unsupported_constraint.items as unsupported_constraints
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
@@ -695,6 +726,16 @@ export class DatabaseInspector {
           ON parent_namespace.oid = parent.relnamespace
         WHERE inherited.inhrelid = c.oid
       ) inheritance ON true
+      LEFT JOIN LATERAL (
+        SELECT index_relation.relname AS index_name
+        FROM pg_index index_catalog
+        JOIN pg_class index_relation
+          ON index_relation.oid = index_catalog.indexrelid
+        WHERE index_catalog.indrelid = c.oid
+          AND index_catalog.indisreplident
+        ORDER BY index_relation.relname
+        LIMIT 1
+      ) replica_identity_index ON true
       ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
@@ -851,6 +892,11 @@ export class DatabaseInspector {
 
       // Get indexes for this table
       const indexes = await this.getTableIndexes(client, tableName, tableSchema);
+      const replicaIdentity = getPostgresReplicaIdentity(
+        row.replica_identity_mode,
+        row.replica_identity_index_name,
+        `table ${tableSchema}.${tableName}`
+      );
 
       tables.push({
         name: tableName,
@@ -874,6 +920,7 @@ export class DatabaseInspector {
         exclusionConstraints:
           exclusionConstraints.length > 0 ? exclusionConstraints : undefined,
         indexes,
+        ...(replicaIdentity ? { replicaIdentity } : {}),
       });
     }
 
@@ -2838,6 +2885,8 @@ export class DatabaseInspector {
         relation_tablespace.spcname as relation_tablespace,
         relation_access_method.amname as relation_access_method,
         pg_get_partkeydef(c.oid) as partition_key,
+        c.relreplident as replica_identity_mode,
+        replica_identity_index.index_name as replica_identity_index_name,
         (
           SELECT jsonb_agg(
             jsonb_build_object(
@@ -2872,6 +2921,16 @@ export class DatabaseInspector {
         ON relation_tablespace.oid = c.reltablespace
       LEFT JOIN pg_am relation_access_method
         ON relation_access_method.oid = c.relam
+      LEFT JOIN LATERAL (
+        SELECT index_relation.relname AS index_name
+        FROM pg_index index_catalog
+        JOIN pg_class index_relation
+          ON index_relation.oid = index_catalog.indexrelid
+        WHERE index_catalog.indrelid = c.oid
+          AND index_catalog.indisreplident
+        ORDER BY index_relation.relname
+        LIMIT 1
+      ) replica_identity_index ON true
       LEFT JOIN LATERAL (
         SELECT array_agg(feature ORDER BY feature) AS items
         FROM (
@@ -2915,6 +2974,11 @@ export class DatabaseInspector {
       const body = [...columns, ...constraints].join(",\n  ");
       const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
       const createStatement = `CREATE TABLE ${qualifiedTable} (\n  ${body}\n) PARTITION BY ${row.partition_key};`;
+      const replicaIdentity = getPostgresReplicaIdentity(
+        row.replica_identity_mode,
+        row.replica_identity_index_name,
+        `partitioned table ${row.schema_name}.${row.table_name}`
+      );
 
       objects.push({
         kind: "partition",
@@ -2929,6 +2993,7 @@ export class DatabaseInspector {
                 row.partition_key_operator_classes,
             }
           : {}),
+        ...(replicaIdentity ? { replicaIdentity } : {}),
       });
     }
 
@@ -2945,6 +3010,8 @@ export class DatabaseInspector {
         parent.relname as parent_name,
         parent_ns.nspname as parent_schema,
         pg_get_expr(c.relpartbound, c.oid) as partition_bound,
+        c.relreplident as replica_identity_mode,
+        replica_identity_index.index_name as replica_identity_index_name,
         unsupported_partition_feature.items as unsupported_partition_features,
         unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
@@ -2956,6 +3023,16 @@ export class DatabaseInspector {
         ON relation_tablespace.oid = c.reltablespace
       LEFT JOIN pg_am relation_access_method
         ON relation_access_method.oid = c.relam
+      LEFT JOIN LATERAL (
+        SELECT index_relation.relname AS index_name
+        FROM pg_index index_catalog
+        JOIN pg_class index_relation
+          ON index_relation.oid = index_catalog.indexrelid
+        WHERE index_catalog.indrelid = c.oid
+          AND index_catalog.indisreplident
+        ORDER BY index_relation.relname
+        LIMIT 1
+      ) replica_identity_index ON true
       LEFT JOIN LATERAL (
         SELECT array_agg(feature ORDER BY feature) AS items
         FROM (
@@ -3007,6 +3084,11 @@ export class DatabaseInspector {
     for (const row of childResult.rows) {
       const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
       const parentTable = this.qualifyName(row.parent_name, row.parent_schema);
+      const replicaIdentity = getPostgresReplicaIdentity(
+        row.replica_identity_mode,
+        row.replica_identity_index_name,
+        `partition ${row.schema_name}.${row.table_name}`
+      );
       objects.push({
         kind: "partition",
         key: `partition:${row.schema_name}.${row.table_name}`,
@@ -3015,6 +3097,7 @@ export class DatabaseInspector {
         createStatement: `CREATE TABLE ${qualifiedTable} PARTITION OF ${parentTable} ${row.partition_bound};`,
         dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`,
         dependencies: [`partition:${row.parent_schema}.${row.parent_name}`],
+        ...(replicaIdentity ? { replicaIdentity } : {}),
       });
     }
 

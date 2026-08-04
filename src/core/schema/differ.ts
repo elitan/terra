@@ -59,6 +59,15 @@ import {
 import { getColumnPhysicalChanges } from "../../utils/column-physical";
 import { renderStorageParameterAssignments } from "../../utils/storage-parameters";
 import { DependencyResolver } from "./dependency-resolver";
+import {
+  postgresReplicaIdentitiesEqual,
+  renderPostgresReplicaIdentity,
+} from "../../utils/postgres-replica-identity";
+
+type ReplicaIdentityIndexCandidate =
+  | { kind: "standalone"; index: Index }
+  | { kind: "primary"; constraint: PrimaryKeyConstraint }
+  | { kind: "unique"; constraint: UniqueConstraint };
 
 function normalizeReferencedTableName(referencedTable: string): string {
   const [name, schema] = splitSchemaTable(referencedTable);
@@ -422,6 +431,355 @@ export class SchemaDiffer {
     return index.constraint !== undefined;
   }
 
+  private validateReplicaIdentities(tables: Table[]): void {
+    const tablesByKey = new Map(
+      tables.map(function mapTable(table) {
+        return [`${table.schema || "public"}.${table.name}`, table] as const;
+      })
+    );
+
+    for (const table of tables) {
+      const identity = table.replicaIdentity;
+      if (!identity) {
+        continue;
+      }
+      if (identity.mode === "index-missing") {
+        throw this.replicaIdentityValidationError(
+          table,
+          "the selected index name is missing"
+        );
+      }
+      if (identity.mode !== "index") {
+        continue;
+      }
+
+      const candidate = this.findReplicaIdentityIndexCandidate(
+        table,
+        identity.indexName
+      );
+      if (!candidate) {
+        throw this.replicaIdentityValidationError(
+          table,
+          `index '${identity.indexName}' is not declared on the table`
+        );
+      }
+
+      let columns: string[];
+      if (candidate.kind === "standalone") {
+        if (!candidate.index.unique) {
+          throw this.replicaIdentityValidationError(
+            table,
+            `index '${identity.indexName}' is not unique`
+          );
+        }
+        if (candidate.index.where) {
+          throw this.replicaIdentityValidationError(
+            table,
+            `index '${identity.indexName}' is partial`
+          );
+        }
+        if (candidate.index.expression || candidate.index.columns.length === 0) {
+          throw this.replicaIdentityValidationError(
+            table,
+            `index '${identity.indexName}' contains an expression`
+          );
+        }
+        columns = candidate.index.columns;
+      } else {
+        if (candidate.constraint.deferrable) {
+          throw this.replicaIdentityValidationError(
+            table,
+            `index '${identity.indexName}' backs a deferrable constraint`
+          );
+        }
+        columns = candidate.constraint.columns;
+        if (candidate.kind === "primary") {
+          continue;
+        }
+      }
+
+      const nullableColumn = columns.find(function findNullable(columnName) {
+        return !SchemaDiffer.replicaIdentityColumnIsNotNull(
+          table,
+          columnName,
+          tablesByKey,
+          new Set()
+        );
+      });
+      if (nullableColumn) {
+        throw this.replicaIdentityValidationError(
+          table,
+          `index '${identity.indexName}' key column '${nullableColumn}' is nullable`
+        );
+      }
+    }
+  }
+
+  private replicaIdentityValidationError(
+    table: Table,
+    reason: string
+  ): ValidationError {
+    const qualifiedName = `${table.schema || "public"}.${table.name}`;
+    return new ValidationError(
+      `PostgreSQL replica identity index for '${qualifiedName}' is invalid: ${reason}. Use a unique, non-partial, immediate, column-only index whose key columns are NOT NULL`,
+      `table ${qualifiedName}`,
+      "replicaIdentity",
+      table.replicaIdentity
+    );
+  }
+
+  private static replicaIdentityColumnIsNotNull(
+    table: Table,
+    columnName: string,
+    tablesByKey: Map<string, Table>,
+    visited: Set<string>
+  ): boolean {
+    const key = `${table.schema || "public"}.${table.name}`;
+    if (visited.has(key)) {
+      return false;
+    }
+    visited.add(key);
+
+    const column = [...table.columns, ...(table.inheritedColumns || [])]
+      .find(function findColumn(candidate) {
+        return candidate.name === columnName;
+      });
+    if (column) {
+      return column.nullable === false;
+    }
+
+    for (const parent of table.inherits || []) {
+      const parentTable = tablesByKey.get(
+        `${parent.schema || table.schema || "public"}.${parent.name}`
+      );
+      if (
+        parentTable &&
+        SchemaDiffer.replicaIdentityColumnIsNotNull(
+          parentTable,
+          columnName,
+          tablesByKey,
+          visited
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private findReplicaIdentityIndexCandidate(
+    table: Table,
+    indexName: string
+  ): ReplicaIdentityIndexCandidate | undefined {
+    const standalone = (table.indexes || []).find(function findIndex(index) {
+      return index.name === indexName;
+    });
+    if (standalone) {
+      return { kind: "standalone", index: standalone };
+    }
+
+    const primaryKey = table.primaryKey;
+    if (
+      primaryKey &&
+      (primaryKey.name || `${table.name}_pkey`) === indexName
+    ) {
+      return { kind: "primary", constraint: primaryKey };
+    }
+
+    const uniqueConstraint = (table.uniqueConstraints || []).find(
+      function findUnique(constraint) {
+        const name = constraint.name ||
+          `${table.name}_${constraint.columns.join("_")}_unique`;
+        return name === indexName;
+      }
+    );
+    return uniqueConstraint
+      ? { kind: "unique", constraint: uniqueConstraint }
+      : undefined;
+  }
+
+  private replicaIdentityUsesStandaloneIndex(table: Table): boolean {
+    const identity = table.replicaIdentity;
+    return identity?.mode === "index" &&
+      this.findReplicaIdentityIndexCandidate(table, identity.indexName)?.kind ===
+        "standalone";
+  }
+
+  private planReplicaIdentityChange(
+    desired: Table,
+    current: Table
+  ): {
+    beforeTableAlterations?: string;
+    afterTableAlterations?: string;
+    deferred?: string;
+  } {
+    const identitiesMatch = postgresReplicaIdentitiesEqual(
+      desired.replicaIdentity,
+      current.replicaIdentity
+    );
+    const desiredIdentity = desired.replicaIdentity;
+    const currentIdentity = current.replicaIdentity;
+    const desiredStatement = renderPostgresReplicaIdentity(
+      { name: desired.name, schema: desired.schema },
+      desiredIdentity
+    );
+
+    if (desiredIdentity?.mode === "index") {
+      if (this.replicaIdentityIndexNeedsReplacement(desired, current)) {
+        const currentNeedsReset = currentIdentity?.mode === "index" ||
+          currentIdentity?.mode === "index-missing";
+        const desiredCandidate = this.findReplicaIdentityIndexCandidate(
+          desired,
+          desiredIdentity.indexName
+        );
+        const plan: {
+          beforeTableAlterations?: string;
+          afterTableAlterations?: string;
+          deferred?: string;
+        } = {};
+        if (currentNeedsReset) {
+          plan.beforeTableAlterations = renderPostgresReplicaIdentity(
+            { name: desired.name, schema: desired.schema },
+            undefined
+          );
+        }
+        if (desiredCandidate?.kind === "standalone") {
+          plan.deferred = desiredStatement;
+        } else {
+          plan.afterTableAlterations = desiredStatement;
+        }
+        return plan;
+      }
+      return identitiesMatch
+        ? {}
+        : { afterTableAlterations: desiredStatement };
+    }
+
+    return identitiesMatch
+      ? {}
+      : { beforeTableAlterations: desiredStatement };
+  }
+
+  private replicaIdentityIndexNeedsReplacement(
+    desired: Table,
+    current: Table
+  ): boolean {
+    const identity = desired.replicaIdentity;
+    if (identity?.mode !== "index") {
+      return false;
+    }
+    const desiredCandidate = this.findReplicaIdentityIndexCandidate(
+      desired,
+      identity.indexName
+    );
+    const currentCandidate = this.findReplicaIdentityIndexCandidate(
+      current,
+      identity.indexName
+    );
+    if (!desiredCandidate || !currentCandidate ||
+      desiredCandidate.kind !== currentCandidate.kind) {
+      return true;
+    }
+
+    if (
+      desiredCandidate.kind === "standalone" &&
+      currentCandidate.kind === "standalone"
+    ) {
+      return !this.indexesAreEqual(
+        desiredCandidate.index,
+        currentCandidate.index
+      );
+    }
+    if (
+      desiredCandidate.kind === "primary" &&
+      currentCandidate.kind === "primary"
+    ) {
+      return !this.primaryKeysAreEqual(
+        desiredCandidate.constraint,
+        currentCandidate.constraint
+      );
+    }
+    if (
+      desiredCandidate.kind === "unique" &&
+      currentCandidate.kind === "unique"
+    ) {
+      return !stringArraysEqual(
+        desiredCandidate.constraint.columns,
+        currentCandidate.constraint.columns
+      ) || this.uniqueConstraintsDiffer(
+        desiredCandidate.constraint,
+        currentCandidate.constraint
+      );
+    }
+    return true;
+  }
+
+  private replicaIdentityConstraintRenameStatement(
+    desired: Table,
+    current: Table
+  ): string | undefined {
+    const identity = desired.replicaIdentity;
+    if (identity?.mode !== "index") {
+      return undefined;
+    }
+    const desiredCandidate = this.findReplicaIdentityIndexCandidate(
+      desired,
+      identity.indexName
+    );
+    if (!desiredCandidate || desiredCandidate.kind === "standalone") {
+      return undefined;
+    }
+
+    let currentConstraint: PrimaryKeyConstraint | UniqueConstraint | undefined;
+    if (desiredCandidate.kind === "primary") {
+      if (
+        current.primaryKey &&
+        this.primaryKeysAreEqual(
+          desiredCandidate.constraint,
+          current.primaryKey
+        )
+      ) {
+        currentConstraint = current.primaryKey;
+      }
+    } else {
+      currentConstraint = (current.uniqueConstraints || []).find(
+        function findEquivalentUnique(constraint) {
+          return stringArraysEqual(
+            desiredCandidate.constraint.columns,
+            constraint.columns
+          );
+        }
+      );
+      if (
+        currentConstraint &&
+        this.uniqueConstraintsDiffer(
+          desiredCandidate.constraint,
+          currentConstraint
+        )
+      ) {
+        currentConstraint = undefined;
+      }
+    }
+
+    const currentName = currentConstraint?.name ||
+      (desiredCandidate.kind === "primary"
+        ? `${current.name}_pkey`
+        : undefined);
+    if (!currentName || currentName === identity.indexName) {
+      return undefined;
+    }
+
+    return new SQLBuilder()
+      .p("ALTER TABLE")
+      .table(desired.name, desired.schema)
+      .p("RENAME CONSTRAINT")
+      .ident(currentName)
+      .p("TO")
+      .ident(identity.indexName)
+      .p(";")
+      .build();
+  }
+
   generateMigrationPlan(
     desiredSchema: Table[],
     currentSchema: Table[],
@@ -431,6 +789,7 @@ export class SchemaDiffer {
     this.validateForeignKeyDeleteColumns(desiredSchema, context);
     this.validateVirtualGeneratedColumnSupport(desiredSchema, context);
     this.validateIdentitySequencePersistenceSupport(desiredSchema, context);
+    this.validateReplicaIdentities(desiredSchema);
     const statements: string[] = [];
     const deferred: string[] = [];
     const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
@@ -507,9 +866,32 @@ export class SchemaDiffer {
             this.batchAlterTableChanges(filteredTable, physicalAlterations)
           );
         }
+        if (filteredTable.replicaIdentity) {
+          const replicaIdentityStatement = renderPostgresReplicaIdentity(
+            { name: filteredTable.name, schema: filteredTable.schema },
+            filteredTable.replicaIdentity
+          );
+          if (this.replicaIdentityUsesStandaloneIndex(filteredTable)) {
+            deferred.push(replicaIdentityStatement);
+          } else {
+            statements.push(replicaIdentityStatement);
+          }
+        }
       } else {
         // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(tableKey)!;
+        const replicaIdentityPlan = this.planReplicaIdentityChange(
+          table,
+          currentTable
+        );
+        if (replicaIdentityPlan.beforeTableAlterations) {
+          statements.push(replicaIdentityPlan.beforeTableAlterations);
+        }
+        const replicaIdentityConstraintRename =
+          this.replicaIdentityConstraintRenameStatement(table, currentTable);
+        if (replicaIdentityConstraintRename) {
+          statements.push(replicaIdentityConstraintRename);
+        }
 
         statements.push(
           ...this.generateIdentitySequenceRenameStatements(table, currentTable)
@@ -528,6 +910,9 @@ export class SchemaDiffer {
           if (batchedStatement) {
             statements.push(batchedStatement);
           }
+        }
+        if (replicaIdentityPlan.afterTableAlterations) {
+          statements.push(replicaIdentityPlan.afterTableAlterations);
         }
 
         // Handle index changes separately (they use CONCURRENTLY which can't be batched)
@@ -548,6 +933,9 @@ export class SchemaDiffer {
           removedColumnNames
         );
         statements.push(...indexStatements);
+        if (replicaIdentityPlan.deferred) {
+          deferred.push(replicaIdentityPlan.deferred);
+        }
       }
     }
 

@@ -38,7 +38,7 @@ export function buildStatementMetadata(plan: MigrationPlan): CliStatementMetadat
     order
   );
   order = appendChannelMetadata(metadata, plan.transactional, "transactional", order);
-  order = appendChannelMetadata(metadata, plan.deferred, "deferred", order);
-  appendChannelMetadata(metadata, plan.concurrent, "concurrent", order);
+  order = appendChannelMetadata(metadata, plan.concurrent, "concurrent", order);
+  appendChannelMetadata(metadata, plan.deferred, "deferred", order);
   return metadata;
 }

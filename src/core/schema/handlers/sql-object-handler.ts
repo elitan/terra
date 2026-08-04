@@ -29,6 +29,10 @@ import {
   renderPostgresEventTriggerMode,
   renderPostgresTableTriggerMode,
 } from "../../../utils/postgres-trigger";
+import {
+  postgresReplicaIdentitiesEqual,
+  renderPostgresReplicaIdentity,
+} from "../../../utils/postgres-replica-identity";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -558,6 +562,11 @@ function pushStatements(
       if (modeStatement) {
         target[bucket].push(modeStatement);
       }
+      const replicaIdentityStatement =
+        renderNonDefaultPartitionReplicaIdentity(item);
+      if (replicaIdentityStatement) {
+        target[bucket].push(replicaIdentityStatement);
+      }
     }
     operations.push({
       name: item.name,
@@ -613,6 +622,33 @@ function renderNonDefaultSqlTriggerMode(
     return undefined;
   }
   return renderSqlTriggerMode(object);
+}
+
+function renderPartitionReplicaIdentity(object: SqlObject): string {
+  return renderPostgresReplicaIdentity(
+    { name: object.name, schema: object.schema },
+    object.replicaIdentity
+  );
+}
+
+function renderNonDefaultPartitionReplicaIdentity(
+  object: SqlObject
+): string | undefined {
+  return object.kind === "partition" && object.replicaIdentity
+    ? renderPartitionReplicaIdentity(object)
+    : undefined;
+}
+
+function partitionReplicaIdentityChanged(
+  desired: SqlObject,
+  current: SqlObject
+): boolean {
+  return desired.kind === "partition" &&
+    current.kind === "partition" &&
+    !postgresReplicaIdentitiesEqual(
+      desired.replicaIdentity,
+      current.replicaIdentity
+    );
 }
 
 export class SqlObjectHandler {
@@ -758,6 +794,10 @@ export class SqlObjectHandler {
 
       const currentCanonical = canonicalObjects.get(currentObject)!;
       const desiredCanonical = canonicalObjects.get(desiredObject)!;
+      const replicaIdentityChanged = partitionReplicaIdentityChanged(
+        desiredObject,
+        currentObject
+      );
       if (
         currentCanonical.comparisonNormalized ===
         desiredCanonical.comparisonNormalized
@@ -765,6 +805,11 @@ export class SqlObjectHandler {
         if (!sqlTriggerModesAreEqual(desiredObject, currentObject)) {
           plan.postRoutineCreate.push(
             renderSqlTriggerMode(desiredObject)
+          );
+        }
+        if (replicaIdentityChanged) {
+          plan.postTableCreate.push(
+            renderPartitionReplicaIdentity(desiredObject)
           );
         }
         continue;
@@ -799,6 +844,11 @@ export class SqlObjectHandler {
           currentCanonical.partitionParent
         )
       ) {
+        if (replicaIdentityChanged) {
+          plan.postTableCreate.push(
+            renderPartitionReplicaIdentity(desiredObject)
+          );
+        }
         continue;
       }
 
@@ -816,6 +866,11 @@ export class SqlObjectHandler {
             ...desiredObject,
             createStatement: replacement.attachStatement,
           });
+          if (replicaIdentityChanged) {
+            plan.postTableCreate.push(
+              renderPartitionReplicaIdentity(desiredObject)
+            );
+          }
           continue;
         }
 

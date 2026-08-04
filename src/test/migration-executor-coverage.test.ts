@@ -1,4 +1,5 @@
 import { describe, expect, test, mock } from "bun:test";
+import { buildStatementMetadata } from "../cli/statement-metadata";
 
 let promptAnswer = "yes";
 
@@ -21,6 +22,25 @@ async function loadExecutor() {
 }
 
 describe("MigrationExecutor coverage", () => {
+  test("reports statement metadata in execution order", function () {
+    const metadata = buildStatementMetadata({
+      preTransactional: ["PRE"],
+      transactional: ["TX"],
+      concurrent: ["CONCURRENT"],
+      deferred: ["DEFER"],
+      hasChanges: true,
+    });
+
+    expect(metadata.map(function selectExecutionFields(item) {
+      return [item.order, item.channel, item.sql];
+    })).toEqual([
+      [1, "pre-transactional", "PRE"],
+      [2, "transactional", "TX"],
+      [3, "concurrent", "CONCURRENT"],
+      [4, "deferred", "DEFER"],
+    ]);
+  });
+
   test("filters destructive operations", async function () {
     const MigrationExecutor = await loadExecutor();
     const executor = new MigrationExecutor({} as any);
@@ -49,16 +69,19 @@ describe("MigrationExecutor coverage", () => {
     expect(await (executor as any).promptConfirmation("continue?")).toBe(false);
   });
 
-  test("executes prerequisite transactions before the main and deferred phases", async function () {
+  test("executes prerequisite, main, concurrent, and dependent phases in order", async function () {
     const MigrationExecutor = await loadExecutor();
-    const calls: string[][] = [];
+    const calls: string[] = [];
     const executor = new MigrationExecutor({
       executeInTransaction: async function (_client: unknown, statements: string[]) {
-        calls.push([...statements]);
+        calls.push(...statements.map(function (statement) {
+          return `transaction:${statement}`;
+        }));
       },
     } as any);
     const client = {
-      query: async function () {
+      query: async function (statement: string) {
+        calls.push(`query:${statement}`);
         return { rows: [] };
       },
     } as any;
@@ -69,12 +92,17 @@ describe("MigrationExecutor coverage", () => {
         preTransactional: ["PRE"],
         transactional: ["TX"],
         deferred: ["DEFER"],
-        concurrent: [],
+        concurrent: ["CONCURRENT"],
         hasChanges: true,
       },
       true
     );
 
-    expect(calls).toEqual([["PRE"], ["TX"], ["DEFER"]]);
+    expect(calls).toEqual([
+      "transaction:PRE",
+      "transaction:TX",
+      "query:CONCURRENT",
+      "transaction:DEFER",
+    ]);
   });
 });

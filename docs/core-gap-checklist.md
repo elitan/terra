@@ -208,7 +208,8 @@
 - done: model PostgreSQL row-level security as independent ENABLE/FORCE flags and policies as complete semantic CREATE POLICY definitions; cover all commands, modes, role forms, expressions, external convergence, enforcement behavior, mixed ALTER TABLE constraints, transactional replacement/removal, idempotency, and pre-mutation rejection of ALTER POLICY or negative RLS mutations on PostgreSQL 14-18.
 - done: preserve PostgreSQL standalone and identity-sequence logged/unlogged persistence with PostgreSQL 14 versus 15-18 semantics; replace destructive option and ownership recreation with native ALTER operations that preserve OIDs, dependents, live counter state, schema-qualified ownership, and idempotency.
 - done: preserve PostgreSQL ordinary trigger `UPDATE OF` columns, transition tables, default statement timing, and origin/disabled/replica/always firing modes; apply mode-only changes natively, preserve constraint/event trigger modes and qualified functions, ignore matching partition clones, reject divergent clone state plus bulk/ONLY mutations, and converge idempotently on PostgreSQL 14-18.
-- next: complete the remaining managed-relation metadata audit, beginning with PostgreSQL replica identity and its index dependency semantics.
+- done: preserve PostgreSQL DEFAULT/FULL/NOTHING/USING INDEX replica identity on ordinary and partition relations; inspect missing selected indexes, validate index eligibility before mutation, reset and restore identity around dependency changes, keep constraint-backed work atomic, and execute concurrent standalone index builds before dependent assignments on PostgreSQL 14-18.
+- next: continue the managed-relation metadata audit with PostgreSQL clustering state and its index dependency semantics.
 
 ## parser
 

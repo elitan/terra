@@ -28,6 +28,7 @@ mock.module("readline", function () {
 interface MockState {
   clientEndCalls: number;
   clientQueries: string[];
+  executionOrder: string[];
   parseCalls: Array<[string, string | undefined]>;
   executeInTransactionCalls: string[][];
   acquireCalls: string[];
@@ -81,6 +82,7 @@ function createMockProvider(options: {
   const state: MockState = {
     clientEndCalls: 0,
     clientQueries: [],
+    executionOrder: [],
     parseCalls: [],
     executeInTransactionCalls: [],
     acquireCalls: [],
@@ -96,6 +98,7 @@ function createMockProvider(options: {
   const client: DatabaseClient = {
     query: async function (sql: string) {
       state.clientQueries.push(sql);
+      state.executionOrder.push(`query:${sql}`);
       return { rows: [] };
     },
     end: async function () {
@@ -162,6 +165,9 @@ function createMockProvider(options: {
     },
     executeInTransaction: async function (_client, statements) {
       state.executeInTransactionCalls.push([...statements]);
+      state.executionOrder.push(...statements.map(function (statement) {
+        return `transaction:${statement}`;
+      }));
     },
     acquireAdvisoryLock: async function (_client, lockOptions) {
       state.acquireCalls.push(lockOptions.lockName);
@@ -468,6 +474,7 @@ describe("SchemaService private coverage", function () {
     const okClient: DatabaseClient = {
       query: async function (sql: string) {
         mock.state.clientQueries.push(sql);
+        mock.state.executionOrder.push(`query:${sql}`);
         return { rows: [] };
       },
       end: async function () {
@@ -490,7 +497,12 @@ describe("SchemaService private coverage", function () {
       ["TX1"],
       ["DEFER1"],
     ]);
-    expect(mock.state.clientQueries).toContain("C1");
+    expect(mock.state.executionOrder).toEqual([
+      "transaction:PRE1",
+      "transaction:TX1",
+      "query:C1",
+      "transaction:DEFER1",
+    ]);
 
     const badClient: DatabaseClient = {
       query: async function (sql: string) {

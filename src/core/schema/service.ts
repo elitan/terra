@@ -104,16 +104,16 @@ export class SchemaService {
           });
         }
 
-        if (result.deferredPreview.length > 0) {
-          Logger.info("Deferred changes (circular FK dependencies):");
-          result.deferredPreview.forEach((stmt, i) => {
+        if (result.concurrentPreview.length > 0) {
+          Logger.info("Concurrent changes (non-transactional):");
+          result.concurrentPreview.forEach((stmt, i) => {
             Logger.cyan(`  ${i + 1}. ${stmt}`);
           });
         }
 
-        if (result.concurrentPreview.length > 0) {
-          Logger.info("Concurrent changes (non-transactional):");
-          result.concurrentPreview.forEach((stmt, i) => {
+        if (result.deferredPreview.length > 0) {
+          Logger.info("Deferred changes (after concurrent changes):");
+          result.deferredPreview.forEach((stmt, i) => {
             Logger.cyan(`  ${i + 1}. ${stmt}`);
           });
         }
@@ -206,14 +206,14 @@ export class SchemaService {
         Logger.print(OutputFormatter.box(result.transactionalPreview));
       }
 
-      if (result.deferredPreview.length > 0) {
-        Logger.print(OutputFormatter.section("Deferred (circular FK dependencies)"));
-        Logger.print(OutputFormatter.box(result.deferredPreview));
-      }
-
       if (result.concurrentPreview.length > 0) {
         Logger.print(OutputFormatter.warningSection("Concurrent (non-transactional)"));
         Logger.print(OutputFormatter.box(result.concurrentPreview));
+      }
+
+      if (result.deferredPreview.length > 0) {
+        Logger.print(OutputFormatter.section("Deferred (after concurrent changes)"));
+        Logger.print(OutputFormatter.box(result.deferredPreview));
       }
 
       console.log();
@@ -263,10 +263,6 @@ export class SchemaService {
       await this.provider.executeInTransaction(client, plan.transactional);
     }
 
-    if (plan.deferred.length > 0) {
-      await this.provider.executeInTransaction(client, plan.deferred);
-    }
-
     if (plan.concurrent.length > 0) {
       for (const statement of plan.concurrent) {
         try {
@@ -277,6 +273,10 @@ export class SchemaService {
           throw error;
         }
       }
+    }
+
+    if (plan.deferred.length > 0) {
+      await this.provider.executeInTransaction(client, plan.deferred);
     }
   }
 
@@ -353,8 +353,8 @@ export class SchemaService {
     const statements = [
       ...(plan.preTransactional ?? []),
       ...plan.transactional,
-      ...plan.deferred,
       ...plan.concurrent,
+      ...plan.deferred,
     ];
     return statements.filter((statement) => isDestructiveStatement(statement));
   }

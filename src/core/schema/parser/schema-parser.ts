@@ -58,6 +58,12 @@ import {
   rejectUnsupportedBulkTriggerAlter,
   type PendingTriggerMode,
 } from "./trigger-mode-parser";
+import {
+  isReplicaIdentitySubtype,
+  mergePendingReplicaIdentities,
+  parseAlterTableReplicaIdentities,
+  type PendingReplicaIdentity,
+} from "./replica-identity-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -517,6 +523,8 @@ export class SchemaParser {
     const sqlObjects: SqlObject[] = [];
     const pendingTableConstraints: PendingTableConstraint[] = [];
     const pendingTriggerModes: PendingTriggerMode[] = [];
+    const pendingReplicaIdentities: PendingReplicaIdentity[] = [];
+    const partitionDefinitions = new Map<string, Table>();
 
     // Auto-quote reserved keywords that are commonly used as column names
     sql = this.autoQuoteReservedKeywords(sql);
@@ -562,6 +570,13 @@ export class SchemaParser {
           const sqlObject = this.parsePartitionSqlObject(stmt);
           if (sqlObject) {
             sqlObjects.push(sqlObject);
+            const partitionDefinition = parseCreateTable(stmt.CreateStmt);
+            if (partitionDefinition) {
+              partitionDefinitions.set(
+                `${partitionDefinition.schema || "public"}.${partitionDefinition.name}`,
+                partitionDefinition
+              );
+            }
           }
         } else if (stmt.CreateStmt) {
           const table = parseCreateTable(stmt.CreateStmt);
@@ -725,11 +740,17 @@ export class SchemaParser {
             filePath
           );
           pendingTriggerModes.push(...triggerModes);
+          const replicaIdentities = parseAlterTableReplicaIdentities(
+            stmt.AlterTableStmt,
+            filePath
+          );
+          pendingReplicaIdentities.push(...replicaIdentities);
           const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
             function isNotDeclarativeStateCommand(item: any) {
               const subtype = item?.AlterTableCmd?.subtype;
               return !isRowSecuritySubtype(subtype) &&
-                !isTableTriggerModeSubtype(subtype);
+                !isTableTriggerModeSubtype(subtype) &&
+                !isReplicaIdentitySubtype(subtype);
             }
           );
           if (remainingCommands.length > 0) {
@@ -741,7 +762,8 @@ export class SchemaParser {
             );
           } else if (
             rowSecurityObjects.length === 0 &&
-            triggerModes.length === 0
+            triggerModes.length === 0 &&
+            replicaIdentities.length === 0
           ) {
             throw this.unsupportedAlterTableError(filePath);
           }
@@ -796,6 +818,13 @@ export class SchemaParser {
       triggers,
       sqlObjects,
       pendingTriggerModes,
+      filePath
+    );
+    mergePendingReplicaIdentities(
+      tables,
+      sqlObjects,
+      pendingReplicaIdentities,
+      partitionDefinitions,
       filePath
     );
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
@@ -1317,7 +1346,7 @@ export class SchemaParser {
       "This ALTER TABLE statement is not supported in schema definitions. " +
         "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
         "ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
-        "named trigger firing modes; " +
+        "named trigger firing modes plus replica identity state; " +
         "define all other desired table state with CREATE TABLE.",
       filePath
     );

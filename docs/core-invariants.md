@@ -24,6 +24,7 @@
 2. failures must leave database in previous consistent state.
 3. concurrent statements must report exact failing statement.
 4. pre-transactional statements must commit before main transactional statements.
+5. concurrent statements must finish before deferred transactional statements that depend on them.
 
 ## error contract
 

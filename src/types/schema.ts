@@ -234,6 +234,12 @@ export type PostgresTriggerEnabledMode =
   | 'replica'
   | 'always';
 
+export type PostgresReplicaIdentity =
+  | { mode: 'full' }
+  | { mode: 'nothing' }
+  | { mode: 'index'; indexName: string }
+  | { mode: 'index-missing' };
+
 export interface Trigger {
   name: string;
   tableName: string;
@@ -371,6 +377,7 @@ export interface SqlObject {
   triggerTable?: QualifiedName;
   triggerFunction?: QualifiedName;
   triggerEnabled?: PostgresTriggerEnabledMode;
+  replicaIdentity?: PostgresReplicaIdentity;
   attributeDependents?: CompositeTypeAttributeDependent[];
   typeDependents?: CompositeTypeTypeDependent[];
   routineDependents?: PostgresTypeRoutineDependent[];
@@ -416,6 +423,7 @@ export interface Table {
   uniqueConstraints?: UniqueConstraint[];
   exclusionConstraints?: ExclusionConstraint[];
   indexes?: Index[];
+  replicaIdentity?: PostgresReplicaIdentity;
 }
 
 export interface Schema {

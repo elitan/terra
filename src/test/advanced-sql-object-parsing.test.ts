@@ -252,6 +252,86 @@ describe("Advanced SQL object parsing", function () {
     `)).rejects.toThrow(/trigger.*audit_ddl.*declared more than once/i);
   });
 
+  test("preserves declarative replica identity for tables and partitions", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE TABLE public.default_identity (id integer PRIMARY KEY);
+      ALTER TABLE public.default_identity REPLICA IDENTITY DEFAULT;
+
+      CREATE TABLE public.full_identity (id integer, value text);
+      ALTER TABLE public.full_identity REPLICA IDENTITY FULL;
+
+      CREATE TABLE public.nothing_identity (id integer, value text);
+      ALTER TABLE public.nothing_identity REPLICA IDENTITY NOTHING;
+
+      CREATE TABLE public.index_identity (
+        id integer NOT NULL,
+        value text
+      );
+      CREATE UNIQUE INDEX index_identity_key
+        ON public.index_identity (id);
+      ALTER TABLE public.index_identity
+        REPLICA IDENTITY USING INDEX index_identity_key;
+
+      CREATE TABLE public.partition_identity (
+        id integer NOT NULL,
+        CONSTRAINT partition_identity_pkey PRIMARY KEY (id)
+      ) PARTITION BY RANGE (id);
+      ALTER TABLE public.partition_identity
+        REPLICA IDENTITY USING INDEX partition_identity_pkey;
+
+      CREATE TABLE public.partition_unique_identity (
+        id integer NOT NULL,
+        CONSTRAINT partition_unique_identity_key UNIQUE (id)
+      ) PARTITION BY RANGE (id);
+      ALTER TABLE public.partition_unique_identity
+        REPLICA IDENTITY USING INDEX partition_unique_identity_key;
+    `);
+
+    expect(parsed.tables.find(function findDefault(table) {
+      return table.name === "default_identity";
+    })).not.toHaveProperty("replicaIdentity");
+    expect(parsed.tables.find(function findFull(table) {
+      return table.name === "full_identity";
+    })).toHaveProperty("replicaIdentity", { mode: "full" });
+    expect(parsed.tables.find(function findNothing(table) {
+      return table.name === "nothing_identity";
+    })).toHaveProperty("replicaIdentity", { mode: "nothing" });
+    expect(parsed.tables.find(function findIndex(table) {
+      return table.name === "index_identity";
+    })).toHaveProperty("replicaIdentity", {
+      mode: "index",
+      indexName: "index_identity_key",
+    });
+    expect(parsed.sqlObjects?.find(function findPartition(object) {
+      return object.key === "partition:public.partition_identity";
+    })).toHaveProperty("replicaIdentity", {
+      mode: "index",
+      indexName: "partition_identity_pkey",
+    });
+    expect(parsed.sqlObjects?.find(function findUniquePartition(object) {
+      return object.key === "partition:public.partition_unique_identity";
+    })).toHaveProperty("replicaIdentity", {
+      mode: "index",
+      indexName: "partition_unique_identity_key",
+    });
+  });
+
+  test("rejects duplicate or unbound replica identity declarations", async function () {
+    const parser = new SchemaParser();
+
+    await expect(parser.parseSchema(`
+      CREATE TABLE public.accounts (id integer);
+      ALTER TABLE public.accounts REPLICA IDENTITY FULL;
+      ALTER TABLE public.accounts REPLICA IDENTITY NOTHING;
+    `)).rejects.toThrow(/replica identity.*declared more than once/i);
+    await expect(
+      parser.parseSchema(
+        "ALTER TABLE public.missing REPLICA IDENTITY FULL;"
+      )
+    ).rejects.toThrow(/replica identity target.*not found/i);
+  });
+
   test("rejects imperative policy and negative row security mutations", async function () {
     const parser = new SchemaParser();
 

@@ -3,7 +3,8 @@ export interface MigrationPlan {
   preTransactional?: string[];
   transactional: string[];
   concurrent: string[];
-  deferred: string[]; // FK statements that must be executed after all tables are created (for circular dependencies)
+  // Transactional statements that depend on concurrent work and therefore run last.
+  deferred: string[];
   hasChanges: boolean;
 }
 

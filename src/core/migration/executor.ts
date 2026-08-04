@@ -60,16 +60,7 @@ export class MigrationExecutor {
         );
       }
 
-      // Step 3: Execute deferred FK statements (for circular dependencies)
-      // These must run after all tables are created but are still transactional
-      if (plan.deferred && plan.deferred.length > 0) {
-        await this.databaseService.executeInTransaction(
-          client,
-          plan.deferred
-        );
-      }
-
-      // Step 4: Execute all concurrent statements individually
+      // Step 3: Execute all concurrent statements individually
       if (plan.concurrent.length > 0) {
         const ora = (await import("ora")).default;
 
@@ -103,6 +94,14 @@ export class MigrationExecutor {
             );
           }
         }
+      }
+
+      // Step 4: Execute transactional work that depends on concurrent changes.
+      if (plan.deferred && plan.deferred.length > 0) {
+        await this.databaseService.executeInTransaction(
+          client,
+          plan.deferred
+        );
       }
     } catch (error) {
       if (error instanceof MigrationError) {

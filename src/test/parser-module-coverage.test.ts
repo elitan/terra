@@ -9,6 +9,10 @@ import { parseCreateSchema } from "../core/schema/parser/schema-definition-parse
 import { parseCreateSequence } from "../core/schema/parser/sequence-parser";
 import { parseCreateTrigger } from "../core/schema/parser/trigger-parser";
 import {
+  isReplicaIdentitySubtype,
+  parseAlterTableReplicaIdentities,
+} from "../core/schema/parser/replica-identity-parser";
+import {
   extractAllConstraints,
   parseForeignKey,
   parseTablePrimaryKey,
@@ -16,6 +20,38 @@ import {
 } from "../core/schema/parser/tables/constraint-parser";
 
 describe("Parser module coverage", () => {
+  describe("replica identity parser", function () {
+    test("recognizes only replica identity ALTER TABLE commands", function () {
+      expect(isReplicaIdentitySubtype("AT_ReplicaIdentity")).toBe(true);
+      expect(isReplicaIdentitySubtype("AT_AddColumn")).toBe(false);
+      expect(parseAlterTableReplicaIdentities({ cmds: [] })).toEqual([]);
+    });
+
+    test("rejects missing targets and malformed index declarations", function () {
+      const replicaCommand = {
+        AlterTableCmd: {
+          subtype: "AT_ReplicaIdentity",
+          def: { ReplicaIdentityStmt: { identity_type: "f" } },
+        },
+      };
+      expect(function parseMissingTarget() {
+        parseAlterTableReplicaIdentities({ cmds: [replicaCommand] });
+      }).toThrow(/missing a table name/i);
+
+      expect(function parseUnnamedIndex() {
+        parseAlterTableReplicaIdentities({
+          relation: { relname: "events" },
+          cmds: [{
+            AlterTableCmd: {
+              subtype: "AT_ReplicaIdentity",
+              def: { ReplicaIdentityStmt: { identity_type: "i" } },
+            },
+          }],
+        });
+      }).toThrow(/using index with a named index/i);
+    });
+  });
+
   describe("extension parser", () => {
     test("parses extension options", () => {
       const extension = parseCreateExtension({

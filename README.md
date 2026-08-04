@@ -148,6 +148,21 @@ replica-only, or always firing modes. Named `ALTER TABLE ... TRIGGER` and
 bulk `ALL`/`USER` mutations and `ALTER TABLE ONLY` mode changes are rejected.
 Partition-created trigger clones are managed through their parent trigger, and
 externally diverged clone modes stop planning instead of being ignored.
+PostgreSQL replica identity is declarative through `ALTER TABLE ... REPLICA
+IDENTITY DEFAULT`, `FULL`, `NOTHING`, or `USING INDEX`. Omitting the clause is
+the canonical `DEFAULT` state. TerraDB inspects both `pg_class.relreplident`
+and the selected `pg_index.indisreplident` index, repairs catalog state left
+behind when a selected index is dropped, and resets identity before replacing
+or renaming a selected index. `USING INDEX` is validated before mutation: the
+target must be a unique, non-partial, immediate, column-only index whose key
+columns are `NOT NULL`; nullable `INCLUDE` payload columns remain valid.
+Standalone indexes may be built concurrently and are assigned in a final
+transaction only after the concurrent build succeeds. Constraint-backed index
+changes and assignments remain atomic in the main transaction. Replica
+identity is tracked independently for ordinary tables, partitioned parents,
+and leaf partitions because PostgreSQL does not propagate it through a
+partition hierarchy. Within the supported partition contract, `USING INDEX`
+targets a named primary-key or unique constraint on the partitioned relation.
 PostgreSQL row-level security is declared with positive `ALTER TABLE ... ENABLE
 ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` state plus complete `CREATE
 POLICY` definitions. TerraDB preserves policy command, permissive/restrictive
