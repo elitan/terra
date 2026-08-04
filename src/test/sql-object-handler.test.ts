@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { SqlObjectHandler } from "../core/schema/handlers/sql-object-handler";
-import type { SqlObject } from "../types/schema";
+import type {
+  PostgresRoleDefinition,
+  SqlObject,
+} from "../types/schema";
 
 function makeSqlObject(overrides: Partial<SqlObject>): SqlObject {
   return {
@@ -34,7 +37,82 @@ function makePolicy(overrides: Partial<SqlObject> = {}): SqlObject {
   });
 }
 
+function makeRole(
+  name: string,
+  definition?: PostgresRoleDefinition
+): SqlObject {
+  return makeSqlObject({
+    kind: "role",
+    key: `role:${name}`,
+    name,
+    schema: undefined,
+    createStatement: `CREATE ROLE "${name}";`,
+    dropStatement: `DROP ROLE IF EXISTS "${name}";`,
+    ...(definition ? { roleDefinition: definition } : {}),
+  });
+}
+
 describe("SqlObjectHandler", function () {
+  test("orders native role alterations and rejects incomplete state", async function () {
+    const handler = new SqlObjectHandler();
+    const currentDefinition: PostgresRoleDefinition = {
+      login: false,
+      superuser: false,
+      createDatabase: false,
+      createRole: false,
+      inherit: true,
+      replication: false,
+      bypassRowLevelSecurity: false,
+      connectionLimit: -1,
+    };
+    const desiredDefinition = {
+      ...currentDefinition,
+      login: true,
+    };
+    const alpha = makeRole("alpha", currentDefinition);
+    const zeta = makeRole("zeta", currentDefinition);
+
+    const plan = await handler.generateStatements(
+      [
+        makeRole("zeta", desiredDefinition),
+        makeRole("alpha", desiredDefinition),
+      ],
+      [zeta, alpha]
+    );
+
+    expect(plan.bootstrapCreate).toEqual([
+      'ALTER ROLE "alpha" WITH LOGIN;',
+      'ALTER ROLE "zeta" WITH LOGIN;',
+    ]);
+    expect(plan.lateDrop).toEqual([]);
+    await expect(
+      handler.generateStatements([makeRole("alpha")], [alpha])
+    ).rejects.toThrow(/missing its lossless canonical definition/i);
+  });
+
+  test("rejects cross-kind SQL object key collisions involving roles", async function () {
+    const handler = new SqlObjectHandler();
+    const definition: PostgresRoleDefinition = {
+      login: false,
+      superuser: false,
+      createDatabase: false,
+      createRole: false,
+      inherit: true,
+      replication: false,
+      bypassRowLevelSecurity: false,
+      connectionLimit: -1,
+    };
+    const role = makeRole("collision", definition);
+    const policy = makePolicy({ key: role.key });
+
+    await expect(
+      handler.generateStatements([policy], [role])
+    ).rejects.toThrow(/collides between role and policy/i);
+    await expect(
+      handler.generateStatements([role], [policy])
+    ).rejects.toThrow(/collides between policy and role/i);
+  });
+
   test("separates partition removals from native foreign-server changes", async function () {
     const handler = new SqlObjectHandler();
     const parent = makeSqlObject({});

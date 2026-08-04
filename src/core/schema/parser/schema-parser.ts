@@ -90,6 +90,8 @@ import {
   type PendingForeignServerOwner,
 } from "./foreign-server-owner-parser";
 import { parseForeignServerRemovals } from "./foreign-server-removal-parser";
+import { parsePostgresRole } from "./role-parser";
+import { parsePostgresRoleRemovals } from "./role-removal-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -921,7 +923,7 @@ export class SchemaParser {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.CreateRoleStmt) {
-          const sqlObject = this.parseRoleSqlObject(stmt);
+          const sqlObject = this.parseRoleSqlObject(stmt, filePath);
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
@@ -1012,6 +1014,19 @@ export class SchemaParser {
         ) {
           sqlObjects.push(
             ...parseForeignServerRemovals(stmt.DropStmt, filePath)
+          );
+        } else if (stmt.DropRoleStmt) {
+          sqlObjects.push(
+            ...parsePostgresRoleRemovals(stmt.DropRoleStmt, filePath)
+          );
+        } else if (
+          stmt.AlterRoleStmt ||
+          stmt.AlterRoleSetStmt ||
+          stmt.RenameStmt?.renameType === "OBJECT_ROLE"
+        ) {
+          throw new ParserError(
+            "PostgreSQL ALTER ROLE is an imperative partial mutation and is not supported in desired schemas; declare the role's complete desired state with one CREATE ROLE statement",
+            filePath
           );
         } else if (stmt.DropStmt) {
           throw new ParserError(
@@ -1632,7 +1647,8 @@ export class SchemaParser {
       if (
         object.kind !== "policy" &&
         object.kind !== "row-level-security" &&
-        object.kind !== "foreign-server"
+        object.kind !== "foreign-server" &&
+        object.kind !== "role"
       ) {
         continue;
       }
@@ -1642,6 +1658,8 @@ export class SchemaParser {
           label = "policy";
         } else if (object.kind === "row-level-security") {
           label = "row-level security state";
+        } else if (object.kind === "role") {
+          label = "role";
         }
         throw new ParserError(
           `PostgreSQL ${label} '${object.key}' is declared more than once in the desired schema`,
@@ -2130,15 +2148,11 @@ export class SchemaParser {
     return object;
   }
 
-  private parseRoleSqlObject(stmt: any): SqlObject | null {
-    const node = stmt?.CreateRoleStmt;
-    const name = node?.role;
-    if (!name) {
-      return null;
-    }
-
-    const kind = node?.stmt_type === "ROLESTMT_USER" ? "user" : "role";
-    return this.buildSqlObject(kind, stmt, name, undefined, `${kind}:${name}`);
+  private parseRoleSqlObject(
+    stmt: any,
+    filePath?: string
+  ): SqlObject | null {
+    return parsePostgresRole(stmt, filePath);
   }
 
   private parseGrantSqlObject(stmt: any): SqlObject | null {

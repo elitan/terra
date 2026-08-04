@@ -111,6 +111,7 @@ export DATABASE_URL=":memory:"
 | Triggers | Yes | Yes |
 | Materialized Views | Yes | No |
 | Schemas | Yes | No |
+| Roles | Yes | No |
 | Object Comments (`COMMENT ON`) | Yes | No |
 | Extensions | Yes | No |
 | Row-Level Security & Policies | Yes | No |
@@ -145,6 +146,17 @@ unless declared by name. `DROP SERVER [IF EXISTS] name [RESTRICT]` is the
 explicit, idempotent absent-state declaration for a database-wide server; it is
 classified as destructive, respects strict mode, and rolls back without deleting
 dependent mappings or foreign tables. `CASCADE` is rejected before mutation.
+PostgreSQL roles and users share one database-cluster identity. TerraDB
+normalizes `CREATE ROLE`, `CREATE USER`, and `CREATE GROUP` to complete role
+state for login, superuser, database/role creation, inheritance, replication,
+row-level-security bypass, and connection-limit attributes. Changes use native
+`ALTER ROLE`, preserving OIDs, ownership, grants, memberships, passwords, and
+role-local configuration. Password, expiration, membership, and `SYSID`
+clauses are rejected in desired `CREATE ROLE` statements because they are
+masked, separately modeled by PostgreSQL, or ignored. `DROP ROLE [IF EXISTS]`
+is the explicit destructive absent-state declaration; PostgreSQL dependency
+checks block it and roll back the transaction while the role still owns objects
+or holds privileges. Undeclared cluster roles remain unmanaged.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

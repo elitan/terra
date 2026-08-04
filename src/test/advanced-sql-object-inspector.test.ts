@@ -361,9 +361,9 @@ describe("Advanced SQL object inspector", function () {
       "policy",
       "range-type",
       "role",
+      "role",
       "row-level-security",
       "row-level-security",
-      "user",
     ]);
 
     expect(sqlObjects.find(function (item) {
@@ -498,7 +498,27 @@ describe("Advanced SQL object inspector", function () {
 
     expect(sqlObjects.find(function (item) {
       return item.key === "role:app_reader";
-    })?.createStatement).toBe('CREATE ROLE "app_reader" WITH NOLOGIN NOINHERIT CONNECTION LIMIT 5;');
+    })).toMatchObject({
+      createStatement:
+        'CREATE ROLE "app_reader" WITH NOLOGIN NOSUPERUSER NOCREATEDB ' +
+        'NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5;',
+      roleDefinition: {
+        login: false,
+        superuser: false,
+        createDatabase: false,
+        createRole: false,
+        inherit: false,
+        replication: false,
+        bypassRowLevelSecurity: false,
+        connectionLimit: 5,
+      },
+    });
+    expect(sqlObjects.find(function (item) {
+      return item.key === "role:app_user";
+    })).toMatchObject({
+      kind: "role",
+      roleDefinition: { login: true },
+    });
 
     expect(sqlObjects.find(function (item) {
       return item.key === "grant:GRANT USAGE ON SCHEMA \"public\" TO \"app_reader\";";

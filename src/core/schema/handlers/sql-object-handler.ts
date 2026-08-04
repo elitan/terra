@@ -1,6 +1,7 @@
 import type {
   PostgresPolicyDefinition,
   PostgresPolicyRole,
+  PostgresRoleDefinition,
   SqlObject,
   SqlObjectKind,
 } from "../../../types/schema";
@@ -37,6 +38,10 @@ import {
   renderPostgresForeignServerAlter,
   renderPostgresForeignServerOwnerAlter,
 } from "../../../utils/postgres-foreign-server";
+import {
+  postgresRoleDefinitionsEqual,
+  renderPostgresRoleAlter,
+} from "../../../utils/postgres-role";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -471,7 +476,7 @@ function getPartitionBoundReplacement(
 }
 
 function getCreateBucket(kind: SqlObjectKind): SqlObjectStatementBucket {
-  if (kind === "role" || kind === "user") {
+  if (kind === "role") {
     return "bootstrapCreate";
   }
   if (kind === "domain-type" || kind === "range-type") {
@@ -749,6 +754,12 @@ export class SqlObjectHandler {
     );
     const replacementDesiredKeys = new Set<string>();
     const newForeignServerOwners: SqlObject[] = [];
+    const alteredRoles: Array<{
+      key: string;
+      name: string;
+      current: PostgresRoleDefinition;
+      desired: PostgresRoleDefinition;
+    }> = [];
 
     const dropsByBucket = new Map<SqlObjectStatementBucket, SqlObject[]>();
     const createsByBucket = new Map<SqlObjectStatementBucket, SqlObject[]>();
@@ -873,6 +884,50 @@ export class SqlObjectHandler {
           newForeignServerOwners.push(desiredObject);
         }
         continue;
+      }
+
+      if (currentObject.kind === "role") {
+        if (desiredObject.kind !== "role") {
+          throw new ValidationError(
+            `PostgreSQL SQL object key '${currentObject.key}' collides between role and ${desiredObject.kind} definitions`,
+            "role",
+            currentObject.key,
+            desiredObject.createStatement
+          );
+        }
+        if (
+          !currentObject.roleDefinition ||
+          !desiredObject.roleDefinition
+        ) {
+          throw new ValidationError(
+            `PostgreSQL role '${desiredObject.name}' is missing its lossless canonical definition`,
+            "role",
+            desiredObject.key,
+            desiredObject.createStatement
+          );
+        }
+        if (
+          !postgresRoleDefinitionsEqual(
+            currentObject.roleDefinition,
+            desiredObject.roleDefinition
+          )
+        ) {
+          alteredRoles.push({
+            key: desiredObject.key,
+            name: desiredObject.name,
+            current: currentObject.roleDefinition,
+            desired: desiredObject.roleDefinition,
+          });
+        }
+        continue;
+      }
+      if (desiredObject.kind === "role") {
+        throw new ValidationError(
+          `PostgreSQL SQL object key '${desiredObject.key}' collides between ${currentObject.kind} and role definitions`,
+          "role",
+          desiredObject.key,
+          desiredObject.createStatement
+        );
       }
 
       const currentCanonical = canonicalObjects.get(currentObject)!;
@@ -1004,6 +1059,21 @@ export class SqlObjectHandler {
       const operations = pushStatements(plan, bucket, objects, false);
       if (bucket === "typeCreate") {
         plan.typeCreateOperations.push(...operations);
+      }
+    }
+    const sortedAlteredRoles = [...alteredRoles].sort(
+      function sortRoleAlters(left, right) {
+        return left.key.localeCompare(right.key);
+      }
+    );
+    for (const role of sortedAlteredRoles) {
+      const statement = renderPostgresRoleAlter(
+        role.name,
+        role.current,
+        role.desired
+      );
+      if (statement) {
+        plan.bootstrapCreate.push(statement);
       }
     }
     for (const server of sortKeys(newForeignServerOwners, false)) {

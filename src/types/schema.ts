@@ -305,8 +305,7 @@ export type SqlObjectKind =
   | "policy"
   | "range-type"
   | "role"
-  | "row-level-security"
-  | "user";
+  | "row-level-security";
 
 export interface PartitionKeyOperatorClass extends QualifiedName {
   inputType: QualifiedName;
@@ -374,6 +373,17 @@ export interface PostgresForeignServerDefinition {
   options: PostgresForeignServerOption[];
 }
 
+export interface PostgresRoleDefinition {
+  login: boolean;
+  superuser: boolean;
+  createDatabase: boolean;
+  createRole: boolean;
+  inherit: boolean;
+  replication: boolean;
+  bypassRowLevelSecurity: boolean;
+  connectionLimit: number;
+}
+
 export interface PostgresTypeRoutineDependent {
   schema: string;
   name: string;
@@ -405,6 +415,7 @@ export interface SqlObject {
   typeDefinition?: PostgresTypeDefinition;
   policyDefinition?: PostgresPolicyDefinition;
   foreignServerDefinition?: PostgresForeignServerDefinition;
+  roleDefinition?: PostgresRoleDefinition;
   triggerTable?: QualifiedName;
   triggerFunction?: QualifiedName;
   triggerEnabled?: PostgresTriggerEnabledMode;

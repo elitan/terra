@@ -4,8 +4,186 @@ import { hasEmptyForeignServerClause } from "../core/schema/parser/schema-parser
 import {
   parseForeignServerRemovals,
 } from "../core/schema/parser/foreign-server-removal-parser";
+import { parsePostgresRole } from "../core/schema/parser/role-parser";
+import {
+  parsePostgresRoleRemovals,
+} from "../core/schema/parser/role-removal-parser";
 
 describe("Advanced SQL object parsing", function () {
+  test("normalizes ROLE and USER aliases to complete role state", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE ROLE plain;
+      CREATE USER "No Login User" NOLOGIN CREATEDB NOINHERIT
+        CONNECTION LIMIT 4;
+      CREATE ROLE "Login Role" LOGIN CREATEROLE;
+    `);
+
+    expect(parsed.sqlObjects).toMatchObject([
+      {
+        kind: "role",
+        key: "role:plain",
+        roleDefinition: {
+          login: false,
+          superuser: false,
+          createDatabase: false,
+          createRole: false,
+          inherit: true,
+          replication: false,
+          bypassRowLevelSecurity: false,
+          connectionLimit: -1,
+        },
+      },
+      {
+        kind: "role",
+        key: "role:No Login User",
+        roleDefinition: {
+          login: false,
+          superuser: false,
+          createDatabase: true,
+          createRole: false,
+          inherit: false,
+          replication: false,
+          bypassRowLevelSecurity: false,
+          connectionLimit: 4,
+        },
+      },
+      {
+        kind: "role",
+        key: "role:Login Role",
+        roleDefinition: {
+          login: true,
+          superuser: false,
+          createDatabase: false,
+          createRole: true,
+          inherit: true,
+          replication: false,
+          bypassRowLevelSecurity: false,
+          connectionLimit: -1,
+        },
+      },
+    ]);
+    expect(parsed.sqlObjects?.[0]?.createStatement).toBe(
+      'CREATE ROLE "plain" WITH NOLOGIN NOSUPERUSER NOCREATEDB ' +
+        'NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1;'
+    );
+  });
+
+  test("rejects role state that cannot be inspected losslessly", async function () {
+    const parser = new SchemaParser();
+    const unsupported = [
+      "CREATE ROLE app PASSWORD 'secret';",
+      "CREATE ROLE app PASSWORD NULL;",
+      "CREATE ROLE app VALID UNTIL 'infinity';",
+      "CREATE ROLE app IN ROLE parent;",
+      "CREATE ROLE app ROLE member;",
+      "CREATE ROLE app ADMIN member;",
+      "CREATE ROLE app SYSID 42;",
+    ];
+
+    for (const sql of unsupported) {
+      await expect(parser.parseSchema(sql)).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        message: expect.stringContaining("not supported in desired schemas"),
+      });
+    }
+    await expect(
+      parser.parseSchema("CREATE ROLE app LOGIN NOLOGIN;")
+    ).rejects.toThrow(/attribute.*canlogin.*more than once/i);
+    await expect(
+      parser.parseSchema("CREATE ROLE app CONNECTION LIMIT -2;")
+    ).rejects.toThrow(/connection limit.*-1 or greater/i);
+    await expect(
+      parser.parseSchema("CREATE ROLE duplicate; CREATE USER duplicate;")
+    ).rejects.toThrow(/role.*declared more than once/i);
+  });
+
+  test("rejects malformed role parser state defensively", function () {
+    expect(parsePostgresRole({ CreateRoleStmt: {} })).toBeNull();
+    expect(parsePostgresRole({
+      CreateRoleStmt: { role: "legacy_group", stmt_type: "ROLESTMT_GROUP" },
+    })).toMatchObject({
+      kind: "role",
+      key: "role:legacy_group",
+      roleDefinition: { login: false },
+    });
+    expect(function parseUnknownCreationForm() {
+      parsePostgresRole({
+        CreateRoleStmt: { role: "app", stmt_type: "ROLESTMT_UNKNOWN" },
+      });
+    }).toThrow(/unsupported creation form/i);
+    expect(function parseMalformedOption() {
+      parsePostgresRole({
+        CreateRoleStmt: {
+          role: "app",
+          stmt_type: "ROLESTMT_ROLE",
+          options: [{}],
+        },
+      });
+    }).toThrow(/malformed option/i);
+    expect(function parseMalformedBoolean() {
+      parsePostgresRole({
+        CreateRoleStmt: {
+          role: "app",
+          stmt_type: "ROLESTMT_ROLE",
+          options: [{ DefElem: { defname: "canlogin", arg: {} } }],
+        },
+      });
+    }).toThrow(/option.*canlogin.*not supported/i);
+    expect(function parseMalformedLimit() {
+      parsePostgresRole({
+        CreateRoleStmt: {
+          role: "app",
+          stmt_type: "ROLESTMT_ROLE",
+          options: [{ DefElem: { defname: "connectionlimit", arg: {} } }],
+        },
+      });
+    }).toThrow(/connection limit/i);
+    expect(function parseContextualRemoval() {
+      parsePostgresRoleRemovals({
+        roles: [{ RoleSpec: { roletype: "ROLESPEC_CURRENT_USER" } }],
+      });
+    }).toThrow(/concrete role name/i);
+    expect(function parseEmptyRemoval() {
+      parsePostgresRoleRemovals({ roles: [] });
+    }).toThrow(/no concrete role names/i);
+  });
+
+  test("models explicit role removals and rejects imperative role changes", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(
+      'DROP ROLE IF EXISTS app, "Quoted Role";'
+    );
+
+    expect(parsed.sqlObjects).toEqual([
+      {
+        kind: "role",
+        key: "role:app",
+        name: "app",
+        createStatement: 'DROP ROLE IF EXISTS "app";',
+        desiredAbsent: true,
+      },
+      {
+        kind: "role",
+        key: "role:Quoted Role",
+        name: "Quoted Role",
+        createStatement: 'DROP ROLE IF EXISTS "Quoted Role";',
+        desiredAbsent: true,
+      },
+    ]);
+
+    for (const sql of [
+      "ALTER ROLE app LOGIN;",
+      "ALTER ROLE app RENAME TO renamed;",
+      "ALTER ROLE app SET search_path = public;",
+    ]) {
+      await expect(parser.parseSchema(sql)).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        message: expect.stringContaining("CREATE ROLE"),
+      });
+    }
+  });
+
   test("models complete foreign server definitions and normalizes conditionals", async function () {
     const parser = new SchemaParser();
     const parsed = await parser.parseSchema(`
@@ -308,7 +486,7 @@ describe("Advanced SQL object parsing", function () {
         EXECUTE FUNCTION public.audit_ddl();
 
       CREATE ROLE app_reader NOLOGIN;
-      CREATE USER app_user WITH LOGIN PASSWORD 'secret';
+      CREATE USER app_user WITH LOGIN;
       GRANT SELECT ON TABLE public.users TO app_reader;
       ALTER DEFAULT PRIVILEGES IN SCHEMA audit GRANT SELECT ON TABLES TO app_reader;
     `;
@@ -336,8 +514,8 @@ describe("Advanced SQL object parsing", function () {
       "policy",
       "range-type",
       "role",
+      "role",
       "row-level-security",
-      "user",
     ]);
   });
 

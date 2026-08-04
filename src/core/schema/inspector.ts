@@ -27,6 +27,7 @@ import type {
   PostgresTriggerEnabledMode,
   PostgresReplicaIdentity,
   PostgresColumnStatistics,
+  PostgresRoleDefinition,
   IndexTerm,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
@@ -47,6 +48,10 @@ import {
   postgresColumnStatisticsFromCatalog,
   postgresStatisticsTargetFromCatalog,
 } from "../../utils/postgres-statistics";
+import {
+  renderPostgresRoleCreate,
+  renderPostgresRoleDrop,
+} from "../../utils/postgres-role";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -4178,37 +4183,23 @@ export class DatabaseInspector {
     `);
 
     return result.rows.map((row: any) => {
-      const kind = row.can_login ? "user" : "role";
-      const options = [row.can_login ? "LOGIN" : "NOLOGIN"];
-      if (row.is_superuser) {
-        options.push("SUPERUSER");
-      }
-      if (row.can_create_db) {
-        options.push("CREATEDB");
-      }
-      if (row.can_create_role) {
-        options.push("CREATEROLE");
-      }
-      if (!row.can_inherit) {
-        options.push("NOINHERIT");
-      }
-      if (row.can_replicate) {
-        options.push("REPLICATION");
-      }
-      if (row.can_bypass_rls) {
-        options.push("BYPASSRLS");
-      }
-      if (row.connection_limit !== -1) {
-        options.push(`CONNECTION LIMIT ${row.connection_limit}`);
-      }
-
-      const subject = kind === "user" ? "USER" : "ROLE";
+      const definition: PostgresRoleDefinition = {
+        login: row.can_login,
+        superuser: row.is_superuser,
+        createDatabase: row.can_create_db,
+        createRole: row.can_create_role,
+        inherit: row.can_inherit,
+        replication: row.can_replicate,
+        bypassRowLevelSecurity: row.can_bypass_rls,
+        connectionLimit: row.connection_limit,
+      };
       return {
-        kind,
-        key: `${kind}:${row.role_name}`,
+        kind: "role" as const,
+        key: `role:${row.role_name}`,
         name: row.role_name,
-        createStatement: `CREATE ${subject} ${this.quoteIdent(row.role_name)} WITH ${options.join(" ")};`,
-        dropStatement: `DROP ${subject} IF EXISTS ${this.quoteIdent(row.role_name)};`,
+        createStatement: renderPostgresRoleCreate(row.role_name, definition),
+        dropStatement: renderPostgresRoleDrop(row.role_name),
+        roleDefinition: definition,
       };
     });
   }

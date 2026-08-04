@@ -44,10 +44,22 @@ describe("Advanced SQL object service", function () {
     const parsedSchema = createParsedSchema({
       sqlObjects: [
         {
-          kind: "user",
-          key: "user:app_user",
+          kind: "role",
+          key: "role:app_user",
           name: "app_user",
-          createStatement: 'CREATE USER "app_user" WITH LOGIN;',
+          createStatement:
+            'CREATE ROLE "app_user" WITH LOGIN NOSUPERUSER NOCREATEDB ' +
+            'NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1;',
+          roleDefinition: {
+            login: true,
+            superuser: false,
+            createDatabase: false,
+            createRole: false,
+            inherit: true,
+            replication: false,
+            bypassRowLevelSecurity: false,
+            connectionLimit: -1,
+          },
         },
         {
           kind: "grant",
@@ -107,11 +119,23 @@ describe("Advanced SQL object service", function () {
       getCurrentSqlObjects: async function () {
         return [
           {
-            kind: "user",
-            key: "user:test_user",
+            kind: "role",
+            key: "role:test_user",
             name: "test_user",
-            createStatement: 'CREATE USER "test_user" WITH LOGIN;',
-            dropStatement: 'DROP USER IF EXISTS "test_user";',
+            createStatement:
+              'CREATE ROLE "test_user" WITH LOGIN NOSUPERUSER NOCREATEDB ' +
+              'NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1;',
+            dropStatement: 'DROP ROLE IF EXISTS "test_user";',
+            roleDefinition: {
+              login: true,
+              superuser: false,
+              createDatabase: false,
+              createRole: false,
+              inherit: true,
+              replication: false,
+              bypassRowLevelSecurity: false,
+              connectionLimit: -1,
+            },
           },
         ];
       },
@@ -139,9 +163,10 @@ describe("Advanced SQL object service", function () {
     const plan = await service.plan("ignored");
 
     expect(plan.transactional).toEqual([
-      'CREATE USER "app_user" WITH LOGIN;',
+      'CREATE ROLE "app_user" WITH LOGIN NOSUPERUSER NOCREATEDB ' +
+        'NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1;',
       'GRANT SELECT ON TABLE "public"."users" TO "app_user";',
     ]);
-    expect(plan.transactional).not.toContain('DROP USER IF EXISTS "test_user";');
+    expect(plan.transactional).not.toContain('DROP ROLE IF EXISTS "test_user";');
   });
 });
