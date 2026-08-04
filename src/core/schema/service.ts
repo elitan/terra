@@ -10,6 +10,7 @@ import type {
 import type { Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import { isDestructiveStatement } from "../../utils/statement-classifier";
+import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
 import {
   CommentHandler,
   CompositeTypeHandler,
@@ -519,9 +520,7 @@ export class SchemaService {
     let preTableTriggerStatements: string[] = [];
     let preTableViewStatements: string[] = [];
     if (this.provider.dialect === "sqlite") {
-      const recreatesTable = tableStatements.some(function (statement) {
-        return /^CREATE\s+(?:VIRTUAL\s+)?TABLE\s+"_(?:""|[^"])+_new"(?=\s*(?:\(|USING\b))/i.test(statement.trim());
-      });
+      const recreatesTable = hasSQLiteTableRecreation(tableStatements);
       const replacesOrDropsView = viewStatements.some(function (statement) {
         return /^DROP VIEW\s+/i.test(statement.trim());
       });

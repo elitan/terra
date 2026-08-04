@@ -28,6 +28,7 @@ import { SQLiteParser } from "./parser";
 import { SQLiteDiffer } from "./differ";
 import { MigrationError } from "../../types/errors";
 import { Logger } from "../../utils/logger";
+import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
 
 const UNSUPPORTED_FEATURES: DatabaseFeature[] = [
   "schemas",
@@ -316,9 +317,7 @@ export class SQLiteProvider implements DatabaseProvider {
   }
 
   private requiresForeignKeySuspension(statements: string[]): boolean {
-    const hasTempRecreateTable = statements.some((statement) =>
-      /^CREATE\s+TABLE\s+"_(?:""|[^"])+_new"\s*\(/i.test(statement.trim())
-    );
+    const hasTempRecreateTable = hasSQLiteTableRecreation(statements);
     const hasDropTable = statements.some((statement) =>
       /^DROP TABLE\s+/i.test(statement.trim())
     );

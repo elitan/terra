@@ -13,6 +13,7 @@ import {
   replaceSQLiteColumnDefinitionName,
   replaceSQLiteCreateTableName,
 } from "./sql-parser-utils";
+import { chooseSQLiteRecreationTableName } from "../../utils/sqlite-recreation";
 
 interface ColumnChange {
   type: 'add' | 'drop' | 'modify';
@@ -35,6 +36,13 @@ export class SQLiteDiffer {
     const statements: string[] = [];
     const currentMap = new Map(current.map(t => [t.name, t]));
     const desiredMap = new Map(desired.map(t => [t.name, t]));
+    const occupiedSchemaNames = new Set<string>();
+    for (const table of [...desired, ...current]) {
+      occupiedSchemaNames.add(table.name);
+      for (const index of table.indexes || []) {
+        occupiedSchemaNames.add(index.name);
+      }
+    }
 
     for (const table of desired) {
       const currentTable = currentMap.get(table.name);
@@ -50,7 +58,18 @@ export class SQLiteDiffer {
         const changes = this.detectChanges(table, currentTable);
 
         if (changes.requiresRecreate) {
-          statements.push(...this.generateTableRecreation(table, currentTable));
+          const temporaryTableName = chooseSQLiteRecreationTableName(
+            table.name,
+            occupiedSchemaNames
+          );
+          occupiedSchemaNames.add(temporaryTableName);
+          statements.push(
+            ...this.generateTableRecreation(
+              table,
+              currentTable,
+              temporaryTableName
+            )
+          );
         } else {
           for (const change of changes.columnChanges) {
             if (change.type === 'add') {
@@ -464,9 +483,12 @@ export class SQLiteDiffer {
     return definition;
   }
 
-  private generateTableRecreation(desired: Table, current: Table): string[] {
+  private generateTableRecreation(
+    desired: Table,
+    current: Table,
+    tempName: string = `_${desired.name}_new`
+  ): string[] {
     const statements: string[] = [];
-    const tempName = `_${desired.name}_new`;
 
     const tempTable = { ...desired, name: tempName };
     statements.push(this.generateCreateTable(tempTable));

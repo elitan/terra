@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { SQLiteDiffer } from "../../providers/sqlite/differ";
 import type { Table } from "../../types/schema";
+import {
+  chooseSQLiteRecreationTableName,
+  hasSQLiteTableRecreation,
+  isSQLiteRecreationTableStatement,
+} from "../../utils/sqlite-recreation";
 
 function makeTable(overrides: Partial<Table> = {}): Table {
   return {
@@ -11,6 +16,41 @@ function makeTable(overrides: Partial<Table> = {}): Table {
 }
 
 describe("SQLiteDiffer private coverage", () => {
+  test("selects and recognizes collision-safe recreation table names", function () {
+    expect(
+      chooseSQLiteRecreationTableName(
+        "users",
+        new Set(["_users_new", "_UsErS_NeW_2"])
+      )
+    ).toBe("_users_new_3");
+    expect(
+      isSQLiteRecreationTableStatement(
+        'CREATE TABLE "_users_new_3" (id INTEGER);'
+      )
+    ).toBe(true);
+    expect(
+      isSQLiteRecreationTableStatement(
+        'CREATE VIRTUAL TABLE "_search_new_2" USING fts5(value);'
+      )
+    ).toBe(true);
+    expect(
+      isSQLiteRecreationTableStatement(
+        'CREATE TABLE "_users_new_backup" (id INTEGER);'
+      )
+    ).toBe(false);
+    expect(
+      hasSQLiteTableRecreation([
+        'CREATE TABLE "_users_new_3" (id INTEGER);',
+        'ALTER TABLE "_UsErS_NeW_3" RENAME TO "users";',
+      ])
+    ).toBe(true);
+    expect(
+      hasSQLiteTableRecreation([
+        'CREATE TABLE "_users_new_3" (id INTEGER);',
+      ])
+    ).toBe(false);
+  });
+
   test("detectChanges marks check constraint changes for recreation", () => {
     const differ = new SQLiteDiffer() as any;
     const desired = makeTable({

@@ -185,6 +185,123 @@ describe("SQLite Table Recreation", () => {
     await client.end();
   });
 
+  test("should avoid collisions with user tables named like recreation artifacts", async function () {
+    const initialSchema = `
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        age INTEGER
+      );
+
+      CREATE TABLE "_users_new" (
+        id INTEGER PRIMARY KEY,
+        note TEXT NOT NULL
+      );
+
+      CREATE TABLE "_users_new_2" (
+        id INTEGER PRIMARY KEY,
+        note TEXT NOT NULL
+      );
+
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
+      CREATE INDEX "_UsErS_NeW_3" ON posts(user_id);
+
+      CREATE TABLE audit_log (
+        user_id INTEGER NOT NULL
+      );
+
+      CREATE VIEW user_ages AS
+        SELECT id, age FROM users;
+
+      CREATE TRIGGER users_insert_audit
+      AFTER INSERT ON users
+      BEGIN
+        INSERT INTO audit_log(user_id) VALUES (NEW.id);
+      END;
+    `;
+    const changedSchema = initialSchema.replace("age INTEGER", "age TEXT");
+
+    await schemaService.apply(initialSchema, ["public"], true);
+    const seedClient = await provider.createClient(config);
+    await seedClient.query("INSERT INTO users(id, age) VALUES (1, 10)");
+    await seedClient.query(
+      'INSERT INTO "_users_new"(id, note) VALUES (?, ?)',
+      [1, "keep me"]
+    );
+    await seedClient.query(
+      'INSERT INTO "_users_new_2"(id, note) VALUES (?, ?)',
+      [1, "keep me too"]
+    );
+    await seedClient.query("INSERT INTO posts(id, user_id) VALUES (1, 1)");
+    await seedClient.end();
+
+    const migration = await schemaService.apply(
+      changedSchema,
+      ["public"],
+      true
+    );
+    expect(migration.transactional).toContainEqual(
+      expect.stringMatching(/^CREATE TABLE "_users_new_4"/)
+    );
+
+    const client = await provider.createClient(config);
+    await client.query("INSERT INTO users(id, age) VALUES (2, '20')");
+    const users = await client.query("SELECT id, age FROM users ORDER BY id");
+    const reservedNameTable = await client.query(
+      'SELECT id, note FROM "_users_new"'
+    );
+    const secondReservedNameTable = await client.query(
+      'SELECT id, note FROM "_users_new_2"'
+    );
+    const posts = await client.query("SELECT id, user_id FROM posts");
+    const foreignKeyCheck = await client.query("PRAGMA foreign_key_check");
+    const auditRows = await client.query(
+      "SELECT user_id FROM audit_log ORDER BY user_id"
+    );
+    const viewRows = await client.query(
+      "SELECT id, age FROM user_ages ORDER BY id"
+    );
+    const temporaryArtifacts = await client.query<{
+      name: string;
+      type: string;
+    }>(`
+      SELECT name, type
+      FROM sqlite_master
+      WHERE name = '_users_new_4'
+    `);
+    const reservedNameIndex = await client.query<{ name: string; type: string }>(`
+      SELECT name, type
+      FROM sqlite_master
+      WHERE lower(name) = lower('_users_new_3')
+    `);
+    await client.end();
+
+    expect(users.rows).toEqual([
+      { id: 1, age: "10" },
+      { id: 2, age: "20" },
+    ]);
+    expect(reservedNameTable.rows).toEqual([{ id: 1, note: "keep me" }]);
+    expect(secondReservedNameTable.rows).toEqual([
+      { id: 1, note: "keep me too" },
+    ]);
+    expect(posts.rows).toEqual([{ id: 1, user_id: 1 }]);
+    expect(foreignKeyCheck.rows).toEqual([]);
+    expect(auditRows.rows).toEqual([{ user_id: 1 }, { user_id: 2 }]);
+    expect(viewRows.rows).toEqual([
+      { id: 1, age: "10" },
+      { id: 2, age: "20" },
+    ]);
+    expect(temporaryArtifacts.rows).toEqual([]);
+    expect(reservedNameIndex.rows).toEqual([
+      { name: "_UsErS_NeW_3", type: "index" },
+    ]);
+    expect((await schemaService.plan(changedSchema)).hasChanges).toBe(false);
+  });
+
   test("should recreate table when primary key changes", async () => {
     await schemaService.apply(`
       CREATE TABLE items (
