@@ -321,6 +321,33 @@ describe("DatabaseInspector coverage", () => {
         };
       }
 
+      if (sql.includes("attribute.attstattarget as column_statistics_target")) {
+        if (params?.[0] === "mv_users" && params?.[1] === "public") {
+          return {
+            rows: [{
+              column_name: "id",
+              column_statistics_target: 350,
+              column_attribute_options: [
+                "n_distinct=-0.5",
+                "n_distinct_inherited=12",
+              ],
+            }],
+          };
+        }
+        if (params?.[0] === "mv_orders" && params?.[1] === "tenant_a") {
+          return {
+            rows: [{
+              column_name: "id",
+              column_statistics_target: null,
+              column_attribute_options: null,
+            }],
+          };
+        }
+        throw new Error(
+          `Unexpected column statistics params: ${JSON.stringify(params)}`
+        );
+      }
+
       if (sql.includes("FROM pg_indexes")) {
         if (params?.[0] === "mv_users" && params?.[1] === "public") {
           return {
@@ -333,6 +360,7 @@ describe("DatabaseInspector coverage", () => {
               is_unique: true,
               nulls_not_distinct: false,
               access_method: "btree",
+              index_key_count: 1,
               has_expressions: false,
               tablespace_name: null,
               storage_options: ["fillfactor=75"],
@@ -343,6 +371,8 @@ describe("DatabaseInspector coverage", () => {
               expression_opclass_name: null,
               where_clause: null,
               sort_options: [1],
+              key_statistics_targets: [null],
+              expression_positions: [],
             }],
           };
         }
@@ -357,6 +387,7 @@ describe("DatabaseInspector coverage", () => {
               is_unique: false,
               nulls_not_distinct: false,
               access_method: "btree",
+              index_key_count: 1,
               has_expressions: true,
               tablespace_name: null,
               storage_options: null,
@@ -367,6 +398,8 @@ describe("DatabaseInspector coverage", () => {
               expression_opclass_name: null,
               where_clause: "active",
               sort_options: [0],
+              key_statistics_targets: [601],
+              expression_positions: [1],
             }],
           };
         }
@@ -409,6 +442,14 @@ describe("DatabaseInspector coverage", () => {
         },
         accessMethod: "custom_heap",
         tablespace: "fast_tables",
+        columnStatistics: [
+          {
+            column: "id",
+            statisticsTarget: 350,
+            nDistinct: -0.5,
+            nDistinctInherited: 12,
+          },
+        ],
         indexes: [
           {
             name: "mv_users_idx",
@@ -445,6 +486,7 @@ describe("DatabaseInspector coverage", () => {
             concurrent: false,
             where: "active",
             expression: "lower(label)",
+            expressionStatisticsTarget: 601,
           },
         ],
       },

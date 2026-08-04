@@ -67,6 +67,12 @@ import {
   postgresIndexMethodSupportsClustering,
   renderPostgresClustering,
 } from "../../utils/postgres-clustering";
+import {
+  renderPostgresColumnStatisticsChanges,
+  renderPostgresExpressionIndexStatistics,
+  validatePostgresColumnStatistics,
+  validatePostgresStatisticsTarget,
+} from "../../utils/postgres-statistics";
 
 type TableIndexCandidate =
   | { kind: "standalone"; index: Index }
@@ -492,6 +498,67 @@ export class SchemaDiffer {
 
   constructor(options: MigrationOptions = DEFAULT_MIGRATION_OPTIONS) {
     this.options = { ...DEFAULT_MIGRATION_OPTIONS, ...options };
+  }
+
+  generateStandaloneIndexStatisticsStatements(
+    desiredIndexes: Index[],
+    currentIndexes: Index[],
+    useConcurrentForNewIndexes: boolean = true
+  ): { statements: string[]; deferred: string[] } {
+    const statements: string[] = [];
+    const deferred: string[] = [];
+    const currentByName = new Map(
+      currentIndexes.map(function mapIndex(index) {
+        return [index.name, index] as const;
+      })
+    );
+    const sortedDesired = [...desiredIndexes].sort(function compareIndexes(
+      first,
+      second
+    ) {
+      return first.name.localeCompare(second.name);
+    });
+
+    for (const desired of sortedDesired) {
+      const current = currentByName.get(desired.name);
+      const structurallyEqual = Boolean(
+        current && this.indexesAreEqual(desired, current)
+      );
+      if (
+        structurallyEqual &&
+        desired.expressionStatisticsTarget ===
+          current?.expressionStatisticsTarget
+      ) {
+        continue;
+      }
+      if (
+        !structurallyEqual &&
+        desired.expressionStatisticsTarget === undefined
+      ) {
+        continue;
+      }
+
+      const statement = renderPostgresExpressionIndexStatistics(
+        { name: desired.name, schema: desired.schema },
+        desired.expressionStatisticsTarget
+      );
+      let creationIsConcurrent = false;
+      if (!structurallyEqual) {
+        if (desired.concurrent !== undefined) {
+          creationIsConcurrent = desired.concurrent;
+        } else {
+          creationIsConcurrent = current
+            ? false
+            : useConcurrentForNewIndexes;
+        }
+      }
+      if (creationIsConcurrent) {
+        deferred.push(statement);
+      } else {
+        statements.push(statement);
+      }
+    }
+    return { statements, deferred };
   }
 
   /**
@@ -1000,6 +1067,95 @@ export class SchemaDiffer {
       : undefined;
   }
 
+  private getEffectiveTableColumnNames(
+    table: Table,
+    tables: Map<string, Table>,
+    visited: Set<string> = new Set()
+  ): Set<string> {
+    const key = this.getTableKey(table);
+    if (visited.has(key)) {
+      return new Set();
+    }
+    visited.add(key);
+    const names = new Set(
+      [...table.columns, ...(table.inheritedColumns || [])].map(
+        function getColumnName(column) {
+          return column.name;
+        }
+      )
+    );
+    for (const parent of table.inherits || []) {
+      const parentTable = tables.get(
+        `${parent.schema || table.schema || "public"}.${parent.name}`
+      );
+      if (!parentTable) continue;
+      for (const name of this.getEffectiveTableColumnNames(
+        parentTable,
+        tables,
+        visited
+      )) {
+        names.add(name);
+      }
+    }
+    return names;
+  }
+
+  private validatePostgresStatistics(tables: Table[]): void {
+    const tableMap = new Map(
+      tables.map(function mapTable(table) {
+        return [`${table.schema || "public"}.${table.name}`, table] as const;
+      })
+    );
+    for (const table of tables) {
+      const identity = `${table.schema || "public"}.${table.name}`;
+      validatePostgresColumnStatistics(
+        table.columnStatistics,
+        identity,
+        this.getEffectiveTableColumnNames(table, tableMap)
+      );
+      for (const index of table.indexes || []) {
+        if (index.expressionStatisticsTarget === undefined) {
+          continue;
+        }
+        const indexIdentity = `${index.schema || table.schema || "public"}.${index.name}`;
+        validatePostgresStatisticsTarget(
+          index.expressionStatisticsTarget,
+          indexIdentity
+        );
+        if (!index.expression || index.columns.length !== 0) {
+          throw new ValidationError(
+            `PostgreSQL expression-index statistics target for ${indexIdentity} requires a single-expression index`,
+            `index ${indexIdentity}`,
+            "expressionStatisticsTarget",
+            index.expressionStatisticsTarget
+          );
+        }
+      }
+    }
+  }
+
+  private generateTableColumnStatisticsStatements(
+    desired: Table,
+    current: Table | undefined,
+    desiredTables: Map<string, Table>
+  ): string[] {
+    const retainedColumns = this.getEffectiveTableColumnNames(
+      desired,
+      desiredTables
+    );
+    const retainedCurrentStatistics = current?.columnStatistics?.filter(
+      function isRetained(entry) {
+        return retainedColumns.has(entry.column);
+      }
+    );
+    return renderPostgresColumnStatisticsChanges(
+      { name: desired.name, schema: desired.schema },
+      desired.columnStatistics,
+      retainedCurrentStatistics,
+      "table"
+    );
+  }
+
   generateMigrationPlan(
     desiredSchema: Table[],
     currentSchema: Table[],
@@ -1009,6 +1165,7 @@ export class SchemaDiffer {
     this.validateForeignKeyDeleteColumns(desiredSchema, context);
     this.validateVirtualGeneratedColumnSupport(desiredSchema, context);
     this.validateIdentitySequencePersistenceSupport(desiredSchema, context);
+    this.validatePostgresStatistics(desiredSchema);
     this.validateReplicaIdentities(desiredSchema);
     this.validateClusteringChoices(desiredSchema);
     const statements: string[] = [];
@@ -1087,6 +1244,13 @@ export class SchemaDiffer {
             this.batchAlterTableChanges(filteredTable, physicalAlterations)
           );
         }
+        statements.push(
+          ...this.generateTableColumnStatisticsStatements(
+            filteredTable,
+            undefined,
+            desiredTables
+          )
+        );
         if (filteredTable.replicaIdentity) {
           const replicaIdentityStatement = renderPostgresReplicaIdentity(
             { name: filteredTable.name, schema: filteredTable.schema },
@@ -1145,6 +1309,13 @@ export class SchemaDiffer {
             statements.push(batchedStatement);
           }
         }
+        statements.push(
+          ...this.generateTableColumnStatisticsStatements(
+            table,
+            currentTable,
+            desiredTables
+          )
+        );
         if (replicaIdentityPlan.afterTableAlterations) {
           statements.push(replicaIdentityPlan.afterTableAlterations);
         }
@@ -1170,6 +1341,13 @@ export class SchemaDiffer {
           removedColumnNames
         );
         statements.push(...indexStatements);
+        const indexStatistics =
+          this.generateStandaloneIndexStatisticsStatements(
+            table.indexes || [],
+            currentTable.indexes || []
+          );
+        statements.push(...indexStatistics.statements);
+        deferred.push(...indexStatistics.deferred);
         if (replicaIdentityPlan.deferred) {
           deferred.push(replicaIdentityPlan.deferred);
         }
@@ -1190,6 +1368,13 @@ export class SchemaDiffer {
           table.indexes
         );
         statements.push(...newTableIndexStatements);
+        const indexStatistics =
+          this.generateStandaloneIndexStatisticsStatements(
+            table.indexes,
+            []
+          );
+        statements.push(...indexStatistics.statements);
+        deferred.push(...indexStatistics.deferred);
       }
     }
 

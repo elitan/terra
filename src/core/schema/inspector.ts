@@ -26,6 +26,7 @@ import type {
   IdentityColumn,
   PostgresTriggerEnabledMode,
   PostgresReplicaIdentity,
+  PostgresColumnStatistics,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
@@ -37,6 +38,10 @@ import {
 } from "../../utils/column-physical";
 import { getDefaultFunctionCost } from "../../utils/function-cost";
 import { postgresTriggerModeFromCatalogCode } from "../../utils/postgres-trigger";
+import {
+  postgresColumnStatisticsFromCatalog,
+  postgresStatisticsTargetFromCatalog,
+} from "../../utils/postgres-statistics";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -801,6 +806,8 @@ export class DatabaseInspector {
           END as column_storage,
           column_type.typstorage as column_default_storage,
           a.attcompression as column_compression,
+          a.attstattarget as column_statistics_target,
+          a.attoptions as column_attribute_options,
           a.attinhcount as inheritance_count
         FROM pg_attribute a
         LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
@@ -878,6 +885,10 @@ export class DatabaseInspector {
         .map(function getColumn(item) {
           return item.column;
         });
+      const columnStatistics = this.parsePostgresColumnStatisticsRows(
+        columnsResult.rows,
+        `${tableSchema}.${tableName}`
+      );
 
       // Get primary key constraint for this table
       const primaryKey = await this.getPrimaryKeyConstraint(client, tableName, tableSchema);
@@ -935,6 +946,7 @@ export class DatabaseInspector {
         ...(typeof row.cluster_index_name === "string"
           ? { clusterIndex: row.cluster_index_name }
           : {}),
+        ...(columnStatistics.length > 0 ? { columnStatistics } : {}),
       });
     }
 
@@ -1026,6 +1038,7 @@ export class DatabaseInspector {
           false
         ) as nulls_not_distinct,
         am.amname as access_method,
+        ix.indnkeyatts as index_key_count,
         ix.indexprs IS NOT NULL as has_expressions,
         -- Extract tablespace information
         ts.spcname as tablespace_name,
@@ -1117,7 +1130,23 @@ export class DatabaseInspector {
           ELSE NULL
         END as where_clause,
         -- indoption: bit 0 = DESC, bit 1 = NULLS FIRST
-        ix.indoption::int2[] as sort_options
+        ix.indoption::int2[] as sort_options,
+        ARRAY(
+          SELECT attribute.attstattarget
+          FROM pg_attribute attribute
+          WHERE attribute.attrelid = ix.indexrelid
+            AND attribute.attnum > 0
+            AND attribute.attnum <= ix.indnkeyatts
+          ORDER BY attribute.attnum
+        ) as key_statistics_targets,
+        ARRAY(
+          SELECT key_column.position::integer
+          FROM unnest(ix.indkey) WITH ORDINALITY
+            AS key_column(attnum, position)
+          WHERE key_column.position <= ix.indnkeyatts
+            AND key_column.attnum = 0
+          ORDER BY key_column.position
+        ) as expression_positions
       FROM pg_indexes i
       JOIN pg_namespace n ON n.nspname = i.schemaname
       JOIN pg_class c ON c.relname = i.tablename AND c.relnamespace = n.oid
@@ -1167,6 +1196,8 @@ export class DatabaseInspector {
       const collations = await this.parseIndexDefinitionCollations(
         row.index_definition
       );
+      const expressionStatisticsTarget =
+        this.getExpressionIndexStatisticsTarget(row);
       indexes.push({
         name: row.index_name,
         tableName: row.table_name,
@@ -1186,6 +1217,9 @@ export class DatabaseInspector {
         concurrent: false,
         where: row.where_clause || undefined,
         expression: row.has_expressions ? row.expression_def : undefined,
+        ...(expressionStatisticsTarget !== undefined
+          ? { expressionStatisticsTarget }
+          : {}),
         ...(row.dependent_columns?.length > 0
           ? { dependentColumns: row.dependent_columns }
           : {}),
@@ -1194,6 +1228,47 @@ export class DatabaseInspector {
       });
     }
     return indexes;
+  }
+
+  private getExpressionIndexStatisticsTarget(row: any): number | undefined {
+    const identity = `${row.table_schema}.${row.index_name}`;
+    const targets: Array<number | undefined> = (
+      row.key_statistics_targets || []
+    ).map(
+      function parseTarget(target: unknown, position: number) {
+        return postgresStatisticsTargetFromCatalog(
+          target,
+          `${identity} expression position ${position + 1}`
+        );
+      }
+    );
+    const customPositions = targets.flatMap(
+      function getCustomPosition(target: number | undefined, position: number) {
+        return target === undefined ? [] : [position + 1];
+      }
+    );
+    if (customPositions.length === 0) {
+      return undefined;
+    }
+    const expressionPositions: number[] = (
+      row.expression_positions || []
+    ).map(Number);
+    if (
+      Number(row.index_key_count) !== 1 ||
+      expressionPositions.length !== 1 ||
+      expressionPositions[0] !== 1 ||
+      customPositions.some(function isUnsupportedPosition(position) {
+        return position !== 1;
+      })
+    ) {
+      throw new ValidationError(
+        `Unsupported PostgreSQL expression-index statistics targets are present on ${identity}; TerraDB currently models only position 1 of a single-expression index`,
+        `index ${identity}`,
+        "expressionStatisticsTarget",
+        customPositions
+      );
+    }
+    return targets[0];
   }
 
   private async parseIndexDefinitionCollations(
@@ -1212,6 +1287,53 @@ export class DatabaseInspector {
       );
     }
     return parseIndexCollations(indexStatement.indexParams);
+  }
+
+  private parsePostgresColumnStatisticsRows(
+    rows: any[],
+    relationIdentity: string
+  ): PostgresColumnStatistics[] {
+    return rows
+      .flatMap(function parseStatistics(row: any) {
+        const statistics = postgresColumnStatisticsFromCatalog(
+          row.column_name,
+          row.column_statistics_target,
+          row.column_attribute_options,
+          relationIdentity
+        );
+        return statistics ? [statistics] : [];
+      })
+      .sort(function compareStatistics(first, second) {
+        return first.column.localeCompare(second.column);
+      });
+  }
+
+  private async getPostgresColumnStatistics(
+    client: Client,
+    relationName: string,
+    schemaName: string
+  ): Promise<PostgresColumnStatistics[]> {
+    const result = await client.query(
+      `
+        SELECT
+          attribute.attname as column_name,
+          attribute.attstattarget as column_statistics_target,
+          attribute.attoptions as column_attribute_options
+        FROM pg_attribute attribute
+        JOIN pg_class relation ON relation.oid = attribute.attrelid
+        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+        WHERE relation.relname = $1
+          AND namespace.nspname = $2
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+        ORDER BY attribute.attnum
+      `,
+      [relationName, schemaName]
+    );
+    return this.parsePostgresColumnStatisticsRows(
+      result.rows,
+      `${schemaName}.${relationName}`
+    );
   }
 
   private parseStorageOptions(
@@ -2001,6 +2123,11 @@ export class DatabaseInspector {
 
     for (const row of matViewsResult.rows) {
       const storageParameters = this.parseTableStorageOptions(row);
+      const columnStatistics = await this.getPostgresColumnStatistics(
+        client,
+        row.view_name,
+        row.schema_name
+      );
       const view: View = {
         name: row.view_name,
         schema: row.schema_name,
@@ -2014,6 +2141,7 @@ export class DatabaseInspector {
         ...(typeof row.cluster_index_name === "string"
           ? { clusterIndex: row.cluster_index_name }
           : {}),
+        ...(columnStatistics.length > 0 ? { columnStatistics } : {}),
       };
 
       const indexes = await this.getTableIndexes(
@@ -2978,6 +3106,37 @@ export class DatabaseInspector {
 
           UNION ALL
 
+          SELECT format(
+            'column %I statistics target or attribute options',
+            attribute.attname
+          ) AS feature
+          FROM pg_attribute attribute
+          WHERE attribute.attrelid = c.oid
+            AND attribute.attnum > 0
+            AND NOT attribute.attisdropped
+            AND (
+              attribute.attstattarget >= 0
+              OR COALESCE(array_length(attribute.attoptions, 1), 0) > 0
+            )
+
+          UNION ALL
+
+          SELECT format(
+            'expression index %I statistics target',
+            index_relation.relname
+          ) AS feature
+          FROM pg_index index_catalog
+          JOIN pg_class index_relation
+            ON index_relation.oid = index_catalog.indexrelid
+          JOIN pg_attribute index_attribute
+            ON index_attribute.attrelid = index_catalog.indexrelid
+            AND index_attribute.attnum > 0
+            AND index_attribute.attnum <= index_catalog.indnkeyatts
+          WHERE index_catalog.indrelid = c.oid
+            AND index_attribute.attstattarget >= 0
+
+          UNION ALL
+
           SELECT format('foreign key %I', constraint_catalog.conname)
           FROM pg_constraint constraint_catalog
           WHERE constraint_catalog.conrelid = c.oid
@@ -3097,6 +3256,37 @@ export class DatabaseInspector {
               OR child_attribute.attstorage IS DISTINCT FROM parent_attribute.attstorage
               OR child_attribute.attcompression IS DISTINCT FROM parent_attribute.attcompression
             )
+
+          UNION ALL
+
+          SELECT format(
+            'column %I statistics target or attribute options',
+            child_attribute.attname
+          ) AS feature
+          FROM pg_attribute child_attribute
+          WHERE child_attribute.attrelid = c.oid
+            AND child_attribute.attnum > 0
+            AND NOT child_attribute.attisdropped
+            AND (
+              child_attribute.attstattarget >= 0
+              OR COALESCE(array_length(child_attribute.attoptions, 1), 0) > 0
+            )
+
+          UNION ALL
+
+          SELECT format(
+            'expression index %I statistics target',
+            index_relation.relname
+          ) AS feature
+          FROM pg_index index_catalog
+          JOIN pg_class index_relation
+            ON index_relation.oid = index_catalog.indexrelid
+          JOIN pg_attribute index_attribute
+            ON index_attribute.attrelid = index_catalog.indexrelid
+            AND index_attribute.attnum > 0
+            AND index_attribute.attnum <= index_catalog.indnkeyatts
+          WHERE index_catalog.indrelid = c.oid
+            AND index_attribute.attstattarget >= 0
 
           UNION ALL
 

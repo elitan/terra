@@ -36,6 +36,13 @@ export interface Column {
   };
 }
 
+export interface PostgresColumnStatistics {
+  column: string;
+  statisticsTarget?: number;
+  nDistinct?: number;
+  nDistinctInherited?: number;
+}
+
 export interface PrimaryKeyConstraint {
   name?: string;
   columns: string[];
@@ -122,6 +129,7 @@ export interface Index {
   concurrent?: boolean;
   where?: string; // For partial indexes
   expression?: string; // For expression indexes
+  expressionStatisticsTarget?: number; // PostgreSQL target for a single expression key
   dependentColumns?: string[]; // PostgreSQL columns that make this index auto-drop with DROP COLUMN
   storageParameters?: Record<string, string>;
   tablespace?: string;
@@ -183,6 +191,7 @@ export interface View {
   columns?: Column[]; // For typed views or materialized views
   indexes?: Index[]; // Only for materialized views
   clusterIndex?: string; // PostgreSQL index remembered for future CLUSTER operations
+  columnStatistics?: PostgresColumnStatistics[]; // PostgreSQL materialized-view column planner statistics
   populated?: boolean; // Materialized view scannability from WITH [NO] DATA
   storageParameters?: Record<string, string>; // Materialized view storage parameters
   tablespace?: string; // Materialized view tablespace; undefined means pg_default
@@ -426,6 +435,7 @@ export interface Table {
   indexes?: Index[];
   replicaIdentity?: PostgresReplicaIdentity;
   clusterIndex?: string; // PostgreSQL index remembered for future CLUSTER operations
+  columnStatistics?: PostgresColumnStatistics[]; // PostgreSQL per-column planner statistics and n_distinct overrides
 }
 
 export interface Schema {

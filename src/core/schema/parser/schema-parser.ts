@@ -70,6 +70,12 @@ import {
   parseAlterRelationClustering,
   type PendingClusteringChoice,
 } from "./clustering-parser";
+import {
+  isPostgresStatisticsSubtype,
+  mergePendingPostgresStatistics,
+  parseAlterPostgresStatistics,
+  type PendingPostgresStatisticsChange,
+} from "./column-statistics-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -531,6 +537,7 @@ export class SchemaParser {
     const pendingTriggerModes: PendingTriggerMode[] = [];
     const pendingReplicaIdentities: PendingReplicaIdentity[] = [];
     const pendingClusteringChoices: PendingClusteringChoice[] = [];
+    const pendingPostgresStatistics: PendingPostgresStatisticsChange[] = [];
     const partitionDefinitions = new Map<string, Table>();
 
     // Auto-quote reserved keywords that are commonly used as column names
@@ -757,13 +764,19 @@ export class SchemaParser {
             filePath
           );
           pendingClusteringChoices.push(...clusteringChoices);
+          const statisticsChanges = parseAlterPostgresStatistics(
+            stmt.AlterTableStmt,
+            filePath
+          );
+          pendingPostgresStatistics.push(...statisticsChanges);
           const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
             function isNotDeclarativeStateCommand(item: any) {
               const subtype = item?.AlterTableCmd?.subtype;
               return !isRowSecuritySubtype(subtype) &&
                 !isTableTriggerModeSubtype(subtype) &&
                 !isReplicaIdentitySubtype(subtype) &&
-                !isClusteringSubtype(subtype);
+                !isClusteringSubtype(subtype) &&
+                !isPostgresStatisticsSubtype(subtype);
             }
           );
           if (remainingCommands.length > 0) {
@@ -777,7 +790,8 @@ export class SchemaParser {
             rowSecurityObjects.length === 0 &&
             triggerModes.length === 0 &&
             replicaIdentities.length === 0 &&
-            clusteringChoices.length === 0
+            clusteringChoices.length === 0 &&
+            statisticsChanges.length === 0
           ) {
             throw this.unsupportedAlterTableError(filePath);
           }
@@ -851,6 +865,14 @@ export class SchemaParser {
       views,
       sqlObjects,
       pendingClusteringChoices,
+      filePath
+    );
+    mergePendingPostgresStatistics(
+      tables,
+      views,
+      indexes,
+      sqlObjects,
+      pendingPostgresStatistics,
       filePath
     );
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
@@ -1373,7 +1395,8 @@ export class SchemaParser {
         "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
         "ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
         "named trigger firing modes, replica identity state, and persistent " +
-        "clustering choices; " +
+        "clustering choices, per-column statistics, and expression-index " +
+        "statistics targets; " +
         "define all other desired table state with CREATE TABLE.",
       filePath
     );

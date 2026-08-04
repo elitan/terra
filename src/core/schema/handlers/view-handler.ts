@@ -22,6 +22,12 @@ import {
   postgresIndexMethodSupportsClustering,
   renderPostgresClustering,
 } from "../../../utils/postgres-clustering";
+import {
+  remapPostgresColumnStatisticsByOrdinal,
+  renderPostgresColumnStatisticsChanges,
+  validatePostgresColumnStatistics,
+  validatePostgresStatisticsTarget,
+} from "../../../utils/postgres-statistics";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -585,6 +591,116 @@ function generateMaterializedViewIndexStatements(
   return statements;
 }
 
+function validateMaterializedViewStatistics(views: View[]): void {
+  for (const view of views) {
+    const qualifiedName = `${view.schema || "public"}.${view.name}`;
+    if ((view.columnStatistics || []).length > 0) {
+      if (!view.materialized) {
+        throw new ValidationError(
+          `PostgreSQL column statistics for ${qualifiedName} require a materialized view`,
+          qualifiedName,
+          "columnStatistics",
+          view.columnStatistics
+        );
+      }
+      if (!view.columnNames) {
+        throw new ValidationError(
+          `Materialized view ${qualifiedName} must declare an explicit output-column list before TerraDB can validate column statistics`,
+          qualifiedName,
+          "columnStatistics",
+          view.columnStatistics
+        );
+      }
+      validatePostgresColumnStatistics(
+        view.columnStatistics,
+        qualifiedName,
+        new Set(view.columnNames)
+      );
+    }
+
+    for (const index of view.indexes || []) {
+      if (index.concurrent === true) {
+        throw new ValidationError(
+          `PostgreSQL materialized-view index ${qualifiedName}.${index.name} cannot be created concurrently`,
+          `${qualifiedName}.${index.name}`,
+          "concurrent",
+          true
+        );
+      }
+      if (index.expressionStatisticsTarget === undefined) {
+        continue;
+      }
+      validatePostgresStatisticsTarget(
+        index.expressionStatisticsTarget,
+        `${qualifiedName}.${index.name}`
+      );
+      if (!index.expression || index.columns.length !== 0) {
+        throw new ValidationError(
+          `PostgreSQL expression-index statistics target for ${qualifiedName}.${index.name} requires a single-expression index`,
+          `${qualifiedName}.${index.name}`,
+          "expressionStatisticsTarget",
+          index.expressionStatisticsTarget
+        );
+      }
+    }
+  }
+}
+
+function generateMaterializedViewStatisticsStatements(
+  desiredViews: View[],
+  currentViews: View[]
+): string[] {
+  const statements: string[] = [];
+  const currentMap = mapViewsByKey(currentViews);
+  for (const desired of desiredViews) {
+    if (!desired.materialized) continue;
+    const current = currentMap.get(getViewKey(desired));
+    const recreated = Boolean(
+      current && postgresViewWillBeRecreated(desired, current)
+    );
+    const currentStatistics = recreated
+      ? undefined
+      : remapPostgresColumnStatisticsByOrdinal(
+          current?.columnStatistics,
+          current?.columnNames,
+          desired.columnNames
+        );
+    statements.push(
+      ...renderPostgresColumnStatisticsChanges(
+        { name: desired.name, schema: desired.schema },
+        desired.columnStatistics,
+        currentStatistics,
+        "materialized-view"
+      )
+    );
+  }
+  return statements;
+}
+
+function generateMaterializedViewIndexStatisticsStatements(
+  desiredViews: View[],
+  currentViews: View[]
+): string[] {
+  const statements: string[] = [];
+  const currentMap = mapViewsByKey(currentViews);
+  for (const desired of desiredViews) {
+    if (!desired.materialized) continue;
+    const current = currentMap.get(getViewKey(desired));
+    const currentIndexes =
+      current && !postgresViewWillBeRecreated(desired, current)
+        ? current.indexes || []
+        : [];
+    const statistics =
+      materializedViewIndexDiffer.generateStandaloneIndexStatisticsStatements(
+        desired.indexes || [],
+        currentIndexes,
+        false
+      );
+    statements.push(...statistics.statements, ...statistics.deferred);
+  }
+  return statements;
+}
+
 function validateMaterializedViewClustering(views: View[]): void {
   for (const view of views) {
     if (!view.clusterIndex) {
@@ -747,6 +863,7 @@ export class ViewHandler {
     if (!usesCreateStatements) {
       validateSecurityInvokerSupport(desiredViews, context);
       validateMaterializedViewClustering(desiredViews);
+      validateMaterializedViewStatistics(desiredViews);
     }
     const statements = generateStatements(
       desiredViews,
@@ -759,7 +876,19 @@ export class ViewHandler {
       return statements;
     }
     statements.push(
+      ...generateMaterializedViewStatisticsStatements(
+        desiredViews,
+        currentViews
+      )
+    );
+    statements.push(
       ...generateMaterializedViewIndexStatements(desiredViews, currentViews)
+    );
+    statements.push(
+      ...generateMaterializedViewIndexStatisticsStatements(
+        desiredViews,
+        currentViews
+      )
     );
     statements.push(
       ...generateMaterializedViewClusteringStatements(
