@@ -112,6 +112,7 @@ export DATABASE_URL=":memory:"
 | Materialized Views | Yes | No |
 | Schemas | Yes | No |
 | Extensions | Yes | No |
+| Row-Level Security & Policies | Yes | No |
 
 PostgreSQL 14 through 18 are supported. Stored generated columns work across
 that range; virtual generated columns are supported on PostgreSQL 18 and fail
@@ -132,6 +133,17 @@ Table recreation preserves hidden ROWID values and SQLite-specific definitions i
 SQLite virtual tables are managed losslessly; bundled FTS5 and RTree modules are covered, while their implementation-owned shadow tables are never managed as user tables.
 SQLite desired schemas accept top-level `CREATE` statements and manage the persistent `main` database only. Imperative SQL, connection-local temporary objects, and external-database statements are rejected before migration planning; DML inside trigger bodies remains supported.
 PostgreSQL desired schemas also describe persistent database state. Session-local temporary tables, views, and sequences are rejected before migration planning instead of being converted into persistent objects. Query-derived tables created with `CREATE TABLE AS` or `SELECT INTO` are also rejected because their structure and optional initial data cannot be reconciled declaratively; define their table structure explicitly and load data separately. `CREATE TABLE LIKE` and typed `CREATE TABLE OF` declarations must likewise be expanded to explicit columns and constraints so copied options or persistent type dependencies are never discarded. Other top-level data, query, session, transaction, maintenance, and untracked DDL commands fail explicitly instead of being silently ignored; SQL inside managed routine bodies remains supported.
+PostgreSQL row-level security is declared with positive `ALTER TABLE ... ENABLE
+ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` state plus complete `CREATE
+POLICY` definitions. TerraDB preserves policy command, permissive/restrictive
+mode, named and contextual roles, `PUBLIC`, `USING`, and `WITH CHECK`, and
+compares catalog-added casts and implicit checks semantically. Combined RLS
+clauses are tracked as independent flags and may share an `ALTER TABLE` with
+supported foreign-key or check additions. Policy changes use transactional
+drop/create replacement; omitting a policy or positive RLS flag removes it.
+`ALTER POLICY`, `DISABLE ROW LEVEL SECURITY`, and `NO FORCE ROW LEVEL SECURITY`
+are imperative partial mutations and are rejected in desired schemas before
+database mutation.
 Ordinary PostgreSQL `UNLOGGED` tables are lifecycle-supported. `UNLOGGED`
 partitioned parents and explicit unlogged leaf partitions are rejected before
 planning: PostgreSQL 18 disallows unlogged partitioned parents, while earlier

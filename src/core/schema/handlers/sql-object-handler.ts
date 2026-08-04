@@ -1,9 +1,12 @@
 import type {
+  PostgresPolicyDefinition,
+  PostgresPolicyRole,
   SqlObject,
   SqlObjectKind,
 } from "../../../types/schema";
 import { ValidationError } from "../../../types/errors";
 import { deparseSync, parse } from "pgsql-parser";
+import { expressionsEqual } from "../../../utils/expression-comparator";
 import { parseCreateTable } from "../parser/tables/table-parser";
 import {
   partitionParentsAreEquivalent,
@@ -67,6 +70,100 @@ function normalizeSql(statement: string): string {
 function terminateStatement(statement: string): string {
   const trimmed = statement.trim();
   return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
+}
+
+function resolvePolicyRole(
+  role: PostgresPolicyRole,
+  context: PostgresTypeObjectContext
+): string {
+  if (role.kind === "public") {
+    return "public:";
+  }
+  if (role.kind === "name") {
+    return `name:${role.name}`;
+  }
+  if (role.kind === "session_user" && context.sessionUser) {
+    return `name:${context.sessionUser}`;
+  }
+  if (
+    (role.kind === "current_role" || role.kind === "current_user") &&
+    context.currentUser
+  ) {
+    return `name:${context.currentUser}`;
+  }
+  return `context:${role.kind}`;
+}
+
+function normalizePolicyRoles(
+  roles: PostgresPolicyRole[],
+  context: PostgresTypeObjectContext
+): string[] {
+  const normalized = Array.from(
+    new Set(
+      roles.map(function mapPolicyRole(role) {
+        return resolvePolicyRole(role, context);
+      })
+    )
+  );
+  if (normalized.includes("public:")) {
+    return ["public:"];
+  }
+  return normalized.sort();
+}
+
+function optionalPolicyExpressionsAreEqual(
+  desired: string | undefined,
+  current: string | undefined
+): boolean {
+  if (!desired || !current) {
+    return desired === current;
+  }
+  return expressionsEqual(desired, current);
+}
+
+function getEffectivePolicyUsing(
+  definition: PostgresPolicyDefinition
+): string | undefined {
+  if (definition.command === "insert") {
+    return undefined;
+  }
+  return definition.using || "true";
+}
+
+function getEffectivePolicyCheck(
+  definition: PostgresPolicyDefinition
+): string | undefined {
+  if (definition.withCheck) {
+    return definition.withCheck;
+  }
+  if (definition.command === "all" || definition.command === "update") {
+    return definition.using || "true";
+  }
+  if (definition.command === "insert") {
+    return "true";
+  }
+  return undefined;
+}
+
+function policyDefinitionsAreEqual(
+  desired: PostgresPolicyDefinition,
+  current: PostgresPolicyDefinition,
+  context: PostgresTypeObjectContext
+): boolean {
+  return (
+    desired.command === current.command &&
+    desired.permissive === current.permissive &&
+    JSON.stringify(normalizePolicyRoles(desired.roles, context)) ===
+      JSON.stringify(normalizePolicyRoles(current.roles, context)) &&
+    optionalPolicyExpressionsAreEqual(
+      getEffectivePolicyUsing(desired),
+      getEffectivePolicyUsing(current)
+    ) &&
+    optionalPolicyExpressionsAreEqual(
+      getEffectivePolicyCheck(desired),
+      getEffectivePolicyCheck(current)
+    )
+  );
 }
 
 function sortPartitionTableConstraints(elements: any[] | undefined): any[] | undefined {
@@ -541,6 +638,27 @@ export class SqlObjectHandler {
       if (
         currentCanonical.comparisonNormalized ===
         desiredCanonical.comparisonNormalized
+      ) {
+        continue;
+      }
+
+      if (
+        currentObject.kind === "row-level-security" &&
+        desiredObject.kind === "row-level-security"
+      ) {
+        continue;
+      }
+
+      if (
+        currentObject.kind === "policy" &&
+        desiredObject.kind === "policy" &&
+        currentObject.policyDefinition &&
+        desiredObject.policyDefinition &&
+        policyDefinitionsAreEqual(
+          desiredObject.policyDefinition,
+          currentObject.policyDefinition,
+          context
+        )
       ) {
         continue;
       }

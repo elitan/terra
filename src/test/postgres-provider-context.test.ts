@@ -19,11 +19,15 @@ describe("PostgresProvider migration context", function () {
       query: async function (sql: string) {
         expect(sql).toContain("server_version_num");
         expect(sql).toContain("default_table_access_method");
+        expect(sql).toContain("current_user::text");
+        expect(sql).toContain("session_user::text");
         return {
           rows: [
             {
               postgres_version_num: "170009",
               default_table_access_method: "custom_heap",
+              current_user_name: "migration_owner",
+              session_user_name: "login_owner",
             },
           ],
         };
@@ -34,6 +38,8 @@ describe("PostgresProvider migration context", function () {
     expect(await provider.getMigrationContext(client)).toEqual({
       postgresVersionNum: 170009,
       defaultTableAccessMethod: "custom_heap",
+      currentUser: "migration_owner",
+      sessionUser: "login_owner",
     });
   });
 

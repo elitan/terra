@@ -755,31 +755,69 @@ describe("Parser edge coverage", () => {
       });
 
       expect(
-        parser.parseAlterTableSqlObject({
+        parser.parseAlterTableSqlObjects({
           AlterTableStmt: {
-            relation: null,
+            relation: { relname: "accounts", schemaname: "public" },
             cmds: [{ AlterTableCmd: { subtype: "AT_EnableRowSecurity" } }],
           },
         })
-      ).toBeNull();
+      ).toEqual([
+        expect.objectContaining({
+          key: "row-level-security:public.accounts:enabled",
+        }),
+      ]);
 
       expect(
-        parser.parseAlterTableSqlObject({
+        parser.parseAlterTableSqlObjects({
           AlterTableStmt: {
             relation: { relname: "users" },
             cmds: [{ AlterTableCmd: {} }],
           },
         })
-      ).toBeNull();
+      ).toEqual([]);
 
       expect(
-        parser.parseAlterTableSqlObject({
+        parser.parseAlterTableSqlObjects({
           AlterTableStmt: {
             relation: { relname: "accounts", schemaname: "public" },
             cmds: [{ AlterTableCmd: { subtype: "AT_AttachPartition" } }],
           },
         })
-      ).toBeNull();
+      ).toEqual([]);
+
+      expect(function parseRowSecurityWithoutTable() {
+        return parser.parseAlterTableSqlObjects(
+          {
+            AlterTableStmt: {
+              relation: null,
+              cmds: [
+                { AlterTableCmd: { subtype: "AT_EnableRowSecurity" } },
+              ],
+            },
+          },
+          "schema.sql"
+        );
+      }).toThrow(/ALTER TABLE statement is not supported/i);
+
+      expect(
+        parser.parsePolicyRole({
+          RoleSpec: {
+            roletype: "ROLESPEC_CSTRING",
+            rolename: "app_reader",
+          },
+        })
+      ).toEqual({ kind: "name", name: "app_reader" });
+      expect(
+        parser.parsePolicyRole({
+          RoleSpec: { roletype: "ROLESPEC_SESSION_USER" },
+        })
+      ).toEqual({ kind: "session_user" });
+      expect(function parseUnsupportedPolicyRole() {
+        return parser.parsePolicyRole(
+          { RoleSpec: { roletype: "ROLESPEC_UNKNOWN" } },
+          "schema.sql"
+        );
+      }).toThrow(/unsupported role reference/i);
 
       expect(parser.parsePolicySqlObject({ CreatePolicyStmt: { policy_name: "tenant_policy" } })).toBeNull();
       expect(parser.parseDomainSqlObject({ CreateDomainStmt: { domainname: [] } })).toBeNull();

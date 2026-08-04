@@ -655,6 +655,8 @@ export class SchemaService {
         desiredProcedures,
         desiredTriggers,
         managedSchemas: schemas,
+        currentUser: migrationContext?.currentUser,
+        sessionUser: migrationContext?.sessionUser,
       }
     );
 

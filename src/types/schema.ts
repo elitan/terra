@@ -309,6 +309,24 @@ export type PostgresTypeDefinition =
   | DomainTypeDefinition
   | RangeTypeDefinition;
 
+export type PostgresPolicyRole =
+  | { kind: "name"; name: string }
+  | {
+      kind:
+        | "public"
+        | "current_role"
+        | "current_user"
+        | "session_user";
+    };
+
+export interface PostgresPolicyDefinition {
+  command: "all" | "select" | "insert" | "update" | "delete";
+  permissive: boolean;
+  roles: PostgresPolicyRole[];
+  using?: string;
+  withCheck?: string;
+}
+
 export interface PostgresTypeRoutineDependent {
   schema: string;
   name: string;
@@ -337,6 +355,7 @@ export interface SqlObject {
   dependencies?: string[];
   partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
   typeDefinition?: PostgresTypeDefinition;
+  policyDefinition?: PostgresPolicyDefinition;
   attributeDependents?: CompositeTypeAttributeDependent[];
   typeDependents?: CompositeTypeTypeDependent[];
   routineDependents?: PostgresTypeRoutineDependent[];

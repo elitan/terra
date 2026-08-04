@@ -23,6 +23,8 @@ import {
 export interface PostgresTypeObjectContext
   extends PostgresTypeDependencyContext {
   currentFunctions?: Function[];
+  currentUser?: string;
+  sessionUser?: string;
 }
 
 function quoteIdentifier(identifier: string): string {

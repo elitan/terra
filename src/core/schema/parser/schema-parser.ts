@@ -42,6 +42,8 @@ import type {
   Comment,
   SqlObject,
   QualifiedName,
+  PostgresPolicyDefinition,
+  PostgresPolicyRole,
 } from "../../../types/schema";
 import { ParserError } from "../../../types/errors";
 import { DEFAULT_COLLATION } from "../../../utils/collation";
@@ -63,6 +65,17 @@ type PendingTableConstraint = {
       constraint: NonNullable<Table["checkConstraints"]>[number];
     }
 );
+
+const ROW_SECURITY_SUBTYPES = new Set([
+  "AT_EnableRowSecurity",
+  "AT_DisableRowSecurity",
+  "AT_ForceRowSecurity",
+  "AT_NoForceRowSecurity",
+]);
+
+function isRowSecuritySubtype(subtype: unknown): boolean {
+  return typeof subtype === "string" && ROW_SECURITY_SUBTYPES.has(subtype);
+}
 
 function isCanonicalPartitionBoundDatum(datum: any, strategy: string): boolean {
   if (datum?.A_Const) {
@@ -626,15 +639,15 @@ export class SchemaParser {
             comments.push(comment);
           }
         } else if (stmt.CreatePolicyStmt) {
-          const sqlObject = this.parsePolicySqlObject(stmt);
+          const sqlObject = this.parsePolicySqlObject(stmt, filePath);
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.AlterPolicyStmt) {
-          const sqlObject = this.parsePolicySqlObject(stmt);
-          if (sqlObject) {
-            sqlObjects.push(sqlObject);
-          }
+          throw new ParserError(
+            "ALTER POLICY is an imperative partial mutation and is not supported in desired schemas; declare the policy's complete desired state with one CREATE POLICY statement",
+            filePath
+          );
         } else if (stmt.CreateDomainStmt) {
           const sqlObject = this.parseDomainSqlObject(stmt, filePath);
           if (sqlObject) {
@@ -667,13 +680,25 @@ export class SchemaParser {
           }
         } else if (stmt.AlterTableStmt) {
           this.rejectUnsupportedPartitionAlter(stmt.AlterTableStmt, filePath);
-          const sqlObject = this.parseAlterTableSqlObject(stmt);
-          if (sqlObject) {
-            sqlObjects.push(sqlObject);
-          } else {
+          const rowSecurityObjects = this.parseAlterTableSqlObjects(
+            stmt,
+            filePath
+          );
+          sqlObjects.push(...rowSecurityObjects);
+          const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
+            function isNotRowSecurityCommand(item: any) {
+              return !isRowSecuritySubtype(item?.AlterTableCmd?.subtype);
+            }
+          );
+          if (remainingCommands.length > 0) {
             pendingTableConstraints.push(
-              ...this.parseAlterTableConstraints(stmt.AlterTableStmt, filePath)
+              ...this.parseAlterTableConstraints(
+                { ...stmt.AlterTableStmt, cmds: remainingCommands },
+                filePath
+              )
             );
+          } else if (rowSecurityObjects.length === 0) {
+            throw this.unsupportedAlterTableError(filePath);
           }
         } else if (stmt.DropStmt) {
           throw new ParserError(
@@ -720,6 +745,7 @@ export class SchemaParser {
       );
     }
 
+    this.rejectDuplicateDeclarativeSqlObjects(sqlObjects, filePath);
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
     this.resolveImplicitForeignKeyColumns(tables, filePath);
 
@@ -1244,6 +1270,28 @@ export class SchemaParser {
     );
   }
 
+  private rejectDuplicateDeclarativeSqlObjects(
+    objects: SqlObject[],
+    filePath?: string
+  ): void {
+    const seen = new Set<string>();
+    for (const object of objects) {
+      if (
+        object.kind !== "policy" &&
+        object.kind !== "row-level-security"
+      ) {
+        continue;
+      }
+      if (seen.has(object.key)) {
+        throw new ParserError(
+          `PostgreSQL ${object.kind === "policy" ? "policy" : "row-level security state"} '${object.key}' is declared more than once in the desired schema`,
+          filePath
+        );
+      }
+      seen.add(object.key);
+    }
+  }
+
   private static tableKey(name: string, schema?: string): string {
     return `${schema || "public"}.${name}`;
   }
@@ -1308,51 +1356,99 @@ export class SchemaParser {
     );
   }
 
-  private parseAlterTableSqlObject(stmt: any): SqlObject | null {
+  private parseAlterTableSqlObjects(
+    stmt: any,
+    filePath?: string
+  ): SqlObject[] {
     const commands = stmt?.AlterTableStmt?.cmds || [];
     const relation = stmt?.AlterTableStmt?.relation;
     const tableName = relation?.relname;
-    if (!tableName || commands.length === 0) {
-      return null;
-    }
-
-    const subtypes = commands.map(function (item: any) {
-      return item?.AlterTableCmd?.subtype;
-    }).filter(Boolean);
-
-    if (subtypes.length === 0) {
-      return null;
-    }
-
-    const hasOnlyRowSecurity = subtypes.every(function (subtype: string) {
-      return [
-        "AT_EnableRowSecurity",
-        "AT_DisableRowSecurity",
-        "AT_ForceRowSecurity",
-        "AT_NoForceRowSecurity",
-      ].includes(subtype);
+    const rowSecurityCommands = commands.filter(function isRowSecurityCommand(
+      item: any
+    ) {
+      return isRowSecuritySubtype(item?.AlterTableCmd?.subtype);
     });
+    if (rowSecurityCommands.length === 0) {
+      return [];
+    }
+    if (!tableName) {
+      throw this.unsupportedAlterTableError(filePath);
+    }
 
-    if (hasOnlyRowSecurity) {
-      const schema = relation?.schemaname;
-      const suffix = subtypes.some(function (subtype: string) {
-        return subtype === "AT_ForceRowSecurity" || subtype === "AT_NoForceRowSecurity";
-      }) ? "force" : "enabled";
+    const schema = relation?.schemaname;
+    const seen = new Set<string>();
+    const objects: SqlObject[] = [];
+    for (const item of rowSecurityCommands) {
+      const subtype = item.AlterTableCmd.subtype;
+      if (subtype === "AT_DisableRowSecurity") {
+        throw new ParserError(
+          "DISABLE ROW LEVEL SECURITY is an imperative mutation and is not supported in desired schemas; omit ENABLE ROW LEVEL SECURITY to declare that enforcement should be disabled",
+          filePath
+        );
+      }
+      if (subtype === "AT_NoForceRowSecurity") {
+        throw new ParserError(
+          "NO FORCE ROW LEVEL SECURITY is an imperative mutation and is not supported in desired schemas; omit FORCE ROW LEVEL SECURITY to declare that owner enforcement should be disabled",
+          filePath
+        );
+      }
 
-      return this.buildSqlObject(
-        "row-level-security",
-        stmt,
-        tableName,
-        schema,
-        `row-level-security:${schema || "public"}.${tableName}:${suffix}`
+      const suffix = subtype === "AT_ForceRowSecurity" ? "force" : "enabled";
+      if (seen.has(suffix)) {
+        throw new ParserError(
+          `ROW LEVEL SECURITY ${suffix === "force" ? "FORCE" : "ENABLE"} is declared more than once for '${schema ? `${schema}.` : ""}${tableName}'`,
+          filePath
+        );
+      }
+      seen.add(suffix);
+      objects.push(
+        this.buildSqlObject(
+          "row-level-security",
+          {
+            AlterTableStmt: {
+              ...stmt.AlterTableStmt,
+              cmds: [item],
+            },
+          },
+          tableName,
+          schema,
+          `row-level-security:${schema || "public"}.${tableName}:${suffix}`
+        )
       );
     }
-
-    return null;
+    return objects;
   }
 
-  private parsePolicySqlObject(stmt: any): SqlObject | null {
-    const node = stmt?.CreatePolicyStmt || stmt?.AlterPolicyStmt;
+  private parsePolicyRole(
+    wrapper: any,
+    filePath?: string
+  ): PostgresPolicyRole {
+    const role = wrapper?.RoleSpec;
+    switch (role?.roletype) {
+      case "ROLESPEC_PUBLIC":
+        return { kind: "public" };
+      case "ROLESPEC_CURRENT_ROLE":
+        return { kind: "current_role" };
+      case "ROLESPEC_CURRENT_USER":
+        return { kind: "current_user" };
+      case "ROLESPEC_SESSION_USER":
+        return { kind: "session_user" };
+      case "ROLESPEC_CSTRING":
+        if (role.rolename) {
+          return { kind: "name", name: role.rolename };
+        }
+    }
+    throw new ParserError(
+      "CREATE POLICY contains an unsupported role reference",
+      filePath
+    );
+  }
+
+  private parsePolicySqlObject(
+    stmt: any,
+    filePath?: string
+  ): SqlObject | null {
+    const node = stmt?.CreatePolicyStmt;
     const name = node?.policy_name;
     const relation = node?.table;
     const tableName = relation?.relname;
@@ -1360,14 +1456,49 @@ export class SchemaParser {
       return null;
     }
 
+    const command = (node.cmd_name || "all") as
+      PostgresPolicyDefinition["command"];
+    if (command === "insert" && node.qual) {
+      throw new ParserError(
+        `PostgreSQL INSERT policy '${name}' cannot declare USING; use WITH CHECK for inserted rows`,
+        filePath
+      );
+    }
+    if (
+      (command === "select" || command === "delete") &&
+      node.with_check
+    ) {
+      throw new ParserError(
+        `PostgreSQL ${command.toUpperCase()} policy '${name}' cannot declare WITH CHECK; use USING for visible rows`,
+        filePath
+      );
+    }
+
     const schema = relation?.schemaname;
-    return this.buildSqlObject(
+    const object = this.buildSqlObject(
       "policy",
       stmt,
       name,
       schema,
       `policy:${schema || "public"}.${tableName}.${name}`
     );
+    const parser = this;
+    return {
+      ...object,
+      policyDefinition: {
+        command,
+        permissive: node.permissive === true,
+        roles: (node.roles || []).map(function mapPolicyRole(role: any) {
+          return parser.parsePolicyRole(role, filePath);
+        }),
+        ...(node.qual
+          ? { using: deparseSync([node.qual]).trim() }
+          : {}),
+        ...(node.with_check
+          ? { withCheck: deparseSync([node.with_check]).trim() }
+          : {}),
+      },
+    };
   }
 
   private parseDomainSqlObject(stmt: any, filePath?: string): SqlObject | null {

@@ -205,6 +205,7 @@
 - done: unify enum, composite, domain, range, and generated-multirange dependency ordering across same-apply creation, composite alteration, and coordinated removal; reject cross-family cycles, ambiguous references, and physical type-name collisions before mutation.
 - done: inspect enum dependencies through direct/array relation attributes, composites, derived domains/ranges, routine signatures, owning defaults/constraints/indexes, and machine-readable catalog identities; reject retained or unmodeled dependents before mutation while allowing coordinated removal, and suppress index drops made redundant by a column drop.
 - done: apply machine-readable catalog dependency inspection and one shared retained-owner classifier across enums, composites, domains, and ranges; retained routines, policies, triggers, casts, relation expressions, and unmanaged objects reject replacement/removal during planning, while modeled policy/trigger removal is coordinated in the same apply.
+- done: model PostgreSQL row-level security as independent ENABLE/FORCE flags and policies as complete semantic CREATE POLICY definitions; cover all commands, modes, role forms, expressions, external convergence, enforcement behavior, mixed ALTER TABLE constraints, transactional replacement/removal, idempotency, and pre-mutation rejection of ALTER POLICY or negative RLS mutations on PostgreSQL 14-18.
 - next: audit remaining PostgreSQL 18 DDL and catalog additions for attributes that the canonical model could silently discard.
 
 ## parser

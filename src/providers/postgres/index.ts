@@ -208,15 +208,21 @@ export class PostgresProvider implements DatabaseProvider {
     const result = await client.query<{
       postgres_version_num: string;
       default_table_access_method: string;
+      current_user_name: string;
+      session_user_name: string;
     }>(`
       SELECT
         current_setting('server_version_num') as postgres_version_num,
-        current_setting('default_table_access_method') as default_table_access_method
+        current_setting('default_table_access_method') as default_table_access_method,
+        current_user::text as current_user_name,
+        session_user::text as session_user_name
     `);
     const row = result.rows[0];
     return {
       postgresVersionNum: Number(row?.postgres_version_num),
       defaultTableAccessMethod: row?.default_table_access_method || "heap",
+      currentUser: row?.current_user_name,
+      sessionUser: row?.session_user_name,
     };
   }
 

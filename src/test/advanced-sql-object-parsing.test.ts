@@ -26,11 +26,6 @@ describe("Advanced SQL object parsing", function () {
         FOR SELECT
         USING (tenant_id = current_setting('app.tenant_id')::integer);
 
-      ALTER POLICY tenant_policy
-        ON public.users
-        USING (tenant_id = current_setting('app.tenant_id')::integer)
-        WITH CHECK (tenant_id = current_setting('app.tenant_id')::integer);
-
       CREATE DOMAIN public.email_address AS text
         CHECK (POSITION('@' IN VALUE) > 1);
 
@@ -105,12 +100,106 @@ describe("Advanced SQL object parsing", function () {
       "partition",
       "partition",
       "policy",
-      "policy",
       "range-type",
       "role",
       "row-level-security",
       "user",
     ]);
+  });
+
+  test("splits combined row security declarations into stable desired objects", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      ALTER TABLE "security"."Order"
+        ENABLE ROW LEVEL SECURITY,
+        FORCE ROW LEVEL SECURITY;
+    `);
+
+    expect(parsed.sqlObjects).toEqual([
+      expect.objectContaining({
+        key: "row-level-security:security.Order:enabled",
+        createStatement: expect.stringMatching(
+          /ALTER TABLE security\."Order"\s+ENABLE ROW LEVEL SECURITY;/
+        ),
+      }),
+      expect.objectContaining({
+        key: "row-level-security:security.Order:force",
+        createStatement: expect.stringMatching(
+          /ALTER TABLE security\."Order"\s+FORCE ROW LEVEL SECURITY;/
+        ),
+      }),
+    ]);
+  });
+
+  test("rejects imperative policy and negative row security mutations", async function () {
+    const parser = new SchemaParser();
+
+    await expect(
+      parser.parseSchema("ALTER POLICY tenant_policy ON public.users USING (true);")
+    ).rejects.toThrow(/ALTER POLICY.*imperative partial mutation/i);
+    await expect(
+      parser.parseSchema("ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;")
+    ).rejects.toThrow(/omit ENABLE ROW LEVEL SECURITY/i);
+    await expect(
+      parser.parseSchema("ALTER TABLE public.users NO FORCE ROW LEVEL SECURITY;")
+    ).rejects.toThrow(/omit FORCE ROW LEVEL SECURITY/i);
+  });
+
+  test("preserves complete CREATE POLICY semantics", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE POLICY insert_policy ON public.users
+        FOR INSERT TO CURRENT_USER WITH CHECK (tenant_id > 0);
+      CREATE POLICY all_policy ON public.users
+        AS RESTRICTIVE FOR ALL TO PUBLIC
+        USING (tenant_id > 0) WITH CHECK (tenant_id >= 10);
+    `);
+
+    expect(parsed.sqlObjects?.map(function mapPolicy(object) {
+      return object.policyDefinition;
+    })).toEqual([
+      {
+        command: "insert",
+        permissive: true,
+        roles: [{ kind: "current_user" }],
+        withCheck: "tenant_id > 0",
+      },
+      {
+        command: "all",
+        permissive: false,
+        roles: [{ kind: "public" }],
+        using: "tenant_id > 0",
+        withCheck: "tenant_id >= 10",
+      },
+    ]);
+  });
+
+  test("rejects duplicate and command-invalid policy declarations", async function () {
+    const parser = new SchemaParser();
+
+    await expect(parser.parseSchema(`
+      CREATE POLICY tenant_policy ON public.users USING (true);
+      CREATE POLICY tenant_policy ON public.users USING (false);
+    `)).rejects.toThrow(/policy .* declared more than once/i);
+    await expect(
+      parser.parseSchema(
+        "CREATE POLICY insert_policy ON public.users FOR INSERT USING (true);"
+      )
+    ).rejects.toThrow(/INSERT policy.*cannot declare USING/i);
+    await expect(
+      parser.parseSchema(
+        "CREATE POLICY select_policy ON public.users FOR SELECT WITH CHECK (true);"
+      )
+    ).rejects.toThrow(/SELECT policy.*cannot declare WITH CHECK/i);
+    await expect(
+      parser.parseSchema(
+        "ALTER TABLE public.users ENABLE ROW LEVEL SECURITY, ENABLE ROW LEVEL SECURITY;"
+      )
+    ).rejects.toThrow(/ENABLE.*declared more than once/i);
+    await expect(parser.parseSchema(`
+      ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+    `)).rejects.toThrow(/row-level security state.*declared more than once/i);
   });
 
   test("preserves domain and range semantics in the canonical model", async function () {

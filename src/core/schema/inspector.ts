@@ -22,6 +22,7 @@ import type {
   SchemaDefinition,
   Comment,
   SqlObject,
+  PostgresPolicyDefinition,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
@@ -3000,15 +3001,18 @@ export class DatabaseInspector {
         pol.polpermissive as is_permissive,
         pg_get_expr(pol.polqual, pol.polrelid) as using_expression,
         pg_get_expr(pol.polwithcheck, pol.polrelid) as with_check_expression,
-        CASE
-          WHEN pol.polroles = '{0}'::oid[] THEN ARRAY['PUBLIC']::text[]
-          ELSE ARRAY(
-            SELECT rolname::text
+        ARRAY(
+          SELECT policy_role.role_name
+          FROM (
+            SELECT 'PUBLIC'::text as role_name
+            WHERE 0::oid = ANY(pol.polroles)
+            UNION ALL
+            SELECT rolname::text as role_name
             FROM pg_roles
             WHERE oid = ANY(pol.polroles)
-            ORDER BY rolname
-          )
-        END as policy_roles
+          ) policy_role
+          ORDER BY policy_role.role_name
+        ) as policy_roles
       FROM pg_policy pol
       JOIN pg_class c ON c.oid = pol.polrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -3022,18 +3026,22 @@ export class DatabaseInspector {
         row.table_name,
         row.schema_name
       );
-      const commandMap: Record<string, string> = {
-        r: "SELECT",
-        a: "INSERT",
-        w: "UPDATE",
-        d: "DELETE",
-        "*": "ALL",
+      const commandMap: Record<
+        string,
+        PostgresPolicyDefinition["command"]
+      > = {
+        r: "select",
+        a: "insert",
+        w: "update",
+        d: "delete",
+        "*": "all",
       };
+      const command = commandMap[row.policy_command] || "all";
       const parts = [
         `CREATE POLICY ${inspector.quoteIdent(row.policy_name)}`,
         `ON ${qualifiedTable}`,
         `AS ${row.is_permissive ? "PERMISSIVE" : "RESTRICTIVE"}`,
-        `FOR ${commandMap[row.policy_command] || "ALL"}`,
+        `FOR ${command.toUpperCase()}`,
       ];
 
       const roles = row.policy_roles || [];
@@ -3058,6 +3066,21 @@ export class DatabaseInspector {
         schema: row.schema_name,
         createStatement: `${parts.join(" ")};`,
         dropStatement: `DROP POLICY IF EXISTS ${inspector.quoteIdent(row.policy_name)} ON ${qualifiedTable};`,
+        policyDefinition: {
+          command,
+          permissive: row.is_permissive,
+          roles: roles.map(function mapPolicyRole(role: string) {
+            return role === "PUBLIC"
+              ? { kind: "public" as const }
+              : { kind: "name" as const, name: role };
+          }),
+          ...(row.using_expression
+            ? { using: row.using_expression }
+            : {}),
+          ...(row.with_check_expression
+            ? { withCheck: row.with_check_expression }
+            : {}),
+        },
       };
     });
   }

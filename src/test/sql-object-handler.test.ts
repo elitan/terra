@@ -14,6 +14,26 @@ function makeSqlObject(overrides: Partial<SqlObject>): SqlObject {
   };
 }
 
+function makePolicy(overrides: Partial<SqlObject> = {}): SqlObject {
+  return makeSqlObject({
+    kind: "policy",
+    key: "policy:public.accounts.tenant_access",
+    name: "tenant_access",
+    createStatement:
+      "CREATE POLICY tenant_access ON public.accounts FOR UPDATE " +
+      "USING (tenant_id > 0);",
+    dropStatement:
+      'DROP POLICY IF EXISTS "tenant_access" ON "public"."accounts";',
+    policyDefinition: {
+      command: "update",
+      permissive: true,
+      roles: [{ kind: "public" }],
+      using: "tenant_id > 0",
+    },
+    ...overrides,
+  });
+}
+
 describe("SqlObjectHandler", function () {
   test("separates dependent type drops from unrelated late drops", async function () {
     const handler = new SqlObjectHandler();
@@ -470,5 +490,171 @@ describe("SqlObjectHandler", function () {
       code: "VALIDATION_ERROR",
       message: expect.stringContaining("could lose data"),
     });
+  });
+
+  test("compares policy roles and effective checks semantically", async function () {
+    const handler = new SqlObjectHandler();
+    const desired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts FOR UPDATE " +
+        "TO CURRENT_ROLE, SESSION_USER USING (tenant_id = " +
+        "current_setting('app.tenant_id')::integer);",
+      policyDefinition: {
+        command: "update",
+        permissive: true,
+        roles: [{ kind: "current_role" }, { kind: "session_user" }],
+        using:
+          "tenant_id = (current_setting('app.tenant_id'))::int",
+      },
+    });
+    const current = makePolicy({
+      createStatement:
+        'CREATE POLICY "tenant_access" ON "public"."accounts" AS PERMISSIVE ' +
+        "FOR UPDATE TO \"test_user\" USING " +
+        "((tenant_id = current_setting('app.tenant_id'::text)::integer)) " +
+        "WITH CHECK ((tenant_id = " +
+        "current_setting('app.tenant_id'::text)::integer));",
+      policyDefinition: {
+        command: "update",
+        permissive: true,
+        roles: [{ kind: "name", name: "test_user" }],
+        using:
+          "(tenant_id = (current_setting('app.tenant_id'::text))::integer)",
+        withCheck:
+          "(tenant_id = (current_setting('app.tenant_id'::text))::integer)",
+      },
+    });
+
+    const plan = await handler.generateStatements([desired], [current], {
+      currentUser: "test_user",
+      sessionUser: "test_user",
+    });
+
+    expect(plan.earlyDrop).toEqual([]);
+    expect(plan.postRoutineCreate).toEqual([]);
+  });
+
+  test("treats PUBLIC as the complete policy audience", async function () {
+    const handler = new SqlObjectHandler();
+    const desired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts TO PUBLIC, app_user " +
+        "USING (tenant_id > 0);",
+      policyDefinition: {
+        command: "update",
+        permissive: true,
+        roles: [{ kind: "public" }, { kind: "name", name: "app_user" }],
+        using: "tenant_id > 0",
+      },
+    });
+
+    const plan = await handler.generateStatements([desired], [makePolicy()]);
+
+    expect(plan.earlyDrop).toEqual([]);
+    expect(plan.postRoutineCreate).toEqual([]);
+  });
+
+  test("normalizes omitted policy predicates to true", async function () {
+    const handler = new SqlObjectHandler();
+    const desired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts FOR UPDATE TO PUBLIC;",
+      policyDefinition: {
+        command: "update",
+        permissive: true,
+        roles: [{ kind: "public" }],
+      },
+    });
+    const current = makePolicy({
+      createStatement:
+        'CREATE POLICY "tenant_access" ON "public"."accounts" AS PERMISSIVE ' +
+        "FOR UPDATE TO PUBLIC USING (true) WITH CHECK (true);",
+      policyDefinition: {
+        command: "update",
+        permissive: true,
+        roles: [{ kind: "public" }],
+        using: "true",
+        withCheck: "true",
+      },
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.earlyDrop).toEqual([]);
+    expect(plan.postRoutineCreate).toEqual([]);
+
+    const desiredInsert = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts FOR INSERT TO PUBLIC;",
+      policyDefinition: {
+        command: "insert",
+        permissive: true,
+        roles: [{ kind: "public" }],
+      },
+    });
+    const currentInsert = makePolicy({
+      createStatement:
+        'CREATE POLICY "tenant_access" ON "public"."accounts" AS PERMISSIVE ' +
+        "FOR INSERT TO PUBLIC WITH CHECK (true);",
+      policyDefinition: {
+        command: "insert",
+        permissive: true,
+        roles: [{ kind: "public" }],
+        withCheck: "true",
+      },
+    });
+    const insertPlan = await handler.generateStatements(
+      [desiredInsert],
+      [currentInsert]
+    );
+
+    expect(insertPlan.earlyDrop).toEqual([]);
+    expect(insertPlan.postRoutineCreate).toEqual([]);
+  });
+
+  test("replaces policies when declarative semantics change", async function () {
+    const handler = new SqlObjectHandler();
+    const current = makePolicy();
+    const desired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts AS RESTRICTIVE " +
+        "FOR DELETE TO PUBLIC USING (tenant_id >= 10);",
+      policyDefinition: {
+        command: "delete",
+        permissive: false,
+        roles: [{ kind: "public" }],
+        using: "tenant_id >= 10",
+      },
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.earlyDrop).toEqual([current.dropStatement]);
+    expect(plan.postRoutineCreate).toEqual([desired.createStatement]);
+  });
+
+  test("compares row security flags by independent state key", async function () {
+    const handler = new SqlObjectHandler();
+    const desired = makeSqlObject({
+      kind: "row-level-security",
+      key: "row-level-security:public.accounts:enabled",
+      createStatement:
+        "ALTER TABLE public.accounts ENABLE ROW LEVEL SECURITY;",
+      dropStatement:
+        "ALTER TABLE public.accounts DISABLE ROW LEVEL SECURITY;",
+    });
+    const current = makeSqlObject({
+      kind: "row-level-security",
+      key: "row-level-security:public.accounts:enabled",
+      createStatement:
+        'ALTER TABLE "public"."accounts" ENABLE ROW LEVEL SECURITY;',
+      dropStatement:
+        'ALTER TABLE "public"."accounts" DISABLE ROW LEVEL SECURITY;',
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.earlyDrop).toEqual([]);
+    expect(plan.postTableCreate).toEqual([]);
   });
 });

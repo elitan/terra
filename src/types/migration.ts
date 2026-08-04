@@ -10,6 +10,8 @@ export interface MigrationPlan {
 export interface MigrationContext {
   postgresVersionNum?: number;
   defaultTableAccessMethod?: string;
+  currentUser?: string;
+  sessionUser?: string;
 }
 
 export interface MigrationOptions {

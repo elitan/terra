@@ -375,9 +375,18 @@ describe("Advanced SQL object inspector", function () {
       dropStatement: 'ALTER TABLE "public"."users" NO FORCE ROW LEVEL SECURITY;',
     });
 
-    expect(sqlObjects.find(function (item) {
+    const policy = sqlObjects.find(function (item) {
       return item.key === "policy:public.users.tenant_policy";
-    })?.createStatement).toContain("WITH CHECK ((tenant_id > 0))");
+    });
+    expect(policy?.createStatement).toContain("WITH CHECK ((tenant_id > 0))");
+    expect(policy?.policyDefinition).toEqual({
+      command: "select",
+      permissive: true,
+      roles: [{ kind: "name", name: "app_reader" }],
+      using:
+        "(tenant_id = current_setting('app.tenant_id'::text)::integer)",
+      withCheck: "(tenant_id > 0)",
+    });
 
     expect(sqlObjects.find(function (item) {
       return item.key === "domain-type:public.email_address";
