@@ -322,6 +322,111 @@ describe("PostgreSQL table persistence", function () {
     ]);
   });
 
+  test("converges reconstructed partition key semantics", async function () {
+    const schemaService = createTestSchemaService();
+    const schema = `
+      CREATE TABLE public.expression_partition_parent (
+        payload text NOT NULL
+      ) PARTITION BY RANGE ((pg_catalog.lower(payload)));
+      CREATE TABLE public.expression_partition_child
+        PARTITION OF public.expression_partition_parent
+        FOR VALUES FROM ('a') TO ('m');
+
+      CREATE TABLE public.function_cast_partition_parent (
+        payload text NOT NULL
+      ) PARTITION BY RANGE (((pg_catalog.lower(payload))::text));
+      CREATE TABLE public.function_cast_partition_child
+        PARTITION OF public.function_cast_partition_parent
+        FOR VALUES FROM ('a') TO ('m');
+
+      CREATE TABLE public.cast_partition_parent (
+        payload text NOT NULL
+      ) PARTITION BY RANGE ((payload::text));
+      CREATE TABLE public.cast_partition_child
+        PARTITION OF public.cast_partition_parent
+        FOR VALUES FROM ('a') TO ('m');
+
+      CREATE TABLE public.opclass_partition_parent (
+        payload text NOT NULL
+      ) PARTITION BY RANGE (payload pg_catalog.text_ops);
+      CREATE TABLE public.opclass_partition_child
+        PARTITION OF public.opclass_partition_parent
+        FOR VALUES FROM ('a') TO ('m');
+    `;
+
+    await schemaService.apply(schema, ["public"], true);
+    await client.query(`
+      INSERT INTO public.expression_partition_parent VALUES ('Bravo');
+      INSERT INTO public.function_cast_partition_parent VALUES ('Bravo');
+      INSERT INTO public.cast_partition_parent VALUES ('bravo');
+      INSERT INTO public.opclass_partition_parent VALUES ('bravo');
+    `);
+
+    expect((await schemaService.plan(schema, ["public"])).hasChanges).toBe(false);
+    expect(
+      (
+        await client.query(`
+          SELECT relname, pg_get_partkeydef(oid) AS key
+          FROM pg_class
+          WHERE relname IN (
+            'expression_partition_parent',
+            'function_cast_partition_parent',
+            'cast_partition_parent',
+            'opclass_partition_parent'
+          )
+          ORDER BY relname
+        `)
+      ).rows
+    ).toEqual([
+      { relname: "cast_partition_parent", key: "RANGE (payload)" },
+      {
+        relname: "expression_partition_parent",
+        key: "RANGE (lower(payload))",
+      },
+      {
+        relname: "function_cast_partition_parent",
+        key: "RANGE (lower(payload))",
+      },
+      { relname: "opclass_partition_parent", key: "RANGE (payload)" },
+    ]);
+  });
+
+  test("detects external partition operator class changes", async function () {
+    const schemaService = createTestSchemaService();
+    await client.query(`
+      CREATE TABLE public.external_opclass_partition (
+        payload text NOT NULL
+      ) PARTITION BY RANGE (payload text_pattern_ops)
+    `);
+
+    const matchingSchema = `
+      CREATE TABLE public.external_opclass_partition (
+        payload text NOT NULL
+      ) PARTITION BY RANGE (payload pg_catalog.text_pattern_ops);
+    `;
+    expect(
+      (await schemaService.plan(matchingSchema, ["public"])).hasChanges
+    ).toBe(false);
+
+    const defaultSchema = matchingSchema.replace(
+      "payload pg_catalog.text_pattern_ops",
+      "payload"
+    );
+    await expect(
+      schemaService.plan(defaultSchema, ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("could lose data"),
+    });
+    expect(
+      (
+        await client.query(
+          "SELECT pg_get_partkeydef('public.external_opclass_partition'::regclass) AS key"
+        )
+      ).rows[0]?.key
+    ).toBe("RANGE (payload text_pattern_ops)");
+  });
+
   test("creates, inspects, and reapplies an unlogged table", async function () {
     const schema = `
       CREATE UNLOGGED TABLE public.persistence_create (

@@ -162,6 +162,157 @@ describe("SqlObjectHandler", function () {
     expect(plan.earlyDrop).toEqual([]);
   });
 
+  test("treats normalized partition key expressions as unchanged", async function () {
+    const handler = new SqlObjectHandler();
+    const cases = [
+      {
+        desired:
+          "CREATE TABLE public.accounts (payload text) " +
+          "PARTITION BY RANGE ((pg_catalog.lower(payload)));",
+        current:
+          "CREATE TABLE public.accounts (payload text) " +
+          "PARTITION BY RANGE (lower(payload));",
+      },
+      {
+        desired:
+          "CREATE TABLE public.accounts (payload text) " +
+          "PARTITION BY RANGE ((payload::text));",
+        current:
+          "CREATE TABLE public.accounts (payload text) " +
+          "PARTITION BY RANGE (payload);",
+      },
+      {
+        desired:
+          "CREATE TABLE public.accounts (payload text) " +
+          "PARTITION BY RANGE (((lower(payload))::text));",
+        current:
+          "CREATE TABLE public.accounts (payload text) " +
+          "PARTITION BY RANGE (lower(payload));",
+        operatorClasses: [
+          {
+            name: "text_ops",
+            schema: "pg_catalog",
+            inputType: { name: "text", schema: "pg_catalog" },
+            isDefault: true,
+          },
+        ],
+      },
+    ];
+
+    for (const scenario of cases) {
+      const plan = await handler.generateStatements(
+        [makeSqlObject({ createStatement: scenario.desired })],
+        [
+          makeSqlObject({
+            createStatement: scenario.current,
+            ...(scenario.operatorClasses
+              ? { partitionKeyOperatorClasses: scenario.operatorClasses }
+              : {}),
+          }),
+        ]
+      );
+      expect(plan.preTableCreate).toEqual([]);
+      expect(plan.earlyDrop).toEqual([]);
+    }
+  });
+
+  test("compares effective partition key operator classes", async function () {
+    const handler = new SqlObjectHandler();
+    const currentDefault = makeSqlObject({
+      createStatement:
+        "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE (payload);",
+      partitionKeyOperatorClasses: [
+        {
+          name: "text_ops",
+          schema: "pg_catalog",
+          inputType: { name: "text", schema: "pg_catalog" },
+          isDefault: true,
+        },
+      ],
+    });
+    const desiredDefault = makeSqlObject({
+      createStatement:
+        "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE (payload pg_catalog.text_ops);",
+    });
+
+    const defaultPlan = await handler.generateStatements(
+      [desiredDefault],
+      [currentDefault]
+    );
+    expect(defaultPlan.preTableCreate).toEqual([]);
+    expect(defaultPlan.earlyDrop).toEqual([]);
+
+    const currentPattern = makeSqlObject({
+      createStatement:
+        "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE (payload text_pattern_ops);",
+      partitionKeyOperatorClasses: [
+        {
+          name: "text_pattern_ops",
+          schema: "pg_catalog",
+          inputType: { name: "text", schema: "pg_catalog" },
+          isDefault: false,
+        },
+      ],
+    });
+    await expect(
+      handler.generateStatements(
+        [
+          makeSqlObject({
+            createStatement:
+              "CREATE TABLE public.accounts (payload text) " +
+              "PARTITION BY RANGE (payload);",
+          }),
+        ],
+        [currentPattern]
+      )
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("could lose data"),
+    });
+  });
+
+  test("rejects meaningful partition key expression changes", async function () {
+    const handler = new SqlObjectHandler();
+    const current = makeSqlObject({
+      createStatement:
+        "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE (payload);",
+      partitionKeyOperatorClasses: [
+        {
+          name: "text_ops",
+          schema: "pg_catalog",
+          inputType: { name: "text", schema: "pg_catalog" },
+          isDefault: true,
+        },
+      ],
+    });
+    const desiredStatements = [
+      "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE ((payload::varchar(5)));",
+      "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE ((lower(payload)));",
+      "CREATE TABLE public.accounts (payload text) " +
+        'PARTITION BY RANGE (payload COLLATE "C");',
+      "CREATE TABLE public.accounts (payload text) " +
+        "PARTITION BY RANGE (payload text_pattern_ops);",
+    ];
+
+    for (const createStatement of desiredStatements) {
+      await expect(
+        handler.generateStatements(
+          [makeSqlObject({ createStatement })],
+          [current]
+        )
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining("could lose data"),
+      });
+    }
+  });
+
   test("rejects meaningful parent column and constraint changes", async function () {
     const handler = new SqlObjectHandler();
     const current = makeSqlObject({

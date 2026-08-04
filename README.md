@@ -128,7 +128,10 @@ PostgreSQL partition definitions are compared through PostgreSQL's parsed
 representation and TerraDB's semantic column model, so equivalent identifier
 quoting, type aliases, formatting, implicit `public` qualification, catalog
 collation qualification, default-expression casts, identity-sequence expansion,
-and explicit `NULL` converge after inspection. A change only
+and explicit `NULL` converge after inspection. Partition keys also normalize
+`pg_catalog` qualification, same-type casts simplified by PostgreSQL, and
+effective default or non-default operator classes without hiding meaningful key
+changes. A change only
 to a leaf partition bound uses transactional `DETACH PARTITION` and `ATTACH
 PARTITION` statements, preserving the partition table and its rows. If the new
 bound rejects existing rows, the transaction rolls back to the prior attached

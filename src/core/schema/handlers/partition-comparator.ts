@@ -9,9 +9,13 @@ import { collationsAreDifferent } from "../../../utils/collation";
 import { expressionsEqual } from "../../../utils/expression-comparator";
 import { identityColumnsAreDifferent } from "../../../utils/identity";
 import { normalizeDefault, normalizeType } from "../../../utils/sql";
+import {
+  partitionKeysAreEquivalent,
+  type PartitionKey,
+} from "./partition-key-comparator";
 
 export type PartitionParent = {
-  definition: string;
+  key: PartitionKey;
   table: Table;
 };
 
@@ -124,7 +128,11 @@ export function partitionParentsAreEquivalent(
   desired: PartitionParent | undefined,
   current: PartitionParent | undefined
 ): boolean {
-  if (!desired || !current || desired.definition !== current.definition) {
+  if (
+    !desired ||
+    !current ||
+    !partitionKeysAreEquivalent(desired.key, current.key)
+  ) {
     return false;
   }
   if (desired.table.columns.length !== current.table.columns.length) {

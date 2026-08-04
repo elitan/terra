@@ -2355,6 +2355,32 @@ export class DatabaseInspector {
         relation_tablespace.spcname as relation_tablespace,
         relation_access_method.amname as relation_access_method,
         pg_get_partkeydef(c.oid) as partition_key,
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'name', operator_class.opcname,
+              'schema', operator_class_namespace.nspname,
+              'inputType', jsonb_build_object(
+                'name', operator_class_type.typname,
+                'schema', operator_class_type_namespace.nspname
+              ),
+              'isDefault', operator_class.opcdefault
+            )
+            ORDER BY partition_key_class.position
+          )
+          FROM pg_partitioned_table partitioned
+          CROSS JOIN LATERAL unnest(partitioned.partclass::oid[])
+            WITH ORDINALITY AS partition_key_class(operator_class_oid, position)
+          JOIN pg_opclass operator_class
+            ON operator_class.oid = partition_key_class.operator_class_oid
+          JOIN pg_namespace operator_class_namespace
+            ON operator_class_namespace.oid = operator_class.opcnamespace
+          JOIN pg_type operator_class_type
+            ON operator_class_type.oid = operator_class.opcintype
+          JOIN pg_namespace operator_class_type_namespace
+            ON operator_class_type_namespace.oid = operator_class_type.typnamespace
+          WHERE partitioned.partrelid = c.oid
+        ) as partition_key_operator_classes,
         unsupported_partition_feature.items as unsupported_partition_features,
         unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
@@ -2414,6 +2440,12 @@ export class DatabaseInspector {
         schema: row.schema_name,
         createStatement,
         dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`,
+        ...(Array.isArray(row.partition_key_operator_classes)
+          ? {
+              partitionKeyOperatorClasses:
+                row.partition_key_operator_classes,
+            }
+          : {}),
       });
     }
 

@@ -6,6 +6,7 @@ import {
   partitionParentsAreEquivalent,
   type PartitionParent,
 } from "./partition-comparator";
+import { buildPartitionKey } from "./partition-key-comparator";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -115,17 +116,21 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
       createStatement?.partspec && !createStatement.partbound
         ? parseCreateTable(createStatement)
         : null;
+    const partitionKey = partitionTable
+      ? buildPartitionKey(
+          createStatement.partspec,
+          partitionTable,
+          object.partitionKeyOperatorClasses
+        )
+      : undefined;
 
     return {
       normalized: normalizeSql(deparseSync(statements)),
       statement,
-      ...(partitionTable
+      ...(partitionTable && partitionKey
         ? {
             partitionParent: {
-              definition: deparseCreateStatement({
-                ...createStatement,
-                tableElts: [],
-              }),
+              key: partitionKey,
               table: partitionTable,
             },
           }

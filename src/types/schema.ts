@@ -251,6 +251,11 @@ export type SqlObjectKind =
   | "row-level-security"
   | "user";
 
+export interface PartitionKeyOperatorClass extends QualifiedName {
+  inputType: QualifiedName;
+  isDefault: boolean;
+}
+
 export interface SqlObject {
   kind: SqlObjectKind;
   key: string;
@@ -259,6 +264,7 @@ export interface SqlObject {
   createStatement: string;
   dropStatement?: string;
   dependencies?: string[];
+  partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
 }
 
 export interface SchemaDefinition {
