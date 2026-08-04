@@ -202,7 +202,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test src/test/schema-differ-private-coverage.test.ts src/test/destructive-operations.test.ts src/test/columns/postgres-specific/type-cast-normalization.test.ts";
   }
   if (normalized.includes("/src/core/schema/parser")) {
-    return "bun --env-file=.env test src/test/schema-parser-private-coverage.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts";
+    return "bun --env-file=.env test src/test/schema-parser-private-coverage.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/inspector.ts")) {
     return "bun --env-file=.env test src/test/inspector-coverage.test.ts src/test/inspector-version-snapshots.test.ts";

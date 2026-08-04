@@ -102,6 +102,16 @@ export DATABASE_URL=":memory:"
 PostgreSQL 14 through 18 are supported. Stored generated columns work across
 that range; virtual generated columns are supported on PostgreSQL 18 and fail
 before mutation on older servers.
+PostgreSQL 18 `NOT ENFORCED` constraints, temporal constraints using `WITHOUT
+OVERLAPS` or `PERIOD`, and named, table-level, `NO INHERIT`, or `NOT VALID`
+`NOT NULL` forms are outside the current declarative constraint model. TerraDB
+rejects those clauses while parsing desired schemas. During inspection it also
+rejects `NOT ENFORCED`, temporal, and `NOT NULL NO INHERIT`/`NOT VALID` catalog
+flags in managed external tables before diffing. An ordinary externally named
+`NOT NULL` is normalized to column nullability because its name is not part of
+the declarative model. Enforced `CHECK` and foreign-key constraints may still
+be declared `NOT VALID`, and ordinary unnamed column `NOT NULL` remains fully
+supported.
 
 SQLite uses table recreation for schema changes that ALTER TABLE doesn't support (column type changes, constraint modifications, etc.).
 Table recreation preserves hidden ROWID values and SQLite-specific definitions including `STRICT`, `WITHOUT ROWID`, `AUTOINCREMENT`, collations, named constraints, and `ON CONFLICT` policies. It validates foreign keys and database integrity before commit, enforces CHECK constraints during migration even when the caller disabled enforcement, and disables `writable_schema` so ALTER operations cannot silently ignore malformed schema entries. It then restores the caller's `foreign_keys`, `defer_foreign_keys`, `ignore_check_constraints`, and `writable_schema` settings. Recreation fails before mutation when declared columns shadow every SQL-visible ROWID name and exact row identity cannot be transferred safely.

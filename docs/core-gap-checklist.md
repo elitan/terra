@@ -191,7 +191,8 @@
 - done: normalize PostgreSQL 18 AST-only expression source locations so `IN` and `= ANY` remain semantically equivalent after the parser upgrade.
 - done: normalize PostgreSQL 18 `NOT NULL` catalog rows through column nullability instead of duplicating them as reconstructed table constraints.
 - done: add PostgreSQL 18 local, PR CI, release-verification, inspector-snapshot, CLI-discovery, and full matrix lanes without changing nightly automation.
-- next: audit PostgreSQL 18 constraint additions (`NOT ENFORCED`, named `NOT NULL`, and temporal constraints) for complete lifecycle support or explicit pre-mutation rejection.
+- done: reject PostgreSQL 18 `NOT ENFORCED`, temporal `WITHOUT OVERLAPS`/`PERIOD`, and advanced named/table-level/inheritance/validation `NOT NULL` semantics while parsing desired schemas; reject unenforced, temporal, and `NOT NULL` inheritance/validation flags on managed external tables without confusing supported `NOT VALID` checks and foreign keys, while normalizing ordinary external `NOT NULL` names to column nullability.
+- next: audit remaining PostgreSQL 18 DDL and catalog additions for attributes that the canonical model could silently discard.
 
 ## parser
 

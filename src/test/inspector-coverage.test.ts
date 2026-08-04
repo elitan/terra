@@ -38,6 +38,76 @@ describe("DatabaseInspector coverage", () => {
     ]);
   });
 
+  test("rejects unmodeled PostgreSQL constraint catalog metadata", async function () {
+    const inspector = new DatabaseInspector();
+    const scenarios = [
+      {
+        constraint: {
+          constraintName: "unenforced_check",
+          constraintType: "c",
+          enforced: false,
+          period: false,
+          validated: false,
+          noInherit: false,
+        },
+        feature: "NOT ENFORCED",
+      },
+      {
+        constraint: {
+          constraintName: "temporal_unique",
+          constraintType: "u",
+          enforced: true,
+          period: true,
+          validated: true,
+          noInherit: false,
+        },
+        feature: "WITHOUT OVERLAPS or PERIOD",
+      },
+      {
+        constraint: {
+          constraintName: "advanced_not_null",
+          constraintType: "n",
+          enforced: true,
+          period: false,
+          validated: false,
+          noInherit: true,
+        },
+        feature: "NOT NULL NO INHERIT or NOT VALID",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const client = createClient(function handleQuery(sql, params) {
+        expect(sql).toContain("conenforced");
+        expect(sql).toContain("conperiod");
+        expect(sql).toContain("constraint_catalog.contype = 'n'");
+        expect(
+          sql.match(
+            /\(to_jsonb\(constraint_catalog\) ->> 'conenforced'\)::boolean,\s+true/g
+          )
+        ).toHaveLength(2);
+        expect(sql).toContain(") unsupported_constraint ON true");
+        expect(params).toEqual([["public"]]);
+        return {
+          rows: [
+            {
+              table_name: "catalog_state",
+              table_schema: "public",
+              unsupported_constraints: [scenario.constraint],
+            },
+          ],
+        };
+      });
+
+      await expect(
+        inspector.getCurrentSchema(client, ["public"])
+      ).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: expect.stringContaining(scenario.feature),
+      });
+    }
+  });
+
   test("maps unlogged table persistence", async function () {
     const inspector = new DatabaseInspector() as any;
     inspector.getPrimaryKeyConstraint = async function () { return undefined; };

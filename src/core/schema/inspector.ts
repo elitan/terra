@@ -70,6 +70,47 @@ const COLUMN_COLLATION_JOIN_SQL = `
     ON column_collation_namespace.oid = column_collation.collnamespace
 `;
 
+const UNSUPPORTED_CONSTRAINT_JOIN_SQL = `
+  LEFT JOIN LATERAL (
+    SELECT json_agg(
+      json_build_object(
+        'constraintName', constraint_catalog.conname,
+        'constraintType', constraint_catalog.contype,
+        'enforced', COALESCE(
+          (to_jsonb(constraint_catalog) ->> 'conenforced')::boolean,
+          true
+        ),
+        'period', COALESCE(
+          (to_jsonb(constraint_catalog) ->> 'conperiod')::boolean,
+          false
+        ),
+        'validated', constraint_catalog.convalidated,
+        'noInherit', constraint_catalog.connoinherit
+      )
+      ORDER BY constraint_catalog.conname
+    ) AS items
+    FROM pg_constraint constraint_catalog
+    WHERE constraint_catalog.conrelid = c.oid
+      AND (
+        NOT COALESCE(
+          (to_jsonb(constraint_catalog) ->> 'conenforced')::boolean,
+          true
+        )
+        OR COALESCE(
+          (to_jsonb(constraint_catalog) ->> 'conperiod')::boolean,
+          false
+        )
+        OR (
+          constraint_catalog.contype = 'n'
+          AND (
+            constraint_catalog.connoinherit
+            OR NOT constraint_catalog.convalidated
+          )
+        )
+      )
+  ) unsupported_constraint ON true
+`;
+
 function parseBooleanRelationOption(
   options: string[] | null,
   name: string
@@ -293,6 +334,69 @@ function assertRoutineRowsAreSupported(rows: RoutineFeatureCatalogRow[]): void {
   }
 }
 
+interface UnsupportedConstraintCatalogRow {
+  constraintName?: string;
+  constraintType?: string;
+  enforced?: boolean;
+  period?: boolean;
+  validated?: boolean;
+  noInherit?: boolean;
+}
+
+interface TableConstraintCatalogRow {
+  table_name?: string;
+  table_schema?: string;
+  unsupported_constraints?: UnsupportedConstraintCatalogRow[];
+}
+
+function getUnsupportedConstraintFeatures(
+  constraint: UnsupportedConstraintCatalogRow
+): string[] {
+  const features: string[] = [];
+  if (constraint.enforced === false) {
+    features.push("NOT ENFORCED");
+  }
+  if (constraint.period === true) {
+    features.push("WITHOUT OVERLAPS or PERIOD");
+  }
+  if (
+    constraint.constraintType === "n" &&
+    (constraint.noInherit === true || constraint.validated === false)
+  ) {
+    features.push("NOT NULL NO INHERIT or NOT VALID");
+  }
+  return features;
+}
+
+function assertConstraintRowsAreSupported(
+  rows: TableConstraintCatalogRow[]
+): void {
+  for (const row of rows) {
+    if (!Array.isArray(row.unsupported_constraints)) {
+      continue;
+    }
+
+    for (const constraint of row.unsupported_constraints) {
+      const features = getUnsupportedConstraintFeatures(constraint);
+      if (features.length === 0) {
+        continue;
+      }
+
+      const identity = [
+        row.table_schema || "public",
+        row.table_name || "unknown table",
+        constraint.constraintName || "unknown constraint",
+      ].join(".");
+      throw new ValidationError(
+        `Unsupported PostgreSQL constraint ${identity} is present in a managed schema: ${features.join(", ")}. TerraDB cannot inspect this constraint losslessly; replace it with a supported constraint or manage the table outside TerraDB before planning`,
+        `constraint ${identity}`,
+        "definition",
+        features
+      );
+    }
+  }
+}
+
 export class DatabaseInspector {
   async getCurrentSchema(client: Client, schemas: string[] = ['public']): Promise<Table[]> {
     const tables: Table[] = [];
@@ -307,7 +411,8 @@ export class DatabaseInspector {
         toast_relation.reloptions as toast_storage_options,
         table_access_method.amname as table_access_method,
         table_tablespace.spcname as table_tablespace_name,
-        inheritance.parents as inheritance_parents
+        inheritance.parents as inheritance_parents,
+        unsupported_constraint.items as unsupported_constraints
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = t.table_schema
@@ -328,13 +433,17 @@ export class DatabaseInspector {
           ON parent_namespace.oid = parent.relnamespace
         WHERE inherited.inhrelid = c.oid
       ) inheritance ON true
+      ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
         AND t.table_type = 'BASE TABLE'
         AND c.relkind = 'r'
         AND NOT c.relispartition
         AND d.objid IS NULL
+      ORDER BY t.table_schema, t.table_name
     `, [schemas]);
+
+    assertConstraintRowsAreSupported(tablesResult.rows);
 
     for (const row of tablesResult.rows) {
       const tableName = row.table_name;
@@ -2179,15 +2288,18 @@ export class DatabaseInspector {
         c.oid,
         c.relname as table_name,
         n.nspname as schema_name,
-        pg_get_partkeydef(c.oid) as partition_key
+        pg_get_partkeydef(c.oid) as partition_key,
+        unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
+      ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND c.relkind = 'p'
         AND d.objid IS NULL
       ORDER BY n.nspname, c.relname
     `, [schemas]);
+    assertConstraintRowsAreSupported(result.rows);
 
     const objects: SqlObject[] = [];
 
@@ -2214,18 +2326,21 @@ export class DatabaseInspector {
         n.nspname as schema_name,
         parent.relname as parent_name,
         parent_ns.nspname as parent_schema,
-        pg_get_expr(c.relpartbound, c.oid) as partition_bound
+        pg_get_expr(c.relpartbound, c.oid) as partition_bound,
+        unsupported_constraint.items as unsupported_constraints
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       JOIN pg_inherits i ON i.inhrelid = c.oid
       JOIN pg_class parent ON parent.oid = i.inhparent
       JOIN pg_namespace parent_ns ON parent_ns.oid = parent.relnamespace
+      ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE n.nspname = ANY($1::text[])
         AND c.relispartition
         AND d.objid IS NULL
       ORDER BY n.nspname, c.relname
     `, [schemas]);
+    assertConstraintRowsAreSupported(childResult.rows);
 
     for (const row of childResult.rows) {
       const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);

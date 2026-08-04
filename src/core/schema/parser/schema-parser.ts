@@ -485,6 +485,10 @@ export class SchemaParser {
         this.rejectTemporaryRelation(stmt, filePath);
         if (stmt.CreateStmt) {
           this.rejectUnsupportedTableShorthand(stmt.CreateStmt, filePath);
+          this.rejectUnsupportedConstraintSemantics(
+            stmt.CreateStmt,
+            filePath
+          );
         }
 
         if (stmt.CreateStmt && this.isPartitionCreateStatement(stmt.CreateStmt)) {
@@ -745,6 +749,82 @@ export class SchemaParser {
     }
   }
 
+  private rejectUnsupportedConstraintSemantics(
+    stmt: any,
+    filePath?: string
+  ): void {
+    for (const element of stmt.tableElts || []) {
+      if (element.ColumnDef) {
+        for (const wrapper of element.ColumnDef.constraints || []) {
+          if (wrapper.Constraint) {
+            this.rejectUnsupportedConstraintNode(
+              wrapper.Constraint,
+              "column",
+              filePath
+            );
+          }
+        }
+        continue;
+      }
+
+      if (element.Constraint) {
+        this.rejectUnsupportedConstraintNode(
+          element.Constraint,
+          "table",
+          filePath
+        );
+      }
+    }
+  }
+
+  private rejectUnsupportedConstraintNode(
+    constraint: any,
+    placement: "column" | "table",
+    filePath?: string
+  ): void {
+    const isCheckOrForeignKey =
+      constraint.contype === "CONSTR_CHECK" ||
+      constraint.contype === "CONSTR_FOREIGN";
+    const isNotEnforced =
+      constraint.contype === "CONSTR_ATTR_NOT_ENFORCED" ||
+      constraint.is_enforced === false ||
+      (isCheckOrForeignKey &&
+        constraint.skip_validation === true &&
+        constraint.is_enforced !== true);
+
+    if (isNotEnforced) {
+      throw new ParserError(
+        "PostgreSQL NOT ENFORCED constraints are not supported in desired schemas because enforcement state is not modeled; use an enforced constraint or manage the table outside TerraDB",
+        filePath
+      );
+    }
+
+    if (
+      constraint.without_overlaps === true ||
+      constraint.fk_with_period === true ||
+      constraint.pk_with_period === true
+    ) {
+      throw new ParserError(
+        "PostgreSQL temporal constraints using WITHOUT OVERLAPS or PERIOD are not supported in desired schemas because temporal coverage semantics are not modeled; use a non-temporal constraint or manage the table outside TerraDB",
+        filePath
+      );
+    }
+
+    if (
+      constraint.contype === "CONSTR_NOTNULL" &&
+      (placement === "table" ||
+        Boolean(constraint.conname) ||
+        constraint.is_no_inherit === true ||
+        constraint.skip_validation === true ||
+        constraint.initially_valid === false)
+    ) {
+      throw new ParserError(
+        "PostgreSQL advanced NOT NULL constraints (named, table-level, NO INHERIT, or NOT VALID) are not supported in desired schemas because TerraDB models only column nullability; use an unnamed column-level NOT NULL constraint or manage the table outside TerraDB",
+        filePath
+      );
+    }
+  }
+
   private unsupportedDerivedTableError(
     statement: "CREATE TABLE AS" | "SELECT INTO",
     filePath?: string
@@ -815,6 +895,7 @@ export class SchemaParser {
       }
 
       const constraint = command.def.Constraint;
+      this.rejectUnsupportedConstraintNode(constraint, "table", filePath);
       if (constraint.contype === "CONSTR_FOREIGN") {
         const foreignKey = parseForeignKey(constraint);
         if (!foreignKey) {
