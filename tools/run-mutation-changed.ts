@@ -196,7 +196,7 @@ function resolveTestCommand(file: string, override?: string): string {
 
   const normalized = file.replace(/\\/g, "/");
   if (normalized.endsWith("/src/core/schema/service.ts")) {
-    return "bun --env-file=.env test src/test/schema-service.test.ts src/test/schema-service-private-coverage.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
+    return "bun --env-file=.env test src/test/schema-service.test.ts src/test/schema-service-private-coverage.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/differ.ts")) {
     return "bun --env-file=.env test src/test/schema-differ-private-coverage.test.ts src/test/destructive-operations.test.ts src/test/columns/postgres-specific/type-cast-normalization.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
@@ -208,13 +208,16 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test src/test/enums/enum-handler-schema-scope.test.ts src/test/enums/postgres-enum-evolution.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/enum-types.test.ts src/test/types/postgres-type-ordering.test.ts";
   }
   if (normalized.includes("/src/core/schema/handlers/composite-type-")) {
-    return "bun --env-file=.env test src/test/types/composite-type-evolution.test.ts src/test/types/composite-types.test.ts src/test/composite-type-parser-coverage.test.ts src/test/types/postgres-type-ordering.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
+    return "bun --env-file=.env test src/test/types/composite-type-evolution.test.ts src/test/types/composite-types.test.ts src/test/composite-type-parser-coverage.test.ts src/test/types/postgres-type-ordering.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
+  }
+  if (normalized.endsWith("/src/core/schema/handlers/postgres-type-dependency-safety.ts")) {
+    return "bun --env-file=.env test src/test/enums/postgres-enum-dependencies.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/postgres-type-ordering.ts")) {
     return "bun --env-file=.env test src/test/types/postgres-type-ordering.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/composite-type-evolution.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/postgres-type-object-handler.ts")) {
-    return "bun --env-file=.env test src/test/types/domain-range-lifecycle.test.ts src/test/sql-object-handler.test.ts src/test/advanced-sql-object-parsing.test.ts";
+    return "bun --env-file=.env test src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts src/test/sql-object-handler.test.ts src/test/advanced-sql-object-parsing.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/sql-object-handler.ts")) {
     return "bun --env-file=.env test src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts";
@@ -223,7 +226,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/inspector.ts")) {
-    return "bun --env-file=.env test src/test/inspector-coverage.test.ts src/test/inspector-version-snapshots.test.ts src/test/advanced-sql-object-inspector.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
+    return "bun --env-file=.env test src/test/inspector-coverage.test.ts src/test/inspector-version-snapshots.test.ts src/test/advanced-sql-object-inspector.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
   }
   if (normalized.endsWith("/src/providers/sqlite/index.ts")) {
     return "bun --env-file=.env test src/test/sqlite/table-recreation.test.ts src/test/sqlite/validation.test.ts";

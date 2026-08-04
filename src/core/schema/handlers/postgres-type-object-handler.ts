@@ -1,35 +1,29 @@
 import type {
-  CompositeType,
   DomainTypeConstraint,
   DomainTypeDefinition,
   Function,
-  Procedure,
   QualifiedName,
   RangeTypeDefinition,
   SqlObject,
-  Table,
-  View,
 } from "../../../types/schema";
 import { ValidationError } from "../../../types/errors";
 import { collationsAreDifferent } from "../../../utils/collation";
 import { expressionsEqual } from "../../../utils/expression-comparator";
 import { normalizeType } from "../../../utils/sql";
 import {
-  attributeDependentIsRetained,
   parseTypeReference,
-  typeReferenceMatches,
 } from "./composite-type-dependencies";
 import { getAutomaticMultirangeName } from "./postgres-type-ordering";
+import {
+  getPostgresTypeDependentDescriptions,
+  getRetainedPostgresTypeDependentDescriptions,
+  type PostgresTypeDependencyContext,
+} from "./postgres-type-dependency-safety";
 
-export type PostgresTypeObjectContext = {
-  desiredTables?: Table[];
-  desiredViews?: View[];
-  desiredCompositeTypes?: CompositeType[];
-  desiredFunctions?: Function[];
+export interface PostgresTypeObjectContext
+  extends PostgresTypeDependencyContext {
   currentFunctions?: Function[];
-  desiredProcedures?: Procedure[];
-  managedSchemas?: string[];
-};
+}
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
@@ -334,37 +328,8 @@ export function generateDomainAlterStatements(
   return result;
 }
 
-function getTypeDependentDescriptions(object: SqlObject): string[] {
-  return [
-    ...(object.attributeDependents || []).map(function renderAttribute(dependent) {
-      return `${dependent.schema}.${dependent.relation}.${dependent.attribute}`;
-    }),
-    ...(object.typeDependents || []).map(function renderType(dependent) {
-      return `${dependent.kind} ${dependent.schema}.${dependent.name}`;
-    }),
-    ...(object.routineDependents || []).map(function renderRoutine(dependent) {
-      return `${dependent.kind} ${dependent.schema}.${dependent.name}(${dependent.identityArguments})`;
-    }),
-  ];
-}
-
-function functionUsesType(func: Function, object: SqlObject): boolean {
-  return (
-    typeReferenceMatches(func.returnType, object) ||
-    func.parameters.some(function parameterUsesType(parameter) {
-      return typeReferenceMatches(parameter.type, object);
-    })
-  );
-}
-
-function procedureUsesType(procedure: Procedure, object: SqlObject): boolean {
-  return procedure.parameters.some(function parameterUsesType(parameter) {
-    return typeReferenceMatches(parameter.type, object);
-  });
-}
-
 export function assertTypeCanBeReplaced(object: SqlObject): void {
-  const dependents = getTypeDependentDescriptions(object);
+  const dependents = getPostgresTypeDependentDescriptions(object);
   if (dependents.length === 0) return;
   throw new ValidationError(
     `PostgreSQL ${object.kind === "domain-type" ? "domain" : "range"} '${object.schema || "public"}.${object.name}' cannot be replaced while these objects depend on it: ${dependents.join(", ")}`,
@@ -379,71 +344,11 @@ export function assertTypeCanBeRemoved(
   desiredObjects: SqlObject[],
   context: PostgresTypeObjectContext
 ): void {
-  const managedSchemas = context.managedSchemas || ["public"];
-  const removedType = {
-    name: object.name,
-    schema: object.schema,
-    attributes: [],
-  };
-  const retainedAttributes = (object.attributeDependents || []).filter(
-    function isRetained(dependent) {
-      return attributeDependentIsRetained(
-        dependent,
-        removedType,
-        context.desiredCompositeTypes || [],
-        context.desiredTables || [],
-        context.desiredViews || [],
-        managedSchemas
-      );
-    }
+  const dependents = getRetainedPostgresTypeDependentDescriptions(
+    object,
+    desiredObjects,
+    { ...context, desiredSqlObjects: desiredObjects }
   );
-  const desiredKeys = new Set(
-    desiredObjects.map(function getKey(candidate) {
-      return candidate.key;
-    })
-  );
-  const retainedTypes = (object.typeDependents || []).filter(
-    function isRetained(dependent) {
-      if (!managedSchemas.includes(dependent.schema)) return true;
-      return desiredKeys.has(
-        `${dependent.kind}-type:${dependent.schema}.${dependent.name}`
-      );
-    }
-  );
-  const retainedRoutines = (object.routineDependents || []).filter(
-    function isRetained(dependent) {
-      if (!managedSchemas.includes(dependent.schema)) return true;
-      if (dependent.kind === "procedure") {
-        return (context.desiredProcedures || []).some(
-          function findProcedure(procedure) {
-            return (
-              (procedure.schema || "public") === dependent.schema &&
-              procedure.name === dependent.name &&
-              procedureUsesType(procedure, object)
-            );
-          }
-        );
-      }
-      return (context.desiredFunctions || []).some(function findFunction(func) {
-        return (
-          (func.schema || "public") === dependent.schema &&
-          func.name === dependent.name &&
-          functionUsesType(func, object)
-        );
-      });
-    }
-  );
-  const dependents = [
-    ...retainedAttributes.map(function renderAttribute(dependent) {
-      return `${dependent.schema}.${dependent.relation}.${dependent.attribute}`;
-    }),
-    ...retainedTypes.map(function renderType(dependent) {
-      return `${dependent.kind} ${dependent.schema}.${dependent.name}`;
-    }),
-    ...retainedRoutines.map(function renderRoutine(dependent) {
-      return `${dependent.kind} ${dependent.schema}.${dependent.name}(${dependent.identityArguments})`;
-    }),
-  ];
   if (dependents.length === 0) return;
 
   throw new ValidationError(

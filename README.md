@@ -191,6 +191,11 @@ ordered in one apply. Index dependency columns come from PostgreSQL's catalogs,
 so a column drop neither double-drops an index nor prevents a replacement index
 from being created. Unmodeled catalog dependents such as casts are also reported
 before mutation and must be removed explicitly first.
+Domains, ranges, and composite types use the same catalog dependency safety.
+TerraDB reports retained routine signatures, policies, triggers, casts, and
+relation-owned expressions before replacement or removal. Managed policies and
+triggers can be removed with their type in one apply; ownerless or unmanaged
+dependents must be migrated explicitly.
 PostgreSQL composite types preserve zero-attribute definitions, attribute order,
 quoted names, schema-qualified types, arrays, typemods, and explicit collations.
 TerraDB dependency-orders composite creation and removal, and uses native

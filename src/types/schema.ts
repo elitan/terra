@@ -168,6 +168,8 @@ export interface CompositeType {
   attributes: CompositeTypeAttribute[];
   attributeDependents?: CompositeTypeAttributeDependent[];
   typeDependents?: CompositeTypeTypeDependent[];
+  routineDependents?: PostgresTypeRoutineDependent[];
+  catalogDependents?: PostgresTypeCatalogDependent[];
 }
 
 export interface View {
@@ -338,6 +340,7 @@ export interface SqlObject {
   attributeDependents?: CompositeTypeAttributeDependent[];
   typeDependents?: CompositeTypeTypeDependent[];
   routineDependents?: PostgresTypeRoutineDependent[];
+  catalogDependents?: PostgresTypeCatalogDependent[];
   hasContainerColumnDependents?: boolean;
 }
 

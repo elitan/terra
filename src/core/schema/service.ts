@@ -622,6 +622,7 @@ export class SchemaService {
           desiredSqlObjects,
           desiredFunctions,
           desiredProcedures,
+          desiredTriggers,
           managedSchemas: schemas,
         }
       );
@@ -635,7 +636,10 @@ export class SchemaService {
           desiredSchema,
           schemas,
           desiredSqlObjects,
-          normalizedDesiredViews
+          normalizedDesiredViews,
+          desiredFunctions,
+          desiredProcedures,
+          desiredTriggers
         );
     }
 
@@ -649,6 +653,7 @@ export class SchemaService {
         desiredFunctions,
         currentFunctions,
         desiredProcedures,
+        desiredTriggers,
         managedSchemas: schemas,
       }
     );

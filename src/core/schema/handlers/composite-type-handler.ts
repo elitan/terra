@@ -1,10 +1,14 @@
 import type {
   CompositeType,
   CompositeTypeAttribute,
+  Function,
+  Procedure,
   SqlObject,
   Table,
+  Trigger,
   View,
 } from "../../../types/schema";
+import { ValidationError } from "../../../types/errors";
 import {
   collationsAreDifferent,
   getAlterColumnCollation,
@@ -16,11 +20,11 @@ import {
   normalizeType,
 } from "../../../utils/sql";
 import {
-  attributeDependentIsRetained,
   getCompositeTypeKey,
   sortCompositeTypesForCreation,
 } from "./composite-type-dependencies";
 import type { PostgresTypeStatement } from "./postgres-type-ordering";
+import { getRetainedPostgresTypeDependentDescriptions } from "./postgres-type-dependency-safety";
 
 function quoteIdentifier(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
@@ -192,7 +196,10 @@ export class CompositeTypeHandler {
     desiredTables: Table[] = [],
     managedSchemas: string[] = ["public"],
     desiredSqlObjects: SqlObject[] = [],
-    desiredViews: View[] = []
+    desiredViews: View[] = [],
+    desiredFunctions: Function[] = [],
+    desiredProcedures: Procedure[] = [],
+    desiredTriggers: Trigger[] = []
   ): string[] {
     return this.generateRemovalTypeStatements(
       desiredCompositeTypes,
@@ -200,7 +207,10 @@ export class CompositeTypeHandler {
       desiredTables,
       managedSchemas,
       desiredSqlObjects,
-      desiredViews
+      desiredViews,
+      desiredFunctions,
+      desiredProcedures,
+      desiredTriggers
     ).map(function getStatement(item) {
       return item.statement;
     });
@@ -212,7 +222,10 @@ export class CompositeTypeHandler {
     desiredTables: Table[] = [],
     managedSchemas: string[] = ["public"],
     desiredSqlObjects: SqlObject[] = [],
-    desiredViews: View[] = []
+    desiredViews: View[] = [],
+    desiredFunctions: Function[] = [],
+    desiredProcedures: Procedure[] = [],
+    desiredTriggers: Trigger[] = []
   ): PostgresTypeStatement[] {
     const desiredCompositeTypeNames = new Set(
       desiredCompositeTypes.map(function getDesiredKey(compositeType) {
@@ -224,54 +237,30 @@ export class CompositeTypeHandler {
       .filter(function isRemoved(compositeType) {
         return !desiredCompositeTypeNames.has(getCompositeTypeKey(compositeType));
       });
-    const desiredSqlObjectKeys = new Set(
-      desiredSqlObjects.map(function getObjectKey(object) {
-        return object.key;
-      })
-    );
-
     for (const removedType of removedTypes) {
-      const retainedDependents = (removedType.attributeDependents ?? []).filter(
-        function isStillDependent(dependent) {
-          return attributeDependentIsRetained(
-            dependent,
-            removedType,
-            desiredCompositeTypes,
-            desiredTables,
-            desiredViews,
-            managedSchemas
-          );
+      const dependents = getRetainedPostgresTypeDependentDescriptions(
+        removedType,
+        desiredSqlObjects,
+        {
+          desiredTables,
+          desiredCompositeTypes,
+          desiredViews,
+          desiredSqlObjects,
+          desiredFunctions,
+          desiredProcedures,
+          desiredTriggers,
+          managedSchemas,
         }
       );
-      if (retainedDependents.length > 0) {
-        const names = retainedDependents
-          .map(function renderDependent(dependent) {
-            return `${dependent.schema}.${dependent.relation}.${dependent.attribute}`;
-          })
-          .join(", ");
-        throw new Error(
-          `Composite type '${removedType.name}' cannot be dropped while managed attributes still use it: ${names}`
-        );
-      }
+      if (dependents.length === 0) continue;
 
-      const retainedTypeDependents = (removedType.typeDependents ?? []).filter(
-        function isRetainedType(dependent) {
-          if (!managedSchemas.includes(dependent.schema)) return true;
-          return desiredSqlObjectKeys.has(
-            `${dependent.kind}-type:${dependent.schema}.${dependent.name}`
-          );
-        }
+      const identity = `${removedType.schema || "public"}.${removedType.name}`;
+      throw new ValidationError(
+        `PostgreSQL composite type '${identity}' cannot be dropped while these objects still use it: ${dependents.join(", ")}. Remove or migrate those dependents first`,
+        "composite-type",
+        identity,
+        dependents
       );
-      if (retainedTypeDependents.length > 0) {
-        const names = retainedTypeDependents
-          .map(function renderDependent(dependent) {
-            return `${dependent.kind} ${dependent.schema}.${dependent.name}`;
-          })
-          .join(", ");
-        throw new Error(
-          `Composite type '${removedType.name}' cannot be dropped while managed types still use it: ${names}`
-        );
-      }
     }
 
     return sortCompositeTypesForCreation(removedTypes)

@@ -54,6 +54,14 @@ describe("Composite Types", () => {
           { name: "scheduled_date", type: "date" },
           { name: "reason", type: "text" },
         ],
+        routineDependents: [
+          {
+            schema: "public",
+            name: "get_priority_data",
+            kind: "function",
+            identityArguments: "",
+          },
+        ],
       },
     ]);
 

@@ -156,6 +156,131 @@ const COMPOSITE_TYPE_DEPENDENCY_CTE_SQL = `
   )
 `;
 
+function getPostgresTypeRoutineDependentsSql(referenceOids: string): string {
+  return `
+    COALESCE((
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'schema', routine_namespace.nspname,
+          'name', routine.proname,
+          'kind', CASE routine.prokind
+            WHEN 'p' THEN 'procedure'
+            ELSE 'function'
+          END,
+          'identityArguments', pg_get_function_identity_arguments(routine.oid)
+        )
+        ORDER BY routine_namespace.nspname, routine.proname,
+          pg_get_function_identity_arguments(routine.oid)
+      )
+      FROM pg_depend dependency
+      JOIN pg_proc routine
+        ON dependency.classid = 'pg_proc'::regclass
+        AND routine.oid = dependency.objid
+      JOIN pg_namespace routine_namespace
+        ON routine_namespace.oid = routine.pronamespace
+      WHERE dependency.refclassid = 'pg_type'::regclass
+        AND dependency.refobjid IN (${referenceOids})
+        AND dependency.deptype = 'n'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend internal_dependency
+          WHERE internal_dependency.classid = 'pg_proc'::regclass
+            AND internal_dependency.objid = routine.oid
+            AND internal_dependency.deptype = 'i'
+        )
+    ), '[]'::jsonb)
+  `;
+}
+
+function getPostgresTypeCatalogDependentsSql(referenceOids: string): string {
+  return `
+    COALESCE((
+      SELECT jsonb_agg(
+        jsonb_strip_nulls(jsonb_build_object(
+          'type', identified.type,
+          'schema', identified.schema,
+          'name', COALESCE(
+            identified.name,
+            dependent_constraint.conname,
+            dependent_policy.polname,
+            dependent_trigger.tgname
+          ),
+          'identity', identified.identity,
+          'ownerSchema', owner_relation.owner_schema,
+          'ownerRelation', owner_relation.owner_relation,
+          'ownerRelationKind', owner_relation.owner_relation_kind,
+          'ownerAttributes', owner_relation.owner_attributes
+        ))
+        ORDER BY identified.type, identified.identity
+      )
+      FROM pg_depend dependency
+      CROSS JOIN LATERAL pg_identify_object(
+        dependency.classid,
+        dependency.objid,
+        dependency.objsubid
+      ) identified
+      LEFT JOIN pg_constraint dependent_constraint
+        ON dependency.classid = 'pg_constraint'::regclass
+        AND dependent_constraint.oid = dependency.objid
+      LEFT JOIN pg_policy dependent_policy
+        ON dependency.classid = 'pg_policy'::regclass
+        AND dependent_policy.oid = dependency.objid
+      LEFT JOIN pg_trigger dependent_trigger
+        ON dependency.classid = 'pg_trigger'::regclass
+        AND dependent_trigger.oid = dependency.objid
+      LEFT JOIN LATERAL (
+        SELECT
+          owner_namespace.nspname as owner_schema,
+          owner_class.relname as owner_relation,
+          owner_class.relkind as owner_relation_kind,
+          array_agg(DISTINCT owner_attribute.attname ORDER BY owner_attribute.attname)
+            FILTER (WHERE owner_attribute.attname IS NOT NULL)
+            as owner_attributes
+        FROM pg_depend owner_dependency
+        JOIN pg_class owner_class
+          ON owner_dependency.refclassid = 'pg_class'::regclass
+          AND owner_class.oid = owner_dependency.refobjid
+        JOIN pg_namespace owner_namespace
+          ON owner_namespace.oid = owner_class.relnamespace
+        LEFT JOIN pg_attribute owner_attribute
+          ON owner_attribute.attrelid = owner_class.oid
+          AND owner_attribute.attnum = owner_dependency.refobjsubid
+        WHERE owner_dependency.classid = dependency.classid
+          AND owner_dependency.objid = dependency.objid
+          AND owner_dependency.deptype IN ('a', 'i', 'P', 'S')
+        GROUP BY
+          owner_namespace.nspname,
+          owner_class.relname,
+          owner_class.relkind
+        ORDER BY owner_namespace.nspname, owner_class.relname
+        LIMIT 1
+      ) owner_relation ON true
+      WHERE dependency.refclassid = 'pg_type'::regclass
+        AND dependency.refobjid IN (${referenceOids})
+        AND dependency.deptype = 'n'
+        AND NOT (
+          dependency.classid = 'pg_class'::regclass
+          AND dependency.objsubid > 0
+        )
+        AND dependency.classid <> 'pg_proc'::regclass
+        AND NOT (
+          dependency.classid = 'pg_type'::regclass
+          AND EXISTS (
+            SELECT 1
+            FROM pg_type dependent_type
+            LEFT JOIN pg_range dependent_range
+              ON dependent_range.rngtypid = dependent_type.oid
+            WHERE dependent_type.oid = dependency.objid
+              AND (
+                dependent_type.typtype = 'd'
+                OR dependent_range.rngtypid IS NOT NULL
+              )
+          )
+        )
+    ), '[]'::jsonb)
+  `;
+}
+
 function parseBooleanRelationOption(
   options: string[] | null,
   name: string
@@ -1452,110 +1577,8 @@ export class DatabaseInspector {
             WHERE dependent_range.rngsubtype IN (t.oid, t.typarray)
           ) dependencies
         ), '[]'::jsonb) as type_dependents,
-        COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object(
-              'schema', routine_namespace.nspname,
-              'name', routine.proname,
-              'kind', CASE routine.prokind
-                WHEN 'p' THEN 'procedure'
-                ELSE 'function'
-              END,
-              'identityArguments', pg_get_function_identity_arguments(routine.oid)
-            )
-            ORDER BY routine_namespace.nspname, routine.proname,
-              pg_get_function_identity_arguments(routine.oid)
-          )
-          FROM pg_depend dependency
-          JOIN pg_proc routine
-            ON dependency.classid = 'pg_proc'::regclass
-            AND routine.oid = dependency.objid
-          JOIN pg_namespace routine_namespace
-            ON routine_namespace.oid = routine.pronamespace
-          WHERE dependency.refclassid = 'pg_type'::regclass
-            AND dependency.refobjid IN (t.oid, t.typarray)
-            AND dependency.deptype = 'n'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM pg_depend internal_dependency
-              WHERE internal_dependency.classid = 'pg_proc'::regclass
-                AND internal_dependency.objid = routine.oid
-                AND internal_dependency.deptype = 'i'
-            )
-        ), '[]'::jsonb) as routine_dependents,
-        COALESCE((
-          SELECT jsonb_agg(
-            jsonb_strip_nulls(jsonb_build_object(
-              'type', identified.type,
-              'schema', identified.schema,
-              'name', COALESCE(identified.name, dependent_constraint.conname),
-              'identity', identified.identity,
-              'ownerSchema', owner_relation.owner_schema,
-              'ownerRelation', owner_relation.owner_relation,
-              'ownerRelationKind', owner_relation.owner_relation_kind,
-              'ownerAttributes', owner_relation.owner_attributes
-            ))
-            ORDER BY identified.type, identified.identity
-          )
-          FROM pg_depend dependency
-          CROSS JOIN LATERAL pg_identify_object(
-            dependency.classid,
-            dependency.objid,
-            dependency.objsubid
-          ) identified
-          LEFT JOIN pg_constraint dependent_constraint
-            ON dependency.classid = 'pg_constraint'::regclass
-            AND dependent_constraint.oid = dependency.objid
-          LEFT JOIN LATERAL (
-            SELECT
-              owner_namespace.nspname as owner_schema,
-              owner_class.relname as owner_relation,
-              owner_class.relkind as owner_relation_kind,
-              array_agg(DISTINCT owner_attribute.attname ORDER BY owner_attribute.attname)
-                FILTER (WHERE owner_attribute.attname IS NOT NULL)
-                as owner_attributes
-            FROM pg_depend owner_dependency
-            JOIN pg_class owner_class
-              ON owner_dependency.refclassid = 'pg_class'::regclass
-              AND owner_class.oid = owner_dependency.refobjid
-            JOIN pg_namespace owner_namespace
-              ON owner_namespace.oid = owner_class.relnamespace
-            LEFT JOIN pg_attribute owner_attribute
-              ON owner_attribute.attrelid = owner_class.oid
-              AND owner_attribute.attnum = owner_dependency.refobjsubid
-            WHERE owner_dependency.classid = dependency.classid
-              AND owner_dependency.objid = dependency.objid
-              AND owner_dependency.deptype IN ('a', 'i', 'P', 'S')
-            GROUP BY
-              owner_namespace.nspname,
-              owner_class.relname,
-              owner_class.relkind
-            ORDER BY owner_namespace.nspname, owner_class.relname
-            LIMIT 1
-          ) owner_relation ON true
-          WHERE dependency.refclassid = 'pg_type'::regclass
-            AND dependency.refobjid IN (t.oid, t.typarray)
-            AND dependency.deptype = 'n'
-            AND NOT (
-              dependency.classid = 'pg_class'::regclass
-              AND dependency.objsubid > 0
-            )
-            AND dependency.classid <> 'pg_proc'::regclass
-            AND NOT (
-              dependency.classid = 'pg_type'::regclass
-              AND EXISTS (
-                SELECT 1
-                FROM pg_type dependent_type
-                LEFT JOIN pg_range dependent_range
-                  ON dependent_range.rngtypid = dependent_type.oid
-                WHERE dependent_type.oid = dependency.objid
-                  AND (
-                    dependent_type.typtype = 'd'
-                    OR dependent_range.rngtypid IS NOT NULL
-                  )
-              )
-            )
-        ), '[]'::jsonb) as catalog_dependents
+        ${getPostgresTypeRoutineDependentsSql("t.oid, t.typarray")} as routine_dependents,
+        ${getPostgresTypeCatalogDependentsSql("t.oid, t.typarray")} as catalog_dependents
       FROM pg_type t
       JOIN pg_namespace n ON t.typnamespace = n.oid
       LEFT JOIN pg_depend extension_dependency
@@ -1747,6 +1770,32 @@ export class DatabaseInspector {
         name: row.dependent_name,
         kind: row.dependent_kind,
       });
+    }
+
+    const catalogDependencyResult = await client.query(`
+      SELECT
+        t.typname as type_name,
+        n.nspname as schema_name,
+        ${getPostgresTypeRoutineDependentsSql("t.oid, t.typarray")} as routine_dependents,
+        ${getPostgresTypeCatalogDependentsSql("t.oid, t.typarray")} as catalog_dependents
+      FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      JOIN pg_class relation ON relation.oid = t.typrelid
+      WHERE n.nspname = ANY($1::text[])
+        AND t.typtype = 'c'
+        AND relation.relkind = 'c'
+      ORDER BY n.nspname, t.typname
+    `, [schemas]);
+
+    for (const row of catalogDependencyResult.rows) {
+      const compositeType = groups.get(`${row.schema_name}.${row.type_name}`);
+      if (!compositeType) continue;
+      if (row.routine_dependents?.length > 0) {
+        compositeType.routineDependents = row.routine_dependents;
+      }
+      if (row.catalog_dependents?.length > 0) {
+        compositeType.catalogDependents = row.catalog_dependents;
+      }
     }
 
     return Array.from(groups.values());
@@ -3105,37 +3154,8 @@ export class DatabaseInspector {
             WHERE dependent_range.rngsubtype IN (t.oid, t.typarray)
           ) dependencies
         ), '[]'::jsonb) as type_dependents,
-        COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object(
-              'schema', routine_namespace.nspname,
-              'name', routine.proname,
-              'kind', CASE routine.prokind
-                WHEN 'p' THEN 'procedure'
-                ELSE 'function'
-              END,
-              'identityArguments', pg_get_function_identity_arguments(routine.oid)
-            )
-            ORDER BY routine_namespace.nspname, routine.proname,
-              pg_get_function_identity_arguments(routine.oid)
-          )
-          FROM pg_depend dependency
-          JOIN pg_proc routine
-            ON dependency.classid = 'pg_proc'::regclass
-            AND routine.oid = dependency.objid
-          JOIN pg_namespace routine_namespace
-            ON routine_namespace.oid = routine.pronamespace
-          WHERE dependency.refclassid = 'pg_type'::regclass
-            AND dependency.refobjid IN (t.oid, t.typarray)
-            AND dependency.deptype = 'n'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM pg_depend internal_dependency
-              WHERE internal_dependency.classid = 'pg_proc'::regclass
-                AND internal_dependency.objid = routine.oid
-                AND internal_dependency.deptype = 'i'
-            )
-        ), '[]'::jsonb) as routine_dependents
+        ${getPostgresTypeRoutineDependentsSql("t.oid, t.typarray")} as routine_dependents,
+        ${getPostgresTypeCatalogDependentsSql("t.oid, t.typarray")} as catalog_dependents
       FROM pg_type t
       JOIN pg_namespace n ON n.oid = t.typnamespace
       JOIN pg_type base_type ON base_type.oid = t.typbasetype
@@ -3302,6 +3322,9 @@ export class DatabaseInspector {
         ...(row.routine_dependents?.length > 0
           ? { routineDependents: row.routine_dependents }
           : {}),
+        ...(row.catalog_dependents?.length > 0
+          ? { catalogDependents: row.catalog_dependents }
+          : {}),
         ...(containerDependents.rows[0]?.has_container_dependents
           ? { hasContainerColumnDependents: true }
           : {}),
@@ -3424,42 +3447,18 @@ export class DatabaseInspector {
             )
           ) dependencies
         ), '[]'::jsonb) as type_dependents,
-        COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object(
-              'schema', routine_namespace.nspname,
-              'name', routine.proname,
-              'kind', CASE routine.prokind
-                WHEN 'p' THEN 'procedure'
-                ELSE 'function'
-              END,
-              'identityArguments', pg_get_function_identity_arguments(routine.oid)
-            )
-            ORDER BY routine_namespace.nspname, routine.proname,
-              pg_get_function_identity_arguments(routine.oid)
-          )
-          FROM pg_depend dependency
-          JOIN pg_proc routine
-            ON dependency.classid = 'pg_proc'::regclass
-            AND routine.oid = dependency.objid
-          JOIN pg_namespace routine_namespace
-            ON routine_namespace.oid = routine.pronamespace
-          WHERE dependency.refclassid = 'pg_type'::regclass
-            AND dependency.refobjid IN (
-              t.oid,
-              t.typarray,
-              r.rngmultitypid,
-              multirange.typarray
-            )
-            AND dependency.deptype = 'n'
-            AND NOT EXISTS (
-              SELECT 1
-              FROM pg_depend internal_dependency
-              WHERE internal_dependency.classid = 'pg_proc'::regclass
-                AND internal_dependency.objid = routine.oid
-                AND internal_dependency.deptype = 'i'
-            )
-        ), '[]'::jsonb) as routine_dependents
+        ${getPostgresTypeRoutineDependentsSql(`
+          t.oid,
+          t.typarray,
+          r.rngmultitypid,
+          multirange.typarray
+        `)} as routine_dependents,
+        ${getPostgresTypeCatalogDependentsSql(`
+          t.oid,
+          t.typarray,
+          r.rngmultitypid,
+          multirange.typarray
+        `)} as catalog_dependents
       FROM pg_range r
       JOIN pg_type t ON t.oid = r.rngtypid
       JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -3581,6 +3580,9 @@ export class DatabaseInspector {
           : {}),
         ...(row.routine_dependents?.length > 0
           ? { routineDependents: row.routine_dependents }
+          : {}),
+        ...(row.catalog_dependents?.length > 0
+          ? { catalogDependents: row.catalog_dependents }
           : {}),
       };
     });
