@@ -269,6 +269,12 @@ export class SQLiteProvider implements DatabaseProvider {
     let foreignKeysSuspended = false;
 
     try {
+      if (sqliteClient.raw.inTransaction) {
+        throw new Error(
+          "SQLite migrations must run outside an active transaction or savepoint"
+        );
+      }
+
       if (foreignKeySuspensionRequired) {
         currentStatement = "PRAGMA foreign_keys";
         const result = await sqliteClient.query<{ foreign_keys: number }>(

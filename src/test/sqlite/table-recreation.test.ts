@@ -16,6 +16,46 @@ async function getForeignKeysSetting(client: DatabaseClient): Promise<number> {
   return result.rows[0]?.foreign_keys ?? -1;
 }
 
+async function createReferencedUsersMigration(
+  provider: SQLiteProvider
+): Promise<{ client: DatabaseClient; statements: string[] }> {
+  const initialSchema = `
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      age INTEGER
+    );
+
+    CREATE TABLE posts (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `;
+  const desired = await provider.parseSchema(
+    initialSchema.replace("age INTEGER", "age TEXT")
+  );
+  const client = await provider.createClient({
+    dialect: "sqlite",
+    filename: ":memory:",
+  });
+  await client.query(
+    "CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)"
+  );
+  await client.query(`
+    CREATE TABLE posts (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+  await client.query("INSERT INTO users(id, age) VALUES (1, 10)");
+  await client.query("INSERT INTO posts(id, user_id) VALUES (1, 1)");
+
+  const current = await provider.getCurrentSchema(client);
+  const migration = provider.generateMigrationPlan(desired.tables, current);
+  return { client, statements: migration.transactional };
+}
+
 describe("SQLite Table Recreation", () => {
   let provider: SQLiteProvider;
   let dbPath: string;
@@ -196,51 +236,20 @@ describe("SQLite Table Recreation", () => {
   });
 
   test("should restore the caller's foreign_keys setting after success and rollback", async function () {
-    const initialSchema = `
-      CREATE TABLE users (
-        id INTEGER PRIMARY KEY,
-        age INTEGER
-      );
-
-      CREATE TABLE posts (
-        id INTEGER PRIMARY KEY,
-        user_id INTEGER NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-      );
-    `;
-    const desired = await provider.parseSchema(
-      initialSchema.replace("age INTEGER", "age TEXT")
-    );
-
     for (const initialSetting of [0, 1]) {
-      const client = await provider.createClient({
-        dialect: "sqlite",
-        filename: ":memory:",
-      });
-      await client.query("CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER)");
-      await client.query(`
-        CREATE TABLE posts (
-          id INTEGER PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-      `);
-      await client.query("INSERT INTO users(id, age) VALUES (1, 10)");
-      await client.query("INSERT INTO posts(id, user_id) VALUES (1, 1)");
-
-      const current = await provider.getCurrentSchema(client);
-      const migration = provider.generateMigrationPlan(desired.tables, current);
+      const { client, statements } =
+        await createReferencedUsersMigration(provider);
       await client.query(`PRAGMA foreign_keys = ${initialSetting}`);
       if (initialSetting === 0) {
         await client.query("UPDATE posts SET user_id = 999 WHERE id = 1");
       }
 
-      await provider.executeInTransaction(client, migration.transactional);
+      await provider.executeInTransaction(client, statements);
       expect(await getForeignKeysSetting(client)).toBe(initialSetting);
       const violations = await client.query("PRAGMA foreign_key_check");
       expect(violations.rows).toHaveLength(initialSetting === 0 ? 1 : 0);
 
-      const failingStatements = [...migration.transactional];
+      const failingStatements = [...statements];
       failingStatements.splice(
         failingStatements.length - 1,
         0,
@@ -252,7 +261,7 @@ describe("SQLite Table Recreation", () => {
       expect(await getForeignKeysSetting(client)).toBe(initialSetting);
 
       if (initialSetting === 1) {
-        const integrityFailureStatements = [...migration.transactional];
+        const integrityFailureStatements = [...statements];
         integrityFailureStatements.splice(
           integrityFailureStatements.length - 1,
           0,
@@ -277,6 +286,47 @@ describe("SQLite Table Recreation", () => {
           user_id: initialSetting === 0 ? 999 : 1,
         },
       ]);
+      await client.end();
+    }
+  });
+
+  test("should reject migrations inside an active transaction or savepoint", async function () {
+    for (const transactionStart of ["BEGIN", "SAVEPOINT caller_scope"]) {
+      const { client, statements } =
+        await createReferencedUsersMigration(provider);
+      await client.query(transactionStart);
+      await client.query("INSERT INTO users(id, age) VALUES (2, 20)");
+
+      await expect(
+        provider.executeInTransaction(client, statements)
+      ).rejects.toThrow("outside an active transaction");
+      expect(await getForeignKeysSetting(client)).toBe(1);
+      const tables = await client.query<{ name: string }>(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table' AND name IN ('users', '_users_new')
+        ORDER BY name
+      `);
+      const columns = await client.query<{ name: string; type: string }>(
+        "PRAGMA table_info(users)"
+      );
+      const rowsInsideTransaction = await client.query(
+        "SELECT id, age FROM users ORDER BY id"
+      );
+      expect(tables.rows).toEqual([{ name: "users" }]);
+      expect(columns.rows.find(function (column) {
+        return column.name === "age";
+      })?.type).toBe("INTEGER");
+      expect(rowsInsideTransaction.rows).toEqual([
+        { id: 1, age: 10 },
+        { id: 2, age: 20 },
+      ]);
+
+      await client.query("ROLLBACK");
+      const rowsAfterRollback = await client.query(
+        "SELECT id, age FROM users ORDER BY id"
+      );
+      expect(rowsAfterRollback.rows).toEqual([{ id: 1, age: 10 }]);
       await client.end();
     }
   });
