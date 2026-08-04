@@ -180,6 +180,117 @@ describe("SQLite Table Recreation", () => {
     expect(result.rows[1].name).toBe("Bob");
   });
 
+  test("should not drop duplicate rows through schema conflict policies", async function () {
+    const initialSchema = `
+      CREATE TABLE conflict_items (
+        id INTEGER PRIMARY KEY,
+        lookup TEXT,
+        payload TEXT
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(
+      "INSERT INTO conflict_items(id, lookup, payload) VALUES (?, ?, ?), (?, ?, ?)",
+      [1, "duplicate", "first", 2, "duplicate", "second"]
+    );
+    await seedClient.end();
+
+    for (const policy of ["IGNORE", "REPLACE"]) {
+      const desiredSchema = `
+        CREATE TABLE conflict_items (
+          id INTEGER PRIMARY KEY,
+          lookup TEXT UNIQUE ON CONFLICT ${policy},
+          payload TEXT
+        );
+      `;
+      await expect(
+        schemaService.apply(desiredSchema, ["public"], true)
+      ).rejects.toMatchObject({
+        code: "MIGRATION_ERROR",
+        statement: expect.stringContaining("INSERT OR ABORT INTO"),
+      });
+
+      const client = await provider.createClient(config);
+      const definition = await client.query<{ sql: string }>(`
+        SELECT sql FROM sqlite_schema
+        WHERE type = 'table' AND name = 'conflict_items'
+      `);
+      const rows = await client.query(
+        "SELECT id, lookup, payload FROM conflict_items ORDER BY id"
+      );
+      const artifacts = await client.query<{ name: string }>(`
+        SELECT name FROM sqlite_schema
+        WHERE name GLOB '_conflict_items_new*'
+      `);
+      await client.end();
+
+      expect(definition.rows[0]?.sql).not.toContain("UNIQUE");
+      expect(rows.rows).toEqual([
+        { id: 1, lookup: "duplicate", payload: "first" },
+        { id: 2, lookup: "duplicate", payload: "second" },
+      ]);
+      expect(artifacts.rows).toEqual([]);
+    }
+  });
+
+  test("should not rewrite nulls through schema conflict policies", async function () {
+    const initialSchema = `
+      CREATE TABLE conflict_values (
+        id INTEGER PRIMARY KEY,
+        value TEXT,
+        marker INTEGER
+      );
+    `;
+    const desiredSchema = `
+      CREATE TABLE conflict_values (
+        id INTEGER PRIMARY KEY,
+        value TEXT NOT NULL ON CONFLICT REPLACE DEFAULT 'filled',
+        marker TEXT
+      );
+    `;
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const seedClient = await provider.createClient(config);
+    await seedClient.query(
+      "INSERT INTO conflict_values(id, value, marker) VALUES (?, ?, ?)",
+      [1, null, 7]
+    );
+    await seedClient.end();
+
+    await expect(
+      schemaService.apply(desiredSchema, ["public"], true)
+    ).rejects.toMatchObject({
+      code: "MIGRATION_ERROR",
+      statement: expect.stringContaining("INSERT OR ABORT INTO"),
+    });
+
+    const client = await provider.createClient(config);
+    const definition = await client.query<{ sql: string }>(`
+      SELECT sql FROM sqlite_schema
+      WHERE type = 'table' AND name = 'conflict_values'
+    `);
+    const rows = await client.query(
+      "SELECT id, value, marker, typeof(marker) AS marker_type " +
+        "FROM conflict_values"
+    );
+    const artifacts = await client.query<{ name: string }>(`
+      SELECT name FROM sqlite_schema
+      WHERE name GLOB '_conflict_values_new*'
+    `);
+    await client.end();
+
+    expect(definition.rows[0]?.sql).not.toContain("NOT NULL");
+    expect(rows.rows).toEqual([{
+      id: 1,
+      value: null,
+      marker: 7,
+      marker_type: "integer",
+    }]);
+    expect(artifacts.rows).toEqual([]);
+  });
+
   test("should preserve hidden rowids during table recreation", async function () {
     await schemaService.apply(`
       CREATE TABLE notes (

@@ -431,7 +431,7 @@ describe("SQLiteDiffer private coverage", () => {
       makeTable()
     ) as string[];
     expect(recreation[1]).toBe(
-      'INSERT INTO "_users_new" ("rowid", "id") ' +
+      'INSERT OR ABORT INTO "_users_new" ("rowid", "id") ' +
       'SELECT "rowid", "id" FROM "users";'
     );
   });

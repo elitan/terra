@@ -680,7 +680,7 @@ export class SQLiteDiffer {
 
     if (copyColumns.target.length > 0) {
       statements.push(
-        `INSERT INTO ${this.quoteIdentifier(tempName)} (${copyColumns.target.join(", ")}) ` +
+        `INSERT OR ABORT INTO ${this.quoteIdentifier(tempName)} (${copyColumns.target.join(", ")}) ` +
         `SELECT ${copyColumns.source.join(", ")} FROM ${this.quoteIdentifier(current.name)};`
       );
     }
