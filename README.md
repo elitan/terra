@@ -132,10 +132,13 @@ also removes those dependencies; an unmanaged view or foreign key blocks and
 rolls back the apply instead of being deleted or stripped by `CASCADE`.
 Partition hierarchy removal follows the same contract: managed triggers, views,
 constraints, policies, and leaves are removed in dependency order before each
-partitioned table is dropped with `RESTRICT`. Foreign-server replacement also
-drops with `RESTRICT` before recreation, so an unmanaged user mapping or foreign
-table blocks the replacement instead of being cascaded away. Unrelated global
-foreign servers remain outside a managed-schema plan unless declared by name.
+partitioned table is dropped with `RESTRICT`. Declared foreign servers preserve
+their type, version, foreign-data wrapper, and complete option map. Version and
+option changes use native `ALTER SERVER`, preserving the server OID, user
+mappings, foreign tables, and grants; unsupported type or wrapper changes fail
+before mutation. `IF NOT EXISTS` and option order normalize declaratively, while
+duplicates fail during parsing. Unrelated global foreign servers remain outside
+a managed-schema plan unless declared by name.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

@@ -218,7 +218,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sequences/sequence-parsing.test.ts src/test/parser-module-coverage.test.ts";
   }
   if (normalized.includes("/src/core/schema/parser")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-parser-private-coverage.test.ts src/test/postgres-comments-lossless.test.ts src/test/postgres-schema-authorization.test.ts src/test/postgres-extension-dependencies.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/advanced-sql-object-parsing.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-parser-private-coverage.test.ts src/test/postgres-comments-lossless.test.ts src/test/postgres-schema-authorization.test.ts src/test/postgres-extension-dependencies.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/advanced-sql-object-parsing.test.ts src/test/postgres-foreign-server-lifecycle.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/enum-handler.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/enums/enum-handler-schema-scope.test.ts src/test/enums/postgres-enum-evolution.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/enum-types.test.ts src/test/types/postgres-type-ordering.test.ts";
@@ -236,7 +236,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts src/test/sql-object-handler.test.ts src/test/advanced-sql-object-parsing.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/sql-object-handler.ts")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts src/test/postgres-advanced-drop-safety.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts src/test/postgres-advanced-drop-safety.test.ts src/test/postgres-foreign-server-lifecycle.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/handlers/sequence-handler.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/handler-module-coverage.test.ts";
@@ -254,7 +254,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/inspector.ts")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/inspector-coverage.test.ts src/test/inspector-version-snapshots.test.ts src/test/postgres-extension-dependencies.test.ts src/test/postgres-advanced-drop-safety.test.ts src/test/advanced-sql-object-inspector.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 src/test/inspector-coverage.test.ts src/test/inspector-version-snapshots.test.ts src/test/postgres-extension-dependencies.test.ts src/test/postgres-advanced-drop-safety.test.ts src/test/postgres-foreign-server-lifecycle.test.ts src/test/advanced-sql-object-inspector.test.ts src/test/types/composite-type-evolution.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/enums/postgres-enum-dependencies.test.ts src/test/types/postgres-type-catalog-dependencies.test.ts";
   }
   if (normalized.endsWith("/src/providers/sqlite/index.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sqlite/table-recreation.test.ts src/test/sqlite/validation.test.ts";
@@ -277,6 +277,9 @@ function resolveTestCommand(file: string, override?: string): string {
   }
   if (normalized.endsWith("/src/utils/statement-classifier.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/properties/destructive-diff-classification.property.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts";
+  }
+  if (normalized.endsWith("/src/utils/postgres-foreign-server.ts")) {
+    return "bun --env-file=.env test --max-concurrency=1 src/test/postgres-foreign-server-lifecycle.test.ts src/test/advanced-sql-object-parsing.test.ts src/test/sql-object-handler.test.ts src/test/advanced-sql-object-inspector.test.ts";
   }
   return "bun --env-file=.env test --max-concurrency=1 src/test/schema-service-private-coverage.test.ts";
 }

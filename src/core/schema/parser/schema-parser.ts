@@ -80,6 +80,10 @@ import {
   parseAlterPostgresStatistics,
   type PendingPostgresStatisticsChange,
 } from "./column-statistics-parser";
+import {
+  renderPostgresForeignServerCreate,
+  sortPostgresForeignServerOptions,
+} from "../../../utils/postgres-foreign-server";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -96,6 +100,156 @@ type PendingTableConstraint = {
       constraint: NonNullable<Table["checkConstraints"]>[number];
     }
 );
+
+function getPostgresStatementSource(sql: string, wrapper: any): string {
+  const bytes = Buffer.from(sql, "utf8");
+  const location = Number(wrapper?.stmt_location) || 0;
+  const length = Number(wrapper?.stmt_len) || bytes.length - location;
+  return bytes.subarray(location, location + length).toString("utf8");
+}
+
+export function hasEmptyForeignServerClause(
+  statement: string,
+  keyword: "TYPE" | "VERSION"
+): boolean {
+  let index = 0;
+  while (index < statement.length) {
+    const skippedIndex = skipPostgresSpaceAndComments(statement, index);
+    if (skippedIndex !== index) {
+      index = skippedIndex;
+      continue;
+    }
+    const character = statement[index];
+    if (character === "'") {
+      index = skipPostgresQuoted(statement, index, "'");
+      continue;
+    }
+    if (character === '"') {
+      index = skipPostgresQuoted(statement, index, '"');
+      continue;
+    }
+    const dollarEnd = postgresDollarQuoteEnd(statement, index);
+    if (dollarEnd !== undefined) {
+      index = dollarEnd;
+      continue;
+    }
+    if (!character || !/[A-Za-z_]/.test(character)) {
+      index += 1;
+      continue;
+    }
+
+    let wordEnd = index + 1;
+    while (
+      wordEnd < statement.length &&
+      /[A-Za-z0-9_$]/.test(statement[wordEnd]!)
+    ) {
+      wordEnd += 1;
+    }
+    const word = statement.slice(index, wordEnd).toUpperCase();
+    if (word === "FOREIGN") {
+      return false;
+    }
+    if (word === keyword) {
+      let valueIndex = skipPostgresSpaceAndComments(statement, wordEnd);
+      if (
+        (statement[valueIndex] === "E" || statement[valueIndex] === "e") &&
+        statement[valueIndex + 1] === "'"
+      ) {
+        valueIndex += 1;
+      } else if (
+        (statement[valueIndex] === "U" || statement[valueIndex] === "u") &&
+        statement[valueIndex + 1] === "&" &&
+        statement[valueIndex + 2] === "'"
+      ) {
+        valueIndex += 2;
+      }
+      return statement.slice(valueIndex, valueIndex + 2) === "''";
+    }
+    index = wordEnd;
+  }
+  return false;
+}
+
+function resolveForeignServerString(
+  parsedValue: unknown,
+  hasExplicitEmptyValue: boolean
+): string | undefined {
+  if (typeof parsedValue === "string") {
+    return parsedValue;
+  }
+  if (hasExplicitEmptyValue) {
+    return "";
+  }
+  return undefined;
+}
+
+function skipPostgresSpaceAndComments(statement: string, start: number): number {
+  let index = start;
+  while (index < statement.length) {
+    if (/\s/.test(statement[index]!)) {
+      index += 1;
+      continue;
+    }
+    if (statement.slice(index, index + 2) === "--") {
+      const lineEnd = statement.indexOf("\n", index + 2);
+      index = lineEnd === -1 ? statement.length : lineEnd + 1;
+      continue;
+    }
+    if (statement.slice(index, index + 2) !== "/*") {
+      return index;
+    }
+    let depth = 1;
+    index += 2;
+    while (index < statement.length && depth > 0) {
+      if (statement.slice(index, index + 2) === "/*") {
+        depth += 1;
+        index += 2;
+      } else if (statement.slice(index, index + 2) === "*/") {
+        depth -= 1;
+        index += 2;
+      } else {
+        index += 1;
+      }
+    }
+  }
+  return index;
+}
+
+function skipPostgresQuoted(
+  statement: string,
+  start: number,
+  quote: "'" | '"'
+): number {
+  let index = start + 1;
+  while (index < statement.length) {
+    if (statement[index] !== quote) {
+      index += 1;
+      continue;
+    }
+    if (statement[index + 1] === quote) {
+      index += 2;
+      continue;
+    }
+    return index + 1;
+  }
+  return statement.length;
+}
+
+function postgresDollarQuoteEnd(
+  statement: string,
+  start: number
+): number | undefined {
+  if (statement[start] !== "$") {
+    return undefined;
+  }
+  const tagMatch = statement.slice(start).match(/^\$[A-Za-z0-9_]*\$/);
+  const tag = tagMatch?.[0];
+  if (!tag) {
+    return undefined;
+  }
+  const end = statement.indexOf(tag, start + tag.length);
+  return end === -1 ? statement.length : end + tag.length;
+}
 
 const ROW_SECURITY_SUBTYPES = new Set([
   "AT_EnableRowSecurity",
@@ -751,7 +905,11 @@ export class SchemaParser {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.CreateForeignServerStmt) {
-          const sqlObject = this.parseForeignServerSqlObject(stmt);
+          const sqlObject = this.parseForeignServerSqlObject(
+            stmt,
+            filePath,
+            getPostgresStatementSource(sql, stmtWrapper)
+          );
           if (sqlObject) {
             sqlObjects.push(sqlObject);
           }
@@ -1449,13 +1607,20 @@ export class SchemaParser {
     for (const object of objects) {
       if (
         object.kind !== "policy" &&
-        object.kind !== "row-level-security"
+        object.kind !== "row-level-security" &&
+        object.kind !== "foreign-server"
       ) {
         continue;
       }
       if (seen.has(object.key)) {
+        let label = "foreign server";
+        if (object.kind === "policy") {
+          label = "policy";
+        } else if (object.kind === "row-level-security") {
+          label = "row-level security state";
+        }
         throw new ParserError(
-          `PostgreSQL ${object.kind === "policy" ? "policy" : "row-level security state"} '${object.key}' is declared more than once in the desired schema`,
+          `PostgreSQL ${label} '${object.key}' is declared more than once in the desired schema`,
           filePath
         );
       }
@@ -1837,12 +2002,64 @@ export class SchemaParser {
     };
   }
 
-  private parseForeignServerSqlObject(stmt: any): SqlObject | null {
-    const name = stmt?.CreateForeignServerStmt?.servername;
+  private parseForeignServerSqlObject(
+    stmt: any,
+    filePath?: string,
+    statementSource: string = ""
+  ): SqlObject | null {
+    const server = stmt?.CreateForeignServerStmt;
+    const name = server?.servername;
     if (!name) {
       return null;
     }
-    return this.buildSqlObject("foreign-server", stmt, name, undefined, `foreign-server:${name}`);
+    const optionNames = new Set<string>();
+    const options = (server.options || []).map(function parseOption(item: any) {
+      const option = item?.DefElem;
+      const optionName = option?.defname;
+      const optionValue = option?.arg?.String?.sval;
+      if (typeof optionName !== "string" || typeof optionValue !== "string") {
+        throw new ParserError(
+          `PostgreSQL foreign server '${name}' contains an unsupported option value`,
+          filePath
+        );
+      }
+      if (optionNames.has(optionName)) {
+        throw new ParserError(
+          `PostgreSQL foreign server '${name}' option '${optionName}' is declared more than once`,
+          filePath
+        );
+      }
+      optionNames.add(optionName);
+      return { name: optionName, value: optionValue };
+    });
+    const hasEmptyType = hasEmptyForeignServerClause(statementSource, "TYPE");
+    const hasEmptyVersion = hasEmptyForeignServerClause(
+      statementSource,
+      "VERSION"
+    );
+    const type = resolveForeignServerString(server.servertype, hasEmptyType);
+    const version = resolveForeignServerString(server.version, hasEmptyVersion);
+    const foreignServerDefinition = {
+      foreignDataWrapper: server.fdwname,
+      ...(type !== undefined ? { type } : {}),
+      ...(version !== undefined ? { version } : {}),
+      options: sortPostgresForeignServerOptions(options),
+    };
+    const object = this.buildSqlObject(
+      "foreign-server",
+      stmt,
+      name,
+      undefined,
+      `foreign-server:${name}`
+    );
+    return {
+      ...object,
+      createStatement: renderPostgresForeignServerCreate(
+        name,
+        foreignServerDefinition
+      ),
+      foreignServerDefinition,
+    };
   }
 
   private parseConstraintTriggerSqlObject(stmt: any): SqlObject | null {

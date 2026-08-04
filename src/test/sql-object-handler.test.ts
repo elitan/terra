@@ -35,7 +35,7 @@ function makePolicy(overrides: Partial<SqlObject> = {}): SqlObject {
 }
 
 describe("SqlObjectHandler", function () {
-  test("separates partition and foreign-server replacement drops", async function () {
+  test("separates partition removals from native foreign-server changes", async function () {
     const handler = new SqlObjectHandler();
     const parent = makeSqlObject({});
     const child = makeSqlObject({
@@ -57,12 +57,22 @@ describe("SqlObjectHandler", function () {
         "CREATE SERVER analytics FOREIGN DATA WRAPPER postgres_fdw;",
       dropStatement: 'DROP SERVER IF EXISTS "analytics" RESTRICT;',
       dependencies: [],
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        version: "14",
+        options: [],
+      },
     });
     const desiredServer = {
       ...currentServer,
       createStatement:
         "CREATE SERVER analytics FOREIGN DATA WRAPPER postgres_fdw " +
         "OPTIONS (host '127.0.0.1');",
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        version: "15'beta",
+        options: [{ name: "host", value: "db'host" }],
+      },
     };
 
     const plan = await handler.generateStatements(
@@ -70,12 +80,15 @@ describe("SqlObjectHandler", function () {
       [parent, child, currentServer]
     );
 
-    expect(plan.earlyDrop).toEqual([currentServer.dropStatement]);
+    expect(plan.earlyDrop).toEqual([]);
     expect(plan.partitionDrop).toEqual([
       child.dropStatement,
       parent.dropStatement,
     ]);
-    expect(plan.preTableCreate).toEqual([desiredServer.createStatement]);
+    expect(plan.preTableCreate).toEqual([
+      'ALTER SERVER "analytics" VERSION \'15\'\'beta\' OPTIONS ' +
+        '(ADD "host" \'db\'\'host\');',
+    ]);
   });
 
   test("separates dependent type drops from unrelated late drops", async function () {

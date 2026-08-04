@@ -32,6 +32,10 @@ import type {
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
 import { renderCollationName } from "../../utils/collation";
+import {
+  parsePostgresForeignServerCatalogOptions,
+  renderPostgresForeignServerCreate,
+} from "../../utils/postgres-foreign-server";
 import { parseCreateIndex } from "./parser/index-parser";
 import {
   columnCompressionFromCatalog,
@@ -4020,6 +4024,8 @@ export class DatabaseInspector {
       SELECT
         srvname as server_name,
         fdw.fdwname as fdw_name,
+        srvtype as server_type,
+        srvversion as server_version,
         srvoptions as server_options
       FROM pg_foreign_server s
       JOIN pg_foreign_data_wrapper fdw ON fdw.oid = s.srvfdw
@@ -4027,14 +4033,29 @@ export class DatabaseInspector {
     `);
 
     return result.rows.map((row: any) => {
-      const options = this.formatOptions(row.server_options);
-      const suffix = options ? ` OPTIONS (${options})` : "";
+      const foreignServerDefinition = {
+        foreignDataWrapper: row.fdw_name,
+        ...(typeof row.server_type === "string"
+          ? { type: row.server_type }
+          : {}),
+        ...(typeof row.server_version === "string"
+          ? { version: row.server_version }
+          : {}),
+        options: parsePostgresForeignServerCatalogOptions(
+          row.server_options,
+          row.server_name
+        ),
+      };
       return {
         kind: "foreign-server" as const,
         key: `foreign-server:${row.server_name}`,
         name: row.server_name,
-        createStatement: `CREATE SERVER ${this.quoteIdent(row.server_name)} FOREIGN DATA WRAPPER ${this.quoteIdent(row.fdw_name)}${suffix};`,
+        createStatement: renderPostgresForeignServerCreate(
+          row.server_name,
+          foreignServerDefinition
+        ),
         dropStatement: `DROP SERVER IF EXISTS ${this.quoteIdent(row.server_name)} RESTRICT;`,
+        foreignServerDefinition,
       };
     });
   }

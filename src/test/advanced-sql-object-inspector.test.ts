@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { DatabaseInspector } from "../core/schema/inspector";
+import {
+  parsePostgresForeignServerCatalogOptions,
+} from "../utils/postgres-foreign-server";
 
 function createClient(handler: (sql: string, params?: unknown[]) => { rows: unknown[] }): any {
   return {
@@ -10,6 +13,24 @@ function createClient(handler: (sql: string, params?: unknown[]) => { rows: unkn
 }
 
 describe("Advanced SQL object inspector", function () {
+  test(
+    "rejects malformed or duplicate foreign server catalog options",
+    function () {
+      expect(function parseMalformedOption() {
+        parsePostgresForeignServerCatalogOptions(
+          ["missing_separator"],
+          "remote"
+        );
+      }).toThrow(/malformed catalog option/i);
+      expect(function parseDuplicateOption() {
+        parsePostgresForeignServerCatalogOptions(
+          ["host=one", "host=two"],
+          "remote"
+        );
+      }).toThrow(/duplicate catalog option/i);
+    }
+  );
+
   test("inspects issue 112 object families from a live database", async function () {
     const inspector = new DatabaseInspector();
     const client = createClient(function (sql, params) {
@@ -210,6 +231,8 @@ describe("Advanced SQL object inspector", function () {
             {
               server_name: "analytics_server",
               fdw_name: "postgres_fdw",
+              server_type: "postgresql",
+              server_version: "14",
               server_options: ["host=127.0.0.1", "dbname=analytics", "port=5432"],
             },
           ],
@@ -351,6 +374,29 @@ describe("Advanced SQL object inspector", function () {
       schema: "public",
       createStatement: 'CREATE TABLE "public"."accounts" (\n  "id" integer NOT NULL,\n  "region_id" integer NOT NULL,\n  CONSTRAINT "accounts_pkey" PRIMARY KEY (id)\n) PARTITION BY RANGE (region_id);',
       dropStatement: 'DROP TABLE IF EXISTS "public"."accounts" RESTRICT;',
+    });
+
+    expect(sqlObjects.find(function (item) {
+      return item.key === "foreign-server:analytics_server";
+    })).toEqual({
+      kind: "foreign-server",
+      key: "foreign-server:analytics_server",
+      name: "analytics_server",
+      createStatement:
+        'CREATE SERVER "analytics_server" TYPE \'postgresql\' VERSION \'14\' ' +
+        'FOREIGN DATA WRAPPER "postgres_fdw" OPTIONS (' +
+        '"dbname" \'analytics\', "host" \'127.0.0.1\', "port" \'5432\');',
+      dropStatement: 'DROP SERVER IF EXISTS "analytics_server" RESTRICT;',
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        type: "postgresql",
+        version: "14",
+        options: [
+          { name: "dbname", value: "analytics" },
+          { name: "host", value: "127.0.0.1" },
+          { name: "port", value: "5432" },
+        ],
+      },
     });
 
     expect(sqlObjects.find(function (item) {

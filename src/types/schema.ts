@@ -361,6 +361,18 @@ export interface PostgresPolicyDefinition {
   withCheck?: string;
 }
 
+export interface PostgresForeignServerOption {
+  name: string;
+  value: string;
+}
+
+export interface PostgresForeignServerDefinition {
+  foreignDataWrapper: string;
+  type?: string;
+  version?: string;
+  options: PostgresForeignServerOption[];
+}
+
 export interface PostgresTypeRoutineDependent {
   schema: string;
   name: string;
@@ -390,6 +402,7 @@ export interface SqlObject {
   partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
   typeDefinition?: PostgresTypeDefinition;
   policyDefinition?: PostgresPolicyDefinition;
+  foreignServerDefinition?: PostgresForeignServerDefinition;
   triggerTable?: QualifiedName;
   triggerFunction?: QualifiedName;
   triggerEnabled?: PostgresTriggerEnabledMode;

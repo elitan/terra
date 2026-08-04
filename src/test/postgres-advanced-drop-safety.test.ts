@@ -141,7 +141,7 @@ describe("PostgreSQL advanced object drop safety", function () {
     expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
   });
 
-  test("refuses to replace a foreign server with an unmanaged user mapping", async function () {
+  test("alters a foreign server without dropping an unmanaged user mapping", async function () {
     await client.query(`
       CREATE EXTENSION IF NOT EXISTS postgres_fdw;
       CREATE SERVER ${FOREIGN_SERVER}
@@ -159,29 +159,27 @@ describe("PostgreSQL advanced object drop safety", function () {
         OPTIONS (host '127.0.0.1');
     `;
     const plan = await service.plan(desired, [MANAGED_SCHEMA]);
-    const serverDropIndex = statementIndex(
-      plan.transactional,
-      `DROP SERVER IF EXISTS "${FOREIGN_SERVER}" RESTRICT;`
+    expect(plan.transactional).toContain(
+      `ALTER SERVER "${FOREIGN_SERVER}" OPTIONS (` +
+        `ADD "host" '127.0.0.1');`
     );
-    const serverCreateIndex = statementIndex(
-      plan.transactional,
-      `CREATE SERVER ${FOREIGN_SERVER}`
-    );
+    expect(plan.transactional.some(isServerDrop)).toBe(false);
 
-    expect(serverDropIndex).toBeGreaterThanOrEqual(0);
-    expect(serverCreateIndex).toBeGreaterThan(serverDropIndex);
-    await expect(
-      service.apply(desired, [MANAGED_SCHEMA], true)
-    ).rejects.toMatchObject({ code: "MIGRATION_ERROR" });
+    await service.apply(desired, [MANAGED_SCHEMA], true);
 
-    expect(await relationExists(client, `${MANAGED_SCHEMA}.rollback_guard`)).toBe(false);
+    expect(await relationExists(client, `${MANAGED_SCHEMA}.rollback_guard`)).toBe(true);
     expect(await foreignServerExists(client, FOREIGN_SERVER)).toBe(true);
     expect(await userMappingExists(client, FOREIGN_SERVER)).toBe(true);
+    expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
   });
 });
 
 function isPartitionDrop(statement: string): boolean {
   return statement.startsWith("DROP TABLE IF EXISTS");
+}
+
+function isServerDrop(statement: string): boolean {
+  return statement.startsWith("DROP SERVER");
 }
 
 function statementIndex(statements: string[], fragment: string): number {

@@ -33,6 +33,9 @@ import {
   postgresReplicaIdentitiesEqual,
   renderPostgresReplicaIdentity,
 } from "../../../utils/postgres-replica-identity";
+import {
+  renderPostgresForeignServerAlter,
+} from "../../../utils/postgres-foreign-server";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -655,6 +658,47 @@ function partitionReplicaIdentityChanged(
     );
 }
 
+function generateForeignServerAlterStatements(
+  desired: SqlObject,
+  current: SqlObject
+): string[] {
+  const desiredDefinition = desired.foreignServerDefinition;
+  const currentDefinition = current.foreignServerDefinition;
+  if (!desiredDefinition || !currentDefinition) {
+    throw new ValidationError(
+      `Foreign server '${desired.name}' is missing its lossless canonical definition`,
+      "foreign-server",
+      desired.key,
+      desired.createStatement
+    );
+  }
+  if (
+    desiredDefinition.foreignDataWrapper !==
+    currentDefinition.foreignDataWrapper
+  ) {
+    throw new ValidationError(
+      `Changing foreign server '${desired.name}' to a different foreign-data wrapper is not supported because PostgreSQL cannot alter that dependency in place; create a new server with a different name`,
+      "foreign-server",
+      desired.key,
+      desired.createStatement
+    );
+  }
+  if (desiredDefinition.type !== currentDefinition.type) {
+    throw new ValidationError(
+      `Changing foreign server '${desired.name}' server type is not supported because PostgreSQL cannot alter it in place; create a new server with a different name`,
+      "foreign-server",
+      desired.key,
+      desired.createStatement
+    );
+  }
+  const statement = renderPostgresForeignServerAlter(
+    desired.name,
+    currentDefinition,
+    desiredDefinition
+  );
+  return statement ? [statement] : [];
+}
+
 export class SqlObjectHandler {
   async generateStatements(
     desiredObjects: SqlObject[],
@@ -794,6 +838,19 @@ export class SqlObjectHandler {
         );
         addToBucket(dropsByBucket, "typeReplaceDrop", currentObject);
         addToBucket(createsByBucket, "typeCreate", desiredObject);
+        continue;
+      }
+
+      if (
+        currentObject.kind === "foreign-server" &&
+        desiredObject.kind === "foreign-server"
+      ) {
+        plan.preTableCreate.push(
+          ...generateForeignServerAlterStatements(
+            desiredObject,
+            currentObject
+          )
+        );
         continue;
       }
 

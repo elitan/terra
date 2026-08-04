@@ -1,7 +1,150 @@
 import { describe, expect, test } from "bun:test";
 import { SchemaParser } from "../core/schema/parser";
+import { hasEmptyForeignServerClause } from "../core/schema/parser/schema-parser";
 
 describe("Advanced SQL object parsing", function () {
+  test("models complete foreign server definitions and normalizes conditionals", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE SERVER IF NOT EXISTS "Remote Server"
+        TYPE 'postgresql'
+        VERSION '14'
+        FOREIGN DATA WRAPPER postgres_fdw
+        OPTIONS (port '5432', host 'localhost');
+    `);
+    const server = parsed.sqlObjects?.[0];
+
+    expect(server).toMatchObject({
+      kind: "foreign-server",
+      key: "foreign-server:Remote Server",
+      name: "Remote Server",
+      foreignServerDefinition: {
+        foreignDataWrapper: "postgres_fdw",
+        type: "postgresql",
+        version: "14",
+        options: [
+          { name: "host", value: "localhost" },
+          { name: "port", value: "5432" },
+        ],
+      },
+    });
+    expect(server?.createStatement).toBe(
+      `CREATE SERVER "Remote Server" TYPE 'postgresql' VERSION '14' ` +
+        `FOREIGN DATA WRAPPER "postgres_fdw" OPTIONS (` +
+        `"host" 'localhost', "port" '5432');`
+    );
+  });
+
+  test("rejects duplicate foreign servers and option names", async function () {
+    const parser = new SchemaParser();
+
+    await expect(
+      parser.parseSchema(`
+        CREATE SERVER duplicate_server
+          FOREIGN DATA WRAPPER postgres_fdw;
+        CREATE SERVER duplicate_server
+          FOREIGN DATA WRAPPER postgres_fdw;
+      `)
+    ).rejects.toThrow(/foreign server.*declared more than once/i);
+    await expect(
+      parser.parseSchema(`
+        CREATE SERVER duplicate_options
+          FOREIGN DATA WRAPPER postgres_fdw
+          OPTIONS (host 'one', host 'two');
+      `)
+    ).rejects.toThrow(/option.*host.*more than once/i);
+  });
+
+  test("quotes unusual foreign server fields losslessly", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE SCHEMA byte_offset_guard;
+      -- blå
+      CREATE SERVER "Remote ""Server"
+        TYPE 'post''gres'
+        VERSION /* retained empty */ E''
+        FOREIGN DATA WRAPPER "FDW Name"
+        OPTIONS ("Mixed Option" 'it''s');
+    `);
+    const server = parsed.sqlObjects?.[0];
+
+    expect(server?.createStatement).toBe(
+      `CREATE SERVER "Remote ""Server" TYPE 'post''gres' VERSION '' ` +
+        `FOREIGN DATA WRAPPER "FDW Name" OPTIONS (` +
+        `"Mixed Option" 'it''s');`
+    );
+    expect(server?.foreignServerDefinition).toEqual({
+      foreignDataWrapper: "FDW Name",
+      type: "post'gres",
+      version: "",
+      options: [{ name: "Mixed Option", value: "it's" }],
+    });
+  });
+
+  test("recognizes empty foreign server clauses through PostgreSQL lexical trivia", function () {
+    expect(
+      hasEmptyForeignServerClause(
+        `CREATE SERVER scanner TYPE $type$TYPE ''$type$
+          VERSION -- retained empty
+          /* outer /* nested */ comment */ U&''
+          FOREIGN DATA WRAPPER postgres_fdw`,
+        "VERSION"
+      )
+    ).toBe(true);
+    expect(
+      hasEmptyForeignServerClause(
+        `CREATE SERVER "quoted ""server""" TYPE E''
+          FOREIGN DATA WRAPPER postgres_fdw`,
+        "TYPE"
+      )
+    ).toBe(true);
+    expect(
+      hasEmptyForeignServerClause(
+        `$not_a_tag TYPE '' FOREIGN DATA WRAPPER postgres_fdw`,
+        "TYPE"
+      )
+    ).toBe(true);
+    expect(
+      hasEmptyForeignServerClause(
+        `CREATE SERVER scanner TYPE 'not empty'
+          FOREIGN DATA WRAPPER postgres_fdw`,
+        "TYPE"
+      )
+    ).toBe(false);
+    expect(hasEmptyForeignServerClause(`"unterminated`, "TYPE")).toBe(false);
+    expect(
+      hasEmptyForeignServerClause(`$tag$unterminated`, "TYPE")
+    ).toBe(false);
+    expect(
+      hasEmptyForeignServerClause(`-- comment without newline`, "TYPE")
+    ).toBe(false);
+    expect(hasEmptyForeignServerClause(`   `, "TYPE")).toBe(false);
+  });
+
+  test("rejects non-string foreign server option AST values", function () {
+    const parser = new SchemaParser() as any;
+
+    expect(function parseInvalidOption() {
+      parser.parseForeignServerSqlObject(
+        {
+          CreateForeignServerStmt: {
+            servername: "invalid_options",
+            fdwname: "postgres_fdw",
+            options: [
+              {
+                DefElem: {
+                  defname: "host",
+                  arg: { Integer: { ival: 1 } },
+                },
+              },
+            ],
+          },
+        },
+        "invalid.sql"
+      );
+    }).toThrow(/unsupported option value/i);
+  });
+
   test("tracks issue 112 object families from sql files", async function () {
     const parser = new SchemaParser();
     const sql = `
