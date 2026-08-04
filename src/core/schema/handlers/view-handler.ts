@@ -18,6 +18,10 @@ import { generateStatements, type HandlerConfig } from "./base-handler";
 import { SchemaDiffer } from "../differ";
 import { normalizeSQLiteIdentifier } from "../../../utils/sqlite-identifier";
 import { normalizeSQLiteSchemaDefinition } from "../../../providers/sqlite/sql-parser-utils";
+import {
+  postgresIndexMethodSupportsClustering,
+  renderPostgresClustering,
+} from "../../../utils/postgres-clustering";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -172,13 +176,12 @@ function definitionWithoutOutputAliases(definition: string): string {
 }
 
 function haveSameColumnNames(desired: View, current: View): boolean {
-  if (!desired.columnNames || !current.columnNames) {
-    return true;
-  }
-  return desired.columnNames.length === current.columnNames.length &&
-    desired.columnNames.every(function hasSameName(name, index) {
-      return name === current.columnNames?.[index];
-    });
+  return !desired.columnNames ||
+    !current.columnNames ||
+    (desired.columnNames.length === current.columnNames.length &&
+      desired.columnNames.every(function hasSameName(name, index) {
+        return name === current.columnNames?.[index];
+      }));
 }
 
 function postgresViewDefinitionNeedsUpdate(
@@ -582,6 +585,121 @@ function generateMaterializedViewIndexStatements(
   return statements;
 }
 
+function validateMaterializedViewClustering(views: View[]): void {
+  for (const view of views) {
+    if (!view.clusterIndex) {
+      continue;
+    }
+    const qualifiedName = `${view.schema || "public"}.${view.name}`;
+    if (!view.materialized) {
+      throw new ValidationError(
+        `PostgreSQL clustering choice for '${qualifiedName}' is invalid: ordinary views cannot have indexes`,
+        qualifiedName,
+        "clusterIndex",
+        view.clusterIndex
+      );
+    }
+    const index = (view.indexes || []).find(function findClusterIndex(
+      candidate
+    ) {
+      return candidate.name === view.clusterIndex;
+    });
+    if (!index) {
+      throw materializedViewClusteringError(
+        view,
+        `index '${view.clusterIndex}' is not declared on the materialized view`
+      );
+    }
+    if (index.where) {
+      throw materializedViewClusteringError(
+        view,
+        `index '${view.clusterIndex}' is partial`
+      );
+    }
+    const method = (index.type || "btree").toLowerCase();
+    if (!postgresIndexMethodSupportsClustering(method)) {
+      throw materializedViewClusteringError(
+        view,
+        `index '${view.clusterIndex}' uses access method '${method}', which TerraDB cannot prove is clusterable`
+      );
+    }
+  }
+}
+
+function materializedViewClusteringError(
+  view: View,
+  reason: string
+): ValidationError {
+  const qualifiedName = `${view.schema || "public"}.${view.name}`;
+  return new ValidationError(
+    `PostgreSQL clustering index for materialized view '${qualifiedName}' is invalid: ${reason}. Use a non-partial index whose access method supports clustering`,
+    qualifiedName,
+    "clusterIndex",
+    view.clusterIndex
+  );
+}
+
+function materializedViewClusterIndexWillChange(
+  desired: View,
+  current: View | undefined
+): boolean {
+  if (!desired.clusterIndex || !current) {
+    return false;
+  }
+  const desiredIndex = (desired.indexes || []).find(function findDesired(
+    index
+  ) {
+    return index.name === desired.clusterIndex;
+  });
+  const currentIndex = (current.indexes || []).find(function findCurrent(
+    index
+  ) {
+    return index.name === desired.clusterIndex;
+  });
+  if (!desiredIndex || !currentIndex) {
+    return false;
+  }
+  return materializedViewIndexDiffer.generateStandaloneIndexStatements(
+    [desiredIndex],
+    [currentIndex]
+  ).length > 0;
+}
+
+function generateMaterializedViewClusteringStatements(
+  desiredViews: View[],
+  currentViews: View[]
+): string[] {
+  const statements: string[] = [];
+  const currentMap = mapViewsByKey(currentViews);
+
+  for (const desired of desiredViews) {
+    if (!desired.materialized) {
+      continue;
+    }
+    const current = currentMap.get(getViewKey(desired));
+    const recreated = Boolean(
+      current && postgresViewWillBeRecreated(desired, current)
+    );
+    const currentIndex = recreated ? undefined : current?.clusterIndex;
+    const selectedIndexChanged = desired.clusterIndex !== currentIndex;
+    const selectedIndexWillChange = materializedViewClusterIndexWillChange(
+      desired,
+      recreated ? undefined : current
+    );
+    if (!selectedIndexChanged && !selectedIndexWillChange) {
+      continue;
+    }
+    statements.push(
+      renderPostgresClustering(
+        { name: desired.name, schema: desired.schema },
+        desired.clusterIndex,
+        "materialized-view"
+      )
+    );
+  }
+  return statements;
+}
+
 function generateMaterializedViewPopulationStatements(
   desiredViews: View[],
   currentViews: View[]
@@ -628,6 +746,7 @@ export class ViewHandler {
       currentViews.some(hasCreateStatement);
     if (!usesCreateStatements) {
       validateSecurityInvokerSupport(desiredViews, context);
+      validateMaterializedViewClustering(desiredViews);
     }
     const statements = generateStatements(
       desiredViews,
@@ -641,6 +760,12 @@ export class ViewHandler {
     }
     statements.push(
       ...generateMaterializedViewIndexStatements(desiredViews, currentViews)
+    );
+    statements.push(
+      ...generateMaterializedViewClusteringStatements(
+        desiredViews,
+        currentViews
+      )
     );
     statements.push(
       ...generateMaterializedViewPopulationStatements(

@@ -13,6 +13,11 @@ import {
   parseAlterTableReplicaIdentities,
 } from "../core/schema/parser/replica-identity-parser";
 import {
+  isClusteringSubtype,
+  mergePendingClusteringChoices,
+  parseAlterRelationClustering,
+} from "../core/schema/parser/clustering-parser";
+import {
   extractAllConstraints,
   parseForeignKey,
   parseTablePrimaryKey,
@@ -49,6 +54,111 @@ describe("Parser module coverage", () => {
           }],
         });
       }).toThrow(/using index with a named index/i);
+    });
+  });
+
+  describe("clustering parser", function () {
+    test("recognizes, parses, and clears persistent choices", function () {
+      expect(isClusteringSubtype("AT_ClusterOn")).toBe(true);
+      expect(isClusteringSubtype("AT_DropCluster")).toBe(true);
+      expect(isClusteringSubtype("AT_AddColumn")).toBe(false);
+      expect(parseAlterRelationClustering({ cmds: [] })).toEqual([]);
+      expect(parseAlterRelationClustering({
+        relation: { schemaname: "public", relname: "events" },
+        objtype: "OBJECT_MATVIEW",
+        cmds: [
+          { AlterTableCmd: { subtype: "AT_ClusterOn", name: "events_idx" } },
+          { AlterTableCmd: { subtype: "AT_DropCluster" } },
+        ],
+      })).toEqual([
+        {
+          schemaName: "public",
+          relationName: "events",
+          relationKind: "materialized-view",
+          indexName: "events_idx",
+        },
+        {
+          schemaName: "public",
+          relationName: "events",
+          relationKind: "materialized-view",
+        },
+      ]);
+    });
+
+    test("rejects malformed or unbound choices", function () {
+      const command = {
+        AlterTableCmd: { subtype: "AT_ClusterOn", name: "events_idx" },
+      };
+      expect(function parseMissingTarget() {
+        parseAlterRelationClustering({ cmds: [command] });
+      }).toThrow(/missing a relation name/i);
+      expect(function parseMissingIndex() {
+        parseAlterRelationClustering({
+          relation: { relname: "events" },
+          cmds: [{ AlterTableCmd: { subtype: "AT_ClusterOn" } }],
+        });
+      }).toThrow(/must name an index/i);
+
+      expect(function mergeMissingTarget() {
+        mergePendingClusteringChoices([], [], [], [{
+          relationName: "missing",
+          relationKind: "table",
+          indexName: "missing_idx",
+        }]);
+      }).toThrow(/target.*not found/i);
+      expect(function mergeWrongKind() {
+        mergePendingClusteringChoices(
+          [{ name: "events", columns: [] }],
+          [],
+          [],
+          [{
+            relationName: "events",
+            relationKind: "materialized-view",
+            indexName: "events_idx",
+          }]
+        );
+      }).toThrow(/must use ALTER MATERIALIZED VIEW/i);
+      expect(function mergePartitionChoice() {
+        mergePendingClusteringChoices(
+          [],
+          [],
+          [{
+            kind: "partition",
+            key: "partition:public.events",
+            name: "events",
+            schema: "public",
+            createStatement: "CREATE TABLE public.events (id integer) PARTITION BY RANGE (id);",
+          }],
+          [{
+            relationName: "events",
+            relationKind: "table",
+            indexName: "events_idx",
+          }]
+        );
+      }).toThrow(/partition clustering/i);
+    });
+
+    test("merges table, materialized-view, and explicit clear choices", function () {
+      const tables = [{
+        name: "events",
+        columns: [],
+        clusterIndex: "old_idx",
+      }];
+      const views = [{
+        name: "summary",
+        definition: "SELECT 1",
+        materialized: true,
+      }];
+      mergePendingClusteringChoices(tables, views, [], [
+        { relationName: "events", relationKind: "table" },
+        {
+          relationName: "summary",
+          relationKind: "materialized-view",
+          indexName: "summary_idx",
+        },
+      ]);
+      expect(tables[0]).not.toHaveProperty("clusterIndex");
+      expect(views[0]).toHaveProperty("clusterIndex", "summary_idx");
     });
   });
 

@@ -209,7 +209,8 @@
 - done: preserve PostgreSQL standalone and identity-sequence logged/unlogged persistence with PostgreSQL 14 versus 15-18 semantics; replace destructive option and ownership recreation with native ALTER operations that preserve OIDs, dependents, live counter state, schema-qualified ownership, and idempotency.
 - done: preserve PostgreSQL ordinary trigger `UPDATE OF` columns, transition tables, default statement timing, and origin/disabled/replica/always firing modes; apply mode-only changes natively, preserve constraint/event trigger modes and qualified functions, ignore matching partition clones, reject divergent clone state plus bulk/ONLY mutations, and converge idempotently on PostgreSQL 14-18.
 - done: preserve PostgreSQL DEFAULT/FULL/NOTHING/USING INDEX replica identity on ordinary and partition relations; inspect missing selected indexes, validate index eligibility before mutation, reset and restore identity around dependency changes, keep constraint-backed work atomic, and execute concurrent standalone index builds before dependent assignments on PostgreSQL 14-18.
-- next: continue the managed-relation metadata audit with PostgreSQL clustering state and its index dependency semantics.
+- done: preserve PostgreSQL persistent clustering choices for ordinary and inherited tables plus materialized views; validate non-partial built-in clusterable indexes, order resets and assignments around standalone/constraint-backed replacements and replica identity, reject partition catalog drift, and keep physical CLUSTER outside schema apply on PostgreSQL 14-18.
+- next: continue the managed-relation metadata audit with PostgreSQL per-column statistics targets and attribute options.
 
 ## parser
 

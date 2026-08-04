@@ -113,4 +113,18 @@ describe("view definition normalization matrix", function () {
     expect(statements).toHaveLength(1);
     expect(statements[0]).toContain("CREATE OR REPLACE VIEW");
   });
+
+  test("recreates a materialized view when changing it to an ordinary view", function () {
+    const handler = new ViewHandler();
+
+    const statements = handler.generateStatements(
+      [makeView({ materialized: false })],
+      [makeView({ materialized: true })]
+    );
+
+    expect(statements).toEqual([
+      'DROP MATERIALIZED VIEW IF EXISTS "public"."matrix_view";\n' +
+        'CREATE VIEW "public"."matrix_view" AS SELECT 1 AS id;',
+    ]);
+  });
 });

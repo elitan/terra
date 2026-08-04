@@ -163,6 +163,20 @@ identity is tracked independently for ordinary tables, partitioned parents,
 and leaf partitions because PostgreSQL does not propagate it through a
 partition hierarchy. Within the supported partition contract, `USING INDEX`
 targets a named primary-key or unique constraint on the partitioned relation.
+PostgreSQL's persistent clustering choice is declarative through `ALTER TABLE
+... CLUSTER ON` and `ALTER MATERIALIZED VIEW ... CLUSTER ON`; omission or
+`SET WITHOUT CLUSTER` is the canonical unselected state. TerraDB inspects
+`pg_index.indisclustered`, validates that the selected index is declared,
+non-partial, and uses a built-in clusterable access method (`btree` or `gist`),
+and restores the choice after index replacement. Standalone index assignments
+run only after any concurrent build succeeds, while constraint-backed table
+indexes and materialized-view indexes remain transactional. Expression-backed
+exclusion constraints must be explicitly named when selected because
+PostgreSQL-generated constraint names are not a declarative contract. The choice is
+relation-local for inheritance hierarchies. Partition clustering is rejected
+because partition indexes are outside TerraDB's independently managed
+partition contract, and physical `CLUSTER` is rejected as an imperative,
+locking maintenance operation rather than executed during schema apply.
 PostgreSQL row-level security is declared with positive `ALTER TABLE ... ENABLE
 ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` state plus complete `CREATE
 POLICY` definitions. TerraDB preserves policy command, permissive/restrictive

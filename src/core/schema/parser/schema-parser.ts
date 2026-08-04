@@ -64,6 +64,12 @@ import {
   parseAlterTableReplicaIdentities,
   type PendingReplicaIdentity,
 } from "./replica-identity-parser";
+import {
+  isClusteringSubtype,
+  mergePendingClusteringChoices,
+  parseAlterRelationClustering,
+  type PendingClusteringChoice,
+} from "./clustering-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -524,6 +530,7 @@ export class SchemaParser {
     const pendingTableConstraints: PendingTableConstraint[] = [];
     const pendingTriggerModes: PendingTriggerMode[] = [];
     const pendingReplicaIdentities: PendingReplicaIdentity[] = [];
+    const pendingClusteringChoices: PendingClusteringChoice[] = [];
     const partitionDefinitions = new Map<string, Table>();
 
     // Auto-quote reserved keywords that are commonly used as column names
@@ -745,12 +752,18 @@ export class SchemaParser {
             filePath
           );
           pendingReplicaIdentities.push(...replicaIdentities);
+          const clusteringChoices = parseAlterRelationClustering(
+            stmt.AlterTableStmt,
+            filePath
+          );
+          pendingClusteringChoices.push(...clusteringChoices);
           const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
             function isNotDeclarativeStateCommand(item: any) {
               const subtype = item?.AlterTableCmd?.subtype;
               return !isRowSecuritySubtype(subtype) &&
                 !isTableTriggerModeSubtype(subtype) &&
-                !isReplicaIdentitySubtype(subtype);
+                !isReplicaIdentitySubtype(subtype) &&
+                !isClusteringSubtype(subtype);
             }
           );
           if (remainingCommands.length > 0) {
@@ -763,10 +776,16 @@ export class SchemaParser {
           } else if (
             rowSecurityObjects.length === 0 &&
             triggerModes.length === 0 &&
-            replicaIdentities.length === 0
+            replicaIdentities.length === 0 &&
+            clusteringChoices.length === 0
           ) {
             throw this.unsupportedAlterTableError(filePath);
           }
+        } else if (stmt.ClusterStmt) {
+          throw new ParserError(
+            "Physical CLUSTER is an imperative maintenance operation and is not supported in desired schemas; declare only the persistent choice with ALTER TABLE or ALTER MATERIALIZED VIEW ... CLUSTER ON",
+            filePath
+          );
         } else if (stmt.DropStmt) {
           throw new ParserError(
             "DROP statements are not supported in schema definitions. " +
@@ -825,6 +844,13 @@ export class SchemaParser {
       sqlObjects,
       pendingReplicaIdentities,
       partitionDefinitions,
+      filePath
+    );
+    mergePendingClusteringChoices(
+      tables,
+      views,
+      sqlObjects,
+      pendingClusteringChoices,
       filePath
     );
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
@@ -1346,7 +1372,8 @@ export class SchemaParser {
       "This ALTER TABLE statement is not supported in schema definitions. " +
         "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
         "ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
-        "named trigger firing modes plus replica identity state; " +
+        "named trigger firing modes, replica identity state, and persistent " +
+        "clustering choices; " +
         "define all other desired table state with CREATE TABLE.",
       filePath
     );

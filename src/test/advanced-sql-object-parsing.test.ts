@@ -332,6 +332,62 @@ describe("Advanced SQL object parsing", function () {
     ).rejects.toThrow(/replica identity target.*not found/i);
   });
 
+  test("preserves declarative PostgreSQL clustering choices", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE TABLE public.clustered_table (id integer, value text);
+      CREATE INDEX clustered_table_order
+        ON public.clustered_table ((lower(value)));
+      ALTER TABLE ONLY public.clustered_table
+        CLUSTER ON clustered_table_order;
+
+      CREATE TABLE public.unclustered_table (id integer);
+      ALTER TABLE public.unclustered_table SET WITHOUT CLUSTER;
+
+      CREATE MATERIALIZED VIEW public.clustered_summary AS
+        SELECT 1 AS id;
+      CREATE INDEX clustered_summary_order
+        ON public.clustered_summary (id);
+      ALTER MATERIALIZED VIEW public.clustered_summary
+        CLUSTER ON clustered_summary_order;
+    `);
+
+    expect(parsed.tables.find(function findClustered(table) {
+      return table.name === "clustered_table";
+    })).toHaveProperty("clusterIndex", "clustered_table_order");
+    expect(parsed.tables.find(function findUnclustered(table) {
+      return table.name === "unclustered_table";
+    })).not.toHaveProperty("clusterIndex");
+    expect(parsed.views.find(function findSummary(view) {
+      return view.name === "clustered_summary";
+    })).toHaveProperty("clusterIndex", "clustered_summary_order");
+  });
+
+  test("rejects ambiguous or imperative PostgreSQL clustering declarations", async function () {
+    const parser = new SchemaParser();
+
+    await expect(parser.parseSchema(`
+      CREATE TABLE public.accounts (id integer);
+      CREATE INDEX accounts_order ON public.accounts (id);
+      ALTER TABLE public.accounts CLUSTER ON accounts_order;
+      ALTER TABLE public.accounts SET WITHOUT CLUSTER;
+    `)).rejects.toThrow(/clustering choice.*declared more than once/i);
+    await expect(
+      parser.parseSchema(
+        "ALTER TABLE public.missing CLUSTER ON missing_order;"
+      )
+    ).rejects.toThrow(/clustering target.*not found/i);
+    await expect(parser.parseSchema(`
+      CREATE TABLE public.partitioned_accounts (id integer)
+        PARTITION BY RANGE (id);
+      ALTER TABLE public.partitioned_accounts
+        CLUSTER ON partitioned_accounts_id_idx;
+    `)).rejects.toThrow(/partition.*clustering/i);
+    await expect(
+      parser.parseSchema("CLUSTER public.accounts USING accounts_order;")
+    ).rejects.toThrow(/physical CLUSTER.*maintenance/i);
+  });
+
   test("rejects imperative policy and negative row security mutations", async function () {
     const parser = new SchemaParser();
 

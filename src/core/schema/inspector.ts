@@ -705,6 +705,7 @@ export class DatabaseInspector {
         inheritance.parents as inheritance_parents,
         c.relreplident as replica_identity_mode,
         replica_identity_index.index_name as replica_identity_index_name,
+        cluster_index.index_name as cluster_index_name,
         unsupported_constraint.items as unsupported_constraints
       FROM information_schema.tables t
       JOIN pg_class c ON c.relname = t.table_name
@@ -736,6 +737,16 @@ export class DatabaseInspector {
         ORDER BY index_relation.relname
         LIMIT 1
       ) replica_identity_index ON true
+      LEFT JOIN LATERAL (
+        SELECT index_relation.relname AS index_name
+        FROM pg_index index_catalog
+        JOIN pg_class index_relation
+          ON index_relation.oid = index_catalog.indexrelid
+        WHERE index_catalog.indrelid = c.oid
+          AND index_catalog.indisclustered
+        ORDER BY index_relation.relname
+        LIMIT 1
+      ) cluster_index ON true
       ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE t.table_schema = ANY($1::text[])
@@ -921,6 +932,9 @@ export class DatabaseInspector {
           exclusionConstraints.length > 0 ? exclusionConstraints : undefined,
         indexes,
         ...(replicaIdentity ? { replicaIdentity } : {}),
+        ...(typeof row.cluster_index_name === "string"
+          ? { clusterIndex: row.cluster_index_name }
+          : {}),
       });
     }
 
@@ -1955,6 +1969,7 @@ export class DatabaseInspector {
         toast_relation.reloptions as toast_storage_options,
         am.amname as access_method,
         m.tablespace as tablespace_name,
+        cluster_index.index_name as cluster_index_name,
         ARRAY(
           SELECT attribute.attname::text
           FROM pg_attribute attribute
@@ -1968,6 +1983,16 @@ export class DatabaseInspector {
       JOIN pg_namespace n ON c.relnamespace = n.oid AND n.nspname = m.schemaname
       LEFT JOIN pg_class toast_relation ON toast_relation.oid = c.reltoastrelid
       JOIN pg_am am ON am.oid = c.relam
+      LEFT JOIN LATERAL (
+        SELECT index_relation.relname AS index_name
+        FROM pg_index index_catalog
+        JOIN pg_class index_relation
+          ON index_relation.oid = index_catalog.indexrelid
+        WHERE index_catalog.indrelid = c.oid
+          AND index_catalog.indisclustered
+        ORDER BY index_relation.relname
+        LIMIT 1
+      ) cluster_index ON true
       LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'e'
       WHERE m.schemaname = ANY($1::text[])
         AND d.objid IS NULL  -- Exclude extension-owned materialized views
@@ -1986,6 +2011,9 @@ export class DatabaseInspector {
         ...(storageParameters ? { storageParameters } : {}),
         ...(row.access_method ? { accessMethod: row.access_method } : {}),
         ...(row.tablespace_name ? { tablespace: row.tablespace_name } : {}),
+        ...(typeof row.cluster_index_name === "string"
+          ? { clusterIndex: row.cluster_index_name }
+          : {}),
       };
 
       const indexes = await this.getTableIndexes(
@@ -2954,6 +2982,15 @@ export class DatabaseInspector {
           FROM pg_constraint constraint_catalog
           WHERE constraint_catalog.conrelid = c.oid
             AND constraint_catalog.contype = 'f'
+
+          UNION ALL
+
+          SELECT format('persistent cluster index %I', index_relation.relname)
+          FROM pg_index index_catalog
+          JOIN pg_class index_relation
+            ON index_relation.oid = index_catalog.indexrelid
+          WHERE index_catalog.indrelid = c.oid
+            AND index_catalog.indisclustered
         ) feature_catalog
       ) unsupported_partition_feature ON true
       ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}
@@ -3068,6 +3105,15 @@ export class DatabaseInspector {
           WHERE constraint_catalog.conrelid = c.oid
             AND constraint_catalog.conislocal
             AND constraint_catalog.coninhcount = 0
+
+          UNION ALL
+
+          SELECT format('persistent cluster index %I', index_relation.relname)
+          FROM pg_index index_catalog
+          JOIN pg_class index_relation
+            ON index_relation.oid = index_catalog.indexrelid
+          WHERE index_catalog.indrelid = c.oid
+            AND index_catalog.indisclustered
         ) feature_catalog
       ) unsupported_partition_feature ON true
       ${UNSUPPORTED_CONSTRAINT_JOIN_SQL}

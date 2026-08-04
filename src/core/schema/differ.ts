@@ -63,11 +63,83 @@ import {
   postgresReplicaIdentitiesEqual,
   renderPostgresReplicaIdentity,
 } from "../../utils/postgres-replica-identity";
+import {
+  postgresIndexMethodSupportsClustering,
+  renderPostgresClustering,
+} from "../../utils/postgres-clustering";
 
-type ReplicaIdentityIndexCandidate =
+type TableIndexCandidate =
   | { kind: "standalone"; index: Index }
   | { kind: "primary"; constraint: PrimaryKeyConstraint }
-  | { kind: "unique"; constraint: UniqueConstraint };
+  | { kind: "unique"; constraint: UniqueConstraint }
+  | { kind: "exclusion"; constraint: ExclusionConstraint };
+
+interface IndexDependentStatePlan {
+  beforeTableAlterations?: string;
+  afterTableAlterations?: string;
+  deferred?: string;
+}
+
+function getExclusionConstraintIndexName(
+  table: Table,
+  constraint: ExclusionConstraint
+): string | undefined {
+  if (constraint.name) {
+    return constraint.name;
+  }
+  const firstElement = constraint.elements[0]?.definition.trim();
+  if (!firstElement) {
+    return undefined;
+  }
+
+  let elementName: string | undefined;
+  if (firstElement.startsWith('"')) {
+    let quotedName = "";
+    for (let position = 1; position < firstElement.length; position++) {
+      const character = firstElement[position];
+      if (character !== '"') {
+        quotedName += character;
+        continue;
+      }
+      if (firstElement[position + 1] === '"') {
+        quotedName += '"';
+        position++;
+        continue;
+      }
+      elementName = quotedName;
+      break;
+    }
+  } else if (!firstElement.startsWith("(")) {
+    elementName = firstElement.match(/^[^\s]+/)?.[0];
+  }
+  return elementName ? `${table.name}_${elementName}_excl` : undefined;
+}
+
+function getUniqueConstraintIndexName(
+  table: Table,
+  constraint: UniqueConstraint
+): string {
+  return constraint.name ||
+    `${table.name}_${constraint.columns.join("_")}_unique`;
+}
+
+function getClusterCandidateMethod(candidate: TableIndexCandidate): string {
+  switch (candidate.kind) {
+    case "standalone":
+      return candidate.index.type || "btree";
+    case "exclusion":
+      return candidate.constraint.method || "gist";
+    case "primary":
+    case "unique":
+      return "btree";
+  }
+}
+
+function clusterCandidateIsPartial(candidate: TableIndexCandidate): boolean {
+  return candidate.kind === "standalone"
+    ? Boolean(candidate.index.where)
+    : candidate.kind === "exclusion" && Boolean(candidate.constraint.where);
+}
 
 function normalizeReferencedTableName(referencedTable: string): string {
   const [name, schema] = splitSchemaTable(referencedTable);
@@ -453,7 +525,7 @@ export class SchemaDiffer {
         continue;
       }
 
-      const candidate = this.findReplicaIdentityIndexCandidate(
+      const candidate = this.findTableIndexCandidate(
         table,
         identity.indexName
       );
@@ -485,6 +557,11 @@ export class SchemaDiffer {
           );
         }
         columns = candidate.index.columns;
+      } else if (candidate.kind === "exclusion") {
+        throw this.replicaIdentityValidationError(
+          table,
+          `index '${identity.indexName}' backs an exclusion constraint instead of a unique constraint`
+        );
       } else {
         if (candidate.constraint.deferrable) {
           throw this.replicaIdentityValidationError(
@@ -513,6 +590,48 @@ export class SchemaDiffer {
         );
       }
     }
+  }
+
+  private validateClusteringChoices(tables: Table[]): void {
+    for (const table of tables) {
+      const indexName = table.clusterIndex;
+      if (!indexName) {
+        continue;
+      }
+      const candidate = this.findTableIndexCandidate(table, indexName);
+      if (!candidate) {
+        throw this.clusteringValidationError(
+          table,
+          `index '${indexName}' is not declared on the table`
+        );
+      }
+      if (clusterCandidateIsPartial(candidate)) {
+        throw this.clusteringValidationError(
+          table,
+          `index '${indexName}' is partial`
+        );
+      }
+      const method = getClusterCandidateMethod(candidate).toLowerCase();
+      if (!postgresIndexMethodSupportsClustering(method)) {
+        throw this.clusteringValidationError(
+          table,
+          `index '${indexName}' uses access method '${method}', which TerraDB cannot prove is clusterable`
+        );
+      }
+    }
+  }
+
+  private clusteringValidationError(
+    table: Table,
+    reason: string
+  ): ValidationError {
+    const qualifiedName = `${table.schema || "public"}.${table.name}`;
+    return new ValidationError(
+      `PostgreSQL clustering index for '${qualifiedName}' is invalid: ${reason}. Use a non-partial index whose access method supports clustering`,
+      `table ${qualifiedName}`,
+      "clusterIndex",
+      table.clusterIndex
+    );
   }
 
   private replicaIdentityValidationError(
@@ -567,10 +686,10 @@ export class SchemaDiffer {
     return false;
   }
 
-  private findReplicaIdentityIndexCandidate(
+  private findTableIndexCandidate(
     table: Table,
     indexName: string
-  ): ReplicaIdentityIndexCandidate | undefined {
+  ): TableIndexCandidate | undefined {
     const standalone = (table.indexes || []).find(function findIndex(index) {
       return index.name === indexName;
     });
@@ -588,31 +707,88 @@ export class SchemaDiffer {
 
     const uniqueConstraint = (table.uniqueConstraints || []).find(
       function findUnique(constraint) {
-        const name = constraint.name ||
-          `${table.name}_${constraint.columns.join("_")}_unique`;
-        return name === indexName;
+        return getUniqueConstraintIndexName(table, constraint) === indexName;
       }
     );
-    return uniqueConstraint
-      ? { kind: "unique", constraint: uniqueConstraint }
+    if (uniqueConstraint) {
+      return { kind: "unique", constraint: uniqueConstraint };
+    }
+
+    const exclusionConstraint = (table.exclusionConstraints || []).find(
+      function findExclusion(constraint) {
+        return getExclusionConstraintIndexName(table, constraint) === indexName;
+      }
+    );
+    return exclusionConstraint
+      ? { kind: "exclusion", constraint: exclusionConstraint }
       : undefined;
   }
 
   private replicaIdentityUsesStandaloneIndex(table: Table): boolean {
     const identity = table.replicaIdentity;
     return identity?.mode === "index" &&
-      this.findReplicaIdentityIndexCandidate(table, identity.indexName)?.kind ===
+      this.findTableIndexCandidate(table, identity.indexName)?.kind ===
         "standalone";
+  }
+
+  private clusterIndexUsesStandaloneIndex(table: Table): boolean {
+    return typeof table.clusterIndex === "string" &&
+      this.findTableIndexCandidate(table, table.clusterIndex)?.kind ===
+        "standalone";
+  }
+
+  private planClusteringChange(
+    desired: Table,
+    current: Table
+  ): IndexDependentStatePlan {
+    const desiredIndex = desired.clusterIndex;
+    const currentIndex = current.clusterIndex;
+    const relation = { name: desired.name, schema: desired.schema };
+    if (!desiredIndex) {
+      return currentIndex
+        ? { beforeTableAlterations: renderPostgresClustering(relation, undefined) }
+        : {};
+    }
+
+    const desiredStatement = renderPostgresClustering(relation, desiredIndex);
+    if (this.clusterIndexNeedsReplacement(desired, current)) {
+      const plan: IndexDependentStatePlan = {};
+      if (currentIndex) {
+        plan.beforeTableAlterations = renderPostgresClustering(
+          relation,
+          undefined
+        );
+      }
+      if (this.clusterIndexUsesStandaloneIndex(desired)) {
+        plan.deferred = desiredStatement;
+      } else {
+        plan.afterTableAlterations = desiredStatement;
+      }
+      return plan;
+    }
+
+    return desiredIndex === currentIndex
+      ? {}
+      : { afterTableAlterations: desiredStatement };
+  }
+
+  private clusterIndexNeedsReplacement(
+    desired: Table,
+    current: Table
+  ): boolean {
+    return desired.clusterIndex
+      ? this.tableIndexCandidateNeedsReplacement(
+          desired,
+          current,
+          desired.clusterIndex
+        )
+      : false;
   }
 
   private planReplicaIdentityChange(
     desired: Table,
     current: Table
-  ): {
-    beforeTableAlterations?: string;
-    afterTableAlterations?: string;
-    deferred?: string;
-  } {
+  ): IndexDependentStatePlan {
     const identitiesMatch = postgresReplicaIdentitiesEqual(
       desired.replicaIdentity,
       current.replicaIdentity
@@ -628,15 +804,11 @@ export class SchemaDiffer {
       if (this.replicaIdentityIndexNeedsReplacement(desired, current)) {
         const currentNeedsReset = currentIdentity?.mode === "index" ||
           currentIdentity?.mode === "index-missing";
-        const desiredCandidate = this.findReplicaIdentityIndexCandidate(
+        const desiredCandidate = this.findTableIndexCandidate(
           desired,
           desiredIdentity.indexName
         );
-        const plan: {
-          beforeTableAlterations?: string;
-          afterTableAlterations?: string;
-          deferred?: string;
-        } = {};
+        const plan: IndexDependentStatePlan = {};
         if (currentNeedsReset) {
           plan.beforeTableAlterations = renderPostgresReplicaIdentity(
             { name: desired.name, schema: desired.schema },
@@ -668,14 +840,20 @@ export class SchemaDiffer {
     if (identity?.mode !== "index") {
       return false;
     }
-    const desiredCandidate = this.findReplicaIdentityIndexCandidate(
+    return this.tableIndexCandidateNeedsReplacement(
       desired,
-      identity.indexName
-    );
-    const currentCandidate = this.findReplicaIdentityIndexCandidate(
       current,
       identity.indexName
     );
+  }
+
+  private tableIndexCandidateNeedsReplacement(
+    desired: Table,
+    current: Table,
+    indexName: string
+  ): boolean {
+    const desiredCandidate = this.findTableIndexCandidate(desired, indexName);
+    const currentCandidate = this.findTableIndexCandidate(current, indexName);
     if (!desiredCandidate || !currentCandidate ||
       desiredCandidate.kind !== currentCandidate.kind) {
       return true;
@@ -711,73 +889,115 @@ export class SchemaDiffer {
         currentCandidate.constraint
       );
     }
+    if (
+      desiredCandidate.kind === "exclusion" &&
+      currentCandidate.kind === "exclusion"
+    ) {
+      return exclusionConstraintsDiffer(
+        desiredCandidate.constraint,
+        currentCandidate.constraint
+      );
+    }
     return true;
   }
 
-  private replicaIdentityConstraintRenameStatement(
+  private selectedConstraintRenameStatements(
     desired: Table,
     current: Table
-  ): string | undefined {
-    const identity = desired.replicaIdentity;
-    if (identity?.mode !== "index") {
-      return undefined;
+  ): string[] {
+    const selectedNames = new Set<string>();
+    if (desired.replicaIdentity?.mode === "index") {
+      selectedNames.add(desired.replicaIdentity.indexName);
     }
-    const desiredCandidate = this.findReplicaIdentityIndexCandidate(
-      desired,
-      identity.indexName
-    );
-    if (!desiredCandidate || desiredCandidate.kind === "standalone") {
-      return undefined;
+    if (desired.clusterIndex) {
+      selectedNames.add(desired.clusterIndex);
     }
 
-    let currentConstraint: PrimaryKeyConstraint | UniqueConstraint | undefined;
-    if (desiredCandidate.kind === "primary") {
-      if (
-        current.primaryKey &&
-        this.primaryKeysAreEqual(
-          desiredCandidate.constraint,
-          current.primaryKey
-        )
-      ) {
-        currentConstraint = current.primaryKey;
-      }
-    } else {
-      currentConstraint = (current.uniqueConstraints || []).find(
-        function findEquivalentUnique(constraint) {
-          return stringArraysEqual(
-            desiredCandidate.constraint.columns,
-            constraint.columns
-          );
-        }
+    const statements: string[] = [];
+    const matchedCurrentNames = new Set<string>();
+    for (const selectedName of selectedNames) {
+      const desiredCandidate = this.findTableIndexCandidate(
+        desired,
+        selectedName
       );
-      if (
-        currentConstraint &&
-        this.uniqueConstraintsDiffer(
-          desiredCandidate.constraint,
-          currentConstraint
-        )
-      ) {
-        currentConstraint = undefined;
+      if (!desiredCandidate || desiredCandidate.kind === "standalone") {
+        continue;
       }
+      if (this.findTableIndexCandidate(current, selectedName)) {
+        continue;
+      }
+      const currentName = this.findEquivalentConstraintIndexName(
+        desiredCandidate,
+        current,
+        matchedCurrentNames
+      );
+      if (!currentName) {
+        continue;
+      }
+      matchedCurrentNames.add(currentName);
+      if (currentName === selectedName) {
+        continue;
+      }
+      statements.push(
+        new SQLBuilder()
+          .p("ALTER TABLE")
+          .table(desired.name, desired.schema)
+          .p("RENAME CONSTRAINT")
+          .ident(currentName)
+          .p("TO")
+          .ident(selectedName)
+          .p(";")
+          .build()
+      );
+    }
+    return statements;
+  }
+
+  private findEquivalentConstraintIndexName(
+    desired: Exclude<TableIndexCandidate, { kind: "standalone" }>,
+    current: Table,
+    matchedCurrentNames: ReadonlySet<string>
+  ): string | undefined {
+    if (desired.kind === "primary") {
+      if (
+        !current.primaryKey ||
+        !this.primaryKeysAreEqual(desired.constraint, current.primaryKey)
+      ) {
+        return undefined;
+      }
+      const currentName = current.primaryKey.name || `${current.name}_pkey`;
+      return matchedCurrentNames.has(currentName) ? undefined : currentName;
+    }
+    if (desired.kind === "unique") {
+      const currentConstraints: UniqueConstraint[] = [];
+      for (const constraint of current.uniqueConstraints || []) {
+        if (
+          stringArraysEqual(desired.constraint.columns, constraint.columns) &&
+          !this.uniqueConstraintsDiffer(desired.constraint, constraint) &&
+          !matchedCurrentNames.has(
+            getUniqueConstraintIndexName(current, constraint)
+          )
+        ) {
+          currentConstraints.push(constraint);
+        }
+      }
+      const currentConstraint = currentConstraints[0];
+      return currentConstraint
+        ? getUniqueConstraintIndexName(current, currentConstraint)
+        : undefined;
     }
 
-    const currentName = currentConstraint?.name ||
-      (desiredCandidate.kind === "primary"
-        ? `${current.name}_pkey`
-        : undefined);
-    if (!currentName || currentName === identity.indexName) {
-      return undefined;
-    }
-
-    return new SQLBuilder()
-      .p("ALTER TABLE")
-      .table(desired.name, desired.schema)
-      .p("RENAME CONSTRAINT")
-      .ident(currentName)
-      .p("TO")
-      .ident(identity.indexName)
-      .p(";")
-      .build();
+    const currentConstraints = (current.exclusionConstraints || []).filter(
+      function findEquivalentExclusion(constraint) {
+        const name = getExclusionConstraintIndexName(current, constraint);
+        return !exclusionConstraintsDiffer(desired.constraint, constraint) &&
+          Boolean(name && !matchedCurrentNames.has(name));
+      }
+    );
+    const currentConstraint = currentConstraints[0];
+    return currentConstraint
+      ? getExclusionConstraintIndexName(current, currentConstraint)
+      : undefined;
   }
 
   generateMigrationPlan(
@@ -790,6 +1010,7 @@ export class SchemaDiffer {
     this.validateVirtualGeneratedColumnSupport(desiredSchema, context);
     this.validateIdentitySequencePersistenceSupport(desiredSchema, context);
     this.validateReplicaIdentities(desiredSchema);
+    this.validateClusteringChoices(desiredSchema);
     const statements: string[] = [];
     const deferred: string[] = [];
     const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
@@ -877,6 +1098,17 @@ export class SchemaDiffer {
             statements.push(replicaIdentityStatement);
           }
         }
+        if (filteredTable.clusterIndex) {
+          const clusteringStatement = renderPostgresClustering(
+            { name: filteredTable.name, schema: filteredTable.schema },
+            filteredTable.clusterIndex
+          );
+          if (this.clusterIndexUsesStandaloneIndex(filteredTable)) {
+            deferred.push(clusteringStatement);
+          } else {
+            statements.push(clusteringStatement);
+          }
+        }
       } else {
         // Handle existing tables using batched ALTER TABLE statements
         const currentTable = currentTables.get(tableKey)!;
@@ -884,14 +1116,16 @@ export class SchemaDiffer {
           table,
           currentTable
         );
+        const clusteringPlan = this.planClusteringChange(table, currentTable);
         if (replicaIdentityPlan.beforeTableAlterations) {
           statements.push(replicaIdentityPlan.beforeTableAlterations);
         }
-        const replicaIdentityConstraintRename =
-          this.replicaIdentityConstraintRenameStatement(table, currentTable);
-        if (replicaIdentityConstraintRename) {
-          statements.push(replicaIdentityConstraintRename);
+        if (clusteringPlan.beforeTableAlterations) {
+          statements.push(clusteringPlan.beforeTableAlterations);
         }
+        statements.push(
+          ...this.selectedConstraintRenameStatements(table, currentTable)
+        );
 
         statements.push(
           ...this.generateIdentitySequenceRenameStatements(table, currentTable)
@@ -914,6 +1148,9 @@ export class SchemaDiffer {
         if (replicaIdentityPlan.afterTableAlterations) {
           statements.push(replicaIdentityPlan.afterTableAlterations);
         }
+        if (clusteringPlan.afterTableAlterations) {
+          statements.push(clusteringPlan.afterTableAlterations);
+        }
 
         // Handle index changes separately (they use CONCURRENTLY which can't be batched)
         const removedColumnNames = new Set(
@@ -935,6 +1172,9 @@ export class SchemaDiffer {
         statements.push(...indexStatements);
         if (replicaIdentityPlan.deferred) {
           deferred.push(replicaIdentityPlan.deferred);
+        }
+        if (clusteringPlan.deferred) {
+          deferred.push(clusteringPlan.deferred);
         }
       }
     }

@@ -182,6 +182,7 @@ export interface View {
   columnNames?: string[]; // Effective output names in ordinal order
   columns?: Column[]; // For typed views or materialized views
   indexes?: Index[]; // Only for materialized views
+  clusterIndex?: string; // PostgreSQL index remembered for future CLUSTER operations
   populated?: boolean; // Materialized view scannability from WITH [NO] DATA
   storageParameters?: Record<string, string>; // Materialized view storage parameters
   tablespace?: string; // Materialized view tablespace; undefined means pg_default
@@ -424,6 +425,7 @@ export interface Table {
   exclusionConstraints?: ExclusionConstraint[];
   indexes?: Index[];
   replicaIdentity?: PostgresReplicaIdentity;
+  clusterIndex?: string; // PostgreSQL index remembered for future CLUSTER operations
 }
 
 export interface Schema {
