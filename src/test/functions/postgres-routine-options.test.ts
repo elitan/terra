@@ -147,6 +147,20 @@ describe("PostgreSQL routine security options", function () {
         `,
       },
       {
+        label: "linked object",
+        sql: `
+          CREATE FUNCTION public.unsupported_routine(integer) RETURNS integer
+          AS 'library_file' LANGUAGE c;
+        `,
+      },
+      {
+        label: "procedure linked object",
+        sql: `
+          CREATE PROCEDURE public.unsupported_routine(integer)
+          AS 'library_file' LANGUAGE c;
+        `,
+      },
+      {
         label: "procedure SQL-standard body",
         sql: `
           CREATE PROCEDURE public.unsupported_routine()
@@ -167,6 +181,53 @@ describe("PostgreSQL routine security options", function () {
         expect((error as Error).message).toContain(scenario.label);
       }
     }
+  });
+
+  test("preserves empty quoted routine bodies without destructive drift", async function () {
+    const schema = `
+      CREATE FUNCTION public.empty_body_function()
+      RETURNS void LANGUAGE sql AS '';
+
+      CREATE PROCEDURE public.empty_body_procedure()
+      AS $$$$ LANGUAGE sql;
+    `;
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(schema);
+    expect(parsed.functions).toHaveLength(1);
+    expect(parsed.functions[0]?.body).toBe("");
+    expect(parsed.procedures).toHaveLength(1);
+    expect(parsed.procedures[0]?.body).toBe("");
+
+    await client.query(schema);
+    const service = createTestSchemaService();
+    const externalPlan = await service.plan(schema, ["public"]);
+    expect(externalPlan.hasChanges).toBe(false);
+    expect(externalPlan.transactional).toEqual([]);
+
+    await cleanDatabase(client);
+    const creation = await service.apply(schema, ["public"], true);
+    expect(creation.transactional.some(function createsFunction(statement) {
+      return statement.includes("CREATE FUNCTION");
+    })).toBe(true);
+    expect(creation.transactional.some(function createsProcedure(statement) {
+      return statement.includes("CREATE PROCEDURE");
+    })).toBe(true);
+
+    const routines = await client.query(`
+      SELECT p.proname, p.prosrc
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN ('empty_body_function', 'empty_body_procedure')
+      ORDER BY p.proname
+    `);
+    expect(routines.rows.map(function normalizeBody(row) {
+      return { name: row.proname, body: row.prosrc.trim() };
+    })).toEqual([
+      { name: "empty_body_function", body: "" },
+      { name: "empty_body_procedure", body: "" },
+    ]);
+    expect((await service.plan(schema, ["public"])).hasChanges).toBe(false);
   });
 
   test("changes and resets routine options without losing OIDs or dependents", async function () {

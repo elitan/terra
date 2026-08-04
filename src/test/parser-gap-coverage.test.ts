@@ -231,6 +231,39 @@ describe("Parser gap coverage", function () {
     expect(parsed?.leakproof).toBe(true);
   });
 
+  test("preserves empty quoted bodies and rejects one-part C object files", function () {
+    const emptyFunction = parseCreateFunction(
+      makeFunctionBase({
+        options: [
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "" } }] } } } },
+        ],
+      })
+    );
+    const emptyProcedure = parseCreateProcedure(
+      makeProcedureBase({
+        options: [
+          { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "" } }] } } } },
+          { DefElem: { defname: "language", arg: { String: { sval: "sql" } } } },
+        ],
+      })
+    );
+
+    expect(emptyFunction?.body).toBe("");
+    expect(emptyProcedure?.body).toBe("");
+
+    const linkedBodyOptions = [
+      { DefElem: { defname: "as", arg: { List: { items: [{ String: { sval: "library_file" } }] } } } },
+      { DefElem: { defname: "language", arg: { String: { sval: "c" } } } },
+    ];
+    expect(function parseLinkedFunction() {
+      return parseCreateFunction(makeFunctionBase({ options: linkedBodyOptions }));
+    }).toThrow("linked object AS syntax");
+    expect(function parseLinkedProcedure() {
+      return parseCreateProcedure(makeProcedureBase({ options: linkedBodyOptions }));
+    }).toThrow("linked object AS syntax");
+  });
+
   test("preserves set-returning and bare strict function options", function () {
     const parsed = parseCreateFunction(
       makeFunctionBase({

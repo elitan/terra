@@ -62,8 +62,18 @@ export function validateRoutineDefinition(
   if (!Array.isArray(node.options)) {
     return;
   }
+  const options = node.options;
 
-  for (const option of node.options) {
+  let language: string | undefined;
+  for (const option of options) {
+    const defElem = option.DefElem;
+    if (defElem?.defname === "language") {
+      language = defElem.arg?.String?.sval;
+      break;
+    }
+  }
+
+  for (const option of options) {
     const defElem = option.DefElem;
     const optionName = defElem?.defname;
     if (!optionName) {
@@ -79,10 +89,13 @@ export function validateRoutineDefinition(
     if (
       optionName === "as" &&
       Array.isArray(defElem.arg?.List?.items) &&
-      defElem.arg.List.items.length > 1
+      (
+        defElem.arg.List.items.length > 1 ||
+        (language === "c" && defElem.arg.List.items.length > 0)
+      )
     ) {
       throw routineError(
-        `PostgreSQL ${kind} linked object AS syntax is not supported in desired schemas because the object file and link symbol are not modeled separately`,
+        `PostgreSQL ${kind} linked object AS syntax is not supported in desired schemas because the object file and optional link symbol are not modeled separately`,
         originalSql,
         filePath
       );

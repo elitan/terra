@@ -63,7 +63,7 @@ export function parseCreateFunction(
     }
 
     const body = extractFunctionBody(node);
-    if (!body) {
+    if (body === null) {
       Logger.warning(`Function '${name}' missing body`);
       return null;
     }
@@ -371,8 +371,14 @@ function extractFunctionBody(node: any): string | null {
         // Body is in a List with items containing String nodes
         const listItems = defElem.arg?.List?.items;
         if (listItems && Array.isArray(listItems)) {
-          const bodyParts = listItems.map((item: any) => item.String?.sval).filter(Boolean);
-          return bodyParts.join('\n') || null;
+          const bodyParts = listItems
+            .map(function extractString(item: any) {
+              return item.String?.sval;
+            })
+            .filter(function isString(value: unknown): value is string {
+              return typeof value === "string";
+            });
+          return bodyParts.length > 0 ? bodyParts.join('\n') : null;
         }
       }
     }

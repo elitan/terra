@@ -39,7 +39,7 @@ export function parseCreateProcedure(
     }
 
     const body = extractProcedureBody(node);
-    if (!body) {
+    if (body === null) {
       Logger.warning(`Procedure '${name}' missing body`);
       return null;
     }
@@ -236,8 +236,14 @@ function extractProcedureBody(node: any): string | null {
           return null;
         }
 
-        const bodyParts = listItems.map((item: any) => item.String?.sval).filter(Boolean);
-        return bodyParts.join("\n") || null;
+        const bodyParts = listItems
+          .map(function extractString(item: any) {
+            return item.String?.sval;
+          })
+          .filter(function isString(value: unknown): value is string {
+            return typeof value === "string";
+          });
+        return bodyParts.length > 0 ? bodyParts.join("\n") : null;
       }
     }
 
