@@ -37,7 +37,7 @@ CREATE TABLE users (
 ```
 
 ```bash
-export DATABASE_URL="sqlite:///path/to/database.db"
+export DATABASE_URL="sqlite:///absolute/path/to/database.db"
 terradb plan -f schema.sql
 terradb apply -f schema.sql
 ```
@@ -71,9 +71,11 @@ export DB_PASSWORD=password
 ### SQLite
 
 ```bash
-export DATABASE_URL="sqlite:///path/to/database.db"
-# or
+export DATABASE_URL="sqlite:///absolute/path/to/database.db"
+# or an absolute/relative filename
 export DATABASE_URL="/path/to/database.db"
+# or an official SQLite file URI (including supported URI parameters)
+export DATABASE_URL="file:/path/to/database.db?mode=rwc"
 # or in-memory
 export DATABASE_URL=":memory:"
 ```

@@ -9,11 +9,13 @@ import type {
 export * from "./types";
 
 export function detectDialect(connectionString: string): DatabaseDialect {
+  if (/^postgres(?:ql)?:\/\//i.test(connectionString)) {
+    return "postgres";
+  }
   if (
-    connectionString.startsWith("sqlite:") ||
-    connectionString.endsWith(".db") ||
-    connectionString.endsWith(".sqlite") ||
-    connectionString.endsWith(".sqlite3") ||
+    /^sqlite:/i.test(connectionString) ||
+    /^file:/i.test(connectionString) ||
+    /\.(?:db|sqlite|sqlite3)$/i.test(connectionString) ||
     connectionString === ":memory:"
   ) {
     return "sqlite";
@@ -26,12 +28,15 @@ export function parseConnectionString(connectionString: string): ConnectionConfi
 
   if (dialect === "sqlite") {
     let filename = connectionString;
-    if (filename.startsWith("sqlite:///")) {
-      filename = filename.slice(10);
-    } else if (filename.startsWith("sqlite://")) {
-      filename = filename.slice(9);
-    } else if (filename.startsWith("sqlite:")) {
-      filename = filename.slice(7);
+    if (/^sqlite:\/\/\//i.test(filename)) {
+      const path = filename.slice("sqlite:///".length);
+      filename = path.startsWith("/") ? path : `/${path}`;
+    } else if (/^sqlite:\/\//i.test(filename)) {
+      filename = filename.slice("sqlite://".length);
+    } else if (/^sqlite:/i.test(filename)) {
+      filename = filename.slice("sqlite:".length);
+    } else if (/^file:/i.test(filename)) {
+      filename = `file:${filename.slice("file:".length)}`;
     }
     return {
       dialect: "sqlite",
