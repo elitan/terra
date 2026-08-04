@@ -56,7 +56,7 @@
     "test:watch": "bun --env-file=.env test --watch src/test",
     "test:sqlite": "bun --env-file=.env test src/test/sqlite",
     "test:sqlite:grammar": "TERRADB_TEST_SILENT=${TERRADB_TEST_SILENT:-1} FC_SEED=${FC_SEED:-20260803} bun --env-file=.env test src/test/sqlite/sqlite-grammar.property.test.ts",
-    "test:pg:matrix": "bun --env-file=.env test $(find src/test -type f -name '*.test.ts' | grep -Ev '^src/test/(sqlite|extensions|columns/performance|properties)/' | sort)",
+    "test:pg:matrix": "bun --env-file=.env test --max-concurrency=1 $(find src/test -type f -name '*.test.ts' | grep -Ev '^src/test/(sqlite|extensions|columns/performance|properties)/' | sort)",
     "test:pg:14": "DATABASE_URL=${DATABASE_URL_PG14:-postgres://test_user:test_password@localhost:5486/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:15": "DATABASE_URL=${DATABASE_URL_PG15:-postgres://test_user:test_password@localhost:5485/sql_terraform_test} bun run test:pg:matrix",
     "test:pg:16": "DATABASE_URL=${DATABASE_URL_PG16:-postgres://test_user:test_password@localhost:5484/sql_terraform_test} bun run test:pg:matrix",

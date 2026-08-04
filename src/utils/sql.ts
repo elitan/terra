@@ -1306,7 +1306,9 @@ export function generateDropTriggerSQL(trigger: Trigger): string {
 export function generateCreateSequenceSQL(seq: Sequence): string {
   const builder = new SQLBuilder();
 
-  builder.p('CREATE SEQUENCE').table(seq.name, seq.schema);
+  builder
+    .p(seq.unlogged ? 'CREATE UNLOGGED SEQUENCE' : 'CREATE SEQUENCE')
+    .table(seq.name, seq.schema);
 
   if (seq.dataType) {
     builder.p(`AS ${seq.dataType}`);

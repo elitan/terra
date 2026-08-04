@@ -54,4 +54,36 @@ describe("Sequence Parsing", () => {
     expect(seq.cycle).toBe(false);
     expect(seq.ownedBy).toBeUndefined();
   });
+
+  test("should preserve unlogged sequence persistence", async function () {
+    const result = await parser.parseSchema(`
+      CREATE UNLOGGED SEQUENCE public.unlogged_order_seq;
+    `);
+
+    expect(result.sequences).toEqual([
+      expect.objectContaining({
+        name: "unlogged_order_seq",
+        schema: "public",
+        unlogged: true,
+      }),
+    ]);
+  });
+
+  test("should preserve exact 64-bit sequence bounds", async function () {
+    const result = await parser.parseSchema(`
+      CREATE SEQUENCE public.boundary_seq
+      AS BIGINT
+      INCREMENT BY 9223372036854775807
+      MINVALUE -9223372036854775808
+      MAXVALUE 9223372036854775807
+      START WITH 9223372036854775806;
+    `);
+
+    expect(result.sequences[0]).toMatchObject({
+      increment: "9223372036854775807",
+      minValue: "-9223372036854775808",
+      maxValue: "9223372036854775807",
+      start: "9223372036854775806",
+    });
+  });
 });

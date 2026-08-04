@@ -501,7 +501,11 @@ export class SchemaService {
     const concurrentStatements = tablePlan.concurrent;
 
     if (this.provider.supportsFeature("sequences")) {
-      sequenceStatements = this.sequenceHandler.generateStatements(desiredSequences, currentSequences);
+      sequenceStatements = this.sequenceHandler.generateStatements(
+        desiredSequences,
+        currentSequences,
+        migrationContext
+      );
     }
 
     const preSequenceStatements = sequenceStatements.filter(

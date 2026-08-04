@@ -73,19 +73,21 @@ describe("Sequence idempotency", () => {
     expect(plan.hasChanges).toBe(true);
     expect(
       plan.transactional.some(function (statement) {
-        return statement.includes("DROP SEQUENCE");
+        return statement.includes("ALTER SEQUENCE");
       })
     ).toBe(true);
     expect(
       plan.transactional.some(
         function (statement) {
           return (
-            statement.includes("CREATE SEQUENCE") &&
-            statement.includes("INCREMENT 10") &&
+            statement.includes("ALTER SEQUENCE") &&
+            statement.includes("INCREMENT BY 10") &&
             statement.includes("CACHE 20")
           );
         }
       )
     ).toBe(true);
+    expect(plan.transactional.join("\n")).not.toContain("DROP SEQUENCE");
+    expect(plan.transactional.join("\n")).not.toContain("CREATE SEQUENCE");
   });
 });

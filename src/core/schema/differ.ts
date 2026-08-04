@@ -430,6 +430,7 @@ export class SchemaDiffer {
     this.validateNullsNotDistinctSupport(desiredSchema, context);
     this.validateForeignKeyDeleteColumns(desiredSchema, context);
     this.validateVirtualGeneratedColumnSupport(desiredSchema, context);
+    this.validateIdentitySequencePersistenceSupport(desiredSchema, context);
     const statements: string[] = [];
     const deferred: string[] = [];
     const orderedDesiredSchema = this.getDeterministicTableOrder(desiredSchema);
@@ -637,12 +638,22 @@ export class SchemaDiffer {
       }
     }
 
-    statements.push(
-      ...this.generateTablePersistenceStatements(
-        orderedDesiredSchema,
-        currentTables
-      )
+    const tablePersistenceStatements = this.generateTablePersistenceStatements(
+      orderedDesiredSchema,
+      currentTables
     );
+    statements.push(...tablePersistenceStatements);
+    for (const desiredTable of orderedDesiredSchema) {
+      const currentTable = currentTables.get(this.getTableKey(desiredTable));
+      if (!currentTable) continue;
+      statements.push(
+        ...this.generateIdentitySequencePersistenceStatements(
+          desiredTable,
+          currentTable,
+          context
+        )
+      );
+    }
 
     // Separate statements into transactional and concurrent
     const transactional: string[] = [];
@@ -693,6 +704,109 @@ export class SchemaDiffer {
         );
       }
     }
+  }
+
+  private validateIdentitySequencePersistenceSupport(
+    desiredSchema: Table[],
+    context: MigrationContext
+  ): void {
+    for (const table of desiredSchema) {
+      const column = table.columns.find(function hasExplicitPersistence(
+        candidate
+      ) {
+        return candidate.identity?.sequencePersistence !== undefined;
+      });
+      if (!column) continue;
+
+      const tableName = getQualifiedTableName(table);
+      if (context.postgresVersionNum === undefined) {
+        throw new ValidationError(
+          `Cannot safely use explicit identity-sequence persistence on ${tableName}.${column.name} without the PostgreSQL server version`,
+          tableName,
+          column.name,
+          column.identity?.sequencePersistence
+        );
+      }
+      if (context.postgresVersionNum < 150000) {
+        const serverMajor = Math.floor(context.postgresVersionNum / 10000);
+        throw new ValidationError(
+          `PostgreSQL ${serverMajor} does not support explicit identity-sequence persistence; PostgreSQL 15 or newer is required`,
+          tableName,
+          column.name,
+          column.identity?.sequencePersistence
+        );
+      }
+    }
+  }
+
+  private getEffectiveIdentitySequencePersistence(
+    table: Table,
+    identity: IdentityColumn,
+    context: MigrationContext
+  ): NonNullable<IdentityColumn["sequencePersistence"]> {
+    if (identity.sequencePersistence) {
+      return identity.sequencePersistence;
+    }
+    if (table.unlogged && (context.postgresVersionNum || 0) >= 150000) {
+      return "unlogged";
+    }
+    return "logged";
+  }
+
+  private generateIdentitySequencePersistenceStatements(
+    desiredTable: Table,
+    currentTable: Table,
+    context: MigrationContext
+  ): string[] {
+    const currentColumns = new Map(
+      currentTable.columns.map(function mapColumn(column) {
+        return [column.name, column] as const;
+      })
+    );
+    const tablePersistenceChanges =
+      Boolean(desiredTable.unlogged) !== Boolean(currentTable.unlogged);
+    const statements: string[] = [];
+
+    for (const desiredColumn of desiredTable.columns) {
+      const desiredIdentity = desiredColumn.identity;
+      const currentIdentity = currentColumns.get(desiredColumn.name)?.identity;
+      if (!desiredIdentity || !currentIdentity?.sequenceName) continue;
+      if (
+        !desiredIdentity.sequencePersistence &&
+        context.postgresVersionNum === undefined
+      ) {
+        continue;
+      }
+      if (!desiredIdentity.sequencePersistence && tablePersistenceChanges) {
+        continue;
+      }
+
+      const desiredPersistence =
+        this.getEffectiveIdentitySequencePersistence(
+          desiredTable,
+          desiredIdentity,
+          context
+        );
+      if (desiredPersistence === currentIdentity.sequencePersistence) {
+        continue;
+      }
+
+      const sequenceName =
+        desiredIdentity.sequenceName || currentIdentity.sequenceName;
+      statements.push(
+        new SQLBuilder()
+          .p("ALTER SEQUENCE")
+          .table(sequenceName.name, sequenceName.schema)
+          .p(
+            desiredPersistence === "unlogged"
+              ? "SET UNLOGGED"
+              : "SET LOGGED"
+          )
+          .p(";")
+          .build()
+      );
+    }
+    return statements;
   }
 
   private validateNullsNotDistinctSupport(

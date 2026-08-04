@@ -32,12 +32,30 @@ describe("Regression: owned sequence ownership changes are detected", function (
     `;
 
     await service.apply(initialSchema, ["public"], true);
+    const before = await client.query(
+      "SELECT 'public.user_seq'::regclass::oid::integer AS oid, nextval('public.user_seq') AS value"
+    );
 
     const plan = await service.apply(updatedSchema, ["public"], true, undefined, true);
 
     expect(plan.hasChanges).toBe(true);
     const sql = plan.transactional.join("\n");
-    expect(sql).toContain("DROP SEQUENCE IF EXISTS");
-    expect(sql).toContain("OWNED BY accounts.id");
+    expect(sql).toContain("ALTER SEQUENCE");
+    expect(sql).toContain("OWNED BY public.accounts.id");
+    expect(sql).not.toContain("DROP SEQUENCE");
+    expect(sql).not.toContain("CREATE SEQUENCE");
+
+    await service.apply(updatedSchema, ["public"], true);
+    const after = await client.query(
+      "SELECT 'public.user_seq'::regclass::oid::integer AS oid, nextval('public.user_seq') AS value"
+    );
+    expect(after.rows[0]).toEqual({
+      oid: before.rows[0]?.oid,
+      value: "2",
+    });
+    expect(
+      (await service.apply(updatedSchema, ["public"], true, undefined, true))
+        .hasChanges
+    ).toBe(false);
   });
 });

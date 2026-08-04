@@ -176,6 +176,74 @@ describe("SchemaDiffer private coverage", () => {
     );
   });
 
+  test("validates and repairs identity-sequence persistence", function () {
+    const differ = new SchemaDiffer();
+    const desired = makeTable({
+      columns: [
+        makeColumn({
+          identity: {
+            generation: "ALWAYS",
+            sequencePersistence: "unlogged",
+          },
+        }),
+      ],
+    });
+    const current = makeTable({
+      columns: [
+        makeColumn({
+          identity: {
+            generation: "ALWAYS",
+            sequenceName: { schema: "public", name: "users_id_seq" },
+            sequencePersistence: "logged",
+          },
+        }),
+      ],
+    });
+
+    expect(function rejectUnknownVersion() {
+      differ.generateMigrationPlan([desired], [current]);
+    }).toThrow("without the PostgreSQL server version");
+    expect(function rejectPostgres14() {
+      differ.generateMigrationPlan([desired], [current], {
+        postgresVersionNum: 140000,
+      });
+    }).toThrow("PostgreSQL 15 or newer is required");
+    expect(
+      differ
+        .generateMigrationPlan([desired], [current], {
+          postgresVersionNum: 150000,
+        })
+        .transactional.join("\n")
+    ).toContain(
+      'ALTER SEQUENCE "public"."users_id_seq" SET UNLOGGED;'
+    );
+
+    const implicitDesired = makeTable({
+      unlogged: true,
+      columns: [
+        makeColumn({
+          identity: { generation: "ALWAYS" },
+        }),
+      ],
+    });
+    const implicitCurrent = makeTable({
+      unlogged: true,
+      columns: [
+        makeColumn({
+          identity: {
+            generation: "ALWAYS",
+            sequenceName: { schema: "public", name: "users_id_seq" },
+            sequencePersistence: "unlogged",
+          },
+        }),
+      ],
+    });
+    expect(
+      differ.generateMigrationPlan([implicitDesired], [implicitCurrent])
+        .hasChanges
+    ).toBe(false);
+  });
+
   test("type conversion helpers cover serial and boolean branches", () => {
     const differ = new SchemaDiffer();
 

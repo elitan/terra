@@ -225,6 +225,7 @@ function normalizeSnapshot(input: any): unknown {
                       name: column.identity.sequenceName.name,
                     }
                   : undefined,
+                sequencePersistence: column.identity.sequencePersistence,
                 start: toStringOrUndefined(column.identity.start),
                 increment: toStringOrUndefined(column.identity.increment),
                 minValue: toStringOrUndefined(column.identity.minValue),
@@ -430,6 +431,7 @@ function normalizeSnapshot(input: any): unknown {
     return {
       schema: sequence.schema,
       name: sequence.name,
+      unlogged: sequence.unlogged,
       dataType: sequence.dataType,
       increment: toStringOrUndefined(sequence.increment),
       minValue: toStringOrUndefined(sequence.minValue),
@@ -545,6 +547,23 @@ function normalizeViewDefinitionForParity(definition: string): string {
 
 function normalizeSnapshotForParity(input: any): unknown {
   const clone = JSON.parse(JSON.stringify(input));
+  if (Array.isArray(clone.tables)) {
+    clone.tables = clone.tables.map(function normalizeIdentityPersistence(
+      table: any
+    ) {
+      return {
+        ...table,
+        columns: Array.isArray(table.columns)
+          ? table.columns.map(function normalizeColumn(column: any) {
+              if (!column.identity) return column;
+              const identity = { ...column.identity };
+              delete identity.sequencePersistence;
+              return { ...column, identity };
+            })
+          : table.columns,
+      };
+    });
+  }
   if (!Array.isArray(clone.views)) {
     return clone;
   }

@@ -17,6 +17,7 @@
                 "schema": "public",
                 "name": "audit_log_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -104,6 +105,7 @@
                 "schema": "public",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -207,6 +209,7 @@
                 "schema": "tenant_a",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -420,6 +423,7 @@
                 "schema": "public",
                 "name": "audit_log_id_seq"
               },
+              "sequencePersistence": "unlogged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -507,6 +511,7 @@
                 "schema": "public",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -610,6 +615,7 @@
                 "schema": "tenant_a",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -823,6 +829,7 @@
                 "schema": "public",
                 "name": "audit_log_id_seq"
               },
+              "sequencePersistence": "unlogged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -910,6 +917,7 @@
                 "schema": "public",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1013,6 +1021,7 @@
                 "schema": "tenant_a",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1226,6 +1235,7 @@
                 "schema": "public",
                 "name": "audit_log_id_seq"
               },
+              "sequencePersistence": "unlogged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1313,6 +1323,7 @@
                 "schema": "public",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1416,6 +1427,7 @@
                 "schema": "tenant_a",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1629,6 +1641,7 @@
                 "schema": "public",
                 "name": "audit_log_id_seq"
               },
+              "sequencePersistence": "unlogged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1716,6 +1729,7 @@
                 "schema": "public",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",
@@ -1819,6 +1833,7 @@
                 "schema": "tenant_a",
                 "name": "users_id_seq"
               },
+              "sequencePersistence": "logged",
               "start": "1",
               "increment": "1",
               "minValue": "1",

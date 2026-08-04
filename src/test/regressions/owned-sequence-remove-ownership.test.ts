@@ -30,13 +30,27 @@ describe("Regression: owned sequence can be made unowned", function () {
     `;
 
     await service.apply(initialSchema, ["public"], true);
+    const before = await client.query(
+      "SELECT 'public.user_seq'::regclass::oid::integer AS oid"
+    );
 
     const plan = await service.apply(updatedSchema, ["public"], true, undefined, true);
 
     expect(plan.hasChanges).toBe(true);
     const sql = plan.transactional.join("\n");
-    expect(sql).toContain("DROP SEQUENCE IF EXISTS");
-    expect(sql).toContain("CREATE SEQUENCE");
-    expect(sql).not.toContain("OWNED BY users.id");
+    expect(sql).toContain("ALTER SEQUENCE");
+    expect(sql).toContain("OWNED BY NONE");
+    expect(sql).not.toContain("DROP SEQUENCE");
+    expect(sql).not.toContain("CREATE SEQUENCE");
+
+    await service.apply(updatedSchema, ["public"], true);
+    const after = await client.query(
+      "SELECT 'public.user_seq'::regclass::oid::integer AS oid"
+    );
+    expect(after.rows[0]?.oid).toBe(before.rows[0]?.oid);
+    expect(
+      (await service.apply(updatedSchema, ["public"], true, undefined, true))
+        .hasChanges
+    ).toBe(false);
   });
 });

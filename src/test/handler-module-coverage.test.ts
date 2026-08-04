@@ -204,6 +204,22 @@ describe("Handler module coverage", () => {
       expect(statements[1]).toContain("OWNED BY public.users.id");
     });
 
+    test("qualifies shorthand ownership with the sequence schema", () => {
+      const handler = new SequenceHandler();
+      const statements = handler.generateStatements(
+        [
+          makeSequence({
+            name: "owned_seq",
+            schema: "tenant_a",
+            ownedBy: "users.id",
+          }),
+        ],
+        []
+      );
+
+      expect(statements[1]).toContain("OWNED BY tenant_a.users.id");
+    });
+
     test("drops removed unmanaged sequences", () => {
       const handler = new SequenceHandler();
       const statements = handler.generateStatements([], [makeSequence({ name: "legacy_seq" })]);
@@ -223,17 +239,91 @@ describe("Handler module coverage", () => {
       expect(statements).toEqual([]);
     });
 
-    test("recreates sequence when managed attributes change", () => {
+    test("alters sequence in place when managed attributes change", () => {
       const handler = new SequenceHandler();
       const statements = handler.generateStatements(
         [makeSequence({ increment: 2 })],
         [makeSequence({ increment: 1 })]
       );
 
-      expect(statements).toHaveLength(2);
-      expect(statements[0]).toContain("DROP SEQUENCE IF EXISTS");
-      expect(statements[1]).toContain("CREATE SEQUENCE");
-      expect(statements[1]).toContain("INCREMENT 2");
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).toContain("ALTER SEQUENCE");
+      expect(statements[0]).toContain("INCREMENT BY 2");
+      expect(statements[0]).not.toContain("DROP SEQUENCE");
+    });
+
+    test("preserves exact bigint increments while altering a sequence", () => {
+      const handler = new SequenceHandler();
+      const statements = handler.generateStatements(
+        [makeSequence({ increment: "9223372036854775807" })],
+        [makeSequence({ increment: 1 })]
+      );
+
+      expect(statements[0]).toContain("INCREMENT BY 9223372036854775807");
+      expect(statements[0]).not.toContain("9223372036854776000");
+    });
+
+    test("alters persistence and ownership without replacing the sequence", () => {
+      const handler = new SequenceHandler();
+      const statements = handler.generateStatements(
+        [makeSequence({ unlogged: true })],
+        [makeSequence({ ownedBy: "public.users.id" })],
+        { postgresVersionNum: 150000 }
+      );
+
+      expect(statements).toEqual([
+        'ALTER SEQUENCE "invoice_seq" SET UNLOGGED;',
+        'ALTER SEQUENCE "invoice_seq" OWNED BY NONE;',
+      ]);
+    });
+
+    test("rejects unlogged sequences without a supported server version", () => {
+      const handler = new SequenceHandler();
+      let unknownVersionError: unknown;
+      let postgres14Error: unknown;
+      try {
+        handler.generateStatements([makeSequence({ unlogged: true })], []);
+      } catch (error) {
+        unknownVersionError = error;
+      }
+      try {
+        handler.generateStatements(
+          [makeSequence({ unlogged: true })],
+          [],
+          { postgresVersionNum: 140000 }
+        );
+      } catch (error) {
+        postgres14Error = error;
+      }
+
+      expect(unknownVersionError).toMatchObject({
+        code: "VALIDATION_ERROR",
+        entity: "public.invoice_seq",
+        field: "unlogged",
+        value: true,
+      });
+      expect(String(unknownVersionError)).toMatch(
+        /without the PostgreSQL server version/i
+      );
+      expect(postgres14Error).toMatchObject({
+        code: "VALIDATION_ERROR",
+        entity: "public.invoice_seq",
+        field: "unlogged",
+        value: true,
+      });
+      expect(String(postgres14Error)).toMatch(
+        /PostgreSQL 14 does not support unlogged sequences/i
+      );
+    });
+
+    test("normalizes an omitted cycle option to no cycle", () => {
+      const handler = new SequenceHandler();
+      const statements = handler.generateStatements(
+        [makeSequence({ cycle: undefined })],
+        [makeSequence({ cycle: false })]
+      );
+
+      expect(statements).toEqual([]);
     });
 
     test("keeps sequence when managed attributes match", () => {

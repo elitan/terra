@@ -149,6 +149,9 @@ export function renderIdentityClause(identity: IdentityColumn): string {
   if (identity.sequenceName) {
     options.push(`SEQUENCE NAME ${renderSequenceName(identity.sequenceName)}`);
   }
+  if (identity.sequencePersistence) {
+    options.push(identity.sequencePersistence.toUpperCase());
+  }
   for (const option of NUMERIC_OPTIONS) {
     const value = identity[option];
     if (value !== undefined) options.push(optionClause(option, value));

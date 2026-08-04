@@ -315,6 +315,12 @@ function extractIdentityColumn(
           case "sequence_name":
             identity.sequenceName = extractIdentitySequenceName(element.arg);
             break;
+          case "logged":
+            identity.sequencePersistence = "logged";
+            break;
+          case "unlogged":
+            identity.sequencePersistence = "unlogged";
+            break;
           case "start":
             identity.start = extractIdentityOptionValue(element.arg);
             break;

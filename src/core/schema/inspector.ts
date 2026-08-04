@@ -23,6 +23,7 @@ import type {
   Comment,
   SqlObject,
   PostgresPolicyDefinition,
+  IdentityColumn,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
 import { renderIdentityClause } from "../../utils/identity";
@@ -39,6 +40,7 @@ const IDENTITY_SEQUENCE_JOIN_SQL = `
     SELECT
       sequence_namespace.nspname as sequence_schema,
       sequence_class.relname as sequence_name,
+      sequence_class.relpersistence as sequence_persistence,
       sequence_catalog.seqstart,
       sequence_catalog.seqincrement,
       sequence_catalog.seqmin,
@@ -61,6 +63,14 @@ const IDENTITY_SEQUENCE_JOIN_SQL = `
     LIMIT 1
   ) identity_sequence ON a.attidentity != ''
 `;
+
+function getIdentitySequencePersistence(
+  persistence: unknown
+): IdentityColumn["sequencePersistence"] {
+  if (persistence === "u") return "unlogged";
+  if (persistence === "p") return "logged";
+  return undefined;
+}
 
 const COLUMN_COLLATION_JOIN_SQL = `
   JOIN pg_type column_type ON column_type.oid = a.atttypid
@@ -703,6 +713,7 @@ export class DatabaseInspector {
           END as generation_expression,
           identity_sequence.sequence_schema as identity_sequence_schema,
           identity_sequence.sequence_name as identity_sequence_name,
+          identity_sequence.sequence_persistence as identity_sequence_persistence,
           identity_sequence.seqstart as identity_start,
           identity_sequence.seqincrement as identity_increment,
           identity_sequence.seqmin as identity_min_value,
@@ -2291,6 +2302,7 @@ export class DatabaseInspector {
       SELECT
         c.relname as sequence_name,
         n.nspname as schema_name,
+        c.relpersistence as sequence_persistence,
         s.seqtypid::regtype::text as data_type,
         s.seqincrement as increment,
         s.seqmin as min_value,
@@ -2331,6 +2343,7 @@ export class DatabaseInspector {
       return {
         name: row.sequence_name,
         schema: row.schema_name,
+        unlogged: row.sequence_persistence === 'u' ? true : undefined,
         dataType: dataType !== 'BIGINT' ? dataType : undefined,
         increment: row.increment !== 1 ? row.increment : undefined,
         minValue: row.min_value,
@@ -3845,6 +3858,7 @@ export class DatabaseInspector {
           END as generation_expression,
           identity_sequence.sequence_schema as identity_sequence_schema,
           identity_sequence.sequence_name as identity_sequence_name,
+          identity_sequence.sequence_persistence as identity_sequence_persistence,
           identity_sequence.seqstart as identity_start,
           identity_sequence.seqincrement as identity_increment,
           identity_sequence.seqmin as identity_min_value,
@@ -3953,6 +3967,9 @@ export class DatabaseInspector {
     return {
       generation: row.attidentity === 'a' ? 'ALWAYS' : 'BY DEFAULT',
       sequenceName,
+      sequencePersistence: getIdentitySequencePersistence(
+        row.identity_sequence_persistence
+      ),
       start: toOptionalString(row.identity_start),
       increment: toOptionalString(row.identity_increment),
       minValue: toOptionalString(row.identity_min_value),

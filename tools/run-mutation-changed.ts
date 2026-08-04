@@ -201,6 +201,9 @@ function resolveTestCommand(file: string, override?: string): string {
   if (normalized.endsWith("/src/core/schema/differ.ts")) {
     return "bun --env-file=.env test src/test/schema-differ-private-coverage.test.ts src/test/destructive-operations.test.ts src/test/columns/postgres-specific/type-cast-normalization.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
   }
+  if (normalized.endsWith("/src/core/schema/parser/sequence-parser.ts")) {
+    return "bun --env-file=.env test src/test/sequences/sequence-parsing.test.ts src/test/parser-module-coverage.test.ts";
+  }
   if (normalized.includes("/src/core/schema/parser")) {
     return "bun --env-file=.env test src/test/schema-parser-private-coverage.test.ts src/test/parser-edge-coverage.test.ts src/test/parser-gap-coverage.test.ts src/test/parser-object-matrix-parity.test.ts src/test/parser-module-coverage.test.ts src/test/function-parser-private-coverage.test.ts src/test/procedure-parser-coverage.test.ts src/test/composite-type-parser-coverage.test.ts src/test/constraint-parser-coverage.test.ts src/test/table-parser-coverage.test.ts src/test/views/view-parsing.test.ts src/test/triggers/basic-triggers.test.ts src/test/postgres-unsupported-statements.test.ts src/test/tables/postgres-table-persistence.test.ts src/test/advanced-sql-object-parsing.test.ts";
   }
@@ -221,6 +224,9 @@ function resolveTestCommand(file: string, override?: string): string {
   }
   if (normalized.endsWith("/src/core/schema/handlers/sql-object-handler.ts")) {
     return "bun --env-file=.env test src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts src/test/types/domain-range-lifecycle.test.ts src/test/types/postgres-type-ordering.test.ts";
+  }
+  if (normalized.endsWith("/src/core/schema/handlers/sequence-handler.ts")) {
+    return "bun --env-file=.env test src/test/handler-module-coverage.test.ts";
   }
   if (normalized.includes("/src/core/schema/handlers/")) {
     return "bun --env-file=.env test src/test/sql-object-handler.test.ts src/test/schema-service-private-coverage.test.ts";

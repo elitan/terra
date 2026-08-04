@@ -20,6 +20,7 @@ export function parseCreateSequence(node: any): Sequence | null {
     return {
       name,
       schema,
+      unlogged: node.sequence?.relpersistence === "u" ? true : undefined,
       dataType,
       increment,
       minValue,
@@ -69,7 +70,10 @@ function extractDataType(options: any[]): Sequence["dataType"] | undefined {
   }
 }
 
-function extractNumericOption(options: any[], key: string): number | undefined {
+function extractNumericOption(
+  options: any[],
+  key: string
+): number | string | undefined {
   try {
     for (const option of options) {
       const defElem = option.DefElem;
@@ -79,8 +83,12 @@ function extractNumericOption(options: any[], key: string): number | undefined {
         return defElem.arg.Integer.ival;
       }
 
-      if (typeof defElem.arg?.Float?.fval === "number") {
-        return defElem.arg.Float.fval;
+      const floatValue = defElem.arg?.Float?.fval;
+      if (
+        typeof floatValue === "number" ||
+        typeof floatValue === "string"
+      ) {
+        return floatValue;
       }
     }
     return undefined;

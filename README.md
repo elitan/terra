@@ -133,6 +133,14 @@ Table recreation preserves hidden ROWID values and SQLite-specific definitions i
 SQLite virtual tables are managed losslessly; bundled FTS5 and RTree modules are covered, while their implementation-owned shadow tables are never managed as user tables.
 SQLite desired schemas accept top-level `CREATE` statements and manage the persistent `main` database only. Imperative SQL, connection-local temporary objects, and external-database statements are rejected before migration planning; DML inside trigger bodies remains supported.
 PostgreSQL desired schemas also describe persistent database state. Session-local temporary tables, views, and sequences are rejected before migration planning instead of being converted into persistent objects. Query-derived tables created with `CREATE TABLE AS` or `SELECT INTO` are also rejected because their structure and optional initial data cannot be reconciled declaratively; define their table structure explicitly and load data separately. `CREATE TABLE LIKE` and typed `CREATE TABLE OF` declarations must likewise be expanded to explicit columns and constraints so copied options or persistent type dependencies are never discarded. Other top-level data, query, session, transaction, maintenance, and untracked DDL commands fail explicitly instead of being silently ignored; SQL inside managed routine bodies remains supported.
+PostgreSQL sequences preserve type, bounds, start, increment, cache, cycling,
+column ownership, and logged/unlogged persistence. Existing sequences evolve
+with native `ALTER SEQUENCE` operations so their OIDs, dependents, and live
+counter state are not reset. `UNLOGGED` standalone sequences and explicit
+identity-sequence `LOGGED`/`UNLOGGED` overrides are supported on PostgreSQL
+15–18 and rejected before mutation on PostgreSQL 14. An implicit identity
+sequence follows its table's persistence on PostgreSQL 15–18; PostgreSQL 14's
+version-specific logged identity-sequence behavior is preserved.
 PostgreSQL row-level security is declared with positive `ALTER TABLE ... ENABLE
 ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` state plus complete `CREATE
 POLICY` definitions. TerraDB preserves policy command, permissive/restrictive

@@ -10,6 +10,7 @@ export type ColumnStorage = 'PLAIN' | 'EXTERNAL' | 'EXTENDED' | 'MAIN';
 export interface IdentityColumn {
   generation: 'ALWAYS' | 'BY DEFAULT';
   sequenceName?: IdentitySequenceName;
+  sequencePersistence?: 'logged' | 'unlogged';
   start?: string;
   increment?: string;
   minValue?: string;
@@ -244,12 +245,13 @@ export interface Trigger {
 export interface Sequence {
   name: string;
   schema?: string; // PostgreSQL schema name, defaults to 'public'
+  unlogged?: boolean;
   dataType?: 'SMALLINT' | 'INTEGER' | 'BIGINT';
-  increment?: number;
-  minValue?: number;
-  maxValue?: number;
-  start?: number;
-  cache?: number;
+  increment?: number | string;
+  minValue?: number | string;
+  maxValue?: number | string;
+  start?: number | string;
+  cache?: number | string;
   cycle?: boolean;
   ownedBy?: string;
 }
