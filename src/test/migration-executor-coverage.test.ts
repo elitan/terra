@@ -78,6 +78,22 @@ describe("MigrationExecutor coverage", () => {
     })).toEqual(["view", "function", "procedure"]);
   });
 
+  test("retains categories for PostgreSQL unlogged relations", function () {
+    const metadata = buildStatementMetadata({
+      transactional: [
+        "CREATE UNLOGGED TABLE public.items (id integer);",
+        "CREATE UNLOGGED SEQUENCE public.item_id_seq AS integer;",
+      ],
+      concurrent: [],
+      deferred: [],
+      hasChanges: true,
+    });
+
+    expect(metadata.map(function selectCategory(item) {
+      return item.category;
+    })).toEqual(["table", "sequence"]);
+  });
+
   test("filters destructive operations", async function () {
     const MigrationExecutor = await loadExecutor();
     const executor = new MigrationExecutor({} as any);

@@ -327,6 +327,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE TABLE") ||
+    normalized.startsWith("CREATE UNLOGGED TABLE") ||
     normalized.startsWith("ALTER TABLE") ||
     normalized.startsWith("DROP TABLE")
   ) {
@@ -368,6 +369,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE SEQUENCE") ||
+    normalized.startsWith("CREATE UNLOGGED SEQUENCE") ||
     normalized.startsWith("ALTER SEQUENCE") ||
     normalized.startsWith("DROP SEQUENCE")
   ) {

@@ -266,6 +266,7 @@
 - done: classify PostgreSQL table and materialized-view `SET TABLESPACE` physical data-file moves as destructive, including batched table alterations; prove strict rejection preserves relation/index OIDs, current tablespaces and storage parameters, populated/materialized rows, and view dependents across PostgreSQL 14 and 18 before ordinary custom placement and default resets converge.
 - done: retain exact CLI statement categories for supported PostgreSQL `ALTER INDEX`, `ALTER VIEW`, `ALTER MATERIALIZED VIEW`, materialized-view refresh, `ALTER SCHEMA`, `ALTER EXTENSION`, and constraint/event/table-trigger operations instead of reporting `other`, generic `table`, or `constraint`; prove direct classification and ordered plan metadata across channels.
 - done: classify TerraDB-emitted PostgreSQL `CREATE OR REPLACE VIEW`, `FUNCTION`, and `PROCEDURE` statements as their managed objects instead of `other`; prove the prefixes directly and through ordered CLI plan metadata.
+- done: classify TerraDB-emitted PostgreSQL `CREATE UNLOGGED TABLE` and version-gated `CREATE UNLOGGED SEQUENCE` statements as `table` and `sequence` instead of `other`; prove direct and ordered CLI plan metadata while retaining PostgreSQL 14's existing sequence rejection.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

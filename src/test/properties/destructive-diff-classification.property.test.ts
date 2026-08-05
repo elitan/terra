@@ -354,6 +354,19 @@ describe("Property-Based: Destructive Diff Classification", function () {
     ).toBe("procedure");
   });
 
+  test("classifies emitted unlogged relations by their managed object", function () {
+    expect(
+      getStatementCategory(
+        'CREATE UNLOGGED TABLE "Odd Schema"."Odd Table" (id integer);'
+      )
+    ).toBe("table");
+    expect(
+      getStatementCategory(
+        'CREATE UNLOGGED SEQUENCE "Odd Schema"."Odd Sequence" AS integer;'
+      )
+    ).toBe("sequence");
+  });
+
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {
     const result = fc.check(
       fc.property(

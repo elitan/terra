@@ -76,6 +76,9 @@ constraint/event-trigger creation and removal, instead of degrading them to
 View, function, and procedure replacements emitted with PostgreSQL's
 `CREATE OR REPLACE` syntax likewise retain their managed-object categories in
 ordered CLI plan metadata.
+Generated PostgreSQL `CREATE UNLOGGED TABLE` statements on PostgreSQL 14-18
+and version-gated `CREATE UNLOGGED SEQUENCE` statements on PostgreSQL 15-18
+are reported as `table` and `sequence`, respectively, rather than `other`.
 
 ## version matrix target
 
