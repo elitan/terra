@@ -38,6 +38,10 @@ generated clauses before planning because those conflict with serial's implicit
 `NOT NULL` and sequence default; explicit `NOT NULL` remains equivalent and
 idempotent. Parser and apply-level scenarios cover canonical and alias spellings,
 pre-mutation failure, and non-application of preceding desired changes.
+Serial pseudo-types with `pg_catalog` qualification, type modifiers, or array
+bounds reject before planning instead of being normalized or deferred to server
+execution. Quoted lowercase `"serial"` remains equivalent to serial, and other
+schema-qualified names ending in `serial` remain on the custom-type path.
 
 ## current feature matrix
 

@@ -143,6 +143,12 @@ desired serial declarations with an explicit `NULL`, `DEFAULT`, identity, or
 generated clause fail during parsing before any database mutation. An explicit
 `NOT NULL` clause and ordinary key, check, unique, or reference constraints
 remain compatible with serial.
+Serial pseudo-types must also use scalar syntax without a type modifier, array
+bounds, or `pg_catalog` qualification. Those forms fail during parsing instead
+of being reinterpreted or reaching database execution. PostgreSQL's valid
+quoted-lowercase `"serial"` spelling remains equivalent, while other
+schema-qualified names ending in `serial` remain custom type references rather
+than pseudo-types.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

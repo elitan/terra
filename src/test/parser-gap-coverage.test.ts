@@ -97,6 +97,36 @@ describe("Parser gap coverage", function () {
     ]);
   });
 
+  test("rejects invalid serial pseudo-type forms without broadening custom types", async function () {
+    const parser = new SchemaParser();
+    const invalidDefinitions = [
+      "pg_catalog.serial",
+      "serial(3)",
+      "serial[]",
+      "serial4[4]",
+    ];
+
+    for (const definition of invalidDefinitions) {
+      await expect(
+        parser.parseSchema(`CREATE TABLE invalid_serial (id ${definition});`)
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        message: expect.stringContaining(
+          "PostgreSQL serial pseudo-types are unqualified scalar shorthands"
+        ),
+      });
+    }
+
+    const valid = await parser.parseSchema(`
+      CREATE TABLE custom_serial_type (value public.serial);
+      CREATE TABLE quoted_lowercase_serial (id "serial");
+    `);
+    expect(valid.tables[0]?.columns[0]?.type).toBe("public.serial");
+    expect(valid.tables[0]?.columns[0]?.nullable).toBe(true);
+    expect(valid.tables[1]?.columns[0]?.type).toBe("SERIAL");
+    expect(valid.tables[1]?.columns[0]?.nullable).toBe(false);
+  });
+
   test("covers routine configuration scalar AST variants", function () {
     const configuration = extractRoutineConfiguration(
       {

@@ -272,6 +272,67 @@ describe("Edge case: serial/bigserial columns", function () {
     ).toBe(false);
   });
 
+  test("rejects invalid serial pseudo-type forms before preceding mutations", async function () {
+    const baseline = `
+      CREATE TABLE serial_type_guard (
+        id INTEGER
+      );
+    `;
+    await schemaService.apply(baseline, ["public"], true);
+
+    const invalidDefinitions = [
+      "pg_catalog.serial",
+      "serial(3)",
+      "serial[]",
+      "serial4[4]",
+    ];
+    for (const definition of invalidDefinitions) {
+      const invalidDesired = `
+        CREATE TABLE serial_type_guard (
+          id INTEGER,
+          pending TEXT
+        );
+        CREATE TABLE invalid_serial_type (
+          id ${definition}
+        );
+      `;
+
+      await expect(
+        schemaService.apply(invalidDesired, ["public"], true)
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        message: expect.stringMatching(
+          /serial pseudo-type.*unqualified scalar/i
+        ),
+      });
+
+      const retainedColumns = await getTableColumnDetails(
+        client,
+        "serial_type_guard"
+      );
+      expect(
+        retainedColumns.map(function getColumnName(column) {
+          return column.name;
+        })
+      ).toEqual(["id"]);
+      const invalidTable = await client.query(
+        "SELECT to_regclass('public.invalid_serial_type') AS relation"
+      );
+      expect(invalidTable.rows).toEqual([{ relation: null }]);
+    }
+
+    const quotedLowercase = `
+      ${baseline}
+      CREATE TABLE quoted_lowercase_serial (
+        id "serial"
+      );
+    `;
+    await schemaService.apply(quotedLowercase, ["public"], true);
+    expect(
+      (await schemaService.plan(quotedLowercase, ["public"])).hasChanges
+    ).toBe(false);
+  });
+
   test("does not mistake a default containing nextval text for serial", async function () {
     await client.query(`
       CREATE TABLE misleading (

@@ -792,6 +792,10 @@ export class SchemaParser {
             stmt.CreateStmt,
             filePath
           );
+          this.rejectInvalidSerialTypeForms(
+            stmt.CreateStmt,
+            filePath
+          );
           this.rejectConflictingSerialColumnClauses(
             stmt.CreateStmt,
             filePath
@@ -1421,6 +1425,57 @@ export class SchemaParser {
       const name = column.colname || "<unnamed>";
       throw new ParserError(
         `PostgreSQL serial column '${schema}.${table}.${name}' declares ${conflicts.join(", ")}, which conflicts with SERIAL's implicit NOT NULL and sequence-backed default. Remove the conflicting clause or use an integer identity column or explicit sequence-backed default instead`,
+        filePath
+      );
+    }
+  }
+
+  private rejectInvalidSerialTypeForms(
+    stmt: any,
+    filePath?: string
+  ): void {
+    for (const element of stmt.tableElts || []) {
+      const column = element.ColumnDef;
+      if (!column) {
+        continue;
+      }
+
+      const typeName = column.typeName;
+      const typeParts = (typeName?.names || [])
+        .map(function getTypePart(item: any) {
+          return item?.String?.sval;
+        })
+        .filter(function hasTypePart(value: unknown): value is string {
+          return typeof value === "string" && value.length > 0;
+        });
+      const serialName = typeParts.at(-1);
+      if (
+        !serialName ||
+        serialName !== serialName.toLowerCase() ||
+        !isPostgresSerialType(serialName)
+      ) {
+        continue;
+      }
+
+      const invalidForms: string[] = [];
+      if (typeParts.length === 2 && typeParts[0] === "pg_catalog") {
+        invalidForms.push("pg_catalog qualification");
+      }
+      if ((typeName.typmods || []).length > 0) {
+        invalidForms.push("type modifiers");
+      }
+      if ((typeName.arrayBounds || []).length > 0) {
+        invalidForms.push("array bounds");
+      }
+      if (invalidForms.length === 0) {
+        continue;
+      }
+
+      const schema = stmt.relation?.schemaname || "public";
+      const table = stmt.relation?.relname || "<unnamed>";
+      const name = column.colname || "<unnamed>";
+      throw new ParserError(
+        `PostgreSQL serial pseudo-type column '${schema}.${table}.${name}' uses ${invalidForms.join(", ")}. PostgreSQL serial pseudo-types are unqualified scalar shorthands without type modifiers or array bounds; use unqualified SERIAL, SMALLSERIAL, or BIGSERIAL, or declare an explicit integer or array type with a separate sequence`,
         filePath
       );
     }
