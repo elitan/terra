@@ -58,6 +58,7 @@ describe("PostgreSQL foreign server lifecycle", function () {
         OPTIONS (schema_name 'public', table_name 'rows');
     `);
     const originalOid = await foreignServerOid(client);
+    const initialState = await inspectForeignServer(client);
 
     const changed = `
       CREATE EXTENSION postgres_fdw;
@@ -74,13 +75,34 @@ describe("PostgreSQL foreign server lifecycle", function () {
       GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;
     `;
     const changedPlan = await service.plan(changed, [MANAGED_SCHEMA]);
-
-    expect(changedPlan.transactional).toContain(
+    const changedStatement =
       `ALTER SERVER "${SERVER_NAME}" VERSION '15' OPTIONS (` +
-        `DROP "dbname", SET "host" 'db.internal', ADD "fetch_size" '1000');`
+      `DROP "dbname", SET "host" 'db.internal', ADD "fetch_size" '1000');`;
+
+    expect(changedPlan.transactional).toContain(changedStatement);
+    expect(getStatementRisk(changedStatement, "transactional")).toBe(
+      "destructive"
     );
     expect(changedPlan.transactional.some(isServerDrop)).toBe(false);
     expect(changedPlan.transactional.some(isServerCreate)).toBe(false);
+    await expect(
+      service.apply(
+        changed,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([changedStatement]),
+    });
+    expect(await foreignServerOid(client)).toBe(originalOid);
+    expect(await inspectForeignServer(client)).toEqual(initialState);
+    expect(await userMappingExists(client)).toBe(true);
+    expect(await foreignTableUsesServer(client)).toBe(true);
+    expect(await publicHasUsage(client)).toBe(true);
 
     await service.apply(changed, [MANAGED_SCHEMA], true);
     expect(await foreignServerOid(client)).toBe(originalOid);
@@ -108,11 +130,34 @@ describe("PostgreSQL foreign server lifecycle", function () {
       GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;
     `;
     const clearedPlan = await service.plan(cleared, [MANAGED_SCHEMA]);
-
-    expect(clearedPlan.transactional).toContain(
+    const clearedStatement =
       `ALTER SERVER "${SERVER_NAME}" VERSION NULL OPTIONS (` +
-        `DROP "fetch_size");`
+      `DROP "fetch_size");`;
+
+    expect(clearedPlan.transactional).toContain(clearedStatement);
+    expect(getStatementRisk(clearedStatement, "transactional")).toBe(
+      "destructive"
     );
+    const changedState = await inspectForeignServer(client);
+    await expect(
+      service.apply(
+        cleared,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([clearedStatement]),
+    });
+    expect(await foreignServerOid(client)).toBe(originalOid);
+    expect(await inspectForeignServer(client)).toEqual(changedState);
+    expect(await userMappingExists(client)).toBe(true);
+    expect(await foreignTableUsesServer(client)).toBe(true);
+    expect(await publicHasUsage(client)).toBe(true);
+
     await service.apply(cleared, [MANAGED_SCHEMA], true);
     expect(await foreignServerOid(client)).toBe(originalOid);
     expect(await userMappingExists(client)).toBe(true);
