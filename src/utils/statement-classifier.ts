@@ -168,6 +168,11 @@ const ALTER_ROLE_CAPABILITY_REMOVAL_PATTERN = new RegExp(
   String.raw`(?:${POSTGRES_ROLE_CAPABILITY_OPTION_PATTERN}\s+)*` +
   String.raw`${POSTGRES_ROLE_CAPABILITY_REMOVAL_PATTERN}\b`
 );
+const ALTER_ROLE_CONNECTION_LIMIT_REMOVAL_PATTERN = new RegExp(
+  String.raw`^ALTER\s+ROLE\s+${POSTGRES_IDENTIFIER_PATTERN}\s+(?:WITH\s+)?` +
+  String.raw`(?:${POSTGRES_ROLE_CAPABILITY_OPTION_PATTERN}\s+)*` +
+  String.raw`CONNECTION\s+LIMIT\s+-1\s*;?$`
+);
 
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
@@ -257,6 +262,7 @@ export function isDestructiveStatement(statement: string): boolean {
     ALTER_IDENTITY_SEQUENCE_CYCLE_PATTERN.test(normalized) ||
     ALTER_IDENTITY_GENERATION_WEAKENING_PATTERN.test(normalized) ||
     ALTER_ROLE_CAPABILITY_REMOVAL_PATTERN.test(normalized) ||
+    ALTER_ROLE_CONNECTION_LIMIT_REMOVAL_PATTERN.test(normalized) ||
     hasDestructiveAlterColumn(normalized)
   );
 }

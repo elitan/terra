@@ -7,6 +7,7 @@ const MANAGED_SCHEMA = "role_contract";
 const EXTERNAL_SCHEMA = "role_contract_external";
 const ROLE_NAME = "TerraDB Lifecycle Role";
 const MEMBER_NAME = "TerraDB Lifecycle Member";
+const CONNECTION_LIMIT_ROLE = "TerraDB Connection Limited Role";
 const REMOVAL_ROLE = "TerraDB Removal Role";
 const UNSUPPORTED_ROLE = "TerraDB Unsupported Role";
 const REMOVAL_GUARD = "removal_guard";
@@ -178,6 +179,85 @@ describe("PostgreSQL role lifecycle", function () {
     expect((await service.plan(changed, [MANAGED_SCHEMA])).hasChanges).toBe(false);
   });
 
+  test("blocks removal of a finite role connection limit", async function () {
+    const service = createTestSchemaService();
+    const limited = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE ROLE "${CONNECTION_LIMIT_ROLE}" LOGIN CONNECTION LIMIT 3;
+    `;
+    const unlimited = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE ROLE "${CONNECTION_LIMIT_ROLE}" LOGIN CONNECTION LIMIT -1;
+    `;
+    const restricted = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE ROLE "${CONNECTION_LIMIT_ROLE}" LOGIN CONNECTION LIMIT 2;
+    `;
+
+    await service.apply(limited, [MANAGED_SCHEMA], true);
+    const original = await inspectRole(client, CONNECTION_LIMIT_ROLE);
+    expect(original).toMatchObject({
+      login: true,
+      connection_limit: 3,
+    });
+
+    const removalPlan = await service.plan(unlimited, [MANAGED_SCHEMA]);
+    const removalStatement =
+      `ALTER ROLE "${CONNECTION_LIMIT_ROLE}" WITH CONNECTION LIMIT -1;`;
+    expect(removalPlan.transactional).toContain(removalStatement);
+    expect(getStatementRisk(removalStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(
+        unlimited,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [removalStatement],
+    });
+    expect(await inspectRole(client, CONNECTION_LIMIT_ROLE)).toEqual(original);
+
+    await service.apply(unlimited, [MANAGED_SCHEMA], true);
+    expect(await inspectRole(client, CONNECTION_LIMIT_ROLE)).toMatchObject({
+      oid: original.oid,
+      login: true,
+      connection_limit: -1,
+    });
+    expect((await service.plan(unlimited, [MANAGED_SCHEMA])).hasChanges).toBe(
+      false
+    );
+
+    const restrictionPlan = await service.plan(restricted, [MANAGED_SCHEMA]);
+    const restrictionStatement =
+      `ALTER ROLE "${CONNECTION_LIMIT_ROLE}" WITH CONNECTION LIMIT 2;`;
+    expect(restrictionPlan.transactional).toContain(restrictionStatement);
+    expect(getStatementRisk(restrictionStatement, "transactional")).toBe(
+      "safe"
+    );
+    await service.apply(
+      restricted,
+      [MANAGED_SCHEMA],
+      true,
+      undefined,
+      false,
+      true
+    );
+    expect(await inspectRole(client, CONNECTION_LIMIT_ROLE)).toMatchObject({
+      oid: original.oid,
+      login: true,
+      connection_limit: 2,
+    });
+    expect((await service.plan(restricted, [MANAGED_SCHEMA])).hasChanges).toBe(
+      false
+    );
+  });
+
   test("removes roles explicitly, blocks strict mode, and rolls back dependencies", async function () {
     await client.query(`CREATE ROLE "${REMOVAL_ROLE}"`);
     await client.query(
@@ -331,6 +411,7 @@ async function cleanup(client: Client): Promise<void> {
   for (const name of [
     MEMBER_NAME,
     ROLE_NAME,
+    CONNECTION_LIMIT_ROLE,
     REMOVAL_ROLE,
     UNSUPPORTED_ROLE,
   ]) {
