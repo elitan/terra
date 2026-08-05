@@ -78,6 +78,11 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users REPLICA IDENTITY FULL",
       "ALTER TABLE users REPLICA IDENTITY USING INDEX users_replica_key",
       "ALTER TABLE users INHERIT public.parent_users",
+      "ALTER ROLE app_user WITH LOGIN SUPERUSER CREATEDB CREATEROLE INHERIT REPLICATION BYPASSRLS CONNECTION LIMIT 5",
+      'ALTER ROLE "NOLOGIN Role" WITH LOGIN',
+      "ALTER ROLE app_user SET application_name TO 'NOLOGIN'",
+      'ALTER ROLE app_user RENAME TO "NOREPLICATION"',
+      "ALTER ROLE app_user RESET ALL",
     ];
 
     await fc.assert(
@@ -117,6 +122,14 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER EVENT TRIGGER audit_ddl ENABLE REPLICA",
       'ALTER TABLE ONLY "Odd Table" REPLICA IDENTITY NOTHING',
       'ALTER TABLE "Odd Child" NO INHERIT "Odd Schema"."Odd Parent"',
+      'ALTER ROLE "Odd Role" WITH NOLOGIN',
+      'ALTER ROLE "Odd Role" NOSUPERUSER',
+      'ALTER ROLE "Odd Role" WITH NOCREATEDB',
+      'ALTER ROLE "Odd Role" NOCREATEROLE',
+      'ALTER ROLE "Odd Role" WITH NOINHERIT',
+      'ALTER ROLE "Odd Role" NOREPLICATION',
+      'ALTER ROLE "Odd Role" WITH NOBYPASSRLS',
+      'ALTER ROLE "Odd Role" WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS',
       "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
       "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader RESTRICT",
     ];

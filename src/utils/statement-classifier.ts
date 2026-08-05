@@ -41,6 +41,15 @@ const REPLICA_IDENTITY_NOTHING_PATTERN =
 const NO_INHERIT_PARENT_PATTERN = new RegExp(
   String.raw`\bNO\s+INHERIT\s+${POSTGRES_QUALIFIED_IDENTIFIER_PATTERN}\s*;?$`
 );
+const POSTGRES_ROLE_CAPABILITY_OPTION_PATTERN =
+  String.raw`(?:LOGIN|NOLOGIN|SUPERUSER|NOSUPERUSER|CREATEDB|NOCREATEDB|CREATEROLE|NOCREATEROLE|INHERIT|NOINHERIT|REPLICATION|NOREPLICATION|BYPASSRLS|NOBYPASSRLS)`;
+const POSTGRES_ROLE_CAPABILITY_REMOVAL_PATTERN =
+  String.raw`(?:NOLOGIN|NOSUPERUSER|NOCREATEDB|NOCREATEROLE|NOINHERIT|NOREPLICATION|NOBYPASSRLS)`;
+const ALTER_ROLE_CAPABILITY_REMOVAL_PATTERN = new RegExp(
+  String.raw`^ALTER\s+ROLE\s+${POSTGRES_IDENTIFIER_PATTERN}\s+(?:WITH\s+)?` +
+  String.raw`(?:${POSTGRES_ROLE_CAPABILITY_OPTION_PATTERN}\s+)*` +
+  String.raw`${POSTGRES_ROLE_CAPABILITY_REMOVAL_PATTERN}\b`
+);
 
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
@@ -81,6 +90,7 @@ export function isDestructiveStatement(statement: string): boolean {
     hasTriggerEnforcementWeakening(normalized) ||
     REPLICA_IDENTITY_NOTHING_PATTERN.test(normalized) ||
     NO_INHERIT_PARENT_PATTERN.test(normalized) ||
+    ALTER_ROLE_CAPABILITY_REMOVAL_PATTERN.test(normalized) ||
     hasDestructiveAlterColumn(normalized)
   );
 }

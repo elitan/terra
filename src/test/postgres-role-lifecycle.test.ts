@@ -80,15 +80,77 @@ describe("PostgreSQL role lifecycle", function () {
     expect(changedPlan.transactional).toContain(alterStatement);
     expect(changedPlan.transactional.some(isRoleCreate)).toBe(false);
     expect(changedPlan.transactional.some(isRoleDrop)).toBe(false);
+    expect(getStatementRisk(alterStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(
+        changed,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([alterStatement]),
+    });
+    expect(await inspectRole(client, ROLE_NAME)).toEqual(original);
+    expect(await schemaOwner(client, EXTERNAL_SCHEMA)).toBe(ROLE_NAME);
+    expect(await roleMembershipExists(client)).toBe(true);
+    expect(await inspectUnmanagedRoleState(client)).toEqual(unmanagedState);
+
     await service.apply(changed, [MANAGED_SCHEMA], true);
 
-    expect((await inspectRole(client, ROLE_NAME)).oid).toBe(original.oid);
+    const changedRole = await inspectRole(client, ROLE_NAME);
+    expect(changedRole).toMatchObject({
+      oid: original.oid,
+      login: true,
+      superuser: false,
+      create_database: false,
+      create_role: false,
+      inherit: true,
+      replication: false,
+      bypass_rls: false,
+      connection_limit: -1,
+    });
     expect(await schemaOwner(client, EXTERNAL_SCHEMA)).toBe(ROLE_NAME);
     expect(await roleMembershipExists(client)).toBe(true);
     expect(await inspectUnmanagedRoleState(client)).toEqual(unmanagedState);
     expect(await service.plan(changed, [MANAGED_SCHEMA])).toMatchObject({
       hasChanges: false,
     });
+
+    const restricted = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE ROLE "${ROLE_NAME}" NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
+        NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1;
+    `;
+    const restrictionStatement =
+      `ALTER ROLE "${ROLE_NAME}" WITH NOLOGIN NOINHERIT;`;
+    const restrictionPlan = await service.plan(restricted, [MANAGED_SCHEMA]);
+    expect(restrictionPlan.transactional).toContain(restrictionStatement);
+    expect(getStatementRisk(restrictionStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(
+        restricted,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([restrictionStatement]),
+    });
+    expect(await inspectRole(client, ROLE_NAME)).toEqual(changedRole);
+    expect(await schemaOwner(client, EXTERNAL_SCHEMA)).toBe(ROLE_NAME);
+    expect(await roleMembershipExists(client)).toBe(true);
+    expect(await inspectUnmanagedRoleState(client)).toEqual(unmanagedState);
 
     await client.query(
       `ALTER ROLE "${ROLE_NAME}" NOLOGIN CREATEDB NOINHERIT CONNECTION LIMIT 7`
