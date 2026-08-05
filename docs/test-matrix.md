@@ -79,6 +79,8 @@ ordered CLI plan metadata.
 Generated PostgreSQL `CREATE UNLOGGED TABLE` statements on PostgreSQL 14-18
 and version-gated `CREATE UNLOGGED SEQUENCE` statements on PostgreSQL 15-18
 are reported as `table` and `sequence`, respectively, rather than `other`.
+SQLite FTS5/RTree `CREATE VIRTUAL TABLE` statements are reported as `table` in
+text/JSON plan metadata, matching their ordinary `DROP TABLE` removal category.
 
 ## version matrix target
 

@@ -1017,6 +1017,49 @@ describe("CLI Contract", () => {
     }
   });
 
+  test("should report SQLite virtual tables as table metadata", async function () {
+    const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+    try {
+      const schemaPath = join(dir, "schema.sql");
+      const dbPath = join(dir, "virtual.sqlite");
+      await writeFile(
+        schemaPath,
+        "CREATE VIRTUAL TABLE search_docs USING fts5(title, body);\n"
+      );
+
+      const result = await runCli(
+        [
+          "run",
+          "src/index.ts",
+          "plan",
+          "-f",
+          schemaPath,
+          "-u",
+          `sqlite:///${dbPath}`,
+          "--format",
+          "json",
+          "--no-color",
+        ],
+        { DATABASE_URL: "" }
+      );
+
+      expect(result.exitCode).toBe(0);
+      const payload = parseJsonOutput(result.output);
+      expect(payload.statementMetadata).toHaveLength(1);
+      expect(payload.statementMetadata[0]).toMatchObject({
+        order: 1,
+        channel: "transactional",
+        category: "table",
+        risk: "safe",
+      });
+      expect(payload.statementMetadata[0].sql).toStartWith(
+        "CREATE VIRTUAL TABLE"
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("should treat sql-like file paths as files in plan command", async () => {
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {

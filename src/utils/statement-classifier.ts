@@ -328,6 +328,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   if (
     normalized.startsWith("CREATE TABLE") ||
     normalized.startsWith("CREATE UNLOGGED TABLE") ||
+    normalized.startsWith("CREATE VIRTUAL TABLE") ||
     normalized.startsWith("ALTER TABLE") ||
     normalized.startsWith("DROP TABLE")
   ) {

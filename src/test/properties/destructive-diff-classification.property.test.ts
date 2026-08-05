@@ -367,6 +367,14 @@ describe("Property-Based: Destructive Diff Classification", function () {
     ).toBe("sequence");
   });
 
+  test("classifies emitted SQLite virtual tables as tables", function () {
+    expect(
+      getStatementCategory(
+        'CREATE VIRTUAL TABLE "Odd Table" USING fts5(title, body);'
+      )
+    ).toBe("table");
+  });
+
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {
     const result = fc.check(
       fc.property(
