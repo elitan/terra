@@ -22,6 +22,7 @@ import { collationsAreDifferent, renderCollationName } from "./collation";
 import { getColumnPhysicalChanges } from "./column-physical";
 import { renderStorageParameterAssignments } from "./storage-parameters";
 import { renderRoutineConfigurationValue } from "./routine-configuration";
+import { qualifiedTypeReferenceMatchesCatalogIdentity } from "./postgres-type-reference";
 
 export type PostgresSerialType = "SMALLSERIAL" | "SERIAL" | "BIGSERIAL";
 
@@ -223,6 +224,21 @@ export function normalizeType(type: string): string {
   // Normalize to lowercase first for case-insensitive matching
   const lowerType = type.toLowerCase();
   return typeMap[lowerType] || type.toUpperCase();
+}
+
+export function postgresTypesAreEquivalent(
+  desiredType: string,
+  currentType: string,
+  currentTypeSchema?: string
+): boolean {
+  return (
+    normalizeType(desiredType) === normalizeType(currentType) ||
+    qualifiedTypeReferenceMatchesCatalogIdentity(
+      desiredType,
+      currentType,
+      currentTypeSchema
+    )
+  );
 }
 
 export function normalizeDefault(value: string | null | undefined): string | undefined {
@@ -447,7 +463,13 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
   }
 
   // Check if types are different
-  if (normalizedDesiredType !== normalizedCurrentType) {
+  if (
+    !postgresTypesAreEquivalent(
+      desired.type,
+      current.type,
+      current.typeSchema
+    )
+  ) {
     return true;
   }
 

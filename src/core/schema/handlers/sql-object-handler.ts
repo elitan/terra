@@ -464,6 +464,11 @@ async function canonicalizeSqlObject(object: SqlObject): Promise<CanonicalSqlObj
       createStatement?.partspec && !createStatement.partbound
         ? parseCreateTable(createStatement)
         : null;
+    if (partitionTable && object.partitionColumnTypeSchemas) {
+      for (const column of partitionTable.columns) {
+        column.typeSchema = object.partitionColumnTypeSchemas[column.name];
+      }
+    }
     const partitionKey = partitionTable
       ? buildPartitionKey(
           createStatement.partspec,

@@ -47,6 +47,7 @@ import {
   hasCanonicalPostgresSerialSequence,
   isInspectedPostgresSerialColumn,
   isPostgresSerialType,
+  postgresTypesAreEquivalent,
 } from "../../utils/sql";
 import { expressionsEqual } from "../../utils/expression-comparator";
 import { SQLBuilder } from "../../utils/sql-builder";
@@ -2115,8 +2116,6 @@ export class SchemaDiffer {
     const statements: string[] = [];
     const tableName = getQualifiedTableName(table);
     this.validateSerialColumnTransition(table, desiredColumn, currentColumn);
-    const normalizedDesiredType = normalizeType(desiredColumn.type);
-    const normalizedCurrentType = normalizeType(currentColumn.type);
 
     // Special handling for generated columns - they need drop and recreate
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
@@ -2161,7 +2160,11 @@ export class SchemaDiffer {
       return statements;
     }
 
-    const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
+    const typeIsChanging = !postgresTypesAreEquivalent(
+      desiredColumn.type,
+      currentColumn.type,
+      currentColumn.typeSchema
+    );
     const collationIsChanging = collationsAreDifferent(
       desiredColumn.collation,
       currentColumn.collation
@@ -3375,9 +3378,11 @@ export class SchemaDiffer {
 
     this.collectIdentityAlterations(desiredColumn, currentColumn, alterations);
 
-    const normalizedDesiredType = normalizeType(desiredColumn.type);
-    const normalizedCurrentType = normalizeType(currentColumn.type);
-    const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
+    const typeIsChanging = !postgresTypesAreEquivalent(
+      desiredColumn.type,
+      currentColumn.type,
+      currentColumn.typeSchema
+    );
     const collationIsChanging = collationsAreDifferent(
       desiredColumn.collation,
       currentColumn.collation

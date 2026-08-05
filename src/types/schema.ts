@@ -22,6 +22,8 @@ export interface IdentityColumn {
 export interface Column {
   name: string;
   type: string;
+  /** Catalog namespace of an inspected PostgreSQL type reference. */
+  typeSchema?: string;
   nullable: boolean;
   default?: string;
   /** Set by PostgreSQL inspection when a matching owned sequence is a default dependency. */
@@ -164,6 +166,8 @@ export interface EnumType {
 export interface CompositeTypeAttribute {
   name: string;
   type: string;
+  /** Catalog namespace of an inspected PostgreSQL type reference. */
+  typeSchema?: string;
   collation?: QualifiedName;
 }
 
@@ -326,6 +330,8 @@ export interface DomainTypeConstraint {
 export interface DomainTypeDefinition {
   kind: "domain";
   baseType: string;
+  /** Catalog namespace of an inspected PostgreSQL base type. */
+  baseTypeSchema?: string;
   collation?: QualifiedName;
   default?: string;
   notNull: boolean;
@@ -335,6 +341,8 @@ export interface DomainTypeDefinition {
 export interface RangeTypeDefinition {
   kind: "range";
   subtype: string;
+  /** Catalog namespace of an inspected PostgreSQL subtype. */
+  subtypeSchema?: string;
   subtypeOperatorClass?: QualifiedName;
   subtypeOperatorClassIsDefault?: boolean;
   collation?: QualifiedName;
@@ -453,6 +461,8 @@ export interface SqlObject {
   dropStatement?: string;
   dependencies?: string[];
   partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
+  /** Catalog namespaces for columns reconstructed from an inspected partition. */
+  partitionColumnTypeSchemas?: Record<string, string>;
   typeDefinition?: PostgresTypeDefinition;
   policyDefinition?: PostgresPolicyDefinition;
   foreignServerDefinition?: PostgresForeignServerDefinition;

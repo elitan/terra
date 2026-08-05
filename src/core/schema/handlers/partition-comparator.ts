@@ -8,7 +8,10 @@ import type {
 import { collationsAreDifferent } from "../../../utils/collation";
 import { expressionsEqual } from "../../../utils/expression-comparator";
 import { identityColumnsAreDifferent } from "../../../utils/identity";
-import { normalizeDefault, normalizeType } from "../../../utils/sql";
+import {
+  normalizeDefault,
+  postgresTypesAreEquivalent,
+} from "../../../utils/sql";
 import {
   partitionKeysAreEquivalent,
   type PartitionKey,
@@ -77,7 +80,11 @@ function partitionColumnsAreEquivalent(
 ): boolean {
   return (
     desired.name === current.name &&
-    normalizeType(desired.type) === normalizeType(current.type) &&
+    postgresTypesAreEquivalent(
+      desired.type,
+      current.type,
+      current.typeSchema
+    ) &&
     desired.nullable === current.nullable &&
     defaultsAreEquivalent(desired.default, current.default) &&
     !collationsAreDifferent(desired.collation, current.collation) &&

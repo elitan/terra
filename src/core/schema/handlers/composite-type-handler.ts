@@ -17,7 +17,7 @@ import {
 import {
   generateCreateCompositeTypeSQL,
   generateDropTypeSQL,
-  normalizeType,
+  postgresTypesAreEquivalent,
 } from "../../../utils/sql";
 import {
   getCompositeTypeKey,
@@ -49,7 +49,11 @@ function attributesAreEqual(
     return Boolean(
       current &&
         desired.name === current.name &&
-        normalizeType(desired.type) === normalizeType(current.type) &&
+        postgresTypesAreEquivalent(
+          desired.type,
+          current.type,
+          current.typeSchema
+        ) &&
         !collationsAreDifferent(desired.collation, current.collation)
     );
   });
@@ -372,8 +376,11 @@ export class CompositeTypeHandler {
         continue;
       }
 
-      const typeIsChanging =
-        normalizeType(desiredAttribute.type) !== normalizeType(currentAttribute.type);
+      const typeIsChanging = !postgresTypesAreEquivalent(
+        desiredAttribute.type,
+        currentAttribute.type,
+        currentAttribute.typeSchema
+      );
       const collationIsChanging = collationsAreDifferent(
         desiredAttribute.collation,
         currentAttribute.collation

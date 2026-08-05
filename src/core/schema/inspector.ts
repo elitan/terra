@@ -56,6 +56,7 @@ import {
   renderPostgresRoleDrop,
 } from "../../utils/postgres-role";
 import { isPostgresSerialType } from "../../utils/sql";
+import { parseTypeReference } from "../../utils/postgres-type-reference";
 import {
   isSupportedPostgresGrantPrivilege,
   postgresGrantKey,
@@ -912,6 +913,10 @@ export class DatabaseInspector {
           col.column_type_schema,
           Boolean(col.is_serial)
         );
+        const typeSchema = this.getUnqualifiedCatalogTypeSchema(
+          type,
+          col.column_type_schema
+        );
 
         // Parse generated column info
         let generated: Column['generated'] | undefined = undefined;
@@ -948,6 +953,7 @@ export class DatabaseInspector {
           column: {
             name: col.column_name,
             type: type,
+            ...(typeSchema ? { typeSchema } : {}),
             nullable: col.is_nullable,
             default: defaultValue,
             serial: col.is_serial || undefined,
@@ -1954,14 +1960,26 @@ export class DatabaseInspector {
     for (const row of result.rows) {
       const key = `${row.schema_name}.${row.type_name}`;
       const current = groups.get(key);
+      const attributeType = row.attribute_name
+        ? this.qualifySerialNamedCustomType(
+            row.attribute_type,
+            row.attribute_type_schema,
+            false
+          )
+        : undefined;
+      const attributeTypeSchema = attributeType
+        ? this.getUnqualifiedCatalogTypeSchema(
+            attributeType,
+            row.attribute_type_schema
+          )
+        : undefined;
       const attribute = row.attribute_name
         ? {
             name: row.attribute_name,
-            type: this.qualifySerialNamedCustomType(
-              row.attribute_type,
-              row.attribute_type_schema,
-              false
-            ),
+            type: attributeType!,
+            ...(attributeTypeSchema
+              ? { typeSchema: attributeTypeSchema }
+              : {}),
             ...(row.attribute_collation_name
               ? {
                   collation: {
@@ -3274,7 +3292,21 @@ export class DatabaseInspector {
     const objects: SqlObject[] = [];
 
     for (const row of result.rows) {
-      const columns = await this.getTableColumnDefinitions(client, row.table_name, row.schema_name);
+      const inspectedColumns = await this.getTableColumnDefinitions(
+        client,
+        row.table_name,
+        row.schema_name
+      );
+      const columns = inspectedColumns.map(function getDefinition(column) {
+        return column.definition;
+      });
+      const partitionColumnTypeSchemas = Object.fromEntries(
+        inspectedColumns.flatMap(function getTypeSchema(column) {
+          return column.typeSchema
+            ? [[column.name, column.typeSchema]]
+            : [];
+        })
+      );
       const constraints = await this.getTableConstraintDefinitions(client, row.oid);
       const body = [...columns, ...constraints].join(",\n  ");
       const qualifiedTable = this.qualifyName(row.table_name, row.schema_name);
@@ -3292,6 +3324,9 @@ export class DatabaseInspector {
         schema: row.schema_name,
         createStatement,
         dropStatement: `DROP TABLE IF EXISTS ${qualifiedTable} RESTRICT;`,
+        ...(Object.keys(partitionColumnTypeSchemas).length > 0
+          ? { partitionColumnTypeSchemas }
+          : {}),
         ...(Array.isArray(row.partition_key_operator_classes)
           ? {
               partitionKeyOperatorClasses:
@@ -3806,6 +3841,10 @@ export class DatabaseInspector {
               `${row.base_type_kind === "d" ? "domain" : "range"}-type:${row.base_type_schema}.${row.base_type_name}`,
             ]
           : [];
+      const baseTypeSchema = this.getUnqualifiedCatalogTypeSchema(
+        row.base_type,
+        row.base_type_schema
+      );
 
       objects.push({
         kind: "domain-type",
@@ -3818,6 +3857,7 @@ export class DatabaseInspector {
         typeDefinition: {
           kind: "domain",
           baseType: row.base_type,
+          ...(baseTypeSchema ? { baseTypeSchema } : {}),
           ...(row.collation_name
             ? {
                 collation: {
@@ -4043,6 +4083,10 @@ export class DatabaseInspector {
               `${row.subtype_kind === "d" ? "domain" : "range"}-type:${row.subtype_schema}.${row.subtype_type_name}`,
             ]
           : [];
+      const subtypeSchema = inspector.getUnqualifiedCatalogTypeSchema(
+        row.subtype_name,
+        row.subtype_schema
+      );
 
       return {
         kind: "range-type" as const,
@@ -4055,6 +4099,7 @@ export class DatabaseInspector {
         typeDefinition: {
           kind: "range" as const,
           subtype: row.subtype_name,
+          ...(subtypeSchema ? { subtypeSchema } : {}),
           ...(row.subtype_opclass_bare_name
             ? {
                 subtypeOperatorClass: {
@@ -4542,7 +4587,15 @@ export class DatabaseInspector {
     return objects;
   }
 
-  private async getTableColumnDefinitions(client: Client, tableName: string, tableSchema: string): Promise<string[]> {
+  private async getTableColumnDefinitions(
+    client: Client,
+    tableName: string,
+    tableSchema: string
+  ): Promise<Array<{
+    name: string;
+    definition: string;
+    typeSchema?: string;
+  }>> {
     const result = await client.query(
       `
         SELECT
@@ -4589,7 +4642,18 @@ export class DatabaseInspector {
       [tableName, tableSchema]
     );
 
-    return result.rows.map(this.buildColumnDefinition, this);
+    const inspector = this;
+    return result.rows.map(function mapColumn(row: any) {
+      const typeSchema = inspector.getUnqualifiedCatalogTypeSchema(
+        row.pg_type,
+        row.column_type_schema
+      );
+      return {
+        name: row.column_name,
+        definition: inspector.buildColumnDefinition(row),
+        ...(typeSchema ? { typeSchema } : {}),
+      };
+    });
   }
 
   private async getTableConstraintDefinitions(client: Client, relationOid: number): Promise<string[]> {
@@ -4773,6 +4837,18 @@ export class DatabaseInspector {
       ? typeSchema
       : this.quoteIdent(typeSchema);
     return `${schema}.${type}`;
+  }
+
+  private getUnqualifiedCatalogTypeSchema(
+    type: string,
+    typeSchema: string | undefined
+  ): string | undefined {
+    if (!typeSchema || typeSchema === "pg_catalog") {
+      return undefined;
+    }
+    return parseTypeReference(type)?.length === 1
+      ? typeSchema
+      : undefined;
   }
 
   private quoteLiteral(value: string): string {

@@ -153,6 +153,11 @@ Catalog inspection preserves the schema identity of custom types named
 `smallserial`, `serial2`, `serial`, `serial4`, `bigserial`, or `serial8`,
 including their arrays and use in composite attributes, so those valid
 schema-qualified types do not drift into integer pseudo-type semantics.
+Catalog namespace identity is also retained whenever PostgreSQL renders another
+visible custom type without its explicit schema. Explicitly qualified scalar
+and array references therefore replan idempotently in ordinary and partitioned
+table columns, composite attributes, domain base types, and range subtypes,
+while a different schema or scalar/array shape remains a real type change.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

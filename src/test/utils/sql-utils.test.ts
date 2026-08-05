@@ -5,8 +5,13 @@ import {
   isPostgresSerialDefault,
   isPostgresSerialType,
   normalizePostgresSerialType,
+  postgresTypesAreEquivalent,
 } from "../../utils/sql";
 import type { Column } from "../../types/schema";
+import {
+  parseTypeReference,
+  qualifiedTypeReferenceMatchesCatalogIdentity,
+} from "../../utils/postgres-type-reference";
 
 describe("normalizeDefault", () => {
   test("should return undefined for null input", () => {
@@ -270,5 +275,131 @@ describe("PostgreSQL serial comparison", function () {
     expect(columnsAreDifferent(desired, unownedNextval)).toBe(true);
     expect(columnsAreDifferent(desired, serial)).toBe(false);
     expect(columnsAreDifferent(desired, serialWithOptionDrift)).toBe(true);
+  });
+});
+
+describe("PostgreSQL catalog type identity comparison", function () {
+  test("parses qualified, quoted, modified, and array type references", function () {
+    expect(parseTypeReference("public.status[]")).toEqual(["public", "status"]);
+    expect(parseTypeReference('"Visible Schema"."Status.Type"(4)[][]')).toEqual([
+      "Visible Schema",
+      "Status.Type",
+    ]);
+    expect(parseTypeReference('"Escaped""Schema"."Escaped""Type"')).toEqual([
+      'Escaped"Schema',
+      'Escaped"Type',
+    ]);
+    expect(parseTypeReference("Status")).toEqual(["status"]);
+    expect(parseTypeReference("public..status")).toBeUndefined();
+    expect(parseTypeReference('"public.status')).toBeUndefined();
+  });
+
+  test("matches explicit qualification only to the inspected catalog namespace", function () {
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "public.status",
+        "status",
+        "public"
+      )
+    ).toBe(true);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        '"Visible Schema"."Status.Type"[][]',
+        '"Status.Type"[]',
+        "Visible Schema"
+      )
+    ).toBe(true);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        '"public"."status"',
+        "status",
+        "public"
+      )
+    ).toBe(true);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "public.status[]",
+        "status",
+        "public"
+      )
+    ).toBe(false);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "public.status(4)",
+        "status(8)",
+        "public"
+      )
+    ).toBe(false);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "public.status",
+        "other.status",
+        "public"
+      )
+    ).toBe(false);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "public.status",
+        "status",
+        "other"
+      )
+    ).toBe(false);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "status",
+        "status",
+        "public"
+      )
+    ).toBe(false);
+    expect(
+      qualifiedTypeReferenceMatchesCatalogIdentity(
+        "public.status",
+        "status",
+        undefined
+      )
+    ).toBe(false);
+  });
+
+  test("uses catalog identity without weakening ordinary type comparison", function () {
+    expect(postgresTypesAreEquivalent("integer", "int4", "pg_catalog")).toBe(
+      true
+    );
+    expect(postgresTypesAreEquivalent("public.status", "status", "public")).toBe(
+      true
+    );
+    expect(postgresTypesAreEquivalent("public.status[]", "status[]", "public")).toBe(
+      true
+    );
+    expect(postgresTypesAreEquivalent("public.status", "status", "other")).toBe(
+      false
+    );
+    expect(postgresTypesAreEquivalent("public.status", "status[]", "public")).toBe(
+      false
+    );
+  });
+
+  test("uses inspected column namespaces for explicitly qualified custom types", function () {
+    const desired: Column = {
+      name: "states",
+      type: "public.status[]",
+      nullable: true,
+    };
+    const current: Column = {
+      name: "states",
+      type: "status[]",
+      typeSchema: "public",
+      nullable: true,
+    };
+
+    expect(columnsAreDifferent(desired, current)).toBe(false);
+    expect(
+      columnsAreDifferent(desired, { ...current, typeSchema: "tenant" })
+    ).toBe(true);
+    expect(
+      columnsAreDifferent(desired, { ...current, typeSchema: undefined })
+    ).toBe(true);
+    expect(columnsAreDifferent(desired, { ...current, type: "status" })).toBe(
+      true
+    );
   });
 });

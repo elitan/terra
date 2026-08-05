@@ -5,74 +5,18 @@ import type {
   Table,
   View,
 } from "../../../types/schema";
+import {
+  parseTypeReference,
+  typeReferenceMatches,
+} from "../../../utils/postgres-type-reference";
+import type { PostgresTypeIdentity } from "../../../utils/postgres-type-reference";
 
-interface PostgresTypeIdentity {
-  name: string;
-  schema?: string;
-}
+export { parseTypeReference, typeReferenceMatches };
 
 export function getCompositeTypeKey(compositeType: CompositeType): string {
   return `${compositeType.schema || "public"}.${compositeType.name}`;
 }
 
-function getBaseTypeName(type: string): string {
-  return type
-    .trim()
-    .replace(/(?:\[[^\]]*\])+$/, "")
-    .replace(/\([^)]*\)$/, "");
-}
-
-export function parseTypeReference(type: string): string[] | undefined {
-  const baseType = getBaseTypeName(type);
-  const parts: string[] = [];
-  let part = "";
-  let quoted = false;
-  let partWasQuoted = false;
-
-  for (let index = 0; index < baseType.length; index += 1) {
-    const character = baseType[index];
-    if (character === '"') {
-      if (quoted && baseType[index + 1] === '"') {
-        part += '"';
-        index += 1;
-        continue;
-      }
-      quoted = !quoted;
-      partWasQuoted = true;
-      continue;
-    }
-    if (character === "." && !quoted) {
-      const value = partWasQuoted ? part : part.trim();
-      if (!value) return undefined;
-      parts.push(partWasQuoted ? value : value.toLowerCase());
-      part = "";
-      partWasQuoted = false;
-      continue;
-    }
-    part += character;
-  }
-
-  const value = partWasQuoted ? part : part.trim();
-  if (quoted || !value) return undefined;
-  parts.push(partWasQuoted ? value : value.toLowerCase());
-  return parts;
-}
-
-export function typeReferenceMatches(
-  type: string,
-  target: PostgresTypeIdentity
-): boolean {
-  const reference = parseTypeReference(type.replace(/^SETOF\s+/i, ""));
-  if (!reference) return false;
-  if (reference.length === 1) {
-    return reference[0] === target.name;
-  }
-  return (
-    reference.length === 2 &&
-    reference[0] === (target.schema || "public") &&
-    reference[1] === target.name
-  );
-}
 
 function findCompositeTypeDependency(
   attribute: CompositeTypeAttribute,

@@ -9,7 +9,7 @@ import type {
 import { ValidationError } from "../../../types/errors";
 import { collationsAreDifferent } from "../../../utils/collation";
 import { expressionsEqual } from "../../../utils/expression-comparator";
-import { normalizeType } from "../../../utils/sql";
+import { postgresTypesAreEquivalent } from "../../../utils/sql";
 import {
   parseTypeReference,
 } from "./composite-type-dependencies";
@@ -63,7 +63,11 @@ export function domainDefinitionsRequireReplacement(
   current: DomainTypeDefinition
 ): boolean {
   return (
-    normalizeType(desired.baseType) !== normalizeType(current.baseType) ||
+    !postgresTypesAreEquivalent(
+      desired.baseType,
+      current.baseType,
+      current.baseTypeSchema
+    ) ||
     collationsAreDifferent(desired.collation, current.collation)
   );
 }
@@ -105,7 +109,11 @@ export function rangeDefinitionsAreEqual(
   rangeName: string
 ): boolean {
   return (
-    normalizeType(desired.subtype) === normalizeType(current.subtype) &&
+    postgresTypesAreEquivalent(
+      desired.subtype,
+      current.subtype,
+      current.subtypeSchema
+    ) &&
     rangeOperatorClassesAreEqual(desired, current, localSchema) &&
     !collationsAreDifferent(desired.collation, current.collation) &&
     qualifiedNamesAreEqual(

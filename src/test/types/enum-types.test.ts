@@ -4,18 +4,31 @@ import { SchemaService } from "../../core/schema/service";
 import { DatabaseService } from "../../core/database/client";
 import { createTestClient, cleanDatabase, getTestDbConfig, createTestSchemaService } from "../utils";
 
+async function cleanPublicQualificationTypes(client: Client): Promise<void> {
+  await client.query(
+    `DROP TABLE IF EXISTS public.qualification_partitioned CASCADE`
+  );
+  await client.query(`DROP TABLE IF EXISTS public.qualification_values CASCADE`);
+  await client.query(`DROP TYPE IF EXISTS public.qualification_composite CASCADE`);
+  await client.query(`DROP TYPE IF EXISTS public.qualification_range CASCADE`);
+  await client.query(`DROP DOMAIN IF EXISTS public.qualification_domain CASCADE`);
+  await client.query(`DROP TYPE IF EXISTS public.qualification_enum CASCADE`);
+}
+
 describe("ENUM Types", () => {
   let client: Client;
   let schemaService: SchemaService;
 
   beforeEach(async () => {
     client = await createTestClient();
+    await cleanPublicQualificationTypes(client);
     await cleanDatabase(client, ['public', 'myapp', 'app', 'tenant_a']);
     const databaseService = new DatabaseService(getTestDbConfig());
     schemaService = createTestSchemaService();
   });
 
   afterEach(async () => {
+    await cleanPublicQualificationTypes(client);
     await client?.end();
   });
 
@@ -691,6 +704,142 @@ describe("ENUM Types", () => {
           serial_values: "{value}",
         },
       ]);
+    });
+
+    it("treats explicit public custom type references as their catalog identities", async function () {
+      const schema = `
+        CREATE TYPE public.qualification_enum AS ENUM ('first', 'second');
+        CREATE DOMAIN public.qualification_domain
+          AS public."qualification_enum";
+        CREATE TYPE public.qualification_range AS RANGE (
+          subtype = "public".qualification_enum
+        );
+        CREATE TYPE public.qualification_composite AS (
+          enum_value public."qualification_enum",
+          enum_values public.qualification_enum[],
+          domain_value public."qualification_domain",
+          domain_values public.qualification_domain[],
+          range_value public."qualification_range",
+          range_values public.qualification_range[]
+        );
+
+        CREATE TABLE public.qualification_values (
+          id integer PRIMARY KEY,
+          enum_value public.qualification_enum,
+          enum_values public.qualification_enum[],
+          domain_value public.qualification_domain,
+          domain_values public.qualification_domain[],
+          range_value public.qualification_range,
+          range_values public.qualification_range[],
+          composite_value public."qualification_composite",
+          composite_values public.qualification_composite[]
+        );
+
+        CREATE TABLE public.qualification_partitioned (
+          enum_value public.qualification_enum NOT NULL
+        ) PARTITION BY LIST (enum_value);
+        CREATE TABLE public.qualification_first
+          PARTITION OF public.qualification_partitioned
+          FOR VALUES IN ('first');
+      `;
+
+      await schemaService.apply(schema, ["public"], true);
+      await client.query(`
+        INSERT INTO public.qualification_values VALUES (
+          1,
+          'first',
+          ARRAY['first', 'second']::public.qualification_enum[],
+          'second',
+          ARRAY['first']::public.qualification_domain[],
+          '[first,second]',
+          ARRAY['[first,second]']::public.qualification_range[],
+          ROW(
+            'first',
+            ARRAY['second']::public.qualification_enum[],
+            'second',
+            ARRAY['first']::public.qualification_domain[],
+            '[first,second]',
+            ARRAY['[first,second]']::public.qualification_range[]
+          )::public.qualification_composite,
+          ARRAY[
+            ROW(
+              'second',
+              ARRAY['first']::public.qualification_enum[],
+              'first',
+              ARRAY['second']::public.qualification_domain[],
+              '[first,second]',
+              ARRAY['[first,second]']::public.qualification_range[]
+            )::public.qualification_composite
+          ]
+        )
+      `);
+      await client.query(`
+        INSERT INTO public.qualification_partitioned VALUES ('first')
+      `);
+      const before = await client.query(`
+        SELECT
+          (SELECT json_object_agg(class.relname, class.oid::text ORDER BY class.relname)
+           FROM pg_class class
+           WHERE class.relnamespace = 'public'::regnamespace
+             AND class.relname IN (
+               'qualification_values',
+               'qualification_partitioned',
+               'qualification_first'
+             )) AS table_oids,
+          json_object_agg(type.typname, type.oid::text ORDER BY type.typname)
+            AS type_oids,
+          json_build_object(
+            'ordinary',
+            (SELECT json_agg(value ORDER BY id)
+             FROM public.qualification_values value),
+            'partitioned',
+            (SELECT json_agg(value ORDER BY enum_value)
+             FROM public.qualification_partitioned value)
+          ) AS rows
+        FROM pg_type type
+        WHERE type.typnamespace = 'public'::regnamespace
+          AND type.typname IN (
+            'qualification_enum',
+            'qualification_domain',
+            'qualification_range',
+            'qualification_composite'
+          )
+      `);
+
+      const plan = await schemaService.plan(schema, ["public"]);
+      expect(plan.hasChanges).toBe(false);
+      await schemaService.apply(schema, ["public"], true);
+
+      const after = await client.query(`
+        SELECT
+          (SELECT json_object_agg(class.relname, class.oid::text ORDER BY class.relname)
+           FROM pg_class class
+           WHERE class.relnamespace = 'public'::regnamespace
+             AND class.relname IN (
+               'qualification_values',
+               'qualification_partitioned',
+               'qualification_first'
+             )) AS table_oids,
+          json_object_agg(type.typname, type.oid::text ORDER BY type.typname)
+            AS type_oids,
+          json_build_object(
+            'ordinary',
+            (SELECT json_agg(value ORDER BY id)
+             FROM public.qualification_values value),
+            'partitioned',
+            (SELECT json_agg(value ORDER BY enum_value)
+             FROM public.qualification_partitioned value)
+          ) AS rows
+        FROM pg_type type
+        WHERE type.typnamespace = 'public'::regnamespace
+          AND type.typname IN (
+            'qualification_enum',
+            'qualification_domain',
+            'qualification_range',
+            'qualification_composite'
+          )
+      `);
+      expect(after.rows).toEqual(before.rows);
     });
 
     it("should handle schema-qualified ENUM types in column definitions", async () => {
