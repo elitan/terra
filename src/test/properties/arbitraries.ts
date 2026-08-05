@@ -385,18 +385,34 @@ export const uniqueConstraint = fc.record({
  * Generate a check constraint expression
  * Only generates numeric comparisons to ensure type compatibility
  */
-export const checkExpression = fc.oneof(
+const checkExpressionDefinition = fc.oneof(
   fc.record({
     column: columnName,
     operator: fc.constantFrom('>', '>=', '<', '<='),
     value: fc.integer({ min: 0, max: 100 })
-  }).map(e => `${e.column} ${e.operator} ${e.value}`),
+  }).map(function renderComparisonExpression(value) {
+    return {
+      column: value.column,
+      expression: `${value.column} ${value.operator} ${value.value}`,
+    };
+  }),
 
   fc.record({
     column: columnName,
     min: fc.integer({ min: 0, max: 50 }),
     max: fc.integer({ min: 51, max: 100 })
-  }).map(e => `${e.column} BETWEEN ${e.min} AND ${e.max}`)
+  }).map(function renderBetweenExpression(value) {
+    return {
+      column: value.column,
+      expression: `${value.column} BETWEEN ${value.min} AND ${value.max}`,
+    };
+  })
+);
+
+export const checkExpression = checkExpressionDefinition.map(
+  function selectCheckExpression(value) {
+    return value.expression;
+  }
 );
 
 /**
@@ -404,8 +420,15 @@ export const checkExpression = fc.oneof(
  */
 export const checkConstraint = fc.record({
   tableName: tableName,
-  expression: checkExpression,
+  definition: checkExpressionDefinition,
   constraintName: constraintName('chk')
+}).map(function flattenCheckConstraint(value) {
+  return {
+    tableName: value.tableName,
+    column: value.definition.column,
+    expression: value.definition.expression,
+    constraintName: value.constraintName,
+  };
 });
 
 /**
@@ -464,11 +487,14 @@ export const expressionIndex = fc.record({
     'TRIM',
     'LENGTH'
   )
-}).map(idx => ({
-  name: idx.name,
-  tableName: idx.tableName,
-  expression: `${idx.expression}(${idx.column})`
-}));
+}).map(function renderExpressionIndex(index) {
+  return {
+    name: index.name,
+    tableName: index.tableName,
+    column: index.column,
+    expression: `${index.expression}(${index.column})`
+  };
+});
 
 /**
  * Generate a simple SELECT query for views

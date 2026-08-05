@@ -7,12 +7,23 @@ import {
   indexDefinition,
   expressionIndex,
   tableName,
-  columnName,
-  partialIndexWhere
+  columnName
 } from "./arbitraries";
 import { configurePropertyTests } from "./property-test-options";
 
 configurePropertyTests();
+
+const partialIndexPredicate = fc.oneof(
+  fc.constant("active = true"),
+  fc.constant("deleted = false"),
+  fc.constant("status = 'active'"),
+  fc.record({
+    operator: fc.constantFrom(">", ">="),
+    value: fc.integer({ min: 0, max: 100 }),
+  }).map(function renderScorePredicate(value) {
+    return `score ${value.operator} ${value.value}`;
+  })
+);
 
 /**
  * Property-Based Tests for Index Management
@@ -123,15 +134,65 @@ describe("Property-Based: Index Management", () => {
     );
   }, { timeout: 120000 });
 
-  // NOTE: This test reveals normalization issues with partial index WHERE clauses
-  // Property-based testing found that some WHERE clause variations aren't normalized correctly
-  // This needs investigation in Terra core
-  // test("property: partial index with WHERE clause is idempotent", async () => { ... });
+  test("property: partial index predicates are idempotent", async function () {
+    await fc.assert(
+      fc.asyncProperty(
+        tableName,
+        partialIndexPredicate,
+        async function assertPartialIndexIdempotency(table, predicate) {
+          await cleanDatabase(client);
+          const schema = `
+            CREATE TABLE ${table} (
+              id SERIAL PRIMARY KEY,
+              active boolean,
+              deleted boolean,
+              status text,
+              score integer
+            );
 
-  // NOTE: This test reveals normalization issues with expression indexes
-  // Property-based testing found that expression indexes may not be idempotent
-  // This needs investigation in Terra core
-  // test("property: expression index is idempotent", async () => { ... });
+            CREATE INDEX idx_partial_property ON ${table} (score)
+              WHERE ${predicate};
+          `.trim();
+
+          await service.apply(schema, ["public"], true);
+          const plan = await service.plan(schema);
+
+          expect(plan.hasChanges).toBe(false);
+          expect(plan.transactional).toEqual([]);
+          expect(plan.concurrent).toEqual([]);
+        }
+      ),
+      { numRuns: 20, verbose: false }
+    );
+  }, { timeout: 120000 });
+
+  test("property: expression indexes are idempotent", async function () {
+    await fc.assert(
+      fc.asyncProperty(
+        expressionIndex,
+        async function assertExpressionIndexIdempotency(index) {
+          await cleanDatabase(client);
+          const schema = `
+            CREATE TABLE ${index.tableName} (
+              id SERIAL PRIMARY KEY,
+              ${index.column} text
+            );
+
+            CREATE INDEX ${index.name} ON ${index.tableName}
+              ((${index.expression}));
+          `.trim();
+
+          await service.apply(schema, ["public"], true);
+          const plan = await service.plan(schema);
+
+          expect(plan.hasChanges).toBe(false);
+          expect(plan.transactional).toEqual([]);
+          expect(plan.concurrent).toEqual([]);
+        }
+      ),
+      { numRuns: 20, verbose: false }
+    );
+  }, { timeout: 120000 });
 
   test("property: changing index from non-unique to unique is detected", async () => {
     await fc.assert(

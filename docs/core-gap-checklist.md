@@ -118,6 +118,7 @@
 - done: rerun sqlite suite green after rollback/no-leak regression (`138` sqlite pass).
 - done: rerun sqlite suites and `test:core` green (`137` sqlite pass, `101` core pass).
 - done: add property tests for destructive diff classification with case/whitespace fuzz coverage.
+- done: restore generated PostgreSQL idempotency properties for immutable partial-index predicates, expression indexes, and row-local CHECK expressions; remove stale normalization-limit notes after PostgreSQL 14/18 verification.
 - done: fix destructive classifier false positive on safe enum statements (`CREATE TYPE`, `ALTER TYPE ... ADD VALUE`).
 - done: add strict-mode integration regression for enum create + value append.
 - done: rerun property suite and `test:core` green (`3` property pass, `102` core pass).

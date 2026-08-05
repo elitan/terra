@@ -133,10 +133,32 @@ describe("Property-Based: Constraint Management", () => {
     );
   }, { timeout: 120000 });
 
-  // NOTE: This test reveals normalization issues with check constraints in Terra
-  // Property-based testing found that check constraint idempotency isn't always maintained
-  // This needs investigation in Terra core
-  // test("property: check constraint creation is idempotent", async () => { ... });
+  test("property: check constraint expressions are idempotent", async function () {
+    await fc.assert(
+      fc.asyncProperty(
+        checkConstraint,
+        async function assertCheckConstraintIdempotency(constraint) {
+          await cleanDatabase(client);
+          const schema = `
+            CREATE TABLE ${constraint.tableName} (
+              id SERIAL PRIMARY KEY,
+              ${constraint.column} integer,
+              CONSTRAINT ${constraint.constraintName}
+                CHECK (${constraint.expression})
+            );
+          `.trim();
+
+          await service.apply(schema, ["public"], true);
+          const plan = await service.plan(schema);
+
+          expect(plan.hasChanges).toBe(false);
+          expect(plan.transactional).toEqual([]);
+          expect(plan.concurrent).toEqual([]);
+        }
+      ),
+      { numRuns: 20, verbose: false }
+    );
+  }, { timeout: 120000 });
 
   test("property: removing foreign key is detected", async () => {
     await fc.assert(
