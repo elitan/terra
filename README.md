@@ -232,6 +232,12 @@ a conditional migration no-op. Contextual owners (`CURRENT_ROLE`,
 `CURRENT_USER`, and `SESSION_USER`), duplicate schema declarations, and inline
 schema elements fail before planning; use a concrete role and separate,
 schema-qualified `CREATE` statements.
+PostgreSQL view queries are compared through their parsed syntax trees. Local
+schema qualification, redundant single-source column qualification, identifier
+quoting, comments, formatting, and redundant parentheses normalize without
+rewriting string or dollar-quoted literal values. Literal whitespace and text
+that resembles a schema or table qualifier therefore remain semantic and cause
+the view query to be replaced.
 PostgreSQL object comments are declarative for schemas, ordinary and partitioned
 tables, table/view/materialized-view/composite columns, ordinary and
 materialized views, indexes, sequences, and user-defined types including enums,

@@ -56,6 +56,24 @@ describe("view definition normalization matrix", function () {
         desired: 'SELECT id FROM "tenant_a"."base_tbl"',
         current: "SELECT id FROM tenant_a.base_tbl",
       },
+      {
+        schema: "public",
+        desired:
+          "SELECT public.base_tbl.id FROM public.base_tbl",
+        current: "SELECT id FROM base_tbl",
+      },
+      {
+        schema: "tenant_a",
+        desired:
+          "SELECT tenant_a.normalize_value(id) FROM tenant_a.base_tbl",
+        current: "SELECT normalize_value(id) FROM base_tbl",
+      },
+      {
+        schema: "tenant_a",
+        desired:
+          "SELECT id::tenant_a.custom_value FROM tenant_a.base_tbl",
+        current: "SELECT id::custom_value FROM base_tbl",
+      },
     ];
 
     for (const item of matrix) {
@@ -112,6 +130,41 @@ describe("view definition normalization matrix", function () {
 
     expect(statements).toHaveLength(1);
     expect(statements[0]).toContain("CREATE OR REPLACE VIEW");
+  });
+
+  test("keeps PostgreSQL literal content distinct", function () {
+    const handler = new ViewHandler();
+    const cases = [
+      {
+        current: "SELECT 'alpha beta'::text AS value",
+        desired: "SELECT 'alpha  beta'::text AS value",
+      },
+      {
+        current:
+          "SELECT 'public.secret'::text AS value FROM public.base_tbl",
+        desired: "SELECT 'secret'::text AS value FROM public.base_tbl",
+      },
+      {
+        current:
+          "SELECT 'source.label'::text AS value " +
+          "FROM public.base_tbl AS source",
+        desired:
+          "SELECT 'label'::text AS value FROM public.base_tbl AS source",
+      },
+      {
+        current: "SELECT $view$alpha  beta$view$::text AS value",
+        desired: "SELECT $view$alpha beta$view$::text AS value",
+      },
+    ];
+
+    for (const item of cases) {
+      const statements = handler.generateStatements(
+        [makeView({ definition: item.desired })],
+        [makeView({ definition: item.current })]
+      );
+      expect(statements).toHaveLength(1);
+      expect(statements[0]).toContain("CREATE OR REPLACE VIEW");
+    }
   });
 
   test("recreates a materialized view when changing it to an ordinary view", function () {

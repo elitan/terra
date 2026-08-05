@@ -306,6 +306,61 @@ describe("Basic View Operations", () => {
       expect(viewResult.rows[0].view_definition).toContain("active");
     });
 
+    test("preserves string literals while normalizing view definitions", async function () {
+      const initialSchema = `
+        CREATE TABLE view_literal_source (
+          id integer PRIMARY KEY
+        );
+
+        CREATE VIEW view_literal_semantics AS
+        SELECT
+          source.id,
+          'alpha beta'::text AS spacing,
+          'public.secret'::text AS schema_text,
+          'source.label'::text AS source_text
+        FROM public.view_literal_source AS source;
+      `;
+      const changedSchema = initialSchema
+        .replace("alpha beta", "alpha  beta")
+        .replace("public.secret", "secret")
+        .replace("source.label", "label");
+
+      await schemaService.apply(initialSchema, ["public"], true);
+      await client.query("INSERT INTO view_literal_source(id) VALUES (1)");
+      expect(
+        (await client.query("SELECT * FROM view_literal_semantics")).rows
+      ).toEqual([
+        {
+          id: 1,
+          spacing: "alpha beta",
+          schema_text: "public.secret",
+          source_text: "source.label",
+        },
+      ]);
+
+      const plan = await schemaService.plan(changedSchema, ["public"]);
+      expect(plan.transactional.some(function replacesView(statement) {
+        return statement.includes(
+          'CREATE OR REPLACE VIEW "view_literal_semantics"'
+        );
+      })).toBe(true);
+
+      await schemaService.apply(changedSchema, ["public"], true);
+      expect(
+        (await client.query("SELECT * FROM view_literal_semantics")).rows
+      ).toEqual([
+        {
+          id: 1,
+          spacing: "alpha  beta",
+          schema_text: "secret",
+          source_text: "label",
+        },
+      ]);
+      expect(
+        (await schemaService.plan(changedSchema, ["public"])).hasChanges
+      ).toBe(false);
+    });
+
     test("should handle view removal", async () => {
       // Initial schema with view
       const initialSchema = `

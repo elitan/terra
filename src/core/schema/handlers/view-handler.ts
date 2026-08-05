@@ -31,118 +31,119 @@ import {
 import { getPostgresIndexTerms } from "../../../utils/postgres-index";
 import { SQLBuilder } from "../../../utils/sql-builder";
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function postgresStringNodeValue(node: any): string | undefined {
+  return typeof node?.String?.sval === "string"
+    ? node.String.sval
+    : undefined;
 }
 
-function normalizeSimpleIdentifierQuotes(definition: string): string {
-  return definition.replace(
-    /(^|[\s(.,])"([a-z_][a-z0-9_]*)"(?=[\s).,]|$)/g,
-    "$1$2"
-  );
+function removeLeadingLocalSchema(
+  nodes: any[] | undefined,
+  localSchema: string,
+  minimumParts: number = 2
+): void {
+  if (
+    !Array.isArray(nodes) ||
+    nodes.length < minimumParts ||
+    postgresStringNodeValue(nodes[0]) !== localSchema
+  ) {
+    return;
+  }
+  nodes.shift();
 }
 
-function isClauseKeyword(value: string): boolean {
-  return new Set([
-    "where",
-    "group",
-    "having",
-    "order",
-    "limit",
-    "offset",
-    "union",
-    "intersect",
-    "except",
-    "join",
-    "left",
-    "right",
-    "full",
-    "inner",
-    "cross",
-  ]).has(value.toLowerCase());
+function simpleSelectSourceName(selectStatement: any): string | undefined {
+  if (selectStatement?.fromClause?.length !== 1) {
+    return undefined;
+  }
+  const rangeVariable = selectStatement.fromClause[0]?.RangeVar;
+  if (!rangeVariable) {
+    return undefined;
+  }
+  return rangeVariable.alias?.aliasname || rangeVariable.relname;
 }
 
-function normalizeSingleSourceColumnQualification(definition: string): string {
-  if (!/^\s*select\b/i.test(definition)) {
-    return definition;
+function removeSingleSourceColumnQualification(
+  value: any,
+  sourceName: string
+): void {
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+  if (value.SelectStmt) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      removeSingleSourceColumnQualification(item, sourceName);
+    }
+    return;
   }
 
-  if ((definition.match(/\bfrom\b/gi) || []).length !== 1 || /\bjoin\b/i.test(definition)) {
-    return definition;
+  const fields = value.ColumnRef?.fields;
+  if (
+    Array.isArray(fields) &&
+    fields.length > 1 &&
+    postgresStringNodeValue(fields[0]) === sourceName
+  ) {
+    fields.shift();
   }
-
-  const fromMatch = definition.match(
-    /\bfrom\s+(?:([a-z_][a-z0-9_]*)\.)?([a-z_][a-z0-9_]*)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?/i
-  );
-  if (!fromMatch) {
-    return definition;
+  for (const child of Object.values(value)) {
+    removeSingleSourceColumnQualification(child, sourceName);
   }
-
-  const fromIndex = fromMatch.index ?? 0;
-  const fromSegment = definition.slice(fromIndex);
-  const clauseMatch = fromSegment.match(
-    /\b(where|group\s+by|having|order\s+by|limit|offset|union|intersect|except)\b/i
-  );
-  const sourceSegment = clauseMatch
-    ? fromSegment.slice(0, clauseMatch.index)
-    : fromSegment;
-
-  if (sourceSegment.includes(",")) {
-    return definition;
-  }
-
-  const aliasName = fromMatch[3];
-  const sourceName = aliasName && !isClauseKeyword(aliasName) ? aliasName : fromMatch[2];
-  if (!sourceName) {
-    return definition;
-  }
-
-  return definition.replace(new RegExp(`\\b${escapeRegExp(sourceName)}\\.`, "gi"), "");
 }
 
-function hasBalancedOuterParentheses(value: string): boolean {
-  if (!value.startsWith("(") || !value.endsWith(")")) {
-    return false;
+function canonicalizePostgresViewAst(value: any, localSchema: string): void {
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      canonicalizePostgresViewAst(item, localSchema);
+    }
+    return;
   }
 
-  let depth = 0;
-  for (let i = 0; i < value.length - 1; i++) {
-    const char = value[i];
-    if (char === "(") depth++;
-    if (char === ")") depth--;
-    if (depth === 0) return false;
+  const rangeVariable = value.RangeVar;
+  if (rangeVariable?.schemaname === localSchema) {
+    delete rangeVariable.schemaname;
+  }
+  removeLeadingLocalSchema(value.FuncCall?.funcname, localSchema);
+  removeLeadingLocalSchema(value.TypeName?.names, localSchema);
+  removeLeadingLocalSchema(value.typeName?.names, localSchema);
+  removeLeadingLocalSchema(value.CollateClause?.collname, localSchema);
+  removeLeadingLocalSchema(value.A_Expr?.name, localSchema);
+  removeLeadingLocalSchema(value.SortBy?.useOp, localSchema);
+  removeLeadingLocalSchema(value.ColumnRef?.fields, localSchema, 3);
+
+  for (const child of Object.values(value)) {
+    canonicalizePostgresViewAst(child, localSchema);
   }
 
-  return depth === 1;
-}
-
-function stripOuterParentheses(value: string): string {
-  let normalized = value.trim();
-  while (hasBalancedOuterParentheses(normalized)) {
-    normalized = normalized.slice(1, -1).trim();
+  const selectStatement = value.SelectStmt;
+  const sourceName = simpleSelectSourceName(selectStatement);
+  if (selectStatement && sourceName) {
+    removeSingleSourceColumnQualification(selectStatement, sourceName);
   }
-  return normalized;
 }
 
-function normalizeWhereParentheses(definition: string): string {
-  return definition.replace(
-    /\bWHERE\s+(.+?)(?=\bGROUP\s+BY\b|\bHAVING\b|\bORDER\s+BY\b|\bLIMIT\b|\bOFFSET\b|$)/i,
-    (_match, clause: string) => `WHERE ${stripOuterParentheses(clause)}`
-  );
-}
-
-function normalizeDefinition(def: string, schema?: string): string {
-  let normalized = def.replace(/;+\s*$/g, '').replace(/\s+/g, ' ').trim();
-  const localSchema = schema || "public";
-  const escapedSchema = escapeRegExp(localSchema);
-
-  normalized = normalized.replace(new RegExp(`"${escapedSchema}"\\.`, "gi"), "");
-  normalized = normalized.replace(new RegExp(`\\b${escapedSchema}\\.`, "gi"), "");
-  normalized = normalizeSimpleIdentifierQuotes(normalized);
-  normalized = normalizeSingleSourceColumnQualification(normalized);
-  normalized = normalizeWhereParentheses(normalized);
-
-  return normalized;
+function normalizeDefinition(definition: string, schema?: string): string {
+  try {
+    const parsed = parseSync(definition);
+    const statements = parsed.stmts?.flatMap(function getStatement(item) {
+      if (!item.stmt) {
+        return [];
+      }
+      canonicalizePostgresViewAst(item.stmt, schema || "public");
+      return [item.stmt];
+    });
+    if (!statements || statements.length === 0) {
+      return definition.trim();
+    }
+    return deparseSync(statements).trim();
+  } catch {
+    return definition.trim();
+  }
 }
 
 function clearOutputAliases(selectStatement: any): void {
