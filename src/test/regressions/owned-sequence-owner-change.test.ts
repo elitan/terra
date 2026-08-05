@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { Client } from "pg";
 import { SchemaService } from "../../core/schema/service";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import { createTestClient, cleanDatabase, createTestSchemaService } from "../utils";
 
 describe("Regression: owned sequence ownership changes are detected", function () {
@@ -57,5 +58,78 @@ describe("Regression: owned sequence ownership changes are detected", function (
       (await service.apply(updatedSchema, ["public"], true, undefined, true))
         .hasChanges
     ).toBe(false);
+
+    const standaloneSchema = `
+      CREATE TABLE users (id integer);
+      CREATE TABLE accounts (id integer);
+      CREATE SEQUENCE user_seq;
+    `;
+    const standalonePlan = await service.plan(standaloneSchema, ["public"]);
+    const removalStatement =
+      'ALTER SEQUENCE "user_seq" OWNED BY NONE;';
+    expect(standalonePlan.transactional).toContain(removalStatement);
+    expect(getStatementRisk(removalStatement, "transactional")).toBe(
+      "destructive"
+    );
+    const attachedState = await inspectSequenceState(client);
+    expect(attachedState.ownerTarget).toBe("public.accounts.id");
+    await expect(
+      service.apply(
+        standaloneSchema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([removalStatement]),
+    });
+    expect(await inspectSequenceState(client)).toEqual(attachedState);
+
+    await service.apply(standaloneSchema, ["public"], true);
+    expect(await inspectSequenceState(client)).toEqual({
+      oid: attachedState.oid,
+      ownerTarget: null,
+      lastValue: "2",
+      isCalled: true,
+    });
+    expect(
+      (await service.plan(standaloneSchema, ["public"])).hasChanges
+    ).toBe(false);
   });
 });
+
+async function inspectSequenceState(client: Client): Promise<{
+  oid: number;
+  ownerTarget: string | null;
+  lastValue: string;
+  isCalled: boolean;
+}> {
+  const result = await client.query(`
+    SELECT
+      sequence.oid::integer AS oid,
+      owner_namespace.nspname || '.' || owner_table.relname || '.' ||
+        owner_attribute.attname AS "ownerTarget",
+      state.last_value::text AS "lastValue",
+      state.is_called AS "isCalled"
+    FROM pg_class sequence
+    JOIN pg_namespace sequence_namespace
+      ON sequence_namespace.oid = sequence.relnamespace
+    CROSS JOIN public.user_seq state
+    LEFT JOIN pg_depend dependency
+      ON dependency.classid = 'pg_class'::regclass
+      AND dependency.objid = sequence.oid
+      AND dependency.deptype = 'a'
+    LEFT JOIN pg_class owner_table ON owner_table.oid = dependency.refobjid
+    LEFT JOIN pg_namespace owner_namespace
+      ON owner_namespace.oid = owner_table.relnamespace
+    LEFT JOIN pg_attribute owner_attribute
+      ON owner_attribute.attrelid = owner_table.oid
+      AND owner_attribute.attnum = dependency.refobjsubid
+    WHERE sequence_namespace.nspname = 'public'
+      AND sequence.relname = 'user_seq'
+  `);
+  return result.rows[0];
+}
