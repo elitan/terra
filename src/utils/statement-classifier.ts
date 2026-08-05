@@ -9,8 +9,38 @@ export type StatementChannel =
   | "deferred"
   | "concurrent";
 
+const POSTGRES_IDENTIFIER_PATTERN =
+  String.raw`(?:"(?:[^"]|"")*"|[A-Z_][A-Z0-9_$]*)`;
+const ALTER_COLUMN_PREFIX =
+  String.raw`\bALTER\s+COLUMN\s+${POSTGRES_IDENTIFIER_PATTERN}\s+`;
+const ALTER_COLUMN_TYPE_PATTERN = new RegExp(
+  ALTER_COLUMN_PREFIX + String.raw`(?:SET\s+DATA\s+)?TYPE\b`
+);
+const ALTER_COLUMN_DROP_DEFAULT_PATTERN = new RegExp(
+  ALTER_COLUMN_PREFIX + String.raw`DROP\s+DEFAULT\b`
+);
+const ALTER_COLUMN_DROP_NOT_NULL_PATTERN = new RegExp(
+  ALTER_COLUMN_PREFIX + String.raw`DROP\s+NOT\s+NULL\b`
+);
+const ALTER_COLUMN_DROP_IDENTITY_PATTERN = new RegExp(
+  ALTER_COLUMN_PREFIX + String.raw`DROP\s+IDENTITY\b`
+);
+const ALTER_COLUMN_DROP_EXPRESSION_PATTERN = new RegExp(
+  ALTER_COLUMN_PREFIX + String.raw`DROP\s+EXPRESSION\b`
+);
+
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
+}
+
+function hasDestructiveAlterColumn(statement: string): boolean {
+  return (
+    ALTER_COLUMN_TYPE_PATTERN.test(statement) ||
+    ALTER_COLUMN_DROP_DEFAULT_PATTERN.test(statement) ||
+    ALTER_COLUMN_DROP_NOT_NULL_PATTERN.test(statement) ||
+    ALTER_COLUMN_DROP_IDENTITY_PATTERN.test(statement) ||
+    ALTER_COLUMN_DROP_EXPRESSION_PATTERN.test(statement)
+  );
 }
 
 export function isDestructiveStatement(statement: string): boolean {
@@ -25,8 +55,7 @@ export function isDestructiveStatement(statement: string): boolean {
     normalized.includes(" DROP COLUMN ") ||
     normalized.includes(" DROP ATTRIBUTE ") ||
     normalized.includes(" DROP CONSTRAINT ") ||
-    normalized.includes(" ALTER COLUMN ") ||
-    normalized.includes(" SET DATA TYPE ")
+    hasDestructiveAlterColumn(normalized)
   );
 }
 

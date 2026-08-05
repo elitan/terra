@@ -61,6 +61,11 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "CREATE TYPE mood AS ENUM ('sad', 'ok')",
       "ALTER TYPE mood ADD VALUE 'happy'",
       "ALTER DEFAULT PRIVILEGES FOR ROLE owner GRANT SELECT ON TABLES TO reader",
+      "ALTER TABLE users ALTER COLUMN status SET DEFAULT 'active'",
+      "ALTER TABLE users ALTER COLUMN email SET NOT NULL",
+      "ALTER TABLE users ALTER COLUMN payload SET STORAGE EXTERNAL",
+      "ALTER TABLE users ALTER COLUMN payload SET COMPRESSION pglz",
+      "ALTER INDEX users_email_idx ALTER COLUMN 1 SET STATISTICS 500",
     ];
 
     await fc.assert(
@@ -84,6 +89,12 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users DROP CONSTRAINT users_pkey",
       "ALTER TABLE users ALTER COLUMN age TYPE BIGINT",
       "ALTER TABLE users ALTER COLUMN age SET DATA TYPE BIGINT",
+      'ALTER TABLE users ALTER COLUMN "odd column" TYPE BIGINT',
+      "ALTER TABLE users ALTER COLUMN status DROP DEFAULT",
+      'ALTER TABLE users ALTER COLUMN "odd default" DROP DEFAULT',
+      "ALTER TABLE users ALTER COLUMN email DROP NOT NULL",
+      "ALTER TABLE users ALTER COLUMN id DROP IDENTITY",
+      "ALTER TABLE users ALTER COLUMN total DROP EXPRESSION",
       "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
       "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader RESTRICT",
     ];

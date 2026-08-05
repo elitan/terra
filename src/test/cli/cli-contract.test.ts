@@ -1571,7 +1571,7 @@ describe("CLI Contract", () => {
           CREATE TABLE ${schemaName}.tasks (
             id INTEGER PRIMARY KEY,
             team_id INTEGER,
-            priority ${schemaName}.priority NOT NULL DEFAULT 'low'
+            priority ${schemaName}.priority NOT NULL DEFAULT 'can''t wait'
           );
           ALTER TABLE ${schemaName}.tasks
             ADD CONSTRAINT tasks_team_fk FOREIGN KEY (team_id)
@@ -1653,6 +1653,32 @@ describe("CLI Contract", () => {
             `CREATE UNIQUE INDEX CONCURRENTLY "tasks_priority_idx" ` +
             `ON "${schemaName}"."tasks" ("priority");`,
         });
+
+        const strictResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "apply",
+            "-f",
+            nextSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--auto-approve",
+            "--dry-run",
+            "--strict",
+            "--format",
+            "json",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(strictResult.exitCode).toBe(0);
+        const strictPayload = parseJsonOutput(strictResult.output);
+        expect(strictPayload.statementMetadata).toEqual(
+          payload.statementMetadata
+        );
       } finally {
         try {
           await client.connect();
