@@ -137,7 +137,12 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "DROP TYPE mood",
       'REFRESH MATERIALIZED VIEW "Odd Schema"."Odd Summary" WITH NO DATA',
       "ALTER TABLE users DROP COLUMN age",
+      "ALTER TABLE [name\\] DROP COLUMN legacy",
+      "ALTER TABLE users /* outer /* inner */ done */ DROP COLUMN legacy",
       "ALTER TABLE users DROP CONSTRAINT users_pkey",
+      "ALTER TABLE users ALTER COLUMN note SET DEFAULT E'a', DROP CONSTRAINT users_note_key",
+      "ALTER TYPE public.payload DROP ATTRIBUTE legacy RESTRICT",
+      "ALTER DOMAIN public.score DROP CONSTRAINT positive RESTRICT",
       "ALTER TABLE users ALTER COLUMN age TYPE BIGINT",
       "ALTER TABLE users ALTER COLUMN age SET DATA TYPE BIGINT",
       'ALTER TABLE users ALTER COLUMN "odd column" TYPE BIGINT',
@@ -373,6 +378,83 @@ describe("Property-Based: Destructive Diff Classification", function () {
         'CREATE VIRTUAL TABLE "Odd Table" USING fts5(title, body);'
       )
     ).toBe("table");
+  });
+
+  test("ignores classifier keywords inside non-code SQL content", function () {
+    const scenarios = [
+      {
+        category: "view",
+        statement:
+          "CREATE OR REPLACE VIEW public.items AS SELECT 'keep DROP CONSTRAINT phrase'::text AS label;",
+      },
+      {
+        category: "function",
+        statement:
+          "CREATE OR REPLACE FUNCTION public.notice() RETURNS void LANGUAGE plpgsql AS $body$ BEGIN RAISE NOTICE 'ALTER TABLE x DROP COLUMN y'; END $body$;",
+      },
+      {
+        category: "comment",
+        statement:
+          "COMMENT ON TABLE public.items IS 'it''s safe to mention SET UNLOGGED and DROP ATTRIBUTE';",
+      },
+      {
+        category: "table",
+        statement:
+          "ALTER TABLE public.items ALTER COLUMN note SET DEFAULT 'DROP CONSTRAINT';",
+      },
+      {
+        category: "table",
+        statement:
+          'ALTER TABLE public.items ADD COLUMN "has DROP CONSTRAINT marker" text;',
+      },
+      {
+        category: "table",
+        statement:
+          "ALTER TABLE public.items /* outer DROP /* inner CONSTRAINT */ ignored */ ADD COLUMN active boolean;",
+      },
+      {
+        category: "table",
+        statement:
+          "ALTER TABLE public.items -- DROP CONSTRAINT ignored\n ADD COLUMN archived boolean;",
+      },
+      {
+        category: "table",
+        statement:
+          String.raw`ALTER TABLE public.items ALTER COLUMN note SET DEFAULT E'keep \' DROP CONSTRAINT phrase';`,
+      },
+      {
+        category: "table",
+        statement:
+          "ALTER TABLE [has DROP COLUMN marker] RENAME TO [kept];",
+      },
+      {
+        category: "enum",
+        statement:
+          "CREATE TYPE public.status AS ENUM ('keep DROP CONSTRAINT phrase');",
+      },
+      {
+        category: "type",
+        statement:
+          "CREATE DOMAIN public.score AS integer CONSTRAINT positive CHECK (VALUE > 0);",
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      expect(getStatementCategory(scenario.statement)).toBe(scenario.category);
+      expect(isDestructiveStatement(scenario.statement)).toBe(false);
+    }
+  });
+
+  test("preserves destructive actions after masked SQL content", function () {
+    const statements = [
+      "ALTER TABLE [name\\] DROP COLUMN legacy",
+      "ALTER TABLE users /* outer /* inner */ done */ DROP COLUMN legacy",
+      "ALTER TABLE users ALTER COLUMN note SET DEFAULT E'a', DROP CONSTRAINT users_note_key",
+    ];
+
+    for (const statement of statements) {
+      expect(isDestructiveStatement(statement)).toBe(true);
+    }
   });
 
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {

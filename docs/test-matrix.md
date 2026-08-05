@@ -81,6 +81,10 @@ and version-gated `CREATE UNLOGGED SEQUENCE` statements on PostgreSQL 15-18
 are reported as `table` and `sequence`, respectively, rather than `other`.
 SQLite FTS5/RTree `CREATE VIRTUAL TABLE` statements are reported as `table` in
 text/JSON plan metadata, matching their ordinary `DROP TABLE` removal category.
+CLI category and destructive-risk classification follows SQL lexical structure:
+quoted strings/identifiers, PostgreSQL dollar bodies, SQLite bracket/backtick
+identifiers, line comments, and nested block comments cannot inject keywords
+such as `DROP CONSTRAINT` or `SET UNLOGGED` into metadata or strict-mode checks.
 
 ## version matrix target
 

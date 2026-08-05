@@ -94,6 +94,25 @@ describe("MigrationExecutor coverage", () => {
     })).toEqual(["table", "sequence"]);
   });
 
+  test("ignores metadata keywords inside statement content", function () {
+    const metadata = buildStatementMetadata({
+      transactional: [
+        "CREATE OR REPLACE VIEW public.items AS SELECT 'DROP CONSTRAINT'::text AS label;",
+        "ALTER TABLE public.items ALTER COLUMN note SET DEFAULT 'SET UNLOGGED';",
+      ],
+      concurrent: [],
+      deferred: [],
+      hasChanges: true,
+    });
+
+    expect(metadata.map(function selectClassification(item) {
+      return [item.category, item.risk];
+    })).toEqual([
+      ["view", "safe"],
+      ["table", "safe"],
+    ]);
+  });
+
   test("filters destructive operations", async function () {
     const MigrationExecutor = await loadExecutor();
     const executor = new MigrationExecutor({} as any);

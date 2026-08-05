@@ -1060,6 +1060,54 @@ describe("CLI Contract", () => {
     }
   });
 
+  test("should ignore classifier keywords inside SQLite view literals", async function () {
+    const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+    try {
+      const schemaPath = join(dir, "schema.sql");
+      const dbPath = join(dir, "literal.sqlite");
+      await writeFile(
+        schemaPath,
+        `CREATE TABLE items (id integer);
+CREATE VIEW item_labels AS
+  SELECT 'keep DROP CONSTRAINT and SET UNLOGGED text' AS label FROM items;
+`
+      );
+
+      const result = await runCli(
+        [
+          "run",
+          "src/index.ts",
+          "apply",
+          "-f",
+          schemaPath,
+          "-u",
+          `sqlite:///${dbPath}`,
+          "--auto-approve",
+          "--dry-run",
+          "--strict",
+          "--format",
+          "json",
+          "--no-color",
+        ],
+        { DATABASE_URL: "" }
+      );
+
+      expect(result.exitCode).toBe(0);
+      const payload = parseJsonOutput(result.output);
+      const viewMetadata = payload.statementMetadata.find(
+        function findViewMetadata(item: any) {
+          return item.sql.startsWith("CREATE VIEW");
+        }
+      );
+      expect(viewMetadata).toMatchObject({
+        category: "view",
+        risk: "safe",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("should treat sql-like file paths as files in plan command", async () => {
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {

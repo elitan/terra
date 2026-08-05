@@ -195,6 +195,113 @@ function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
 }
 
+function findDelimitedTokenEnd(
+  statement: string,
+  start: number,
+  closingDelimiter: string,
+  allowBackslashEscapes: boolean
+): number {
+  let index = start + 1;
+  while (index < statement.length) {
+    if (allowBackslashEscapes && statement[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (statement[index] !== closingDelimiter) {
+      index += 1;
+      continue;
+    }
+    if (statement[index + 1] === closingDelimiter) {
+      index += 2;
+      continue;
+    }
+    return index + 1;
+  }
+  return statement.length;
+}
+
+function findBlockCommentEnd(statement: string, start: number): number {
+  let depth = 1;
+  let index = start + 2;
+  while (index < statement.length && depth > 0) {
+    if (statement.slice(index, index + 2) === "/*") {
+      depth += 1;
+      index += 2;
+    } else if (statement.slice(index, index + 2) === "*/") {
+      depth -= 1;
+      index += 2;
+    } else {
+      index += 1;
+    }
+  }
+  return index;
+}
+
+function findDollarQuotedEnd(
+  statement: string,
+  start: number
+): number | undefined {
+  const tag = statement.slice(start).match(/^\$(?:[A-Z_][A-Z0-9_]*)?\$/)?.[0];
+  if (!tag) {
+    return undefined;
+  }
+  const end = statement.indexOf(tag, start + tag.length);
+  return end === -1 ? statement.length : end + tag.length;
+}
+
+function maskTokenContent(
+  characters: string[],
+  start: number,
+  end: number
+): void {
+  for (let index = start; index < end; index += 1) {
+    const character = characters[index]!;
+    if (/\s/.test(character)) {
+      continue;
+    }
+    characters[index] = " ";
+  }
+}
+
+function maskSqlNonKeywordContent(statement: string): string {
+  const characters = statement.split("");
+  let index = 0;
+  while (index < statement.length) {
+    let end: number | undefined;
+    let contentStart = index;
+    let contentEnd: number | undefined;
+    const character = statement[index]!;
+
+    if (statement.slice(index, index + 2) === "--") {
+      const lineEnd = statement.indexOf("\n", index + 2);
+      end = lineEnd === -1 ? statement.length : lineEnd;
+    } else if (statement.slice(index, index + 2) === "/*") {
+      end = findBlockCommentEnd(statement, index);
+    } else if (character === "'" || character === '"' || character === "`") {
+      const isEscapeString = character === "'" &&
+        statement[index - 1] === "E" &&
+        !/[A-Z0-9_$]/.test(statement[index - 2] || "");
+      end = findDelimitedTokenEnd(statement, index, character, isEscapeString);
+      contentStart = index + 1;
+      contentEnd = end - 1;
+    } else if (character === "[") {
+      end = findDelimitedTokenEnd(statement, index, "]", false);
+      contentStart = index + 1;
+      contentEnd = end - 1;
+    } else if (character === "$") {
+      end = findDollarQuotedEnd(statement, index);
+    }
+
+    if (end === undefined) {
+      index += 1;
+      continue;
+    }
+    maskTokenContent(characters, contentStart, contentEnd ?? end);
+    index = end;
+  }
+  return characters.join("");
+}
+
 function normalizePostgresIdentifierToken(token: string): string {
   if (token.startsWith('"')) {
     return token.slice(1, -1).replace(/""/g, '"');
@@ -243,47 +350,48 @@ function hasTriggerEnforcementWeakening(statement: string): boolean {
 
 export function isDestructiveStatement(statement: string): boolean {
   const normalized = normalizeStatement(statement);
+  const syntax = maskSqlNonKeywordContent(normalized);
   return (
-    normalized.startsWith("DROP ") ||
-    normalized.startsWith("REVOKE ") ||
+    syntax.startsWith("DROP ") ||
+    syntax.startsWith("REVOKE ") ||
     (
-      normalized.startsWith("ALTER DEFAULT PRIVILEGES ") &&
-      normalized.includes(" REVOKE ")
+      syntax.startsWith("ALTER DEFAULT PRIVILEGES ") &&
+      syntax.includes(" REVOKE ")
     ) ||
-    normalized.includes(" DROP COLUMN ") ||
-    normalized.includes(" DROP ATTRIBUTE ") ||
-    normalized.includes(" DROP CONSTRAINT ") ||
-    normalized.includes(" DISABLE ROW LEVEL SECURITY") ||
-    normalized.includes(" NO FORCE ROW LEVEL SECURITY") ||
-    normalized.includes(" SET UNLOGGED") ||
-    hasTriggerEnforcementWeakening(normalized) ||
-    REPLICA_IDENTITY_NOTHING_PATTERN.test(normalized) ||
-    NO_INHERIT_PARENT_PATTERN.test(normalized) ||
-    DETACH_PARTITION_PATTERN.test(normalized) ||
-    ALTER_SCHEMA_OWNER_PATTERN.test(normalized) ||
-    ALTER_SERVER_OPTION_REMOVAL_PATTERN.test(normalized) ||
-    ALTER_SERVER_OWNER_PATTERN.test(normalized) ||
-    ALTER_SERVER_VERSION_REMOVAL_PATTERN.test(normalized) ||
-    SEQUENCE_OWNERSHIP_REMOVAL_PATTERN.test(normalized) ||
-    COMMENT_REMOVAL_PATTERN.test(normalized) ||
-    CLUSTER_SELECTION_REMOVAL_PATTERN.test(normalized) ||
-    MATERIALIZED_VIEW_DEPOPULATION_PATTERN.test(normalized) ||
-    ALTER_VIEW_OPTION_RESET_PATTERN.test(normalized) ||
-    ALTER_VIEW_SECURITY_WEAKENING_PATTERN.test(normalized) ||
-    ALTER_DOMAIN_WEAKENING_PATTERN.test(normalized) ||
-    ALTER_RELATION_STORAGE_RESET_PATTERN.test(normalized) ||
-    ALTER_RELATION_DISTINCT_RESET_PATTERN.test(normalized) ||
-    ALTER_STATISTICS_TARGET_RESET_PATTERN.test(normalized) ||
-    ALTER_COLUMN_COMPRESSION_RESET_PATTERN.test(normalized) ||
-    ALTER_RELATION_ACCESS_METHOD_PATTERN.test(normalized) ||
-    ALTER_RELATION_TABLESPACE_PATTERN.test(normalized) ||
-    ALTER_SEQUENCE_DATA_TYPE_PATTERN.test(normalized) ||
-    ALTER_SEQUENCE_CYCLE_PATTERN.test(normalized) ||
-    ALTER_IDENTITY_SEQUENCE_CYCLE_PATTERN.test(normalized) ||
-    ALTER_IDENTITY_GENERATION_WEAKENING_PATTERN.test(normalized) ||
-    ALTER_ROLE_CAPABILITY_REMOVAL_PATTERN.test(normalized) ||
-    ALTER_ROLE_CONNECTION_LIMIT_REMOVAL_PATTERN.test(normalized) ||
-    hasDestructiveAlterColumn(normalized)
+    syntax.includes(" DROP COLUMN ") ||
+    syntax.includes(" DROP ATTRIBUTE ") ||
+    syntax.includes(" DROP CONSTRAINT ") ||
+    syntax.includes(" DISABLE ROW LEVEL SECURITY") ||
+    syntax.includes(" NO FORCE ROW LEVEL SECURITY") ||
+    syntax.includes(" SET UNLOGGED") ||
+    hasTriggerEnforcementWeakening(syntax) ||
+    REPLICA_IDENTITY_NOTHING_PATTERN.test(syntax) ||
+    NO_INHERIT_PARENT_PATTERN.test(syntax) ||
+    DETACH_PARTITION_PATTERN.test(syntax) ||
+    ALTER_SCHEMA_OWNER_PATTERN.test(syntax) ||
+    ALTER_SERVER_OPTION_REMOVAL_PATTERN.test(syntax) ||
+    ALTER_SERVER_OWNER_PATTERN.test(syntax) ||
+    ALTER_SERVER_VERSION_REMOVAL_PATTERN.test(syntax) ||
+    SEQUENCE_OWNERSHIP_REMOVAL_PATTERN.test(syntax) ||
+    COMMENT_REMOVAL_PATTERN.test(syntax) ||
+    CLUSTER_SELECTION_REMOVAL_PATTERN.test(syntax) ||
+    MATERIALIZED_VIEW_DEPOPULATION_PATTERN.test(syntax) ||
+    ALTER_VIEW_OPTION_RESET_PATTERN.test(syntax) ||
+    ALTER_VIEW_SECURITY_WEAKENING_PATTERN.test(syntax) ||
+    ALTER_DOMAIN_WEAKENING_PATTERN.test(syntax) ||
+    ALTER_RELATION_STORAGE_RESET_PATTERN.test(syntax) ||
+    ALTER_RELATION_DISTINCT_RESET_PATTERN.test(syntax) ||
+    ALTER_STATISTICS_TARGET_RESET_PATTERN.test(syntax) ||
+    ALTER_COLUMN_COMPRESSION_RESET_PATTERN.test(syntax) ||
+    ALTER_RELATION_ACCESS_METHOD_PATTERN.test(syntax) ||
+    ALTER_RELATION_TABLESPACE_PATTERN.test(syntax) ||
+    ALTER_SEQUENCE_DATA_TYPE_PATTERN.test(syntax) ||
+    ALTER_SEQUENCE_CYCLE_PATTERN.test(syntax) ||
+    ALTER_IDENTITY_SEQUENCE_CYCLE_PATTERN.test(syntax) ||
+    ALTER_IDENTITY_GENERATION_WEAKENING_PATTERN.test(syntax) ||
+    ALTER_ROLE_CAPABILITY_REMOVAL_PATTERN.test(syntax) ||
+    ALTER_ROLE_CONNECTION_LIMIT_REMOVAL_PATTERN.test(syntax) ||
+    hasDestructiveAlterColumn(syntax)
   );
 }
 
@@ -302,6 +410,7 @@ export function getStatementRisk(
 
 export function getStatementCategory(statement: string): CliStatementCategory {
   const normalized = normalizeStatement(statement);
+  const syntax = maskSqlNonKeywordContent(normalized);
   if (
     normalized.startsWith("CREATE TRIGGER") ||
     normalized.startsWith("CREATE CONSTRAINT TRIGGER") ||
@@ -313,7 +422,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
     (
       normalized.startsWith("ALTER TABLE") &&
       /\b(?:DISABLE|ENABLE(?:\s+(?:REPLICA|ALWAYS))?)\s+TRIGGER\b/.test(
-        normalized
+        syntax
       )
     )
   ) {
@@ -321,7 +430,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("ALTER TABLE") &&
-    /\b(?:ADD|ALTER|VALIDATE|DROP|RENAME)\s+CONSTRAINT\b/.test(normalized)
+    /\b(?:ADD|ALTER|VALIDATE|DROP|RENAME)\s+CONSTRAINT\b/.test(syntax)
   ) {
     return "constraint";
   }
@@ -342,7 +451,10 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   ) {
     return "index";
   }
-  if (normalized.includes(" CONSTRAINT ")) {
+  if (
+    normalized.startsWith("ALTER DOMAIN") &&
+    /\b(?:ADD|DROP|RENAME|VALIDATE)\s+CONSTRAINT\b/.test(syntax)
+  ) {
     return "constraint";
   }
   if (
@@ -362,9 +474,9 @@ export function getStatementCategory(statement: string): CliStatementCategory {
     return "view";
   }
   if (
-    (normalized.startsWith("CREATE TYPE") && normalized.includes(" AS ENUM")) ||
+    (normalized.startsWith("CREATE TYPE") && syntax.includes(" AS ENUM")) ||
     (normalized.startsWith("ALTER TYPE") &&
-      (normalized.includes(" ADD VALUE ") || normalized.includes(" RENAME VALUE ")))
+      (syntax.includes(" ADD VALUE ") || syntax.includes(" RENAME VALUE ")))
   ) {
     return "enum";
   }
