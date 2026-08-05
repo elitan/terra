@@ -240,11 +240,14 @@ function generateDefinitionChangeStatements(
   const normalizedDesired = normalizeSequence(desired);
   const normalizedCurrent = normalizeSequence(current);
   if (sequenceParametersDiffer(normalizedDesired, normalizedCurrent)) {
+    const builder = new SQLBuilder()
+      .p("ALTER SEQUENCE")
+      .table(desired.name, desired.schema);
+    if (normalizedDesired.dataType !== normalizedCurrent.dataType) {
+      builder.p(`AS ${normalizedDesired.dataType}`);
+    }
     statements.push(
-      new SQLBuilder()
-        .p("ALTER SEQUENCE")
-        .table(desired.name, desired.schema)
-        .p(`AS ${normalizedDesired.dataType}`)
+      builder
         .p(`INCREMENT BY ${normalizedDesired.increment}`)
         .p(`MINVALUE ${normalizedDesired.minValue}`)
         .p(`MAXVALUE ${normalizedDesired.maxValue}`)

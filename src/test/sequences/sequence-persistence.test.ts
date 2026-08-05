@@ -159,6 +159,130 @@ describe("PostgreSQL sequence persistence and state-preserving evolution", funct
     }
   });
 
+  test("blocks standalone sequence type changes in strict mode", async function () {
+    const service = createTestSchemaService();
+    const bigintSchema = `
+      CREATE SEQUENCE public.sequence_type_guard_seq
+        AS BIGINT
+        START WITH 10
+        INCREMENT BY 5
+        MINVALUE 1
+        MAXVALUE 1000
+        CACHE 1
+        NO CYCLE;
+    `;
+    const smallintSchema = `
+      CREATE SEQUENCE public.sequence_type_guard_seq
+        AS SMALLINT
+        START WITH 10
+        INCREMENT BY 7
+        MINVALUE 1
+        MAXVALUE 1000
+        CACHE 2
+        NO CYCLE;
+    `;
+    const widenedSchema = `
+      CREATE SEQUENCE public.sequence_type_guard_seq
+        AS BIGINT
+        START WITH 10
+        INCREMENT BY 7
+        MINVALUE 1
+        MAXVALUE 1000
+        CACHE 2
+        NO CYCLE;
+    `;
+
+    async function getTypeGuardState() {
+      return (
+        await client.query(`
+          SELECT relation.oid::integer AS oid,
+                 format_type(sequence.seqtypid, NULL) AS data_type,
+                 sequence.seqincrement::text AS increment,
+                 sequence.seqmin::text AS min_value,
+                 sequence.seqmax::text AS max_value,
+                 sequence.seqstart::text AS start_value,
+                 sequence.seqcache::text AS cache,
+                 sequence.seqcycle AS cycle,
+                 state.last_value::text AS last_value,
+                 state.is_called
+          FROM pg_sequence sequence
+          JOIN pg_class relation ON relation.oid = sequence.seqrelid
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          CROSS JOIN public.sequence_type_guard_seq state
+          WHERE namespace.nspname = 'public'
+            AND relation.relname = 'sequence_type_guard_seq'
+        `)
+      ).rows;
+    }
+
+    await service.apply(bigintSchema, ["public"], true);
+    await client.query(
+      "SELECT setval('public.sequence_type_guard_seq', 25, true)"
+    );
+    const before = await getTypeGuardState();
+    const plan = await service.plan(smallintSchema, ["public"]);
+    expect(plan.transactional).toHaveLength(1);
+    expect(plan.transactional[0]).toContain("AS SMALLINT");
+    expect(plan.transactional[0]).toContain("CACHE 2");
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "destructive"
+    );
+
+    await expect(
+      service.apply(
+        smallintSchema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+    expect(await getTypeGuardState()).toEqual(before);
+
+    await service.apply(smallintSchema, ["public"], true);
+    const narrowed = await getTypeGuardState();
+    expect(narrowed).toEqual([
+      {
+        oid: before[0]?.oid,
+        data_type: "smallint",
+        increment: "7",
+        min_value: "1",
+        max_value: "1000",
+        start_value: "10",
+        cache: "2",
+        cycle: false,
+        last_value: "25",
+        is_called: true,
+      },
+    ]);
+    const next = await client.query(
+      "SELECT nextval('public.sequence_type_guard_seq')::text AS value"
+    );
+    expect(next.rows).toEqual([{ value: "32" }]);
+    expect((await service.plan(smallintSchema, ["public"])).hasChanges).toBe(
+      false
+    );
+
+    const widenPlan = await service.plan(widenedSchema, ["public"]);
+    expect(widenPlan.transactional).toHaveLength(1);
+    expect(widenPlan.transactional[0]).toContain("AS BIGINT");
+    expect(
+      getStatementRisk(widenPlan.transactional[0]!, "transactional")
+    ).toBe("destructive");
+    await service.apply(widenedSchema, ["public"], true);
+    expect((await getTypeGuardState())[0]).toMatchObject({
+      oid: before[0]?.oid,
+      data_type: "bigint",
+    });
+    expect((await service.plan(widenedSchema, ["public"])).hasChanges).toBe(
+      false
+    );
+  });
+
   test("blocks weakening sequence durability in strict mode", async function () {
     if (postgresVersionNum < VERSION_15) return;
     const service = createTestSchemaService();
