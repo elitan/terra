@@ -135,6 +135,19 @@ describe("Property-Based: Destructive Diff Classification", function () {
     ).toBe("constraint");
   });
 
+  test("classifies unique index creation across supported dialect forms", function () {
+    const statements = [
+      "CREATE UNIQUE INDEX users_email_idx ON users (email);",
+      "CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email);",
+      "CREATE UNIQUE INDEX CONCURRENTLY users_email_idx ON users (email);",
+      "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS users_email_idx ON users (email);",
+    ];
+
+    for (const statement of statements) {
+      expect(getStatementCategory(statement)).toBe("index");
+    }
+  });
+
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {
     const result = fc.check(
       fc.property(

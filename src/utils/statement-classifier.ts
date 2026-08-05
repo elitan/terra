@@ -54,6 +54,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE INDEX") ||
+    normalized.startsWith("CREATE UNIQUE INDEX") ||
     normalized.startsWith("DROP INDEX")
   ) {
     return "index";

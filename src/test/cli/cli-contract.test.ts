@@ -946,6 +946,8 @@ describe("CLI Contract", () => {
           id INTEGER PRIMARY KEY,
           email TEXT NOT NULL
         );
+
+        CREATE UNIQUE INDEX users_email_idx ON users (email);
         `.trim() + "\n"
       );
 
@@ -971,6 +973,8 @@ describe("CLI Contract", () => {
           id INTEGER PRIMARY KEY,
           email TEXT NOT NULL
         );`;
+      const createUsersEmailIndexSql =
+        "CREATE UNIQUE INDEX users_email_idx ON users (email);";
       expect(payload).toEqual({
         schemaVersion: 2,
         command: "plan",
@@ -980,14 +984,14 @@ describe("CLI Contract", () => {
         hasChanges: true,
         counts: {
           preTransactional: 0,
-          transactional: 1,
+          transactional: 2,
           deferred: 0,
           concurrent: 0,
-          total: 1,
+          total: 2,
         },
         statements: {
           preTransactional: [],
-          transactional: [createUsersSql],
+          transactional: [createUsersSql, createUsersEmailIndexSql],
           deferred: [],
           concurrent: [],
         },
@@ -998,6 +1002,13 @@ describe("CLI Contract", () => {
             category: "table",
             risk: "safe",
             sql: createUsersSql,
+          },
+          {
+            order: 2,
+            channel: "transactional",
+            category: "index",
+            risk: "safe",
+            sql: createUsersEmailIndexSql,
           },
         ],
       });
@@ -1554,6 +1565,8 @@ describe("CLI Contract", () => {
             id INTEGER PRIMARY KEY,
             priority ${schemaName}.priority NOT NULL DEFAULT 'can''t wait'
           );
+          CREATE UNIQUE INDEX CONCURRENTLY tasks_priority_idx
+            ON ${schemaName}.tasks (priority);
           `.trim() + "\n"
         );
 
@@ -1609,6 +1622,16 @@ describe("CLI Contract", () => {
           sql: enumStatement,
         });
         expect(payload.counts.transactional).toBe(1);
+        expect(payload.counts.concurrent).toBe(1);
+        expect(payload.statementMetadata[2]).toEqual({
+          order: 3,
+          channel: "concurrent",
+          category: "index",
+          risk: "concurrent",
+          sql:
+            `CREATE UNIQUE INDEX CONCURRENTLY "tasks_priority_idx" ` +
+            `ON "${schemaName}"."tasks" ("priority");`,
+        });
       } finally {
         try {
           await client.connect();

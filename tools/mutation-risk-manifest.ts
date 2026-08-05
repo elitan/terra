@@ -93,5 +93,11 @@ export const mutationRiskManifest: MutationRiskManifest = {
       level: "high",
       reason: "connection parsing controls endpoint, credentials, and TLS semantics",
     },
+    {
+      path: "src/utils/statement-classifier.ts",
+      owner: "cli-contract",
+      level: "high",
+      reason: "statement classification controls strict-mode safety and CLI risk metadata",
+    },
   ],
 };
