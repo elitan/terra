@@ -1,7 +1,35 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import { SchemaParser } from "../core/schema/parser";
+import { getStatementRisk } from "../utils/statement-classifier";
 import { createTestClient, createTestSchemaService } from "./utils";
+
+async function inspectManagedComments(client: Client) {
+  const result = await client.query(`
+    SELECT
+      d.description,
+      d.classoid::regclass::text AS catalog
+    FROM pg_description d
+    WHERE d.description LIKE '% comment'
+      AND (
+        d.objoid IN (
+          SELECT c.oid
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'comment_scope'
+        )
+        OR d.objoid IN (
+          SELECT t.oid
+          FROM pg_type t
+          JOIN pg_namespace n ON n.oid = t.typnamespace
+          WHERE n.nspname = 'comment_scope'
+        )
+        OR d.objoid = 'comment_scope'::regnamespace
+      )
+    ORDER BY d.description
+  `);
+  return result.rows;
+}
 
 describe("PostgreSQL COMMENT parser fidelity", function () {
   test("normalizes every losslessly supported target", async function () {
@@ -228,31 +256,9 @@ describe("PostgreSQL COMMENT catalog round trip", function () {
 
     expect(replan.hasChanges).toBe(false);
 
-    const result = await client.query(`
-      SELECT
-        d.description,
-        d.classoid::regclass::text AS catalog
-      FROM pg_description d
-      WHERE d.description LIKE '% comment'
-        AND (
-          d.objoid IN (
-            SELECT c.oid
-            FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'comment_scope'
-          )
-          OR d.objoid IN (
-            SELECT t.oid
-            FROM pg_type t
-            JOIN pg_namespace n ON n.oid = t.typnamespace
-            WHERE n.nspname = 'comment_scope'
-          )
-          OR d.objoid = 'comment_scope'::regnamespace
-        )
-      ORDER BY d.description
-    `);
-    expect(result.rows).toHaveLength(17);
-    expect(new Set(result.rows.map(function getCatalog(row) {
+    const commentsBeforeRemoval = await inspectManagedComments(client);
+    expect(commentsBeforeRemoval).toHaveLength(17);
+    expect(new Set(commentsBeforeRemoval.map(function getCatalog(row) {
       return row.catalog;
     }))).toEqual(new Set(["pg_class", "pg_namespace", "pg_type"]));
 
@@ -270,6 +276,23 @@ describe("PostgreSQL COMMENT catalog round trip", function () {
     expect(removalSql).toContain("COMMENT ON TYPE");
     expect(removalSql).toContain("COMMENT ON COLUMN");
     expect(removalSql).toContain("IS NULL");
+    for (const statement of removalPlan.transactional) {
+      expect(getStatementRisk(statement, "transactional")).toBe(
+        "destructive"
+      );
+    }
+
+    await expect(
+      service.apply(
+        definitions,
+        ["comment_scope"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({ code: "STRICT_MODE_ERROR" });
+    expect(await inspectManagedComments(client)).toEqual(commentsBeforeRemoval);
 
     await service.apply(definitions, ["comment_scope"], true);
     const removalReplan = await service.apply(
