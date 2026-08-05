@@ -9,7 +9,11 @@ import type {
 } from "../../providers/types";
 import type { Extension, Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
-import { isDestructiveStatement } from "../../utils/statement-classifier";
+import {
+  getCreatedPostgresServerName,
+  getPostgresServerOwnerTransferName,
+  isDestructiveStatement,
+} from "../../utils/statement-classifier";
 import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
 import { collectSQLiteSchemaIdentifiers } from "../../utils/sqlite-identifier";
 import {
@@ -356,7 +360,20 @@ export class SchemaService {
       ...plan.concurrent,
       ...plan.deferred,
     ];
-    return statements.filter((statement) => isDestructiveStatement(statement));
+    const createdServerNames = new Set<string>();
+    for (const statement of statements) {
+      const serverName = getCreatedPostgresServerName(statement);
+      if (serverName) {
+        createdServerNames.add(serverName);
+      }
+    }
+    return statements.filter(function isUnapprovedDestructive(statement) {
+      if (!isDestructiveStatement(statement)) {
+        return false;
+      }
+      const serverName = getPostgresServerOwnerTransferName(statement);
+      return !serverName || !createdServerNames.has(serverName);
+    });
   }
 
   private filterUnmanagedSchemas(

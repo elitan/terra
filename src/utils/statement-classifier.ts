@@ -58,6 +58,16 @@ const ALTER_SERVER_OPTION_REMOVAL_PATTERN = new RegExp(
   String.raw`OPTIONS\s*\(\s*(?:${ALTER_SERVER_OPTION_ACTION_PATTERN}\s*,\s*)*` +
   String.raw`DROP\s+${POSTGRES_IDENTIFIER_PATTERN}(?:\s*,|\s*\))`
 );
+const CREATE_SERVER_NAME_PATTERN = new RegExp(
+  String.raw`^CREATE\s+SERVER\s+(?:IF\s+NOT\s+EXISTS\s+)?` +
+  String.raw`(${POSTGRES_IDENTIFIER_PATTERN})\s+`,
+  "i"
+);
+const ALTER_SERVER_OWNER_PATTERN = new RegExp(
+  String.raw`^ALTER\s+SERVER\s+(${POSTGRES_IDENTIFIER_PATTERN})\s+` +
+  String.raw`OWNER\s+TO\s+${POSTGRES_IDENTIFIER_PATTERN}\s*;?$`,
+  "i"
+);
 const SEQUENCE_OWNERSHIP_REMOVAL_PATTERN = new RegExp(
   String.raw`^ALTER\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?${POSTGRES_QUALIFIED_IDENTIFIER_PATTERN}\s+OWNED\s+BY\s+NONE\s*;?$`
 );
@@ -110,6 +120,35 @@ function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
 }
 
+function normalizePostgresIdentifierToken(token: string): string {
+  if (token.startsWith('"')) {
+    return token.slice(1, -1).replace(/""/g, '"');
+  }
+  return token.toLowerCase();
+}
+
+function getMatchedPostgresIdentifier(
+  pattern: RegExp,
+  statement: string
+): string | undefined {
+  const match = pattern.exec(statement.trim());
+  return match?.[1]
+    ? normalizePostgresIdentifierToken(match[1])
+    : undefined;
+}
+
+export function getCreatedPostgresServerName(
+  statement: string
+): string | undefined {
+  return getMatchedPostgresIdentifier(CREATE_SERVER_NAME_PATTERN, statement);
+}
+
+export function getPostgresServerOwnerTransferName(
+  statement: string
+): string | undefined {
+  return getMatchedPostgresIdentifier(ALTER_SERVER_OWNER_PATTERN, statement);
+}
+
 function hasDestructiveAlterColumn(statement: string): boolean {
   return (
     ALTER_COLUMN_TYPE_PATTERN.test(statement) ||
@@ -148,6 +187,7 @@ export function isDestructiveStatement(statement: string): boolean {
     DETACH_PARTITION_PATTERN.test(normalized) ||
     ALTER_SCHEMA_OWNER_PATTERN.test(normalized) ||
     ALTER_SERVER_OPTION_REMOVAL_PATTERN.test(normalized) ||
+    ALTER_SERVER_OWNER_PATTERN.test(normalized) ||
     SEQUENCE_OWNERSHIP_REMOVAL_PATTERN.test(normalized) ||
     COMMENT_REMOVAL_PATTERN.test(normalized) ||
     CLUSTER_SELECTION_REMOVAL_PATTERN.test(normalized) ||

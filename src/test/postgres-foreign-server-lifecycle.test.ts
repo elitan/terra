@@ -224,19 +224,31 @@ describe("PostgreSQL foreign server lifecycle", function () {
       GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;
     `;
     const initialPlan = await service.plan(desired, [MANAGED_SCHEMA]);
+    const ownerStatement =
+      `ALTER SERVER "${SERVER_NAME}" OWNER TO "${OWNER_ROLE}";`;
     const createIndex = initialPlan.transactional.findIndex(isServerCreate);
     const grantIndex = initialPlan.transactional.indexOf(
       `GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;`
     );
     const ownerIndex = initialPlan.transactional.indexOf(
-      `ALTER SERVER "${SERVER_NAME}" OWNER TO "${OWNER_ROLE}";`
+      ownerStatement
     );
 
     expect(createIndex).toBeGreaterThanOrEqual(0);
     expect(grantIndex).toBeGreaterThan(createIndex);
     expect(ownerIndex).toBeGreaterThan(createIndex);
     expect(grantIndex).toBeGreaterThan(ownerIndex);
-    await service.apply(desired, [MANAGED_SCHEMA], true);
+    expect(getStatementRisk(ownerStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await service.apply(
+      desired,
+      [MANAGED_SCHEMA],
+      true,
+      undefined,
+      false,
+      true
+    );
     expect(await foreignServerOwner(client)).toBe(OWNER_ROLE);
     expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
 
@@ -251,13 +263,30 @@ describe("PostgreSQL foreign server lifecycle", function () {
       ALTER SERVER "${SERVER_NAME}" OWNER TO CURRENT_USER;
     `);
     const originalOid = await foreignServerOid(client);
+    const driftedOwner = await foreignServerOwner(client);
     const repairPlan = await service.plan(desired, [MANAGED_SCHEMA]);
 
-    expect(repairPlan.transactional).toContain(
-      `ALTER SERVER "${SERVER_NAME}" OWNER TO "${OWNER_ROLE}";`
-    );
+    expect(repairPlan.transactional).toContain(ownerStatement);
     expect(repairPlan.transactional.some(isServerCreate)).toBe(false);
     expect(repairPlan.transactional.some(isServerDrop)).toBe(false);
+    await expect(
+      service.apply(
+        desired,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [ownerStatement],
+    });
+    expect(await foreignServerOid(client)).toBe(originalOid);
+    expect(await foreignServerOwner(client)).toBe(driftedOwner);
+    expect(await userMappingExists(client)).toBe(true);
+    expect(await foreignTableUsesServer(client)).toBe(true);
+    expect(await publicHasUsage(client)).toBe(true);
 
     await service.apply(desired, [MANAGED_SCHEMA], true);
     expect(await foreignServerOid(client)).toBe(originalOid);

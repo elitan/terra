@@ -832,4 +832,51 @@ describe("SchemaService private coverage", function () {
     expect(mock.state.executeInTransactionCalls).toHaveLength(0);
     expect(mock.state.clientEndCalls).toBe(1);
   });
+
+  test("strict mode permits foreign server owner initialization", async function () {
+    const createStatement =
+      'CREATE SERVER "New Server" FOREIGN DATA WRAPPER "postgres_fdw";';
+    const ownerStatement =
+      'ALTER SERVER "New Server" OWNER TO "Server Owner";';
+    const mock = createMockProvider({
+      parsedSchema: createParsedSchema(),
+      plan: createPlan({
+        transactional: [createStatement, ownerStatement],
+        hasChanges: true,
+      }),
+    });
+
+    const service = createService(mock.provider);
+    await expect(
+      service.apply("", ["public"], true, undefined, false, true)
+    ).resolves.toMatchObject({ hasChanges: true });
+    expect(mock.state.executeInTransactionCalls).toEqual([
+      [createStatement, ownerStatement],
+    ]);
+  });
+
+  test("strict mode blocks ownership transfer for another foreign server", async function () {
+    const existingOwnerStatement =
+      'ALTER SERVER "Existing Server" OWNER TO "Server Owner";';
+    const mock = createMockProvider({
+      parsedSchema: createParsedSchema(),
+      plan: createPlan({
+        transactional: [
+          'CREATE SERVER "New Server" FOREIGN DATA WRAPPER "postgres_fdw";',
+          'ALTER SERVER "New Server" OWNER TO "Server Owner";',
+          existingOwnerStatement,
+        ],
+        hasChanges: true,
+      }),
+    });
+
+    const service = createService(mock.provider);
+    await expect(
+      service.apply("", ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [existingOwnerStatement],
+    });
+    expect(mock.state.executeInTransactionCalls).toHaveLength(0);
+  });
 });
