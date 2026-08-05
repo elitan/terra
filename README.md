@@ -163,6 +163,12 @@ than distinct schema types. TerraDB normalizes `type[n]`, repeated bounded or
 unbounded dimensions, and SQL-standard `type ARRAY[n]` to the element's single
 catalog array type across columns, partitions, composites, domains, ranges,
 functions, and procedures; stored array values retain their actual dimensions.
+PostgreSQL's SQL-standard `float` precision aliases follow the documented binary
+precision boundaries: `float(1)` through `float(24)` normalize to `real`, while
+`float(25)` through `float(53)` and precision-less `float` normalize to `double
+precision`. The boundary forms converge across columns, arrays, composite
+attributes, domain bases, and range subtypes; precision outside `1` through `53`
+fails during parsing before any preceding schema change is applied.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

@@ -7,7 +7,7 @@ import {
   getPublicSchemaObjectSnapshot,
 } from "./utils";
 
-describe("cleanDatabase", () => {
+describe("cleanDatabase", function () {
   let client: Client;
 
   async function setupClient() {
@@ -34,6 +34,7 @@ describe("cleanDatabase", () => {
       CREATE SEQUENCE cleanup_seq;
       CREATE TYPE cleanup_enum AS ENUM ('a', 'b');
       CREATE DOMAIN cleanup_domain AS INTEGER;
+      CREATE TYPE cleanup_range AS RANGE (subtype = double precision);
       CREATE FUNCTION cleanup_fn(v INTEGER) RETURNS INTEGER
       LANGUAGE SQL
       AS $$ SELECT v + 1 $$;
@@ -50,5 +51,6 @@ describe("cleanDatabase", () => {
     expect(snapshot.routines.some((name) => name.startsWith("cleanup_"))).toBe(false);
     expect(snapshot.enums.some((name) => name.startsWith("cleanup_"))).toBe(false);
     expect(snapshot.domains.some((name) => name.startsWith("cleanup_"))).toBe(false);
+    expect(snapshot.ranges.some((name) => name.startsWith("cleanup_"))).toBe(false);
   });
 });

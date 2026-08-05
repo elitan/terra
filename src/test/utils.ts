@@ -107,6 +107,20 @@ export async function cleanDatabase(client: Client | undefined, schemas: string[
             EXECUTE 'DROP SEQUENCE IF EXISTS ' || r.quoted_name || ' CASCADE';
           END LOOP;
 
+          -- Range constructor functions have an internal dependency on their
+          -- owning type and cannot be dropped independently. Remove range
+          -- types before the general routine cleanup reaches those functions.
+          FOR r IN (
+            SELECT quote_ident(t.typname) as quoted_typename
+            FROM pg_type t
+            LEFT JOIN pg_depend d ON d.objid = t.oid AND d.deptype = 'e'
+            WHERE t.typtype = 'r'
+              AND t.typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+              AND d.objid IS NULL
+          ) LOOP
+            EXECUTE 'DROP TYPE IF EXISTS ' || r.quoted_typename || ' CASCADE';
+          END LOOP;
+
           FOR r IN (
             SELECT quote_ident(p.proname) as quoted_name,
                    pg_get_function_identity_arguments(p.oid) as args
@@ -390,6 +404,7 @@ export interface PublicSchemaObjectSnapshot {
   routines: string[];
   enums: string[];
   domains: string[];
+  ranges: string[];
 }
 
 export async function getPublicSchemaObjectSnapshot(
@@ -403,6 +418,7 @@ export async function getPublicSchemaObjectSnapshot(
     routineResult,
     enumResult,
     domainResult,
+    rangeResult,
   ] = await Promise.all([
     client.query(`
       SELECT tablename
@@ -451,6 +467,14 @@ export async function getPublicSchemaObjectSnapshot(
         AND t.typtype = 'd'
       ORDER BY t.typname
     `),
+    client.query(`
+      SELECT t.typname
+      FROM pg_type t
+      JOIN pg_namespace n ON t.typnamespace = n.oid
+      WHERE n.nspname = 'public'
+        AND t.typtype = 'r'
+      ORDER BY t.typname
+    `),
   ]);
 
   return {
@@ -461,6 +485,7 @@ export async function getPublicSchemaObjectSnapshot(
     routines: routineResult.rows.map((row) => row.proname),
     enums: enumResult.rows.map((row) => row.typname),
     domains: domainResult.rows.map((row) => row.typname),
+    ranges: rangeResult.rows.map((row) => row.typname),
   };
 }
 
