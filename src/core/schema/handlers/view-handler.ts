@@ -29,6 +29,7 @@ import {
   validatePostgresStatisticsTarget,
 } from "../../../utils/postgres-statistics";
 import { getPostgresIndexTerms } from "../../../utils/postgres-index";
+import { SQLBuilder } from "../../../utils/sql-builder";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -207,12 +208,114 @@ function postgresViewDefinitionNeedsUpdate(
 
   return desired.materialized !== current.materialized ||
     normalizeDefinition(desiredDefinition, desired.schema) !==
-      normalizeDefinition(currentDefinition, current.schema) ||
-    desired.checkOption !== current.checkOption ||
-    (desired.securityBarrier ?? false) !==
-      (current.securityBarrier ?? false) ||
-    (desired.securityInvoker ?? false) !==
-      (current.securityInvoker ?? false);
+      normalizeDefinition(currentDefinition, current.schema);
+}
+
+function postgresViewOptionsNeedUpdate(
+  desired: View,
+  current: View
+): boolean {
+  return generateOrdinaryViewOptionAlterations(desired, current).length > 0;
+}
+
+type PostgresViewOptionValue = string | boolean;
+
+function renderPostgresViewOptionValue(
+  value: PostgresViewOptionValue
+): string {
+  return typeof value === "boolean" ? String(value) : value.toLowerCase();
+}
+
+function renderSetPostgresViewOptions(
+  view: View,
+  options: Array<[string, PostgresViewOptionValue]>
+): string {
+  const assignments = options.map(function renderAssignment([name, value]) {
+    return `${name} = ${renderPostgresViewOptionValue(value)}`;
+  });
+  return new SQLBuilder()
+    .p("ALTER VIEW")
+    .table(view.name, view.schema)
+    .p(`SET (${assignments.join(", ")})`)
+    .p(";")
+    .build();
+}
+
+function renderResetPostgresViewOptions(
+  view: View,
+  options: string[]
+): string {
+  return new SQLBuilder()
+    .p("ALTER VIEW")
+    .table(view.name, view.schema)
+    .p(`RESET (${options.join(", ")})`)
+    .p(";")
+    .build();
+}
+
+function addBooleanViewOptionChange(
+  name: string,
+  desired: boolean | undefined,
+  current: boolean | undefined,
+  optionsToSet: Array<[string, PostgresViewOptionValue]>,
+  optionsToReset: string[]
+): void {
+  if ((desired ?? false) === (current ?? false)) {
+    return;
+  }
+  if (desired === undefined) {
+    optionsToReset.push(name);
+  } else {
+    optionsToSet.push([name, desired]);
+  }
+}
+
+function generateOrdinaryViewOptionAlterations(
+  desired: View,
+  current: View
+): string[] {
+  if (desired.materialized) {
+    return [];
+  }
+
+  const optionsToSet: Array<[string, PostgresViewOptionValue]> = [];
+  const optionsToReset: string[] = [];
+  if (desired.checkOption !== current.checkOption) {
+    if (
+      current.checkOption === "CASCADED" &&
+      desired.checkOption === "LOCAL"
+    ) {
+      optionsToReset.push("check_option");
+    }
+    if (desired.checkOption === undefined) {
+      optionsToReset.push("check_option");
+    } else {
+      optionsToSet.push(["check_option", desired.checkOption]);
+    }
+  }
+  addBooleanViewOptionChange(
+    "security_barrier",
+    desired.securityBarrier,
+    current.securityBarrier,
+    optionsToSet,
+    optionsToReset
+  );
+  addBooleanViewOptionChange(
+    "security_invoker",
+    desired.securityInvoker,
+    current.securityInvoker,
+    optionsToSet,
+    optionsToReset
+  );
+
+  const statements: string[] = [];
+  if (optionsToReset.length > 0) {
+    statements.push(renderResetPostgresViewOptions(desired, optionsToReset));
+  }
+  if (optionsToSet.length > 0) {
+    statements.push(renderSetPostgresViewOptions(desired, optionsToSet));
+  }
+  return statements;
 }
 
 function validateSecurityInvokerSupport(
@@ -469,8 +572,17 @@ function generatePostgresViewUpdateStatements(
 
   const statements = generateViewColumnRenameStatements(desired, current);
   if (postgresViewDefinitionNeedsUpdate(desired, current)) {
-    statements.push(generateCreateOrReplaceViewSQL(desired));
+    const replacementView = postgresViewOptionsNeedUpdate(desired, current)
+      ? {
+          ...desired,
+          checkOption: current.checkOption,
+          securityBarrier: current.securityBarrier,
+          securityInvoker: current.securityInvoker,
+        }
+      : desired;
+    statements.push(generateCreateOrReplaceViewSQL(replacementView));
   }
+  statements.push(...generateOrdinaryViewOptionAlterations(desired, current));
   statements.push(
     ...generateMaterializedViewPhysicalAlterations(desired, current, context)
   );
@@ -550,6 +662,7 @@ function createPostgresConfig(
     },
     needsUpdate: function postgresViewNeedsUpdate(desired, current) {
       return postgresViewDefinitionNeedsUpdate(desired, current) ||
+        postgresViewOptionsNeedUpdate(desired, current) ||
         !haveSameColumnNames(desired, current) ||
         materializedViewPhysicalPropertiesNeedUpdate(
           desired,
