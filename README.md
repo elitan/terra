@@ -256,6 +256,9 @@ transition names, `WHEN` expressions, function arguments, and origin, disabled,
 replica-only, or always firing modes. Named `ALTER TABLE ... TRIGGER` and
 `ALTER EVENT TRIGGER` firing modes are declarative and use native alterations;
 bulk `ALL`/`USER` mutations and `ALTER TABLE ONLY` mode changes are rejected.
+SQL comparison normalizes structural `EXECUTE PROCEDURE` to `EXECUTE FUNCTION`
+without rewriting quoted trigger arguments, so argument whitespace and keyword
+text remain exact.
 Partition-created trigger clones are managed through their parent trigger, and
 externally diverged clone modes stop planning instead of being ignored.
 PostgreSQL replica identity is declarative through `ALTER TABLE ... REPLICA

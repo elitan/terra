@@ -84,13 +84,161 @@ type PartitionBoundReplacement = {
   attachStatement: string;
 };
 
+function findQuotedSqlTokenEnd(
+  statement: string,
+  start: number,
+  delimiter: "'" | '"',
+  backslashEscapes: boolean
+): number {
+  let index = start + 1;
+  while (index < statement.length) {
+    if (backslashEscapes && statement[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (statement[index] !== delimiter) {
+      index += 1;
+      continue;
+    }
+    if (statement[index + 1] === delimiter) {
+      index += 2;
+      continue;
+    }
+    return index + 1;
+  }
+  return statement.length;
+}
+
+function findDollarQuotedSqlTokenEnd(
+  statement: string,
+  start: number
+): number | undefined {
+  const delimiter = statement
+    .slice(start)
+    .match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0];
+  if (!delimiter) {
+    return undefined;
+  }
+  const end = statement.indexOf(delimiter, start + delimiter.length);
+  return end === -1 ? statement.length : end + delimiter.length;
+}
+
+function findSqlBlockCommentEnd(statement: string, start: number): number {
+  let depth = 1;
+  let index = start + 2;
+  while (index < statement.length && depth > 0) {
+    if (statement.slice(index, index + 2) === "/*") {
+      depth += 1;
+      index += 2;
+    } else if (statement.slice(index, index + 2) === "*/") {
+      depth -= 1;
+      index += 2;
+    } else {
+      index += 1;
+    }
+  }
+  return index;
+}
+
+function sqlStringUsesBackslashEscapes(
+  statement: string,
+  quoteIndex: number
+): boolean {
+  const prefix = statement[quoteIndex - 1];
+  const beforePrefix = statement[quoteIndex - 2] || "";
+  if (
+    (prefix === "E" || prefix === "e") &&
+    !/[A-Za-z0-9_$]/.test(beforePrefix)
+  ) {
+    return true;
+  }
+  return (
+    prefix === "&" &&
+    (beforePrefix === "U" || beforePrefix === "u") &&
+    !/[A-Za-z0-9_$]/.test(statement[quoteIndex - 3] || "")
+  );
+}
+
 function normalizeSql(statement: string): string {
-  return statement
-    .replace(/;\s*$/g, "")
-    .replace(/\bEXECUTE\s+PROCEDURE\b/gi, "EXECUTE FUNCTION")
-    .replace(/\bPASSWORD\s+'(?:[^']|'')*'/gi, "PASSWORD '<redacted>'")
-    .replace(/\s+/g, " ")
-    .trim();
+  const output: string[] = [];
+  let index = 0;
+  let separator = "";
+  let previousWord: string | undefined;
+
+  function append(value: string): void {
+    if (output.length > 0) {
+      output.push(separator);
+    }
+    output.push(value);
+    separator = "";
+  }
+
+  while (index < statement.length) {
+    const character = statement[index]!;
+    if (/\s/.test(character)) {
+      separator = output.length > 0 ? " " : "";
+      index += 1;
+      continue;
+    }
+    if (statement.slice(index, index + 2) === "--") {
+      const lineEnd = statement.indexOf("\n", index + 2);
+      index = lineEnd === -1 ? statement.length : lineEnd + 1;
+      separator = output.length > 0 ? " " : "";
+      continue;
+    }
+    if (statement.slice(index, index + 2) === "/*") {
+      index = findSqlBlockCommentEnd(statement, index);
+      separator = output.length > 0 ? " " : "";
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      const end = findQuotedSqlTokenEnd(
+        statement,
+        index,
+        character,
+        character === "'" && sqlStringUsesBackslashEscapes(statement, index)
+      );
+      append(statement.slice(index, end));
+      previousWord = undefined;
+      index = end;
+      continue;
+    }
+    if (character === "$") {
+      const end = findDollarQuotedSqlTokenEnd(statement, index);
+      if (end !== undefined) {
+        append(statement.slice(index, end));
+        previousWord = undefined;
+        index = end;
+        continue;
+      }
+    }
+    if (/[A-Za-z_]/.test(character)) {
+      let end = index + 1;
+      while (/[A-Za-z0-9_$]/.test(statement[end] || "")) {
+        end += 1;
+      }
+      const word = statement.slice(index, end);
+      const normalizedWord = word.toUpperCase();
+      let outputWord = word;
+      if (previousWord === "EXECUTE" && normalizedWord === "PROCEDURE") {
+        outputWord = "FUNCTION";
+      }
+      append(outputWord);
+      previousWord = normalizedWord;
+      index = end;
+      continue;
+    }
+
+    append(character);
+    previousWord = undefined;
+    index += 1;
+  }
+
+  const normalized = output.join("").trim();
+  if (normalized.endsWith(";")) {
+    return normalized.slice(0, -1).trimEnd();
+  }
+  return normalized;
 }
 
 function terminateStatement(statement: string): string {

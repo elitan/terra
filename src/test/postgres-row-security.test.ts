@@ -194,6 +194,55 @@ describe("PostgreSQL row-level security and policy lifecycle", function () {
     }
   });
 
+  test("distinguishes whitespace inside policy string literals", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE SCHEMA "${SCHEMA}";
+      CREATE TABLE "${SCHEMA}"."Order" (
+        id integer PRIMARY KEY,
+        label text NOT NULL
+      );
+      ALTER TABLE "${SCHEMA}"."Order"
+        ENABLE ROW LEVEL SECURITY,
+        FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "exact label" ON "${SCHEMA}"."Order"
+        FOR SELECT TO PUBLIC
+        USING (label = 'alpha beta');
+      GRANT USAGE ON SCHEMA "${SCHEMA}" TO PUBLIC;
+      GRANT SELECT ON TABLE "${SCHEMA}"."Order" TO PUBLIC;
+    `;
+    const changed = initial.replace("alpha beta", "alpha  beta");
+
+    await service.apply(initial, [SCHEMA], true);
+    await client.query(
+      `INSERT INTO "${SCHEMA}"."Order" (id, label)
+       VALUES (1, 'alpha beta'), (2, 'alpha  beta')`
+    );
+    expect(await getVisibleOrderIds(client)).toEqual([1]);
+
+    const plan = await service.plan(changed, [SCHEMA]);
+    expect(plan.transactional).toContain(
+      `DROP POLICY IF EXISTS "exact label" ON "${SCHEMA}"."Order";`
+    );
+    expect(plan.transactional.some(function createsChangedPolicy(statement) {
+      return (
+        statement.includes('CREATE POLICY "exact label"') &&
+        statement.includes("'alpha  beta'")
+      );
+    })).toBe(true);
+
+    await service.apply(changed, [SCHEMA], true);
+    expect(await getVisibleOrderIds(client)).toEqual([2]);
+    const storedRows = await client.query(
+      `SELECT id, label FROM "${SCHEMA}"."Order" ORDER BY id`
+    );
+    expect(storedRows.rows).toEqual([
+      { id: 1, label: "alpha beta" },
+      { id: 2, label: "alpha  beta" },
+    ]);
+    expect((await service.plan(changed, [SCHEMA])).hasChanges).toBe(false);
+  });
+
   test("replaces changed policies and removes policy enforcement declaratively", async function () {
     const service = createTestSchemaService();
     const initial = `${baseSchema}

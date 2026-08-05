@@ -1083,6 +1083,98 @@ describe("SqlObjectHandler", function () {
     expect(plan.postTableCreate).toEqual([]);
   });
 
+  test("preserves constraint trigger argument strings during comparison", async function () {
+    const handler = new SqlObjectHandler();
+    const current = makeSqlObject({
+      kind: "constraint-trigger",
+      key: "constraint-trigger:public.accounts.constraint_audit",
+      name: "constraint_audit",
+      createStatement:
+        "CREATE CONSTRAINT TRIGGER constraint_audit AFTER INSERT " +
+        "ON public.accounts FOR EACH ROW EXECUTE PROCEDURE " +
+        "public.audit_row('alpha beta', 'EXECUTE PROCEDURE');",
+      dropStatement:
+        'DROP TRIGGER IF EXISTS "constraint_audit" ON "public"."accounts";',
+      triggerTable: { name: "accounts", schema: "public" },
+      triggerFunction: { name: "audit_row", schema: "public" },
+    });
+    const desired = makeSqlObject({
+      ...current,
+      createStatement:
+        "CREATE CONSTRAINT TRIGGER constraint_audit AFTER INSERT " +
+        "ON public.accounts FOR EACH ROW EXECUTE FUNCTION " +
+        "public.audit_row('alpha  beta', 'EXECUTE FUNCTION');",
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.earlyDrop).toEqual([current.dropStatement]);
+    expect(plan.postRoutineCreate).toEqual([desired.createStatement]);
+  });
+
+  test("preserves PostgreSQL escape-string content during comparison", async function () {
+    const handler = new SqlObjectHandler();
+    const current = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts " +
+        "USING (label = E'alpha\\' EXECUTE PROCEDURE');",
+      policyDefinition: undefined,
+    });
+    const desired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts " +
+        "USING (label = E'alpha\\' EXECUTE FUNCTION');",
+      policyDefinition: undefined,
+    });
+
+    const changedPlan = await handler.generateStatements([desired], [current]);
+
+    expect(changedPlan.earlyDrop).toEqual([current.dropStatement]);
+    expect(changedPlan.postRoutineCreate).toEqual([desired.createStatement]);
+
+    const formattedCurrent = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts " +
+        "USING (label = E'alpha\\' beta'   );",
+      policyDefinition: undefined,
+    });
+    const formattedDesired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts " +
+        "USING (label = E'alpha\\' beta' );",
+      policyDefinition: undefined,
+    });
+
+    const unchangedPlan = await handler.generateStatements(
+      [formattedDesired],
+      [formattedCurrent]
+    );
+
+    expect(unchangedPlan.earlyDrop).toEqual([]);
+    expect(unchangedPlan.postRoutineCreate).toEqual([]);
+  });
+
+  test("normalizes formatting after PostgreSQL dollar strings", async function () {
+    const handler = new SqlObjectHandler();
+    const current = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts " +
+        "USING (label = $policy$alpha  beta$policy$   );",
+      policyDefinition: undefined,
+    });
+    const desired = makePolicy({
+      createStatement:
+        "CREATE POLICY tenant_access ON public.accounts " +
+        "USING (label = $policy$alpha  beta$policy$ );",
+      policyDefinition: undefined,
+    });
+
+    const plan = await handler.generateStatements([desired], [current]);
+
+    expect(plan.earlyDrop).toEqual([]);
+    expect(plan.postRoutineCreate).toEqual([]);
+  });
+
   test("alters constraint and event trigger firing modes without replacement", async function () {
     const handler = new SqlObjectHandler();
     const constraint = makeSqlObject({

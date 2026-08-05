@@ -297,6 +297,71 @@ describe("PostgreSQL trigger semantics", function () {
     );
   });
 
+  test("distinguishes whitespace inside constraint trigger arguments", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE TABLE public.trigger_argument_events (value text NOT NULL);
+      CREATE TABLE public.trigger_argument_subject (id integer PRIMARY KEY);
+
+      CREATE FUNCTION public.capture_constraint_argument()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        INSERT INTO public.trigger_argument_events(value)
+        VALUES (TG_ARGV[0] || '|' || TG_ARGV[1]);
+        RETURN NULL;
+      END;
+      $$;
+
+      CREATE CONSTRAINT TRIGGER argument_audit
+        AFTER INSERT ON public.trigger_argument_subject
+        FOR EACH ROW
+        EXECUTE FUNCTION public.capture_constraint_argument(
+          'alpha beta', 'EXECUTE PROCEDURE'
+        );
+    `;
+    const changed = initial
+      .replace("alpha beta", "alpha  beta")
+      .replace("'EXECUTE PROCEDURE'", "'EXECUTE FUNCTION'");
+
+    await service.apply(initial, ["public"], true);
+    await client.query(
+      "INSERT INTO public.trigger_argument_subject(id) VALUES (1)"
+    );
+    expect(
+      (await client.query(
+        "SELECT value FROM public.trigger_argument_events ORDER BY ctid"
+      )).rows
+    ).toEqual([{ value: "alpha beta|EXECUTE PROCEDURE" }]);
+
+    const plan = await service.plan(changed, ["public"]);
+    expect(plan.transactional).toContain(
+      'DROP TRIGGER IF EXISTS "argument_audit" ON "public"."trigger_argument_subject";'
+    );
+    expect(plan.transactional.some(function createsChangedTrigger(statement) {
+      return (
+        statement.includes("CREATE CONSTRAINT TRIGGER argument_audit") &&
+        statement.includes("'alpha  beta'") &&
+        statement.includes("'EXECUTE FUNCTION'")
+      );
+    })).toBe(true);
+
+    await service.apply(changed, ["public"], true);
+    await client.query(
+      "INSERT INTO public.trigger_argument_subject(id) VALUES (2)"
+    );
+    expect(
+      (await client.query(
+        "SELECT value FROM public.trigger_argument_events ORDER BY ctid"
+      )).rows
+    ).toEqual([
+      { value: "alpha beta|EXECUTE PROCEDURE" },
+      { value: "alpha  beta|EXECUTE FUNCTION" },
+    ]);
+    expect((await service.plan(changed, ["public"])).hasChanges).toBe(false);
+  });
+
   test("preserves constraint and event trigger firing modes", async function () {
     const service = createTestSchemaService();
     const schema = `
