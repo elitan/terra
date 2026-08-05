@@ -385,7 +385,8 @@ describe("SchemaService private coverage", function () {
     const privateService = service as unknown as {
       filterCurrentSqlObjects: (
         current: NonNullable<ParsedSchema["sqlObjects"]>,
-        desired: NonNullable<ParsedSchema["sqlObjects"]>
+        desired: NonNullable<ParsedSchema["sqlObjects"]>,
+        schemas?: ParsedSchema["schemas"]
       ) => NonNullable<ParsedSchema["sqlObjects"]>;
     };
     const scopedPolicy = {
@@ -455,12 +456,66 @@ describe("SchemaService private coverage", function () {
         serverGrant,
         implicitOwnerGrant,
       ],
-      [desiredRole, desiredServer]
+      [desiredRole, desiredServer],
+      []
     );
 
     expect(filtered.map(function (item) {
       return item.key;
     })).toEqual([scopedPolicy.key, desiredRole.key, serverGrant.key]);
+  });
+
+  test("filterCurrentSqlObjects scopes default privileges by owner and schema", function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as {
+      filterCurrentSqlObjects: (
+        current: NonNullable<ParsedSchema["sqlObjects"]>,
+        desired: NonNullable<ParsedSchema["sqlObjects"]>,
+        schemas?: ParsedSchema["schemas"]
+      ) => NonNullable<ParsedSchema["sqlObjects"]>;
+    };
+    const desiredRole = {
+      kind: "role" as const,
+      key: "role:object_owner",
+      name: "object_owner",
+      createStatement: "CREATE ROLE object_owner;",
+    };
+
+    function makeDefaultPrivilege(owner: string, schema?: string) {
+      return {
+        kind: "default-privilege" as const,
+        key: `default-privilege:${owner}:${schema || "global"}`,
+        name: "default privilege",
+        ...(schema ? { schema } : {}),
+        createStatement: "ALTER DEFAULT PRIVILEGES ...;",
+        defaultPrivilegeDefinition: {
+          owner,
+          objectType: "TABLES" as const,
+          ...(schema ? { schema } : {}),
+          grantee: "reader",
+          granteeIsPublic: false,
+          privilege: "SELECT",
+          granted: true,
+          grantable: false,
+          baselineGranted: false,
+        },
+      };
+    }
+
+    const global = makeDefaultPrivilege("object_owner");
+    const managedSchema = makeDefaultPrivilege("object_owner", "app");
+    const unmanagedSchema = makeDefaultPrivilege("object_owner", "external");
+    const unmanagedOwner = makeDefaultPrivilege("external_owner");
+    const filtered = privateService.filterCurrentSqlObjects(
+      [global, managedSchema, unmanagedSchema, unmanagedOwner],
+      [desiredRole],
+      [{ name: "app" }]
+    );
+
+    expect(filtered.map(function getKey(item) {
+      return item.key;
+    })).toEqual([global.key, managedSchema.key]);
   });
 
   test("filterCurrentExtensions keeps managed desired and required extensions", function () {

@@ -398,7 +398,8 @@ export class SchemaService {
 
   private filterCurrentSqlObjects(
     currentObjects: NonNullable<ParsedSchema["sqlObjects"]>,
-    desiredObjects: NonNullable<ParsedSchema["sqlObjects"]>
+    desiredObjects: NonNullable<ParsedSchema["sqlObjects"]>,
+    desiredSchemas: ParsedSchema["schemas"] = []
   ) {
     const desiredKeys = new Set(desiredObjects.map(function (item) {
       return item.key;
@@ -412,8 +413,28 @@ export class SchemaService {
           return item.name;
         })
     );
+    const desiredRoles = new Set(
+      desiredObjects
+        .filter(function isRole(item) {
+          return item.kind === "role";
+        })
+        .map(function getRoleName(item) {
+          return item.name;
+        })
+    );
+    const desiredSchemaNames = new Set(
+      desiredSchemas.map(function getSchemaName(schema) {
+        return schema.name;
+      })
+    );
 
     return currentObjects.filter(function (item) {
+      if (item.kind === "default-privilege") {
+        const definition = item.defaultPrivilegeDefinition;
+        return definition !== undefined &&
+          desiredRoles.has(definition.owner) &&
+          (!definition.schema || desiredSchemaNames.has(definition.schema));
+      }
       if (
         item.kind === "grant" &&
         item.grantDefinition?.implicitDefault === true &&
@@ -518,7 +539,8 @@ export class SchemaService {
     const currentComments = await this.provider.getCurrentComments(client, schemas);
     const currentSqlObjects = this.filterCurrentSqlObjects(
       await this.provider.getCurrentSqlObjects?.(client, schemas) || [],
-      desiredSqlObjects
+      desiredSqlObjects,
+      desiredSchemas
     );
     const sqliteIdentifiers = this.provider.dialect === "sqlite"
       ? collectSQLiteSchemaIdentifiers(
@@ -787,7 +809,9 @@ export class SchemaService {
 
     const transactionalPreview = [
       ...sqlObjectPlan.bootstrapCreate,
+      ...sqlObjectPlan.preSchemaCreate,
       ...schemaStatements,
+      ...sqlObjectPlan.postSchemaCreate,
       ...extensionCreateStatements,
       ...sqlObjectPlan.typeReplaceDrop,
       ...typeCreateStatements,

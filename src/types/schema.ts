@@ -299,6 +299,7 @@ export type SqlObjectKind =
   | "constraint-trigger"
   | "domain-type"
   | "event-trigger"
+  | "default-privilege"
   | "foreign-server"
   | "grant"
   | "partition"
@@ -401,6 +402,25 @@ export interface PostgresGrantDefinition {
   implicitDefault: boolean;
 }
 
+export type PostgresDefaultPrivilegeObjectType =
+  | "TABLES"
+  | "SEQUENCES"
+  | "ROUTINES"
+  | "TYPES"
+  | "SCHEMAS";
+
+export interface PostgresDefaultPrivilegeDefinition {
+  owner: string;
+  objectType: PostgresDefaultPrivilegeObjectType;
+  schema?: string;
+  grantee: string;
+  granteeIsPublic: boolean;
+  privilege: string;
+  granted: boolean;
+  grantable: boolean;
+  baselineGranted: boolean;
+}
+
 export interface PostgresTypeRoutineDependent {
   schema: string;
   name: string;
@@ -434,6 +454,7 @@ export interface SqlObject {
   foreignServerDefinition?: PostgresForeignServerDefinition;
   roleDefinition?: PostgresRoleDefinition;
   grantDefinition?: PostgresGrantDefinition;
+  defaultPrivilegeDefinition?: PostgresDefaultPrivilegeDefinition;
   triggerTable?: QualifiedName;
   triggerFunction?: QualifiedName;
   triggerEnabled?: PostgresTriggerEnabledMode;

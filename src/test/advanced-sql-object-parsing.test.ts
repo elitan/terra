@@ -8,6 +8,9 @@ import { parsePostgresRole } from "../core/schema/parser/role-parser";
 import {
   parsePostgresRoleRemovals,
 } from "../core/schema/parser/role-removal-parser";
+import {
+  parsePostgresDefaultPrivileges,
+} from "../core/schema/parser/default-privilege-parser";
 
 describe("Advanced SQL object parsing", function () {
   test("expands supported object grants into atomic canonical privileges", async function () {
@@ -105,7 +108,6 @@ describe("Advanced SQL object parsing", function () {
       "GRANT SELECT ON TABLE public.accounts TO CURRENT_USER;",
       "GRANT SELECT ON TABLE public.accounts TO reader GRANTED BY CURRENT_USER;",
       "GRANT SELECT ON TABLE public.accounts TO PUBLIC WITH GRANT OPTION;",
-      "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO reader;",
     ];
 
     for (const sql of unsupported) {
@@ -113,6 +115,244 @@ describe("Advanced SQL object parsing", function () {
         code: "PARSER_ERROR",
         message: expect.stringContaining("not supported in desired schemas"),
       });
+    }
+  });
+
+  test("expands PostgreSQL default privileges into atomic desired state", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE ROLE owner_a;
+      CREATE ROLE owner_b;
+      CREATE SCHEMA app;
+      CREATE SCHEMA audit;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner_a, owner_b
+        IN SCHEMA app, audit
+        GRANT SELECT, INSERT ON TABLES TO reader, PUBLIC;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner_a
+        REVOKE EXECUTE ON ROUTINES FROM PUBLIC RESTRICT;
+    `);
+    const defaults = parsed.sqlObjects?.filter(function isDefault(object) {
+      return object.kind === "default-privilege";
+    });
+
+    expect(defaults).toHaveLength(17);
+    expect(defaults?.find(function isGlobalRevoke(object) {
+      return object.defaultPrivilegeDefinition?.objectType === "ROUTINES";
+    })).toMatchObject({
+      createStatement:
+        'ALTER DEFAULT PRIVILEGES FOR ROLE "owner_a" REVOKE EXECUTE ON ROUTINES FROM PUBLIC RESTRICT;',
+      defaultPrivilegeDefinition: {
+        owner: "owner_a",
+        objectType: "ROUTINES",
+        grantee: "PUBLIC",
+        granteeIsPublic: true,
+        privilege: "EXECUTE",
+        granted: false,
+        grantable: false,
+        baselineGranted: true,
+      },
+    });
+    expect(defaults?.find(function isSchemaGrant(object) {
+      const definition = object.defaultPrivilegeDefinition;
+      return definition?.owner === "owner_b" &&
+        definition.schema === "audit" &&
+        definition.grantee === "reader" &&
+        definition.privilege === "SELECT";
+    })).toMatchObject({
+      createStatement:
+        'ALTER DEFAULT PRIVILEGES FOR ROLE "owner_b" IN SCHEMA "audit" GRANT SELECT ON TABLES TO "reader";',
+      defaultPrivilegeDefinition: {
+        baselineGranted: false,
+        granted: true,
+      },
+    });
+  });
+
+  test("distinguishes PUBLIC from a quoted default-privilege role", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE ROLE owner;
+      CREATE ROLE "PUBLIC";
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO PUBLIC, "PUBLIC";
+    `);
+    const defaults = parsed.sqlObjects?.filter(function isDefault(object) {
+      return object.kind === "default-privilege";
+    });
+
+    expect(defaults).toHaveLength(2);
+    expect(defaults?.map(function getGrantee(object) {
+      const definition = object.defaultPrivilegeDefinition;
+      return {
+        grantee: definition?.grantee,
+        isPublic: definition?.granteeIsPublic,
+      };
+    })).toEqual([
+      { grantee: "PUBLIC", isPublic: false },
+      { grantee: "PUBLIC", isPublic: true },
+    ]);
+  });
+
+  test("rejects duplicate default privileges and absent owners", async function () {
+    const parser = new SchemaParser();
+    await expect(parser.parseSchema(`
+      CREATE ROLE owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO reader;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO reader;
+    `)).rejects.toThrow(/default privilege.*declared more than once/i);
+
+    await expect(parser.parseSchema(`
+      DROP ROLE IF EXISTS owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO reader;
+    `)).rejects.toThrow(/must also declare.*CREATE ROLE/i);
+  });
+
+  test("rejects default privilege syntax outside the portable contract", async function () {
+    const parser = new SchemaParser();
+    const unsupported = [
+      "ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner GRANT ALL ON TABLES TO reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner GRANT MAINTAIN ON TABLES TO reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner GRANT SELECT ON LARGE OBJECTS TO reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE GRANT OPTION FOR SELECT ON TABLES FROM reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader CASCADE;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE CURRENT_USER GRANT SELECT ON TABLES TO reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner IN SCHEMA app GRANT USAGE ON SCHEMAS TO reader;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner GRANT SELECT ON TABLES TO PUBLIC WITH GRANT OPTION;",
+    ];
+
+    for (const sql of unsupported) {
+      await expect(parser.parseSchema(sql)).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+      });
+    }
+    await expect(parser.parseSchema(`
+      CREATE ROLE owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        IN SCHEMA app GRANT SELECT ON TABLES TO reader;
+    `)).rejects.toThrow(/must also declare.*CREATE SCHEMA/i);
+    await expect(parser.parseSchema(`
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO reader;
+    `)).rejects.toThrow(/must also declare.*CREATE ROLE/i);
+    await expect(parser.parseSchema(`
+      CREATE ROLE owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        REVOKE GRANT OPTION FOR SELECT ON TABLES FROM reader;
+    `)).rejects.toThrow(/imperative partial default-privilege mutation/i);
+    await expect(parser.parseSchema(`
+      CREATE ROLE owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO PUBLIC WITH GRANT OPTION;
+    `)).rejects.toThrow(/grant option for PUBLIC is not supported/i);
+  });
+
+  test("preserves default privilege grant options in canonical state", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      CREATE ROLE owner;
+      ALTER DEFAULT PRIVILEGES FOR ROLE owner
+        GRANT SELECT ON TABLES TO reader WITH GRANT OPTION;
+    `);
+    const privilege = parsed.sqlObjects?.find(function isDefault(object) {
+      return object.kind === "default-privilege";
+    });
+
+    expect(privilege).toMatchObject({
+      createStatement:
+        'ALTER DEFAULT PRIVILEGES FOR ROLE "owner" ' +
+        'GRANT SELECT ON TABLES TO "reader" WITH GRANT OPTION;',
+      defaultPrivilegeDefinition: {
+        granted: true,
+        grantable: true,
+      },
+    });
+  });
+
+  test("rejects malformed default privilege AST defensively", function () {
+    const roleOption = {
+      DefElem: {
+        defname: "roles",
+        arg: {
+          List: {
+            items: [{
+              RoleSpec: {
+                roletype: "ROLESPEC_CSTRING",
+                rolename: "owner",
+              },
+            }],
+          },
+        },
+      },
+    };
+    const action = {
+      targtype: "ACL_TARGET_DEFAULTS",
+      objtype: "OBJECT_TABLE",
+      is_grant: true,
+      privileges: [{ AccessPriv: { priv_name: "select" } }],
+      grantees: [{
+        RoleSpec: {
+          roletype: "ROLESPEC_CSTRING",
+          rolename: "reader",
+        },
+      }],
+    };
+    const malformed = [
+      { options: [roleOption] },
+      { options: [{}], action },
+      { options: [roleOption, roleOption], action },
+      {
+        options: [{
+          DefElem: {
+            defname: "roles",
+            arg: { List: { items: [] } },
+          },
+        }],
+        action,
+      },
+      {
+        options: [
+          roleOption,
+          {
+            DefElem: {
+              defname: "schemas",
+              arg: { List: { items: [{}] } },
+            },
+          },
+        ],
+        action,
+      },
+      {
+        options: [{
+          DefElem: {
+            defname: "unexpected",
+            arg: { List: { items: [{ String: { sval: "value" } }] } },
+          },
+        }],
+        action,
+      },
+      {
+        options: [roleOption],
+        action: { ...action, grantees: [] },
+      },
+      {
+        options: [roleOption],
+        action: {
+          ...action,
+          grantees: [{
+            RoleSpec: { roletype: "ROLESPEC_CURRENT_USER" },
+          }],
+        },
+      },
+    ];
+
+    for (const node of malformed) {
+      expect(function parseMalformedDefaultPrivilege() {
+        parsePostgresDefaultPrivileges(node, "malformed-default.sql");
+      }).toThrow();
     }
   });
 

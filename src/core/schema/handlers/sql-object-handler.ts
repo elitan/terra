@@ -43,9 +43,15 @@ import {
   renderPostgresRoleAlter,
 } from "../../../utils/postgres-role";
 import { renderPostgresGrantOptionRevoke } from "../../../utils/postgres-grant";
+import {
+  postgresDefaultPrivilegeMatchesBaseline,
+  renderPostgresDefaultPrivilegeTransition,
+} from "../../../utils/postgres-default-privilege";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
+  preSchemaCreate: string[];
+  postSchemaCreate: string[];
   typeCreate: string[];
   preTableCreate: string[];
   postTableCreate: string[];
@@ -515,6 +521,28 @@ function getDropBucket(kind: SqlObjectKind): SqlObjectStatementBucket {
   return "lateDrop";
 }
 
+function getCreateBucketForObject(
+  object: SqlObject
+): SqlObjectStatementBucket {
+  if (object.kind === "default-privilege") {
+    return object.defaultPrivilegeDefinition?.schema
+      ? "postSchemaCreate"
+      : "preSchemaCreate";
+  }
+  return getCreateBucket(object.kind);
+}
+
+function getDropBucketForObject(
+  object: SqlObject
+): SqlObjectStatementBucket {
+  if (object.kind === "default-privilege") {
+    return object.defaultPrivilegeDefinition?.schema
+      ? "postSchemaCreate"
+      : "preSchemaCreate";
+  }
+  return getDropBucket(object.kind);
+}
+
 function sortKeys(objects: SqlObject[], reverse: boolean): SqlObject[] {
   const byKey = new Map(objects.map(function (item) {
     return [item.key, item] as const;
@@ -723,6 +751,8 @@ export class SqlObjectHandler {
   ): Promise<SqlObjectPlan> {
     const plan: SqlObjectPlan = {
       bootstrapCreate: [],
+      preSchemaCreate: [],
+      postSchemaCreate: [],
       typeCreate: [],
       preTableCreate: [],
       postTableCreate: [],
@@ -808,13 +838,17 @@ export class SqlObjectHandler {
           }
           assertTypeCanBeRemoved(currentObject, desiredObjects, context);
         }
-        addToBucket(dropsByBucket, getDropBucket(currentObject.kind), currentObject);
+        addToBucket(
+          dropsByBucket,
+          getDropBucketForObject(currentObject),
+          currentObject
+        );
         continue;
       }
       if (desiredObject.desiredAbsent === true) {
         addToBucket(
           dropsByBucket,
-          getDropBucket(currentObject.kind),
+          getDropBucketForObject(currentObject),
           currentObject
         );
         continue;
@@ -963,6 +997,56 @@ export class SqlObjectHandler {
         continue;
       }
 
+      if (
+        currentObject.kind === "default-privilege" ||
+        desiredObject.kind === "default-privilege"
+      ) {
+        if (
+          currentObject.kind !== "default-privilege" ||
+          desiredObject.kind !== "default-privilege"
+        ) {
+          throw new ValidationError(
+            `PostgreSQL SQL object key '${currentObject.key}' collides between ${currentObject.kind} and ${desiredObject.kind} definitions`,
+            "default-privilege",
+            currentObject.key,
+            desiredObject.createStatement
+          );
+        }
+        const currentDefinition = currentObject.defaultPrivilegeDefinition;
+        const desiredDefinition = desiredObject.defaultPrivilegeDefinition;
+        if (!currentDefinition || !desiredDefinition) {
+          throw new ValidationError(
+            `PostgreSQL default privilege '${desiredObject.key}' is missing its lossless canonical definition`,
+            "default-privilege",
+            desiredObject.key,
+            desiredObject.createStatement
+          );
+        }
+        if (
+          currentDefinition.baselineGranted !==
+          desiredDefinition.baselineGranted
+        ) {
+          throw new ValidationError(
+            `PostgreSQL default privilege '${desiredObject.key}' has inconsistent hard-wired baseline state`,
+            "default-privilege",
+            desiredObject.key,
+            desiredObject.createStatement
+          );
+        }
+        const statement = renderPostgresDefaultPrivilegeTransition(
+          currentDefinition,
+          desiredDefinition
+        );
+        if (statement) {
+          addToBucket(
+            createsByBucket,
+            getCreateBucketForObject(desiredObject),
+            { ...desiredObject, createStatement: statement }
+          );
+        }
+        continue;
+      }
+
       const currentCanonical = canonicalObjects.get(currentObject)!;
       const desiredCanonical = canonicalObjects.get(desiredObject)!;
       const replicaIdentityChanged = partitionReplicaIdentityChanged(
@@ -1053,8 +1137,16 @@ export class SqlObjectHandler {
         );
       }
 
-      addToBucket(dropsByBucket, getDropBucket(currentObject.kind), currentObject);
-      addToBucket(createsByBucket, getCreateBucket(desiredObject.kind), desiredObject);
+      addToBucket(
+        dropsByBucket,
+        getDropBucketForObject(currentObject),
+        currentObject
+      );
+      addToBucket(
+        createsByBucket,
+        getCreateBucketForObject(desiredObject),
+        desiredObject
+      );
     }
 
     for (const desiredObject of desiredObjects) {
@@ -1072,7 +1164,19 @@ export class SqlObjectHandler {
           context
         );
       }
-      addToBucket(createsByBucket, getCreateBucket(desiredObject.kind), desiredObject);
+      if (
+        desiredObject.defaultPrivilegeDefinition &&
+        postgresDefaultPrivilegeMatchesBaseline(
+          desiredObject.defaultPrivilegeDefinition
+        )
+      ) {
+        continue;
+      }
+      addToBucket(
+        createsByBucket,
+        getCreateBucketForObject(desiredObject),
+        desiredObject
+      );
       if (
         desiredObject.kind === "foreign-server" &&
         desiredObject.foreignServerDefinition?.owner !== undefined
@@ -1126,6 +1230,8 @@ export class SqlObjectHandler {
     plan.typeDrop = dedupeStatements(plan.typeDrop);
     plan.lateDrop = dedupeStatements(plan.lateDrop);
     plan.bootstrapCreate = dedupeStatements(plan.bootstrapCreate);
+    plan.preSchemaCreate = dedupeStatements(plan.preSchemaCreate);
+    plan.postSchemaCreate = dedupeStatements(plan.postSchemaCreate);
     plan.typeCreate = dedupeStatements(plan.typeCreate);
     plan.preTableCreate = dedupeStatements(plan.preTableCreate);
     plan.postTableCreate = dedupeStatements(plan.postTableCreate);

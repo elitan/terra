@@ -30,6 +30,7 @@ import type {
   PostgresRoleDefinition,
   PostgresGrantDefinition,
   PostgresGrantObjectType,
+  PostgresDefaultPrivilegeDefinition,
   IndexTerm,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
@@ -60,6 +61,13 @@ import {
   renderPostgresGrant,
   renderPostgresGrantRevoke,
 } from "../../utils/postgres-grant";
+import {
+  isSupportedPostgresDefaultPrivilege,
+  postgresDefaultPrivilegeKey,
+  postgresDefaultPrivilegeObjectTypeFromCatalog,
+  renderPostgresDefaultPrivilegeRestore,
+  renderPostgresDefaultPrivilegeState,
+} from "../../utils/postgres-default-privilege";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -2179,6 +2187,7 @@ export class DatabaseInspector {
       this.getCurrentEventTriggerObjects(client),
       this.getCurrentRoleObjects(client),
       this.getCurrentGrantObjects(client, schemas),
+      this.getCurrentDefaultPrivilegeObjects(client),
     ]);
 
     return groups
@@ -4355,6 +4364,117 @@ export class DatabaseInspector {
       ));
     }
 
+    return objects;
+  }
+
+  private async getCurrentDefaultPrivilegeObjects(
+    client: Client
+  ): Promise<SqlObject[]> {
+    const result = await client.query(`
+      SELECT
+        owner.rolname AS owner_name,
+        namespace.nspname AS schema_name,
+        defaults.defaclobjtype AS object_type,
+        privilege.privilege_type,
+        privilege.grantee = 0 AS grantee_is_public,
+        COALESCE(grantee.rolname, 'PUBLIC') AS grantee_name,
+        privilege.actual_granted,
+        privilege.is_grantable,
+        privilege.baseline_granted,
+        pg_get_userbyid(privilege.actual_grantor) AS grantor_name
+      FROM pg_default_acl defaults
+      JOIN pg_roles owner ON owner.oid = defaults.defaclrole
+      LEFT JOIN pg_namespace namespace
+        ON namespace.oid = defaults.defaclnamespace
+      JOIN LATERAL (
+        SELECT
+          COALESCE(actual.grantee, baseline.grantee) AS grantee,
+          COALESCE(
+            actual.privilege_type,
+            baseline.privilege_type
+          ) AS privilege_type,
+          actual.privilege_type IS NOT NULL AS actual_granted,
+          COALESCE(actual.is_grantable, false) AS is_grantable,
+          baseline.privilege_type IS NOT NULL AS baseline_granted,
+          actual.grantor AS actual_grantor
+        FROM aclexplode(defaults.defaclacl) actual
+        FULL JOIN aclexplode(
+          CASE
+            WHEN defaults.defaclnamespace = 0 THEN
+              acldefault(
+                CASE
+                  WHEN defaults.defaclobjtype = 'S' THEN 's'::"char"
+                  ELSE defaults.defaclobjtype
+                END,
+                defaults.defaclrole
+              )
+            ELSE NULL::aclitem[]
+          END
+        ) baseline
+          ON baseline.grantor = actual.grantor
+          AND baseline.grantee = actual.grantee
+          AND baseline.privilege_type = actual.privilege_type
+        WHERE actual.privilege_type IS NULL
+          OR baseline.privilege_type IS NULL
+          OR actual.is_grantable <> baseline.is_grantable
+      ) privilege ON true
+      LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
+      ORDER BY
+        owner.rolname,
+        namespace.nspname NULLS FIRST,
+        defaults.defaclobjtype,
+        privilege.grantee,
+        privilege.privilege_type
+    `);
+    const objects: SqlObject[] = [];
+    for (const row of result.rows) {
+      const objectType = postgresDefaultPrivilegeObjectTypeFromCatalog(
+        row.object_type
+      );
+      if (
+        !objectType ||
+        !isSupportedPostgresDefaultPrivilege(
+          objectType,
+          row.privilege_type
+        )
+      ) {
+        continue;
+      }
+      if (row.grantor_name && row.grantor_name !== row.owner_name) {
+        throw new ValidationError(
+          `PostgreSQL default ${objectType} privilege ${row.privilege_type} for role '${row.owner_name}' was granted by non-owner role '${row.grantor_name}', which TerraDB cannot reconcile safely`,
+          "default-privilege",
+          row.owner_name
+        );
+      }
+      const definition: PostgresDefaultPrivilegeDefinition = {
+        owner: row.owner_name,
+        objectType,
+        ...(row.schema_name ? { schema: row.schema_name } : {}),
+        grantee: row.grantee_name,
+        granteeIsPublic: row.grantee_is_public,
+        privilege: row.privilege_type,
+        granted: row.actual_granted,
+        grantable: row.actual_granted && row.is_grantable,
+        baselineGranted: row.baseline_granted,
+      };
+      const createStatement = renderPostgresDefaultPrivilegeState(definition);
+      objects.push({
+        kind: "default-privilege",
+        key: postgresDefaultPrivilegeKey(definition),
+        name: createStatement,
+        ...(definition.schema ? { schema: definition.schema } : {}),
+        createStatement,
+        dropStatement: renderPostgresDefaultPrivilegeRestore(definition),
+        defaultPrivilegeDefinition: definition,
+        dependencies: [
+          `role:${definition.owner}`,
+          ...(definition.granteeIsPublic
+            ? []
+            : [`role:${definition.grantee}`]),
+        ],
+      });
+    }
     return objects;
   }
 

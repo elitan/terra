@@ -165,14 +165,27 @@ role named `PUBLIC`, preserves PostgreSQL's implicit owner/default ACL entries,
 and changes `WITH GRANT OPTION` natively. Omitting a managed grant emits a
 destructive `REVOKE ... RESTRICT`, so strict mode can block it. Direct
 `REVOKE`, role-membership grants, column privileges, `ALL`, expanding `ALL ...
-IN SCHEMA`, `ALTER DEFAULT PRIVILEGES`, contextual grantees, explicit grantors,
-and object families whose ACLs are not inspected losslessly fail before
-mutation. Version-specific privileges outside the PostgreSQL 14-18 portable
-contract, including PostgreSQL 18 `MAINTAIN`, remain unmanaged and are
-preserved. A foreign-server grant must declare the corresponding server so
+IN SCHEMA`, contextual grantees, explicit grantors, and object families whose
+ACLs are not inspected losslessly fail before mutation. Version-specific
+privileges outside the PostgreSQL 14-18 portable contract, including
+PostgreSQL 17-18 `MAINTAIN`, remain unmanaged and are preserved. A
+foreign-server grant must declare the corresponding server so
 omission remains scoped after the grant is removed from desired SQL. A grant
 made by a non-owner grantor is rejected during inspection
 because it cannot be revoked safely without managing grantor provenance.
+PostgreSQL default privileges are declarative for explicitly named `FOR ROLE`
+owners across tables, sequences, routines, types, and schemas. Global and
+`IN SCHEMA` declarations expand to stable atomic privileges, preserve negative
+hard-wired defaults such as revoking routine execution from `PUBLIC`, and
+change grant options without temporarily removing access. The owner role and
+any schema-specific target must be declared in the same desired schema so
+omission has a stable scope. Omission restores PostgreSQL's hard-wired global
+default or removes a per-schema addition; nested revocations are destructive
+and respect strict mode. As PostgreSQL specifies, these settings affect only
+objects created later. `ALL`, contextual owners or grantees, `CASCADE`,
+grant-option-only revocations, PostgreSQL 17-18 `MAINTAIN`, and PostgreSQL 18
+large-object defaults are rejected before mutation to keep one portable
+PostgreSQL 14-18 contract.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

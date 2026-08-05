@@ -31,6 +31,151 @@ describe("Advanced SQL object inspector", function () {
     }
   );
 
+  test("inspects only portable default privilege deviations", async function () {
+    const inspector = new DatabaseInspector() as any;
+    const client = createClient(function (sql) {
+      expect(sql).toContain("FROM pg_default_acl");
+      expect(sql).toContain("WHEN defaults.defaclobjtype = 'S'");
+      expect(sql).toContain("THEN 's'::\"char\"");
+      expect(sql).toContain("ELSE NULL::aclitem[]");
+      expect(sql).toContain("COALESCE(actual.is_grantable, false)");
+      expect(sql).toContain(") privilege ON true");
+      return {
+        rows: [
+          {
+            owner_name: "object_owner",
+            schema_name: null,
+            object_type: "f",
+            privilege_type: "EXECUTE",
+            grantee_is_public: true,
+            grantee_name: "PUBLIC",
+            actual_granted: false,
+            is_grantable: false,
+            baseline_granted: true,
+            grantor_name: null,
+          },
+          {
+            owner_name: "object_owner",
+            schema_name: null,
+            object_type: "r",
+            privilege_type: "SELECT",
+            grantee_is_public: false,
+            grantee_name: "reader",
+            actual_granted: true,
+            is_grantable: false,
+            baseline_granted: false,
+            grantor_name: "object_owner",
+          },
+          {
+            owner_name: "object_owner",
+            schema_name: "app",
+            object_type: "r",
+            privilege_type: "INSERT",
+            grantee_is_public: false,
+            grantee_name: "reader",
+            actual_granted: true,
+            is_grantable: true,
+            baseline_granted: false,
+            grantor_name: "object_owner",
+          },
+          {
+            owner_name: "object_owner",
+            schema_name: null,
+            object_type: "r",
+            privilege_type: "MAINTAIN",
+            grantee_is_public: false,
+            grantee_name: "reader",
+            actual_granted: true,
+            is_grantable: false,
+            baseline_granted: false,
+            grantor_name: "object_owner",
+          },
+          {
+            owner_name: "object_owner",
+            schema_name: null,
+            object_type: "L",
+            privilege_type: "SELECT",
+            grantee_is_public: false,
+            grantee_name: "reader",
+            actual_granted: true,
+            is_grantable: false,
+            baseline_granted: false,
+            grantor_name: "object_owner",
+          },
+        ],
+      };
+    });
+
+    const objects = await inspector.getCurrentDefaultPrivilegeObjects(client);
+
+    expect(objects).toHaveLength(3);
+    expect(objects[0]).toMatchObject({
+      kind: "default-privilege",
+      key:
+        "default-privilege:ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "GRANT EXECUTE ON ROUTINES TO PUBLIC;",
+      createStatement:
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "REVOKE EXECUTE ON ROUTINES FROM PUBLIC RESTRICT;",
+      dropStatement:
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "GRANT EXECUTE ON ROUTINES TO PUBLIC;",
+      defaultPrivilegeDefinition: {
+        granted: false,
+        grantable: false,
+        baselineGranted: true,
+      },
+      dependencies: ["role:object_owner"],
+    });
+    expect(objects[1]).toMatchObject({
+      createStatement:
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "GRANT SELECT ON TABLES TO \"reader\";",
+      dropStatement:
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "REVOKE SELECT ON TABLES FROM \"reader\" RESTRICT;",
+      dependencies: ["role:object_owner", "role:reader"],
+    });
+    expect(objects[2]).toMatchObject({
+      schema: "app",
+      createStatement:
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" IN SCHEMA \"app\" " +
+        "GRANT INSERT ON TABLES TO \"reader\" WITH GRANT OPTION;",
+      dropStatement:
+        "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" IN SCHEMA \"app\" " +
+        "REVOKE INSERT ON TABLES FROM \"reader\" RESTRICT;",
+      defaultPrivilegeDefinition: {
+        granted: true,
+        grantable: true,
+        baselineGranted: false,
+      },
+    });
+  });
+
+  test("rejects default privileges granted by a non-owner role", async function () {
+    const inspector = new DatabaseInspector() as any;
+    const client = createClient(function () {
+      return {
+        rows: [{
+          owner_name: "object_owner",
+          schema_name: null,
+          object_type: "r",
+          privilege_type: "SELECT",
+          grantee_is_public: false,
+          grantee_name: "reader",
+          actual_granted: true,
+          is_grantable: false,
+          baseline_granted: false,
+          grantor_name: "grant_manager",
+        }],
+      };
+    });
+
+    await expect(
+      inspector.getCurrentDefaultPrivilegeObjects(client)
+    ).rejects.toThrow(/granted by non-owner role 'grant_manager'/i);
+  });
+
   test("inspects issue 112 object families from a live database", async function () {
     const inspector = new DatabaseInspector();
     const client = createClient(function (sql, params) {
@@ -340,6 +485,10 @@ describe("Advanced SQL object inspector", function () {
         };
       }
 
+      if (sql.includes("FROM pg_default_acl")) {
+        return { rows: [] };
+      }
+
       throw new Error(`Unhandled SQL: ${sql}`);
     });
 
@@ -563,6 +712,10 @@ describe("Advanced SQL object inspector", function () {
       }
 
       if (sql.includes("aclexplode(s.srvacl)")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("FROM pg_default_acl")) {
         return { rows: [] };
       }
 

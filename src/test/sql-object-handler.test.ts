@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { SqlObjectHandler } from "../core/schema/handlers/sql-object-handler";
 import type {
+  PostgresDefaultPrivilegeDefinition,
   PostgresGrantDefinition,
   PostgresRoleDefinition,
   SqlObject,
 } from "../types/schema";
+import {
+  postgresDefaultPrivilegeKey,
+  renderPostgresDefaultPrivilegeRestore,
+  renderPostgresDefaultPrivilegeState,
+} from "../utils/postgres-default-privilege";
 
 function makeSqlObject(overrides: Partial<SqlObject>): SqlObject {
   return {
@@ -81,7 +87,137 @@ function makeGrant(
   });
 }
 
+function makeDefaultPrivilege(
+  definitionOverrides: Partial<PostgresDefaultPrivilegeDefinition> = {},
+  objectOverrides: Partial<SqlObject> = {}
+): SqlObject {
+  const definition: PostgresDefaultPrivilegeDefinition = {
+    owner: "object_owner",
+    objectType: "TABLES",
+    grantee: "reader",
+    granteeIsPublic: false,
+    privilege: "SELECT",
+    granted: true,
+    grantable: false,
+    baselineGranted: false,
+    ...definitionOverrides,
+  };
+  const statement = renderPostgresDefaultPrivilegeState(definition);
+  return makeSqlObject({
+    kind: "default-privilege",
+    key: postgresDefaultPrivilegeKey(definition),
+    name: statement,
+    schema: definition.schema,
+    createStatement: statement,
+    dropStatement: renderPostgresDefaultPrivilegeRestore(definition),
+    defaultPrivilegeDefinition: definition,
+    dependencies: ["role:object_owner", "role:reader"],
+    ...objectOverrides,
+  });
+}
+
 describe("SqlObjectHandler", function () {
+  test("orders global and schema default privileges before created objects", async function () {
+    const handler = new SqlObjectHandler();
+    const global = makeDefaultPrivilege();
+    const inSchema = makeDefaultPrivilege({
+      schema: "app",
+      privilege: "INSERT",
+    });
+    const baseline = makeDefaultPrivilege({
+      grantee: "object_owner",
+      privilege: "SELECT",
+      baselineGranted: true,
+    });
+
+    const plan = await handler.generateStatements(
+      [global, inSchema, baseline],
+      []
+    );
+
+    expect(plan.preSchemaCreate).toEqual([global.createStatement]);
+    expect(plan.postSchemaCreate).toEqual([inSchema.createStatement]);
+    expect(plan.finalCreate).toEqual([]);
+  });
+
+  test("transitions default privileges without dropping retained access", async function () {
+    const handler = new SqlObjectHandler();
+    const globalCurrent = makeDefaultPrivilege();
+    const globalDesired = makeDefaultPrivilege({ grantable: true });
+    const schemaCurrent = makeDefaultPrivilege({
+      schema: "app",
+      privilege: "INSERT",
+      grantable: true,
+    });
+    const schemaDesired = makeDefaultPrivilege({
+      schema: "app",
+      privilege: "INSERT",
+    });
+
+    const plan = await handler.generateStatements(
+      [globalDesired, schemaDesired],
+      [globalCurrent, schemaCurrent]
+    );
+
+    expect(plan.preSchemaCreate).toEqual([
+      "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "GRANT SELECT ON TABLES TO \"reader\" WITH GRANT OPTION;",
+    ]);
+    expect(plan.postSchemaCreate).toEqual([
+      "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" IN SCHEMA \"app\" " +
+        "REVOKE GRANT OPTION FOR INSERT ON TABLES FROM \"reader\" RESTRICT;",
+    ]);
+  });
+
+  test("restores omitted default privileges to PostgreSQL baselines", async function () {
+    const handler = new SqlObjectHandler();
+    const addedGrant = makeDefaultPrivilege();
+    const removedPublicExecute = makeDefaultPrivilege({
+      objectType: "ROUTINES",
+      grantee: "PUBLIC",
+      granteeIsPublic: true,
+      privilege: "EXECUTE",
+      granted: false,
+      baselineGranted: true,
+    });
+
+    const plan = await handler.generateStatements(
+      [],
+      [addedGrant, removedPublicExecute]
+    );
+
+    expect(plan.preSchemaCreate).toEqual([
+      "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "REVOKE SELECT ON TABLES FROM \"reader\" RESTRICT;",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE \"object_owner\" " +
+        "GRANT EXECUTE ON ROUTINES TO PUBLIC;",
+    ]);
+  });
+
+  test("rejects incomplete and colliding default privilege definitions", async function () {
+    const handler = new SqlObjectHandler();
+    const complete = makeDefaultPrivilege();
+    const incomplete = makeDefaultPrivilege({}, {
+      defaultPrivilegeDefinition: undefined,
+    });
+
+    await expect(
+      handler.generateStatements([incomplete], [complete])
+    ).rejects.toThrow(/missing its lossless canonical definition/i);
+    await expect(
+      handler.generateStatements(
+        [makeDefaultPrivilege({ baselineGranted: true })],
+        [complete]
+      )
+    ).rejects.toThrow(/inconsistent hard-wired baseline state/i);
+    await expect(
+      handler.generateStatements(
+        [makePolicy({ key: complete.key })],
+        [complete]
+      )
+    ).rejects.toThrow(/collides between default-privilege and policy/i);
+  });
+
   test("changes privilege grant options without revoking the privilege", async function () {
     const handler = new SqlObjectHandler();
 

@@ -60,6 +60,7 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "COMMENT ON TABLE users IS 'test'",
       "CREATE TYPE mood AS ENUM ('sad', 'ok')",
       "ALTER TYPE mood ADD VALUE 'happy'",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner GRANT SELECT ON TABLES TO reader",
     ];
 
     await fc.assert(
@@ -84,6 +85,7 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users ALTER COLUMN age TYPE BIGINT",
       "ALTER TABLE users ALTER COLUMN age SET DATA TYPE BIGINT",
       "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
+      "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader RESTRICT",
     ];
 
     await fc.assert(

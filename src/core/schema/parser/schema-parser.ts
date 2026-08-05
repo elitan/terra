@@ -93,6 +93,7 @@ import { parseForeignServerRemovals } from "./foreign-server-removal-parser";
 import { parsePostgresRole } from "./role-parser";
 import { parsePostgresRoleRemovals } from "./role-removal-parser";
 import { parsePostgresGrants } from "./grant-parser";
+import { parsePostgresDefaultPrivileges } from "./default-privilege-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -933,9 +934,11 @@ export class SchemaParser {
             ...this.parseGrantSqlObjects(stmt.GrantStmt, filePath)
           );
         } else if (stmt.AlterDefaultPrivilegesStmt) {
-          throw new ParserError(
-            "PostgreSQL ALTER DEFAULT PRIVILEGES is not supported in desired schemas because TerraDB does not yet inspect pg_default_acl losslessly; manage default privileges separately",
-            filePath
+          sqlObjects.push(
+            ...parsePostgresDefaultPrivileges(
+              stmt.AlterDefaultPrivilegesStmt,
+              filePath
+            )
           );
         } else if (stmt.GrantRoleStmt) {
           throw new ParserError(
@@ -1088,6 +1091,7 @@ export class SchemaParser {
       filePath
     );
     this.rejectUnboundForeignServerGrants(sqlObjects, filePath);
+    this.rejectUnboundDefaultPrivileges(sqlObjects, schemas, filePath);
     rejectDuplicateTriggerDeclarations(triggers, sqlObjects, filePath);
     mergePendingTriggerModes(
       triggers,
@@ -1655,6 +1659,7 @@ export class SchemaParser {
         object.kind !== "row-level-security" &&
         object.kind !== "foreign-server" &&
         object.kind !== "grant" &&
+        object.kind !== "default-privilege" &&
         object.kind !== "role"
       ) {
         continue;
@@ -1669,6 +1674,8 @@ export class SchemaParser {
           label = "role";
         } else if (object.kind === "grant") {
           label = "privilege grant";
+        } else if (object.kind === "default-privilege") {
+          label = "default privilege";
         }
         throw new ParserError(
           `PostgreSQL ${label} '${object.key}' is declared more than once in the desired schema`,
@@ -1705,6 +1712,43 @@ export class SchemaParser {
         `PostgreSQL GRANT on foreign server '${definition.objectName}' must also declare that server with CREATE SERVER so omission has a stable database-wide management scope`,
         filePath
       );
+    }
+  }
+
+  private rejectUnboundDefaultPrivileges(
+    objects: SqlObject[],
+    schemas: SchemaDefinition[],
+    filePath?: string
+  ): void {
+    const declaredRoles = new Set(
+      objects
+        .filter(function isPresentRole(object) {
+          return object.kind === "role" && object.desiredAbsent !== true;
+        })
+        .map(function getRoleName(object) {
+          return object.name;
+        })
+    );
+    const declaredSchemas = new Set(schemas.map(function getSchemaName(schema) {
+      return schema.name;
+    }));
+    for (const object of objects) {
+      const definition = object.defaultPrivilegeDefinition;
+      if (!definition) {
+        continue;
+      }
+      if (!declaredRoles.has(definition.owner)) {
+        throw new ParserError(
+          `PostgreSQL default privileges for role '${definition.owner}' must also declare that owner with CREATE ROLE so omission has a stable database-wide scope`,
+          filePath
+        );
+      }
+      if (definition.schema && !declaredSchemas.has(definition.schema)) {
+        throw new ParserError(
+          `PostgreSQL default privileges in schema '${definition.schema}' must also declare that schema with CREATE SCHEMA so omission has a stable scope`,
+          filePath
+        );
+      }
     }
   }
 

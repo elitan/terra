@@ -18,6 +18,10 @@ export function isDestructiveStatement(statement: string): boolean {
   return (
     normalized.startsWith("DROP ") ||
     normalized.startsWith("REVOKE ") ||
+    (
+      normalized.startsWith("ALTER DEFAULT PRIVILEGES ") &&
+      normalized.includes(" REVOKE ")
+    ) ||
     normalized.includes(" DROP COLUMN ") ||
     normalized.includes(" DROP ATTRIBUTE ") ||
     normalized.includes(" DROP CONSTRAINT ") ||

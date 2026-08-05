@@ -369,7 +369,7 @@ async function supportsMaintainPrivilege(client: Client): Promise<boolean> {
   const result = await client.query(
     "SELECT current_setting('server_version_num')::integer AS version"
   );
-  return Number(result.rows[0]?.version) >= 180000;
+  return Number(result.rows[0]?.version) >= 170000;
 }
 
 async function publicPrivilegeRows(client: Client): Promise<Array<{
