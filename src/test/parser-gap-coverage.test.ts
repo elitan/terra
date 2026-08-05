@@ -118,11 +118,16 @@ describe("Parser gap coverage", function () {
     }
 
     const valid = await parser.parseSchema(`
-      CREATE TABLE custom_serial_type (value public.serial);
+      CREATE TABLE custom_serial_type (
+        value public.serial,
+        values public.serial[]
+      );
       CREATE TABLE quoted_lowercase_serial (id "serial");
     `);
     expect(valid.tables[0]?.columns[0]?.type).toBe("public.serial");
     expect(valid.tables[0]?.columns[0]?.nullable).toBe(true);
+    expect(valid.tables[0]?.columns[1]?.type).toBe("public.serial[]");
+    expect(valid.tables[0]?.columns[1]?.nullable).toBe(true);
     expect(valid.tables[1]?.columns[0]?.type).toBe("SERIAL");
     expect(valid.tables[1]?.columns[0]?.nullable).toBe(false);
   });

@@ -55,6 +55,7 @@ import {
   renderPostgresRoleCreate,
   renderPostgresRoleDrop,
 } from "../../utils/postgres-role";
+import { isPostgresSerialType } from "../../utils/sql";
 import {
   isSupportedPostgresGrantPrivilege,
   postgresGrantKey,
@@ -207,6 +208,8 @@ function getPostgresReplicaIdentity(
 
 const COLUMN_COLLATION_JOIN_SQL = `
   JOIN pg_type column_type ON column_type.oid = a.atttypid
+  JOIN pg_namespace column_type_namespace
+    ON column_type_namespace.oid = column_type.typnamespace
   LEFT JOIN pg_collation column_collation
     ON column_collation.oid = a.attcollation
     AND a.attcollation <> column_type.typcollation
@@ -854,6 +857,7 @@ export class DatabaseInspector {
           a.attname as column_name,
           format_type(a.atttypid, a.atttypmod) as data_type,
           format_type(a.atttypid, a.atttypmod) as pg_type,
+          column_type_namespace.nspname as column_type_schema,
           CASE
             WHEN a.atttypmod > 0 AND format_type(a.atttypid, a.atttypmod) LIKE '%(%'
             THEN substring(format_type(a.atttypid, a.atttypmod) FROM '\\((\\d+)')::int
@@ -903,7 +907,11 @@ export class DatabaseInspector {
       );
 
       const inspectedColumns = columnsResult.rows.map((col: any) => {
-        let type = col.pg_type;
+        const type = this.qualifySerialNamedCustomType(
+          col.pg_type,
+          col.column_type_schema,
+          Boolean(col.is_serial)
+        );
 
         // Parse generated column info
         let generated: Column['generated'] | undefined = undefined;
@@ -1914,6 +1922,7 @@ export class DatabaseInspector {
         n.nspname as schema_name,
         a.attname as attribute_name,
         format_type(a.atttypid, a.atttypmod) as attribute_type,
+        attribute_type_namespace.nspname as attribute_type_schema,
         attribute_collation.collname as attribute_collation_name,
         attribute_collation_namespace.nspname as attribute_collation_schema,
         a.attnum
@@ -1925,6 +1934,8 @@ export class DatabaseInspector {
         AND a.attnum > 0
         AND NOT a.attisdropped
       LEFT JOIN pg_type attribute_type ON attribute_type.oid = a.atttypid
+      LEFT JOIN pg_namespace attribute_type_namespace
+        ON attribute_type_namespace.oid = attribute_type.typnamespace
       LEFT JOIN pg_collation attribute_collation
         ON attribute_collation.oid = a.attcollation
         AND a.attcollation <> attribute_type.typcollation
@@ -1946,7 +1957,11 @@ export class DatabaseInspector {
       const attribute = row.attribute_name
         ? {
             name: row.attribute_name,
-            type: row.attribute_type,
+            type: this.qualifySerialNamedCustomType(
+              row.attribute_type,
+              row.attribute_type_schema,
+              false
+            ),
             ...(row.attribute_collation_name
               ? {
                   collation: {
@@ -4533,6 +4548,7 @@ export class DatabaseInspector {
         SELECT
           a.attname as column_name,
           format_type(a.atttypid, a.atttypmod) as pg_type,
+          column_type_namespace.nspname as column_type_schema,
           NOT a.attnotnull as is_nullable,
           pg_get_expr(ad.adbin, ad.adrelid) as column_default,
           a.attgenerated,
@@ -4593,7 +4609,12 @@ export class DatabaseInspector {
   }
 
   private buildColumnDefinition(row: any): string {
-    const parts = [this.quoteIdent(row.column_name), row.pg_type];
+    const type = this.qualifySerialNamedCustomType(
+      row.pg_type,
+      row.column_type_schema,
+      false
+    );
+    const parts = [this.quoteIdent(row.column_name), type];
 
     const collation = this.buildColumnCollation(row);
     if (collation) {
@@ -4727,6 +4748,31 @@ export class DatabaseInspector {
 
   private quoteIdent(value: string): string {
     return `"${String(value).replace(/"/g, '""')}"`;
+  }
+
+  private qualifySerialNamedCustomType(
+    type: string,
+    typeSchema: string | undefined,
+    isStructuralSerial: boolean
+  ): string {
+    if (
+      isStructuralSerial ||
+      !typeSchema ||
+      typeSchema === "pg_catalog"
+    ) {
+      return type;
+    }
+
+    const arrayMatch = type.match(/^(.+?)(\[\])+$/);
+    const baseType = arrayMatch?.[1] || type;
+    if (!isPostgresSerialType(baseType)) {
+      return type;
+    }
+
+    const schema = /^[a-z_][a-z0-9_$]*$/.test(typeSchema)
+      ? typeSchema
+      : this.quoteIdent(typeSchema);
+    return `${schema}.${type}`;
   }
 
   private quoteLiteral(value: string): string {

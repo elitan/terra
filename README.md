@@ -149,6 +149,10 @@ of being reinterpreted or reaching database execution. PostgreSQL's valid
 quoted-lowercase `"serial"` spelling remains equivalent, while other
 schema-qualified names ending in `serial` remain custom type references rather
 than pseudo-types.
+Catalog inspection preserves the schema identity of custom types named
+`smallserial`, `serial2`, `serial`, `serial4`, `bigserial`, or `serial8`,
+including their arrays and use in composite attributes, so those valid
+schema-qualified types do not drift into integer pseudo-type semantics.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

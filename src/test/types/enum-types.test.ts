@@ -608,6 +608,91 @@ describe("ENUM Types", () => {
   });
 
   describe("Schema-Qualified ENUM Types", () => {
+    it("preserves enum type identities that collide with serial aliases", async function () {
+      const schema = `
+        CREATE TYPE public.smallserial AS ENUM ('value');
+        CREATE TYPE public.serial2 AS ENUM ('value');
+        CREATE TYPE public.serial AS ENUM ('value');
+        CREATE TYPE public.serial4 AS ENUM ('value');
+        CREATE TYPE public.bigserial AS ENUM ('value');
+        CREATE TYPE public.serial8 AS ENUM ('value');
+        CREATE TYPE public.serial_payload AS (
+          scalar_value public.serial,
+          serial_values public.serial[]
+        );
+
+        CREATE TABLE serial_type_collisions (
+          small_value public.smallserial,
+          serial2_value public.serial2,
+          serial_value public.serial,
+          serial4_value public.serial4,
+          big_value public.bigserial,
+          serial8_value public.serial8,
+          serial_values public.serial[]
+        );
+      `;
+
+      await schemaService.apply(schema, ["public"], true);
+      await client.query(`
+        INSERT INTO serial_type_collisions VALUES (
+          'value', 'value', 'value', 'value', 'value', 'value',
+          ARRAY['value']::public.serial[]
+        )
+      `);
+      const before = await client.query(`
+        SELECT
+          'public.serial_type_collisions'::regclass::oid::text AS table_oid,
+          json_object_agg(type.typname, type.oid::text ORDER BY type.typname)
+            AS type_oids
+        FROM pg_type type
+        WHERE type.typnamespace = 'public'::regnamespace
+          AND type.typname IN (
+            'smallserial', 'serial2', 'serial', 'serial4', 'bigserial', 'serial8',
+            'serial_payload'
+          )
+      `);
+
+      const plan = await schemaService.plan(schema, ["public"]);
+      expect(plan.hasChanges).toBe(false);
+      await schemaService.apply(schema, ["public"], true);
+
+      const after = await client.query(`
+        SELECT
+          'public.serial_type_collisions'::regclass::oid::text AS table_oid,
+          json_object_agg(type.typname, type.oid::text ORDER BY type.typname)
+            AS type_oids
+        FROM pg_type type
+        WHERE type.typnamespace = 'public'::regnamespace
+          AND type.typname IN (
+            'smallserial', 'serial2', 'serial', 'serial4', 'bigserial', 'serial8',
+            'serial_payload'
+          )
+      `);
+      expect(after.rows).toEqual(before.rows);
+      const rows = await client.query(`
+        SELECT
+          small_value::text,
+          serial2_value::text,
+          serial_value::text,
+          serial4_value::text,
+          big_value::text,
+          serial8_value::text,
+          serial_values::text
+        FROM serial_type_collisions
+      `);
+      expect(rows.rows).toEqual([
+        {
+          small_value: "value",
+          serial2_value: "value",
+          serial_value: "value",
+          serial4_value: "value",
+          big_value: "value",
+          serial8_value: "value",
+          serial_values: "{value}",
+        },
+      ]);
+    });
+
     it("should handle schema-qualified ENUM types in column definitions", async () => {
       const schema = `
         CREATE SCHEMA myapp;

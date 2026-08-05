@@ -332,6 +332,9 @@ describe("DatabaseInspector coverage", () => {
         };
       }
       if (sql.includes("FROM pg_attribute")) {
+        expect(sql).toContain(
+          "column_type_namespace.nspname as column_type_schema"
+        );
         return {
           rows: [
             {
@@ -345,6 +348,20 @@ describe("DatabaseInspector coverage", () => {
               column_storage: null,
               column_compression: "",
               inheritance_count: 1,
+            },
+            {
+              column_name: "custom_serial_values",
+              pg_type: "serial[]",
+              column_type_schema: "public",
+              is_serial: false,
+              is_nullable: true,
+              column_default: null,
+              attgenerated: "",
+              attidentity: "",
+              column_default_storage: "x",
+              column_storage: null,
+              column_compression: "",
+              inheritance_count: 0,
             },
           ],
         };
@@ -360,11 +377,82 @@ describe("DatabaseInspector coverage", () => {
     expect(tables[0]?.inherits).toEqual([
       { name: "events", schema: "public" },
     ]);
-    expect(tables[0]?.columns).toEqual([]);
+    expect(tables[0]?.columns).toHaveLength(1);
+    expect(tables[0]?.columns[0]?.type).toBe("public.serial[]");
     expect(tables[0]?.inheritedColumns?.[0]?.name).toBe("payload");
     expect(tables[0]?.inheritedCheckConstraints?.[0]?.name).toBe(
       "parent_check"
     );
+  });
+
+  test("qualifies only serial-named custom catalog types", function () {
+    const inspector = new DatabaseInspector() as any;
+
+    expect(
+      inspector.qualifySerialNamedCustomType("serial", "public", false)
+    ).toBe("public.serial");
+    expect(
+      inspector.qualifySerialNamedCustomType("serial[]", "Odd Schema", false)
+    ).toBe('"Odd Schema".serial[]');
+    expect(
+      inspector.qualifySerialNamedCustomType("serial", "public", true)
+    ).toBe("serial");
+    expect(
+      inspector.qualifySerialNamedCustomType("serial", "pg_catalog", false)
+    ).toBe("serial");
+    expect(
+      inspector.qualifySerialNamedCustomType("serial", undefined, false)
+    ).toBe("serial");
+    expect(
+      inspector.qualifySerialNamedCustomType("text", "public", false)
+    ).toBe("text");
+    expect(
+      inspector.buildColumnDefinition({
+        column_name: "custom_values",
+        pg_type: "serial[]",
+        column_type_schema: "public",
+        is_nullable: true,
+        column_default: null,
+        attgenerated: "",
+        attidentity: "",
+      })
+    ).toBe('"custom_values" public.serial[]');
+  });
+
+  test("preserves serial-named custom types in composite attributes", async function () {
+    const inspector = new DatabaseInspector();
+    const client = createClient(function handleCompositeQuery(sql, params) {
+      expect(params).toEqual([["public"]]);
+      if (sql.includes("c.relkind = 'c'")) {
+        expect(sql).toContain(
+          "attribute_type_namespace.nspname as attribute_type_schema"
+        );
+        return {
+          rows: [
+            {
+              type_name: "payload",
+              schema_name: "public",
+              attribute_name: "values",
+              attribute_type: "serial[]",
+              attribute_type_schema: "public",
+              attnum: 1,
+            },
+          ],
+        };
+      }
+      if (
+        sql.includes("target_types AS") ||
+        sql.includes("as catalog_dependents")
+      ) {
+        return { rows: [] };
+      }
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    const types = await inspector.getCurrentCompositeTypes(client, ["public"]);
+    expect(types[0]?.attributes).toEqual([
+      { name: "values", type: "public.serial[]" },
+    ]);
   });
 
   test("parses views and materialized view indexes", async () => {

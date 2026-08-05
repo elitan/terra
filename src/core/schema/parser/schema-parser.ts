@@ -1457,14 +1457,21 @@ export class SchemaParser {
         continue;
       }
 
+      const isUnqualified = typeParts.length === 1;
+      const isPgCatalogQualified =
+        typeParts.length === 2 && typeParts[0] === "pg_catalog";
+      if (!isUnqualified && !isPgCatalogQualified) {
+        continue;
+      }
+
       const invalidForms: string[] = [];
-      if (typeParts.length === 2 && typeParts[0] === "pg_catalog") {
+      if (isPgCatalogQualified) {
         invalidForms.push("pg_catalog qualification");
       }
-      if ((typeName.typmods || []).length > 0) {
+      if (isUnqualified && (typeName.typmods || []).length > 0) {
         invalidForms.push("type modifiers");
       }
-      if ((typeName.arrayBounds || []).length > 0) {
+      if (isUnqualified && (typeName.arrayBounds || []).length > 0) {
         invalidForms.push("array bounds");
       }
       if (invalidForms.length === 0) {

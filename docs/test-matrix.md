@@ -42,6 +42,11 @@ Serial pseudo-types with `pg_catalog` qualification, type modifiers, or array
 bounds reject before planning instead of being normalized or deferred to server
 execution. Quoted lowercase `"serial"` remains equivalent to serial, and other
 schema-qualified names ending in `serial` remain on the custom-type path.
+Catalog inspection combines `format_type` with `pg_type.typnamespace` for
+custom types whose names collide with all six serial aliases. Scalar and array
+table columns, partition column reconstruction, and composite attributes retain
+their schema identity; live PostgreSQL 14/18 lifecycle tests preserve type/table
+OIDs and rows and replan empty.
 
 ## current feature matrix
 
