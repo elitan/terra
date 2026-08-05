@@ -331,9 +331,9 @@ function parseExpression(expr: string): unknown {
 }
 
 export function expressionsEqual(expr1: string, expr2: string): boolean {
-  // Fast path: if strings are identical after basic whitespace normalization
-  const basicNorm = (s: string) => s.replace(/\s+/g, " ").trim();
-  if (basicNorm(expr1) === basicNorm(expr2)) {
+  const trimmedExpression1 = expr1.trim();
+  const trimmedExpression2 = expr2.trim();
+  if (trimmedExpression1 === trimmedExpression2) {
     return true;
   }
 
@@ -350,7 +350,6 @@ export function expressionsEqual(expr1: string, expr2: string): boolean {
 
     return JSON.stringify(norm1) === JSON.stringify(norm2);
   } catch {
-    // If parsing fails, fall back to string comparison
-    return basicNorm(expr1) === basicNorm(expr2);
+    return false;
   }
 }

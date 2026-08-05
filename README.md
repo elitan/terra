@@ -384,6 +384,14 @@ drop/create replacement; omitting a policy or positive RLS flag removes it.
 `ALTER POLICY`, `DISABLE ROW LEVEL SECURITY`, and `NO FORCE ROW LEVEL SECURITY`
 are imperative partial mutations and are rejected in desired schemas before
 database mutation.
+PostgreSQL expression comparison is token-safe. Formatting whitespace and
+comments outside tokens normalize through PostgreSQL syntax trees, while
+whitespace inside ordinary, escape, dollar-quoted, and identifier literals
+remains semantic. This applies to table and domain checks, domain defaults,
+generated columns, expression and partial indexes, policies, partition
+expressions, and other managed expression fields. If an expression cannot be
+parsed for semantic comparison, TerraDB treats unequal text as drift instead
+of guessing that it is equivalent.
 Ordinary PostgreSQL `UNLOGGED` tables are lifecycle-supported. `UNLOGGED`
 partitioned parents and explicit unlogged leaf partitions are rejected before
 planning: PostgreSQL 18 disallows unlogged partitioned parents, while earlier

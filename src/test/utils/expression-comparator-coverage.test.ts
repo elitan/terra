@@ -7,8 +7,44 @@ describe("Expression comparator coverage", () => {
     await loadModule();
   });
 
-  test("matches fast-path equivalent strings", () => {
+  test("matches formatting-equivalent expressions", () => {
     expect(expressionsEqual("status = 'active'", " status   =   'active' ")).toBe(true);
+    expect(
+      expressionsEqual(
+        "status /* desired formatting */ = 'active'",
+        "status = 'active'"
+      )
+    ).toBe(true);
+  });
+
+  test("preserves whitespace inside quoted lexical tokens", function () {
+    expect(
+      expressionsEqual(
+        "starts_with(label, 'alpha beta'::text)",
+        "starts_with(label, 'alpha  beta'::text)"
+      )
+    ).toBe(false);
+    expect(
+      expressionsEqual(
+        "label = $value$alpha beta$value$",
+        "label = $value$alpha  beta$value$"
+      )
+    ).toBe(false);
+    expect(
+      expressionsEqual(
+        "label = E'alpha beta'",
+        "label = E'alpha  beta'"
+      )
+    ).toBe(false);
+    expect(
+      expressionsEqual('"alpha beta" = 1', '"alpha  beta" = 1')
+    ).toBe(false);
+  });
+
+  test("fails closed when invalid expressions differ inside a literal", function () {
+    expect(
+      expressionsEqual("label = 'alpha beta", "label = 'alpha  beta")
+    ).toBe(false);
   });
 
   test("normalizes BETWEEN against explicit range checks", () => {

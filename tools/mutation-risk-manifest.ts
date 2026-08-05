@@ -99,5 +99,11 @@ export const mutationRiskManifest: MutationRiskManifest = {
       level: "high",
       reason: "statement classification controls strict-mode safety and CLI risk metadata",
     },
+    {
+      path: "src/utils/expression-comparator.ts",
+      owner: "core-schema",
+      level: "critical",
+      reason: "expression equivalence controls semantic drift and replacement decisions across managed objects",
+    },
   ],
 };
