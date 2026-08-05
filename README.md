@@ -392,7 +392,10 @@ and rolling the whole change back if existing data violates a new constraint.
 PostgreSQL cannot add or validate a domain constraint or set domain `NOT NULL`
 when that domain (or a derived domain) is stored inside an array, composite, or
 range column; TerraDB detects that catalog state and rejects the change during
-planning with a container-migration diagnostic.
+planning with a container-migration diagnostic. Non-validating changes such as
+setting or dropping a domain default remain supported for container domains;
+TerraDB classifies the operation structurally, so keywords in quoted names do
+not trigger the validation restriction.
 Changing a domain's base type or collation, or changing between domain and range
 families, requires replacement and is therefore allowed only while no relation,
 derived type, or routine signature depends on it. Domain removal is

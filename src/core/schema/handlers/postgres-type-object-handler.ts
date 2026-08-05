@@ -310,15 +310,10 @@ export function generateDomainAlterStatements(
     ...additions,
     ...validations,
   ];
-  const requiresNestedValueValidation = result.some(
-    function requiresValidation(statement) {
-      return (
-        statement.includes(" SET NOT NULL;") ||
-        statement.includes(" ADD CONSTRAINT ") ||
-        statement.includes(" VALIDATE CONSTRAINT ")
-      );
-    }
-  );
+  const addsNotNull =
+    desiredDefinition.notNull && !currentDefinition.notNull;
+  const requiresNestedValueValidation =
+    addsNotNull || additions.length > 0 || validations.length > 0;
   if (hasContainerColumnDependents && requiresNestedValueValidation) {
     throw new ValidationError(
       `PostgreSQL domain '${desiredObject.schema || "public"}.${desiredObject.name}' cannot add or validate constraints or set NOT NULL while it or a derived domain is stored inside an array, composite, or range column; migrate those container columns first`,

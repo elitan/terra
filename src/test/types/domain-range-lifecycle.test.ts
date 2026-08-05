@@ -656,7 +656,7 @@ describe("PostgreSQL domain and range type lifecycle", function () {
     `;
     const constrained = initial.replace(
       '"code" AS integer;',
-      '"code" AS integer CONSTRAINT "positive" CHECK (VALUE > 0) NOT NULL;'
+      '"code" AS integer CONSTRAINT "positive" CHECK (VALUE > 0);'
     );
     await service.apply(initial, [SCHEMA], true);
 
@@ -674,6 +674,122 @@ describe("PostgreSQL domain and range type lifecycle", function () {
     expect(state.rows).toEqual([
       { typnotnull: false, constraint_count: 0 },
     ]);
+  });
+
+  test("rejects domain not-null validation inside containers", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE SCHEMA "${SCHEMA}";
+      CREATE DOMAIN "${SCHEMA}"."code" AS integer;
+      CREATE TABLE "${SCHEMA}"."records" (
+        id integer PRIMARY KEY,
+        codes "${SCHEMA}"."code"[]
+      );
+    `;
+    const desired = initial.replace(
+      '"code" AS integer;',
+      '"code" AS integer NOT NULL;'
+    );
+    await service.apply(initial, [SCHEMA], true);
+
+    await expect(
+      service.apply(desired, [SCHEMA], true, undefined, true)
+    ).rejects.toThrow(/cannot add or validate.*array, composite, or range/i);
+    const state = await client.query(`
+      SELECT domain.typnotnull
+      FROM pg_type domain
+      JOIN pg_namespace namespace
+        ON namespace.oid = domain.typnamespace
+      WHERE namespace.nspname = $1
+        AND domain.typname = 'code'
+    `, [SCHEMA]);
+    expect(state.rows).toEqual([{ typnotnull: false }]);
+  });
+
+  test("rejects domain constraint validation inside containers", async function () {
+    const service = createTestSchemaService();
+    await client.query(`
+      CREATE SCHEMA "${SCHEMA}";
+      CREATE DOMAIN "${SCHEMA}"."code" AS integer;
+      ALTER DOMAIN "${SCHEMA}"."code"
+        ADD CONSTRAINT "positive" CHECK (VALUE > 0) NOT VALID;
+      CREATE TABLE "${SCHEMA}"."records" (
+        id integer PRIMARY KEY,
+        codes "${SCHEMA}"."code"[]
+      )
+    `);
+    const desired = `
+      CREATE SCHEMA "${SCHEMA}";
+      CREATE DOMAIN "${SCHEMA}"."code" AS integer
+        CONSTRAINT "positive" CHECK (VALUE > 0);
+      CREATE TABLE "${SCHEMA}"."records" (
+        id integer PRIMARY KEY,
+        codes "${SCHEMA}"."code"[]
+      );
+    `;
+
+    await expect(
+      service.apply(desired, [SCHEMA], true, undefined, true)
+    ).rejects.toThrow(/cannot add or validate.*array, composite, or range/i);
+    const state = await client.query(`
+      SELECT constraint_row.convalidated
+      FROM pg_constraint constraint_row
+      JOIN pg_type domain ON domain.oid = constraint_row.contypid
+      JOIN pg_namespace namespace
+        ON namespace.oid = domain.typnamespace
+      WHERE namespace.nspname = $1
+        AND domain.typname = 'code'
+        AND constraint_row.conname = 'positive'
+    `, [SCHEMA]);
+    expect(state.rows).toEqual([{ convalidated: false }]);
+  });
+
+  test("allows safe container-domain changes with validation keywords in quoted names", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE SCHEMA "${SCHEMA}";
+      CREATE DOMAIN "${SCHEMA}"."safe ADD CONSTRAINT marker"
+        AS integer DEFAULT 7;
+      CREATE TABLE "${SCHEMA}"."records" (
+        id integer PRIMARY KEY,
+        codes "${SCHEMA}"."safe ADD CONSTRAINT marker"[]
+      );
+    `;
+    const desired = initial.replace(" DEFAULT 7", "");
+    const dropDefault =
+      `ALTER DOMAIN "${SCHEMA}"."safe ADD CONSTRAINT marker" DROP DEFAULT;`;
+
+    await service.apply(initial, [SCHEMA], true);
+    await client.query(`
+      INSERT INTO "${SCHEMA}"."records" (id, codes)
+      VALUES (
+        1,
+        ARRAY[7::"${SCHEMA}"."safe ADD CONSTRAINT marker"]
+      )
+    `);
+
+    const plan = await service.apply(
+      desired,
+      [SCHEMA],
+      true,
+      undefined,
+      true
+    );
+    expect(plan.transactional).toEqual([dropDefault]);
+
+    await service.apply(desired, [SCHEMA], true);
+    const state = await client.query(`
+      SELECT domain.typdefault, count(records.id)::integer AS row_count
+      FROM pg_type domain
+      JOIN pg_namespace namespace
+        ON namespace.oid = domain.typnamespace
+      CROSS JOIN "${SCHEMA}"."records" records
+      WHERE namespace.nspname = $1
+        AND domain.typname = 'safe ADD CONSTRAINT marker'
+      GROUP BY domain.typdefault
+    `, [SCHEMA]);
+    expect(state.rows).toEqual([{ typdefault: null, row_count: 1 }]);
+    expect((await service.plan(desired, [SCHEMA])).hasChanges).toBe(false);
   });
 
   test("detects domains derived from type arrays and multiranges", async function () {
