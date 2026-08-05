@@ -177,24 +177,29 @@ describe("Array Type Operations", () => {
   });
 
   describe("Multidimensional Arrays", () => {
-    test("should not generate changes for 2D integer array", async () => {
+    test("ignores decorative array dimensions and size bounds", async function () {
       await client.query(`
         CREATE TABLE matrix (
           id serial PRIMARY KEY,
-          data integer[][]
+          data integer[2][3],
+          standard_data integer ARRAY[4]
         );
       `);
 
       const desiredSQL = `
         CREATE TABLE matrix (
           id serial PRIMARY KEY,
-          data integer[][]
+          data integer[2][3],
+          standard_data integer ARRAY[4]
         );
       `;
 
       const { parser, differ, inspector } = services;
       const currentSchema = await inspector.getCurrentSchema(client);
       const desiredTables = await parser.parseCreateTableStatements(desiredSQL);
+      expect(desiredTables[0]?.columns.map(function getType(column) {
+        return column.type;
+      })).toEqual(["SERIAL", "INT4[2][3]", "INT4[4]"]);
       const plan = differ.generateMigrationPlan(desiredTables, currentSchema);
 
       expect(plan.transactional).toHaveLength(0);

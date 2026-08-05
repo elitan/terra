@@ -90,7 +90,7 @@ function normalizeTypeReferenceDecorators(type: string): string | undefined {
     .trim()
     .replace(/\s+/g, " ")
     .replace(/\s*([(),\[\]])\s*/g, "$1")
-    .replace(/(?:\[\])+$/, "[]")
+    .replace(/(?:\[(?:\d*)\])+$/, "[]")
     .toUpperCase();
 }
 

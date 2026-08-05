@@ -4,6 +4,7 @@ import {
   columnsAreDifferent,
   isPostgresSerialDefault,
   isPostgresSerialType,
+  normalizeType,
   normalizePostgresSerialType,
   postgresTypesAreEquivalent,
 } from "../../utils/sql";
@@ -361,6 +362,8 @@ describe("PostgreSQL catalog type identity comparison", function () {
   });
 
   test("uses catalog identity without weakening ordinary type comparison", function () {
+    expect(normalizeType("integer[2][3]")).toBe("INT4[]");
+    expect(normalizeType("public.status[4][]")).toBe("PUBLIC.STATUS[]");
     expect(postgresTypesAreEquivalent("integer", "int4", "pg_catalog")).toBe(
       true
     );
@@ -370,6 +373,9 @@ describe("PostgreSQL catalog type identity comparison", function () {
     expect(postgresTypesAreEquivalent("public.status[]", "status[]", "public")).toBe(
       true
     );
+    expect(
+      postgresTypesAreEquivalent("public.status[2][3]", "status[]", "public")
+    ).toBe(true);
     expect(postgresTypesAreEquivalent("public.status", "status", "other")).toBe(
       false
     );

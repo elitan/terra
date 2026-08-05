@@ -10,7 +10,9 @@ async function cleanPublicQualificationTypes(client: Client): Promise<void> {
   );
   await client.query(`DROP TABLE IF EXISTS public.qualification_values CASCADE`);
   await client.query(`DROP TYPE IF EXISTS public.qualification_composite CASCADE`);
+  await client.query(`DROP TYPE IF EXISTS public.qualification_array_range CASCADE`);
   await client.query(`DROP TYPE IF EXISTS public.qualification_range CASCADE`);
+  await client.query(`DROP DOMAIN IF EXISTS public.qualification_array_domain CASCADE`);
   await client.query(`DROP DOMAIN IF EXISTS public.qualification_domain CASCADE`);
   await client.query(`DROP TYPE IF EXISTS public.qualification_enum CASCADE`);
 }
@@ -706,37 +708,47 @@ describe("ENUM Types", () => {
       ]);
     });
 
-    it("treats explicit public custom type references as their catalog identities", async function () {
+    it("treats qualified custom types and decorative array dimensions as catalog identities", async function () {
       const schema = `
         CREATE TYPE public.qualification_enum AS ENUM ('first', 'second');
         CREATE DOMAIN public.qualification_domain
           AS public."qualification_enum";
+        CREATE DOMAIN public.qualification_array_domain
+          AS public.qualification_enum[2][3];
         CREATE TYPE public.qualification_range AS RANGE (
           subtype = "public".qualification_enum
         );
+        CREATE TYPE public.qualification_array_range AS RANGE (
+          subtype = public.qualification_enum[4]
+        );
         CREATE TYPE public.qualification_composite AS (
           enum_value public."qualification_enum",
-          enum_values public.qualification_enum[],
+          enum_values public.qualification_enum[2][3],
           domain_value public."qualification_domain",
-          domain_values public.qualification_domain[],
+          domain_values public.qualification_domain[4],
+          array_domain_value public.qualification_array_domain,
           range_value public."qualification_range",
-          range_values public.qualification_range[]
+          range_values public.qualification_range[5][6],
+          array_range_value public.qualification_array_range
         );
 
         CREATE TABLE public.qualification_values (
           id integer PRIMARY KEY,
           enum_value public.qualification_enum,
-          enum_values public.qualification_enum[],
+          enum_values public.qualification_enum[2][3],
           domain_value public.qualification_domain,
-          domain_values public.qualification_domain[],
+          domain_values public.qualification_domain[4],
+          array_domain_value public.qualification_array_domain,
           range_value public.qualification_range,
-          range_values public.qualification_range[],
+          range_values public.qualification_range[5][6],
+          array_range_value public.qualification_array_range,
           composite_value public."qualification_composite",
-          composite_values public.qualification_composite[]
+          composite_values public.qualification_composite[7][8]
         );
 
         CREATE TABLE public.qualification_partitioned (
-          enum_value public.qualification_enum NOT NULL
+          enum_value public.qualification_enum NOT NULL,
+          enum_values public.qualification_enum[2][3]
         ) PARTITION BY LIST (enum_value);
         CREATE TABLE public.qualification_first
           PARTITION OF public.qualification_partitioned
@@ -751,15 +763,19 @@ describe("ENUM Types", () => {
           ARRAY['first', 'second']::public.qualification_enum[],
           'second',
           ARRAY['first']::public.qualification_domain[],
+          ARRAY['first', 'second']::public.qualification_array_domain,
           '[first,second]',
           ARRAY['[first,second]']::public.qualification_range[],
+          NULL,
           ROW(
             'first',
             ARRAY['second']::public.qualification_enum[],
             'second',
             ARRAY['first']::public.qualification_domain[],
+            ARRAY['first', 'second']::public.qualification_array_domain,
             '[first,second]',
-            ARRAY['[first,second]']::public.qualification_range[]
+            ARRAY['[first,second]']::public.qualification_range[],
+            NULL
           )::public.qualification_composite,
           ARRAY[
             ROW(
@@ -767,14 +783,19 @@ describe("ENUM Types", () => {
               ARRAY['first']::public.qualification_enum[],
               'first',
               ARRAY['second']::public.qualification_domain[],
+              ARRAY['second']::public.qualification_array_domain,
               '[first,second]',
-              ARRAY['[first,second]']::public.qualification_range[]
+              ARRAY['[first,second]']::public.qualification_range[],
+              NULL
             )::public.qualification_composite
           ]
         )
       `);
       await client.query(`
-        INSERT INTO public.qualification_partitioned VALUES ('first')
+        INSERT INTO public.qualification_partitioned VALUES (
+          'first',
+          ARRAY['first', 'second']::public.qualification_enum[]
+        )
       `);
       const before = await client.query(`
         SELECT
@@ -801,7 +822,9 @@ describe("ENUM Types", () => {
           AND type.typname IN (
             'qualification_enum',
             'qualification_domain',
+            'qualification_array_domain',
             'qualification_range',
+            'qualification_array_range',
             'qualification_composite'
           )
       `);
@@ -835,7 +858,9 @@ describe("ENUM Types", () => {
           AND type.typname IN (
             'qualification_enum',
             'qualification_domain',
+            'qualification_array_domain',
             'qualification_range',
+            'qualification_array_range',
             'qualification_composite'
           )
       `);

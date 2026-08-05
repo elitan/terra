@@ -161,9 +161,8 @@ export function normalizeType(type: string): string {
     varbit: "BIT VARYING",
   };
 
-  // Handle array types by extracting base type, normalizing it, and adding single []
-  // PostgreSQL normalizes all multi-dimensional arrays to single-dimension (e.g. integer[][] -> integer[])
-  const arrayMatch = type.match(/^(.+?)(\[\])+$/);
+  // PostgreSQL treats declared sizes and dimensions as one catalog array type.
+  const arrayMatch = type.match(/^(.+?)(\[(?:\d*)\])+$/);
   if (arrayMatch && arrayMatch[1]) {
     const baseType = arrayMatch[1];
     const normalizedBase = normalizeType(baseType);

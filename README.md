@@ -158,6 +158,11 @@ visible custom type without its explicit schema. Explicitly qualified scalar
 and array references therefore replan idempotently in ordinary and partitioned
 table columns, composite attributes, domain base types, and range subtypes,
 while a different schema or scalar/array shape remains a real type change.
+PostgreSQL array size bounds and declared dimensionality are decorative rather
+than distinct schema types. TerraDB normalizes `type[n]`, repeated bounded or
+unbounded dimensions, and SQL-standard `type ARRAY[n]` to the element's single
+catalog array type across columns, partitions, composites, domains, ranges,
+functions, and procedures; stored array values retain their actual dimensions.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required
