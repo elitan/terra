@@ -19,6 +19,7 @@ import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
 import { collectSQLiteSchemaIdentifiers } from "../../utils/sqlite-identifier";
 import { validatePostgresNumericModifiers } from "../../utils/postgres-numeric";
 import { validatePostgresTemporalModifiers } from "../../utils/postgres-temporal";
+import { validatePostgresLengthModifiers } from "../../utils/postgres-length";
 import {
   CommentHandler,
   CompositeTypeHandler,
@@ -572,19 +573,17 @@ export class SchemaService {
       : [];
     const migrationContext = await this.provider.getMigrationContext?.(client);
     if (this.provider.dialect === "postgres") {
-      validatePostgresNumericModifiers(
-        {
-          tables: desiredSchema,
-          compositeTypes: desiredCompositeTypes,
-          sqlObjects: desiredSqlObjects,
-        },
-        migrationContext?.postgresVersionNum
-      );
-      validatePostgresTemporalModifiers({
+      const desiredTypeModifierSchema = {
         tables: desiredSchema,
         compositeTypes: desiredCompositeTypes,
         sqlObjects: desiredSqlObjects,
-      });
+      };
+      validatePostgresNumericModifiers(
+        desiredTypeModifierSchema,
+        migrationContext?.postgresVersionNum
+      );
+      validatePostgresTemporalModifiers(desiredTypeModifierSchema);
+      validatePostgresLengthModifiers(desiredTypeModifierSchema);
     }
 
     let schemaStatements: string[] = [];

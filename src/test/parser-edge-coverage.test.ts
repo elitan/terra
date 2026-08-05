@@ -417,6 +417,35 @@ describe("Parser edge coverage", () => {
       ]);
     });
 
+    test("preserves PostgreSQL internal char identity", async function () {
+      const parser = new SchemaParser();
+      const parsed = await parser.parseSchema(`
+        CREATE TABLE char_identities (
+          internal_value "char",
+          qualified_internal_value pg_catalog.char,
+          sql_character CHAR
+        );
+        CREATE FUNCTION echo_internal_char(value "char")
+        RETURNS "char"
+        LANGUAGE SQL
+        AS $$ SELECT value $$;
+        CREATE PROCEDURE consume_internal_char(value "char")
+        LANGUAGE SQL
+        AS $$ SELECT NULL $$;
+      `);
+
+      expect(parsed.tables[0]?.columns.map(function getType(column) {
+        return column.type;
+      })).toEqual(['"char"', '"char"', "BPCHAR(1)"]);
+      expect(parsed.functions[0]).toMatchObject({
+        parameters: [{ name: "value", type: '"char"' }],
+        returnType: '"char"',
+      });
+      expect(parsed.procedures[0]).toMatchObject({
+        parameters: [{ name: "value", type: '"char"' }],
+      });
+    });
+
     test("distinguishes unconstrained and primary-key nullability", function () {
       const unconstrained = parseColumn({
         colname: "optional_value",

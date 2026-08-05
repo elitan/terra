@@ -16,6 +16,10 @@ function getQualifiedName(name: string, schema: string | undefined): string {
   return `${schema || "public"}.${name}`;
 }
 
+export function stripPostgresArrayDecorators(type: string): string {
+  return type.trim().replace(/(?:\[(?:\d*)\])+$/, "").trim();
+}
+
 export function collectPostgresTypeUsages(
   schema: PostgresTypeUsageSchema
 ): PostgresTypeUsage[] {

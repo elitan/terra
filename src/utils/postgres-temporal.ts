@@ -1,6 +1,7 @@
 import { ValidationError } from "../types/errors";
 import {
   collectPostgresTypeUsages,
+  stripPostgresArrayDecorators,
   type PostgresTypeUsage,
   type PostgresTypeUsageSchema,
 } from "./postgres-type-usage";
@@ -28,14 +29,10 @@ const INTERVAL_FIELDS_PATTERN = [
   "SECOND",
 ].join("|");
 
-function removeArrayDecorators(type: string): string {
-  return type.trim().replace(/(?:\[(?:\d*)\])+$/, "").trim();
-}
-
 function parsePostgresTemporalConstraint(
   type: string
 ): PostgresTemporalConstraint | undefined {
-  const baseType = removeArrayDecorators(type);
+  const baseType = stripPostgresArrayDecorators(type);
   const timeMatch = baseType.match(
     /^(?:time|timetz|timestamp|timestamptz)(?:\s*\(\s*([+-]?\d+)\s*\))?(?:\s+(?:with|without)\s+time\s+zone)?$/i
   );
@@ -62,7 +59,7 @@ function parsePostgresTemporalConstraint(
 }
 
 function hasPostgresTemporalConstraintSyntax(type: string): boolean {
-  const baseType = removeArrayDecorators(type);
+  const baseType = stripPostgresArrayDecorators(type);
   return /^(?:time|timetz|timestamp|timestamptz|interval)\b/i.test(baseType) &&
     (baseType.includes("(") || /^interval\s+\w/i.test(baseType));
 }

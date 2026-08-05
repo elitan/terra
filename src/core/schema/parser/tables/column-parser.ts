@@ -160,14 +160,19 @@ export function extractDataType(typeName: any): string {
 
     let type: string;
     if (names.length > 1 && names[0] === 'pg_catalog') {
-      type = names[names.length - 1].toUpperCase();
+      const catalogType = names[names.length - 1];
+      type = catalogType === "char" ? '"char"' : catalogType.toUpperCase();
     } else if (names.length > 1) {
       type = names.map(renderTypeIdentifier).join('.');
     } else {
       const name = names[0];
-      type = /^[a-z_][a-z0-9_$]*$/.test(name)
-        ? name.toUpperCase()
-        : renderTypeIdentifier(name);
+      if (name === "char") {
+        type = '"char"';
+      } else if (/^[a-z_][a-z0-9_$]*$/.test(name)) {
+        type = name.toUpperCase();
+      } else {
+        type = renderTypeIdentifier(name);
+      }
     }
 
     if (typeName.typmods && typeName.typmods.length > 0) {

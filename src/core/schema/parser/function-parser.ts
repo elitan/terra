@@ -228,6 +228,7 @@ function extractDataType(dataTypeNode: any): string {
         float8: "double precision",
         bool: "boolean",
         varchar: "character varying",
+        char: '"char"',
       };
       const mappedType = typeMap[typeName.toLowerCase()];
       const normalizedSchema = schemaParts.join(".").toLowerCase();

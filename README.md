@@ -186,6 +186,14 @@ SECOND`, round-trip across ordinary and partitioned columns, bounded arrays,
 composite attributes, and domain bases. Temporal modifiers on range subtypes are
 rejected because PostgreSQL accepts but does not retain them in the range
 catalog; use an unconstrained temporal subtype or a domain instead.
+PostgreSQL character length modifiers are validated from `1` through
+`10,485,760`, and bit-string lengths from `1` through `83,886,080`, across
+ordinary and partitioned columns, arrays, composite attributes, and domain
+bases. Constrained character and bit range subtypes fail before planning because
+PostgreSQL drops their lengths from the range catalog. The internal one-byte
+`"char"` type remains distinct from SQL `CHAR` across columns, arrays, domains,
+ranges, functions, and procedures; unbounded `bpchar`, `varchar`, and `varbit`
+also retain their separate catalog semantics.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

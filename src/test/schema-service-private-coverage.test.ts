@@ -249,6 +249,31 @@ describe("SchemaService private coverage", function () {
     await expect(
       createService(temporalSqlite.provider).plan("CREATE TABLE events")
     ).resolves.toMatchObject({ hasChanges: false });
+
+    const invalidLength = createParsedSchema({
+      tables: [{
+        name: "labels",
+        columns: [{ name: "value", type: "VARCHAR(0)" }],
+      }],
+    });
+    const lengthPostgres = createMockProvider({
+      parsedSchema: invalidLength,
+      migrationContext: { postgresVersionNum: 180000 },
+    });
+    await expect(
+      createService(lengthPostgres.provider).plan("CREATE TABLE labels")
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringMatching(/VARCHAR length 0/i),
+    });
+
+    const lengthSqlite = createMockProvider({
+      dialect: "sqlite",
+      parsedSchema: invalidLength,
+    });
+    await expect(
+      createService(lengthSqlite.provider).plan("CREATE TABLE labels")
+    ).resolves.toMatchObject({ hasChanges: false });
   });
 
   test("generateStatements preserves array creates and matching managed objects", function () {
