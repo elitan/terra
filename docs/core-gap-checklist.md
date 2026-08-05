@@ -238,6 +238,7 @@
 - done: classify ordinary, conditional, and PostgreSQL concurrent `CREATE UNIQUE INDEX` statements as indexes in CLI statement metadata instead of `other`; cover the generated SQLite and PostgreSQL JSON plan paths at the supported version boundaries, classify the strict-mode statement classifier as high-risk for changed-file mutation testing, and kill its selected mutant.
 - done: make the CLI `constraint` metadata category reachable for PostgreSQL `ALTER TABLE` ADD/ALTER/VALIDATE/DROP/RENAME CONSTRAINT actions without stealing CREATE TABLE or inline ADD COLUMN declarations; verify generated enum, constraint, and concurrent-index phase ordering on PostgreSQL 14 and 18.
 - done: replace the blanket destructive classification of PostgreSQL `ALTER COLUMN` with action-aware matching; keep type conversions and DROP DEFAULT/NOT NULL/IDENTITY/EXPRESSION blocked by strict mode while allowing SET DEFAULT/NOT NULL, storage/compression, and index-statistics changes, including a batched generated PostgreSQL 14/18 strict dry run and four killed high-risk classifier mutants.
+- done: classify PostgreSQL `DISABLE ROW LEVEL SECURITY` and `NO FORCE ROW LEVEL SECURITY` as destructive while leaving ENABLE/FORCE safe; prove strict mode blocks enforcement weakening without removing the retained policy or changing either catalog flag across PostgreSQL 14 and 18, and kill both selected high-risk classifier mutants.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

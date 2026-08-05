@@ -265,6 +265,57 @@ describe("PostgreSQL row-level security and policy lifecycle", function () {
     }]);
   });
 
+  test("blocks row-security enforcement weakening in strict mode", async function () {
+    const service = createTestSchemaService();
+    const policy = `
+      CREATE POLICY "Tenant Access"
+        ON "${SCHEMA}"."Order"
+        FOR SELECT TO PUBLIC
+        USING (tenant_id > 0);
+    `;
+    const enforced = `${baseSchema}
+      ALTER TABLE "${SCHEMA}"."Order"
+        ENABLE ROW LEVEL SECURITY,
+        FORCE ROW LEVEL SECURITY;
+      ${policy}
+    `;
+    const weakened = `${baseSchema}${policy}`;
+    const weakeningStatements = [
+      `ALTER TABLE "${SCHEMA}"."Order" NO FORCE ROW LEVEL SECURITY;`,
+      `ALTER TABLE "${SCHEMA}"."Order" DISABLE ROW LEVEL SECURITY;`,
+    ];
+
+    await service.apply(enforced, [SCHEMA], true);
+    const plan = await service.plan(weakened, [SCHEMA]);
+    expect(plan.transactional).toEqual(
+      expect.arrayContaining(weakeningStatements)
+    );
+    await expect(
+      service.apply(weakened, [SCHEMA], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining(weakeningStatements),
+    });
+
+    const state = await client.query(`
+      SELECT
+        relation.relrowsecurity,
+        relation.relforcerowsecurity,
+        count(policy.oid)::integer AS policy_count
+      FROM pg_class relation
+      JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      LEFT JOIN pg_policy policy ON policy.polrelid = relation.oid
+      WHERE namespace.nspname = $1 AND relation.relname = 'Order'
+      GROUP BY relation.relrowsecurity, relation.relforcerowsecurity
+    `, [SCHEMA]);
+    expect(state.rows).toEqual([{
+      relrowsecurity: true,
+      relforcerowsecurity: true,
+      policy_count: 1,
+    }]);
+    expect((await service.plan(enforced, [SCHEMA])).hasChanges).toBe(false);
+  });
+
   test("rolls back policy and enforcement changes after a later policy failure", async function () {
     const service = createTestSchemaService();
     const initial = `${baseSchema}
