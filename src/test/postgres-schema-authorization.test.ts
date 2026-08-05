@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import { SchemaParser } from "../core/schema/parser";
+import { getStatementRisk } from "../utils/statement-classifier";
 import { createTestClient, createTestSchemaService } from "./utils";
 
 const ROLE_NAME = "TerraDB Schema Contract Owner";
@@ -59,9 +60,17 @@ describe("PostgreSQL schema authorization lifecycle", function () {
     const desired = `
       CREATE ROLE "${ROLE_NAME}" NOLOGIN;
       CREATE SCHEMA AUTHORIZATION "${ROLE_NAME}";
+      CREATE TABLE "${ROLE_NAME}".ownership_guard (
+        id integer PRIMARY KEY,
+        payload text NOT NULL
+      );
     `;
 
     await service.apply(desired, [ROLE_NAME], true);
+    await client.query(
+      `INSERT INTO "${ROLE_NAME}".ownership_guard VALUES (1, 'preserved')`
+    );
+    const originalSchemaOid = await schemaOid(client, ROLE_NAME);
     expect(await schemaOwner(client, ROLE_NAME)).toBe(ROLE_NAME);
 
     const unchanged = await service.plan(desired, [ROLE_NAME]);
@@ -71,12 +80,47 @@ describe("PostgreSQL schema authorization lifecycle", function () {
       `ALTER SCHEMA ${client.escapeIdentifier(ROLE_NAME)} OWNER TO CURRENT_USER`
     );
     const repair = await service.plan(desired, [ROLE_NAME]);
-    expect(repair.transactional).toContain(
-      `ALTER SCHEMA ${client.escapeIdentifier(ROLE_NAME)} OWNER TO ${client.escapeIdentifier(ROLE_NAME)};`
+    const ownerStatement =
+      `ALTER SCHEMA ${client.escapeIdentifier(ROLE_NAME)} OWNER TO ` +
+      `${client.escapeIdentifier(ROLE_NAME)};`;
+    expect(repair.transactional).toContain(ownerStatement);
+    expect(getStatementRisk(ownerStatement, "transactional")).toBe(
+      "destructive"
     );
+    const previousOwner = await currentUser(client);
+    await expect(
+      service.apply(
+        desired,
+        [ROLE_NAME],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([ownerStatement]),
+    });
+    expect(await schemaOwner(client, ROLE_NAME)).toBe(previousOwner);
+    expect(await schemaOid(client, ROLE_NAME)).toBe(originalSchemaOid);
+    expect(
+      (
+        await client.query(
+          `SELECT * FROM "${ROLE_NAME}".ownership_guard`
+        )
+      ).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
 
     await service.apply(desired, [ROLE_NAME], true);
     expect(await schemaOwner(client, ROLE_NAME)).toBe(ROLE_NAME);
+    expect(await schemaOid(client, ROLE_NAME)).toBe(originalSchemaOid);
+    expect(
+      (
+        await client.query(
+          `SELECT * FROM "${ROLE_NAME}".ownership_guard`
+        )
+      ).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
     expect((await service.plan(desired, [ROLE_NAME])).hasChanges).toBe(false);
   });
 
@@ -110,6 +154,19 @@ async function schemaOwner(client: Client, schema: string): Promise<string | nul
     [schema]
   );
   return result.rows[0]?.owner || null;
+}
+
+async function schemaOid(client: Client, schema: string): Promise<number> {
+  const result = await client.query(
+    "SELECT oid::integer FROM pg_namespace WHERE nspname = $1",
+    [schema]
+  );
+  return result.rows[0]?.oid;
+}
+
+async function currentUser(client: Client): Promise<string> {
+  const result = await client.query("SELECT current_user AS name");
+  return result.rows[0]?.name;
 }
 
 async function cleanup(client: Client): Promise<void> {
