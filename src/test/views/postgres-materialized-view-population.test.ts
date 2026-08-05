@@ -6,6 +6,7 @@ import {
   generateCreateViewSQL,
   generateRefreshMaterializedViewSQL,
 } from "../../utils/sql";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import {
   cleanDatabase,
   createTestClient,
@@ -35,6 +36,21 @@ describe("PostgreSQL materialized view population state", function () {
       [viewName]
     );
     return result.rows[0]?.ispopulated;
+  }
+
+  async function getMaterializedViewOid(viewName: string): Promise<number> {
+    const result = await client.query(
+      `
+        SELECT relation.oid::integer
+        FROM pg_class relation
+        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname = 'public'
+          AND relation.relname = $1
+          AND relation.relkind = 'm'
+      `,
+      [viewName]
+    );
+    return result.rows[0]?.oid;
   }
 
   test("parses and generates WITH NO DATA distinctly from the populated default", async function () {
@@ -134,26 +150,61 @@ describe("PostgreSQL materialized view population state", function () {
     await client.query("INSERT INTO public.source_items VALUES (1), (2)");
     await service.apply(populatedSchema, ["public"], true);
     expect(await getPopulationState("item_summary")).toBe(true);
+    const originalOid = await getMaterializedViewOid("item_summary");
+    const materializedRows = [{ id: 1 }, { id: 2 }];
+    expect(
+      await client.query("SELECT id FROM public.item_summary ORDER BY id")
+    ).toMatchObject({ rows: materializedRows });
 
     const emptyPlan = await service.plan(unpopulatedSchema, ["public"]);
-    expect(emptyPlan.transactional).toEqual([
-      'REFRESH MATERIALIZED VIEW "public"."item_summary" WITH NO DATA;',
-    ]);
+    const depopulationStatement =
+      'REFRESH MATERIALIZED VIEW "public"."item_summary" WITH NO DATA;';
+    expect(emptyPlan.transactional).toEqual([depopulationStatement]);
+    expect(getStatementRisk(depopulationStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(
+        unpopulatedSchema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [depopulationStatement],
+    });
+    expect(await getPopulationState("item_summary")).toBe(true);
+    expect(await getMaterializedViewOid("item_summary")).toBe(originalOid);
+    expect(
+      await client.query("SELECT id FROM public.item_summary ORDER BY id")
+    ).toMatchObject({ rows: materializedRows });
+
     await service.apply(unpopulatedSchema, ["public"], true);
     expect(await getPopulationState("item_summary")).toBe(false);
+    expect(await getMaterializedViewOid("item_summary")).toBe(originalOid);
+    await expect(
+      client.query("SELECT id FROM public.item_summary")
+    ).rejects.toThrow("has not been populated");
     expect((await service.plan(unpopulatedSchema, ["public"])).hasChanges).toBe(
       false
     );
 
     const populatePlan = await service.plan(populatedSchema, ["public"]);
-    expect(populatePlan.transactional).toEqual([
-      'REFRESH MATERIALIZED VIEW "public"."item_summary" WITH DATA;',
-    ]);
+    const populationStatement =
+      'REFRESH MATERIALIZED VIEW "public"."item_summary" WITH DATA;';
+    expect(populatePlan.transactional).toEqual([populationStatement]);
+    expect(getStatementRisk(populationStatement, "transactional")).toBe(
+      "safe"
+    );
     await service.apply(populatedSchema, ["public"], true);
     expect(await getPopulationState("item_summary")).toBe(true);
+    expect(await getMaterializedViewOid("item_summary")).toBe(originalOid);
     expect(
       await client.query("SELECT id FROM public.item_summary ORDER BY id")
-    ).toMatchObject({ rows: [{ id: 1 }, { id: 2 }] });
+    ).toMatchObject({ rows: materializedRows });
     expect((await service.plan(populatedSchema, ["public"])).hasChanges).toBe(
       false
     );

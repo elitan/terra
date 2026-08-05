@@ -57,6 +57,9 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users ADD COLUMN age INT",
       "CREATE INDEX idx_users_age ON users(age)",
       "CREATE VIEW users_v AS SELECT id FROM users",
+      "REFRESH MATERIALIZED VIEW public.summary",
+      'REFRESH MATERIALIZED VIEW "WITH NO DATA" WITH DATA',
+      "REFRESH MATERIALIZED VIEW CONCURRENTLY public.summary WITH DATA",
       "COMMENT ON TABLE users IS 'test'",
       `COMMENT ON TABLE "IS NULL" IS 'text containing IS NULL'`,
       'ALTER TABLE "SET WITHOUT CLUSTER" CLUSTER ON "CLUSTER ON"',
@@ -116,6 +119,7 @@ describe("Property-Based: Destructive Diff Classification", function () {
     const destructiveStatements = [
       "DROP TABLE users",
       "DROP TYPE mood",
+      'REFRESH MATERIALIZED VIEW "Odd Schema"."Odd Summary" WITH NO DATA',
       "ALTER TABLE users DROP COLUMN age",
       "ALTER TABLE users DROP CONSTRAINT users_pkey",
       "ALTER TABLE users ALTER COLUMN age TYPE BIGINT",

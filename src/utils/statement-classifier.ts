@@ -74,6 +74,10 @@ const CLUSTER_SELECTION_REMOVAL_PATTERN = new RegExp(
   String.raw`MATERIALIZED\s+VIEW\s+(?:IF\s+EXISTS\s+)?${POSTGRES_QUALIFIED_IDENTIFIER_PATTERN}` +
   String.raw`)\s+SET\s+WITHOUT\s+CLUSTER\s*;?$`
 );
+const MATERIALIZED_VIEW_DEPOPULATION_PATTERN = new RegExp(
+  String.raw`^REFRESH\s+MATERIALIZED\s+VIEW\s+(?:CONCURRENTLY\s+)?` +
+  String.raw`${POSTGRES_QUALIFIED_IDENTIFIER_PATTERN}\s+WITH\s+NO\s+DATA\s*;?$`
+);
 const POSTGRES_VIEW_OPTION_NAME_PATTERN =
   String.raw`(?:CHECK_OPTION|SECURITY_BARRIER|SECURITY_INVOKER)`;
 const ALTER_VIEW_OPTION_RESET_PATTERN = new RegExp(
@@ -147,6 +151,7 @@ export function isDestructiveStatement(statement: string): boolean {
     SEQUENCE_OWNERSHIP_REMOVAL_PATTERN.test(normalized) ||
     COMMENT_REMOVAL_PATTERN.test(normalized) ||
     CLUSTER_SELECTION_REMOVAL_PATTERN.test(normalized) ||
+    MATERIALIZED_VIEW_DEPOPULATION_PATTERN.test(normalized) ||
     ALTER_VIEW_OPTION_RESET_PATTERN.test(normalized) ||
     ALTER_VIEW_SECURITY_WEAKENING_PATTERN.test(normalized) ||
     ALTER_DOMAIN_WEAKENING_PATTERN.test(normalized) ||
