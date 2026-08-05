@@ -110,21 +110,17 @@ function normalizeSequence(sequence: Sequence): NormalizedSequence {
   };
 }
 
-function sequenceDefinitionsDiffer(
-  desired: Sequence,
-  current: Sequence
+function sequenceParametersDiffer(
+  desired: NormalizedSequence,
+  current: NormalizedSequence
 ): boolean {
-  const normalizedDesired = normalizeSequence(desired);
-  const normalizedCurrent = normalizeSequence(current);
-
   return (
-    normalizedDesired.dataType !== normalizedCurrent.dataType ||
-    normalizedDesired.increment !== normalizedCurrent.increment ||
-    normalizedDesired.minValue !== normalizedCurrent.minValue ||
-    normalizedDesired.maxValue !== normalizedCurrent.maxValue ||
-    normalizedDesired.start !== normalizedCurrent.start ||
-    normalizedDesired.cache !== normalizedCurrent.cache ||
-    normalizedDesired.cycle !== normalizedCurrent.cycle
+    desired.dataType !== current.dataType ||
+    desired.increment !== current.increment ||
+    desired.minValue !== current.minValue ||
+    desired.maxValue !== current.maxValue ||
+    desired.start !== current.start ||
+    desired.cache !== current.cache
   );
 }
 
@@ -236,27 +232,39 @@ function generateCreateSequenceStatements(sequence: Sequence): string[] {
   return statements;
 }
 
-function generateDefinitionChangeStatement(
+function generateDefinitionChangeStatements(
   desired: Sequence,
   current: Sequence
-): string | null {
-  if (!sequenceDefinitionsDiffer(desired, current)) {
-    return null;
+): string[] {
+  const statements: string[] = [];
+  const normalizedDesired = normalizeSequence(desired);
+  const normalizedCurrent = normalizeSequence(current);
+  if (sequenceParametersDiffer(normalizedDesired, normalizedCurrent)) {
+    statements.push(
+      new SQLBuilder()
+        .p("ALTER SEQUENCE")
+        .table(desired.name, desired.schema)
+        .p(`AS ${normalizedDesired.dataType}`)
+        .p(`INCREMENT BY ${normalizedDesired.increment}`)
+        .p(`MINVALUE ${normalizedDesired.minValue}`)
+        .p(`MAXVALUE ${normalizedDesired.maxValue}`)
+        .p(`START WITH ${normalizedDesired.start}`)
+        .p(`CACHE ${normalizedDesired.cache}`)
+        .p(";")
+        .build()
+    );
   }
-
-  const normalized = normalizeSequence(desired);
-  return new SQLBuilder()
-    .p("ALTER SEQUENCE")
-    .table(desired.name, desired.schema)
-    .p(`AS ${normalized.dataType}`)
-    .p(`INCREMENT BY ${normalized.increment}`)
-    .p(`MINVALUE ${normalized.minValue}`)
-    .p(`MAXVALUE ${normalized.maxValue}`)
-    .p(`START WITH ${normalized.start}`)
-    .p(`CACHE ${normalized.cache}`)
-    .p(normalized.cycle ? "CYCLE" : "NO CYCLE")
-    .p(";")
-    .build();
+  if (normalizedDesired.cycle !== normalizedCurrent.cycle) {
+    statements.push(
+      new SQLBuilder()
+        .p("ALTER SEQUENCE")
+        .table(desired.name, desired.schema)
+        .p(normalizedDesired.cycle ? "CYCLE" : "NO CYCLE")
+        .p(";")
+        .build()
+    );
+  }
+  return statements;
 }
 
 function generatePersistenceChangeStatement(
@@ -278,14 +286,7 @@ function generateAlterSequenceStatements(
   desired: Sequence,
   current: Sequence
 ): string[] {
-  const statements: string[] = [];
-  const definitionStatement = generateDefinitionChangeStatement(
-    desired,
-    current
-  );
-  if (definitionStatement) {
-    statements.push(definitionStatement);
-  }
+  const statements = generateDefinitionChangeStatements(desired, current);
 
   const persistenceStatement = generatePersistenceChangeStatement(
     desired,

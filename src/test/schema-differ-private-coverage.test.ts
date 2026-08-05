@@ -532,6 +532,47 @@ describe("SchemaDiffer private coverage", () => {
     expect(safePlan.transactional[0]).toContain("SET (fillfactor=80)");
   });
 
+  test("isolates identity CYCLE without splitting NO CYCLE changes", function () {
+    const differ = new SchemaDiffer();
+    const baseIdentity = {
+      generation: "ALWAYS" as const,
+      increment: "1",
+      cache: "1",
+      cycle: false,
+    };
+    const noCycleTable = makeTable({
+      columns: [makeColumn({ identity: baseIdentity })],
+    });
+    const cycleTable = makeTable({
+      columns: [makeColumn({
+        identity: { ...baseIdentity, cache: "2", cycle: true },
+      })],
+    });
+    const cyclePlan = differ.generateMigrationPlan(
+      [cycleTable],
+      [noCycleTable]
+    );
+    expect(cyclePlan.transactional).toHaveLength(2);
+    expect(cyclePlan.transactional[0]).toContain(
+      'ALTER COLUMN "id" SET CACHE 2'
+    );
+    expect(cyclePlan.transactional[1]).toContain(
+      'ALTER COLUMN "id" SET CYCLE'
+    );
+
+    const noCyclePlan = differ.generateMigrationPlan(
+      [noCycleTable],
+      [cycleTable]
+    );
+    expect(noCyclePlan.transactional).toHaveLength(1);
+    expect(noCyclePlan.transactional[0]).toContain(
+      'ALTER COLUMN "id" SET CACHE 1'
+    );
+    expect(noCyclePlan.transactional[0]).toContain(
+      'ALTER COLUMN "id" SET NO CYCLE'
+    );
+  });
+
   test("generateMigrationPlan preserves null uniqueness semantics", function () {
     const differ = new SchemaDiffer();
     const columns = [

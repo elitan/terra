@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import { DatabaseInspector } from "../../core/schema/inspector";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import { cleanDatabase, createTestClient, createTestSchemaService } from "../utils";
 
 const VERSION_15 = 150000;
@@ -206,6 +207,127 @@ describe("PostgreSQL sequence persistence and state-preserving evolution", funct
       ).rows[0]?.value
     ).toBe("12");
     expect((await service.plan(logged, ["public"])).hasChanges).toBe(false);
+  });
+
+  test("blocks enabling sequence wraparound without applying safe definition changes", async function () {
+    await client.query(`
+      CREATE SEQUENCE public.cycle_guard_seq
+        AS BIGINT MINVALUE 1 MAXVALUE 3 START WITH 1 INCREMENT BY 1 CACHE 1 NO CYCLE;
+      SELECT setval('public.cycle_guard_seq', 2, true);
+    `);
+    const desired = `
+      CREATE SEQUENCE public.cycle_guard_seq
+        AS BIGINT MINVALUE 1 MAXVALUE 5 START WITH 1 INCREMENT BY 1 CACHE 1 CYCLE;
+    `;
+    const service = createTestSchemaService();
+    const beforeRelation = await getRelationPersistence(
+      client,
+      "cycle_guard_seq"
+    );
+    const beforeDefinition = (
+      await client.query(`
+        SELECT sequence.seqmax::text AS max_value, sequence.seqcycle AS cycle
+        FROM pg_sequence sequence
+        JOIN pg_class relation ON relation.oid = sequence.seqrelid
+        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname = 'public'
+          AND relation.relname = 'cycle_guard_seq'
+      `)
+    ).rows;
+    const beforeValue = (
+      await client.query(
+        "SELECT last_value::text AS last_value, is_called FROM public.cycle_guard_seq"
+      )
+    ).rows;
+
+    const plan = await service.plan(desired, ["public"]);
+    expect(plan.transactional).toHaveLength(2);
+    const cycleStatement =
+      'ALTER SEQUENCE "public"."cycle_guard_seq" CYCLE;';
+    expect(plan.transactional[1]).toBe(cycleStatement);
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "safe"
+    );
+    expect(getStatementRisk(cycleStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(desired, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [cycleStatement],
+    });
+
+    expect(await getRelationPersistence(client, "cycle_guard_seq")).toEqual(
+      beforeRelation
+    );
+    expect(
+      (
+        await client.query(`
+          SELECT sequence.seqmax::text AS max_value, sequence.seqcycle AS cycle
+          FROM pg_sequence sequence
+          JOIN pg_class relation ON relation.oid = sequence.seqrelid
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname = 'public'
+            AND relation.relname = 'cycle_guard_seq'
+        `)
+      ).rows
+    ).toEqual(beforeDefinition);
+    expect(
+      (
+        await client.query(
+          "SELECT last_value::text AS last_value, is_called FROM public.cycle_guard_seq"
+        )
+      ).rows
+    ).toEqual(beforeValue);
+
+    await service.apply(desired, ["public"], true);
+    expect(await getRelationPersistence(client, "cycle_guard_seq")).toEqual(
+      beforeRelation
+    );
+    expect(
+      (
+        await client.query(`
+          SELECT sequence.seqmax::text AS max_value, sequence.seqcycle AS cycle
+          FROM pg_sequence sequence
+          JOIN pg_class relation ON relation.oid = sequence.seqrelid
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          WHERE namespace.nspname = 'public'
+            AND relation.relname = 'cycle_guard_seq'
+        `)
+      ).rows
+    ).toEqual([{ max_value: "5", cycle: true }]);
+    expect(
+      (
+        await client.query(
+          "SELECT nextval('public.cycle_guard_seq')::text AS value FROM generate_series(1, 4)"
+        )
+      ).rows
+    ).toEqual([
+      { value: "3" },
+      { value: "4" },
+      { value: "5" },
+      { value: "1" },
+    ]);
+    expect((await service.plan(desired, ["public"])).hasChanges).toBe(false);
+
+    const noCycle = desired.replace(" CACHE 1 CYCLE", " CACHE 1 NO CYCLE");
+    const noCyclePlan = await service.plan(noCycle, ["public"]);
+    expect(noCyclePlan.transactional).toEqual([
+      'ALTER SEQUENCE "public"."cycle_guard_seq" NO CYCLE;',
+    ]);
+    expect(
+      getStatementRisk(noCyclePlan.transactional[0]!, "transactional")
+    ).toBe("safe");
+    await service.apply(
+      noCycle,
+      ["public"],
+      true,
+      undefined,
+      false,
+      true
+    );
+    expect((await service.plan(noCycle, ["public"])).hasChanges).toBe(false);
   });
 
   test("round-trips exact bigint bounds beyond safe JavaScript integers", async function () {

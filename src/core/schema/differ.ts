@@ -516,6 +516,40 @@ type TableAlteration =
   | { type: "add_exclusion"; constraint: ExclusionConstraint }
   | { type: "drop_exclusion"; constraintName: string };
 
+const TABLE_ALTERATION_PRIORITY: Record<TableAlteration["type"], number> = {
+  inherit_parent: 0,
+  no_inherit_parent: 0,
+  drop_foreign_key: 0,
+  drop_exclusion: 1,
+  drop_unique: 1,
+  drop_check: 2,
+  drop_primary_key: 3,
+  drop_column: 4,
+  alter_column_drop_identity: 5,
+  alter_column_type: 10,
+  alter_column_set_default: 11,
+  alter_column_drop_default: 12,
+  add_column: 13,
+  alter_column_set_storage: 14,
+  alter_column_set_compression: 15,
+  alter_column_set_not_null: 16,
+  alter_column_add_identity: 17,
+  alter_column_set_identity_generation: 18,
+  alter_column_set_identity_option: 19,
+  alter_column_drop_not_null: 20,
+  add_primary_key: 21,
+  add_check: 22,
+  add_unique: 23,
+  add_exclusion: 24,
+  add_foreign_key: 25,
+  validate_check: 26,
+  validate_foreign_key: 26,
+  reset_table_storage_parameters: 27,
+  set_table_storage_parameters: 28,
+  set_table_access_method: 29,
+  set_table_tablespace: 30,
+};
+
 type ForeignKeyChange = "none" | "validate" | "replace";
 type CheckConstraintChange = "none" | "validate" | "replace";
 
@@ -3780,46 +3814,61 @@ export class SchemaDiffer {
     }
   }
 
-  /**
-   * Keeps storage-parameter resets explicit while preserving alteration order.
-   */
+  /** Keeps destructive actions explicit while preserving alteration order. */
   private batchAlterTableStatements(
     table: Table,
     alterations: TableAlteration[]
   ): string[] {
-    const hasStorageReset = alterations.some(function isStorageReset(alteration) {
-      return alteration.type === "reset_table_storage_parameters";
-    });
-    if (!hasStorageReset) {
-      return [this.batchAlterTableChanges(table, alterations)];
-    }
-
-    const beforeReset: TableAlteration[] = [];
-    const resets: TableAlteration[] = [];
-    const afterReset: TableAlteration[] = [];
-
-    for (const alteration of alterations) {
-      switch (alteration.type) {
-        case "reset_table_storage_parameters":
-          resets.push(alteration);
-          break;
-        case "set_table_storage_parameters":
-        case "set_table_access_method":
-        case "set_table_tablespace":
-          afterReset.push(alteration);
-          break;
-        default:
-          beforeReset.push(alteration);
+    const groups: TableAlteration[][] = [];
+    let batch: TableAlteration[] = [];
+    for (const alteration of this.sortTableAlterations(table, alterations)) {
+      if (this.requiresStandaloneAlterTableStatement(alteration)) {
+        if (batch.length > 0) {
+          groups.push(batch);
+          batch = [];
+        }
+        groups.push([alteration]);
+      } else {
+        batch.push(alteration);
       }
+    }
+    if (batch.length > 0) {
+      groups.push(batch);
     }
 
     const statements: string[] = [];
-    for (const group of [beforeReset, resets, afterReset]) {
-      if (group.length > 0) {
-        statements.push(this.batchAlterTableChanges(table, group));
-      }
+    for (const group of groups) {
+      statements.push(this.batchAlterTableChanges(table, group));
     }
     return statements;
+  }
+
+  private requiresStandaloneAlterTableStatement(
+    alteration: TableAlteration
+  ): boolean {
+    if (alteration.type === "reset_table_storage_parameters") {
+      return true;
+    }
+    return alteration.type === "alter_column_set_identity_option" &&
+      alteration.clause === "CYCLE";
+  }
+
+  private sortTableAlterations(
+    table: Table,
+    alterations: TableAlteration[]
+  ): TableAlteration[] {
+    const differ = this;
+    return [...alterations].sort(function compareAlterations(left, right) {
+      const priorityDiff =
+        TABLE_ALTERATION_PRIORITY[left.type] -
+        TABLE_ALTERATION_PRIORITY[right.type];
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+      const leftKey = differ.getAlterationSortKey(table, left);
+      const rightKey = differ.getAlterationSortKey(table, right);
+      return leftKey.localeCompare(rightKey);
+    });
   }
 
   /**
@@ -3835,52 +3884,7 @@ export class SchemaDiffer {
       return "";
     }
 
-    // Sort alterations: drops first, then alters, then adds
-    // Within each category, order by dependency (e.g., constraints before columns for drops)
-    const operationPriority: Record<string, number> = {
-      inherit_parent: 0,
-      no_inherit_parent: 0,
-      drop_foreign_key: 0,
-      drop_exclusion: 1,
-      drop_unique: 1,
-      drop_check: 2,
-      drop_primary_key: 3,
-      drop_column: 4,
-      alter_column_drop_identity: 5,
-      alter_column_type: 10,
-      alter_column_set_default: 11,
-      alter_column_drop_default: 12,
-      add_column: 13,
-      alter_column_set_storage: 14,
-      alter_column_set_compression: 15,
-      alter_column_set_not_null: 16,
-      alter_column_add_identity: 17,
-      alter_column_set_identity_generation: 18,
-      alter_column_set_identity_option: 19,
-      alter_column_drop_not_null: 20,
-      add_primary_key: 21,
-      add_check: 22,
-      add_unique: 23,
-      add_exclusion: 24,
-      add_foreign_key: 25,
-      validate_check: 26,
-      validate_foreign_key: 26,
-      reset_table_storage_parameters: 27,
-      set_table_storage_parameters: 28,
-      set_table_access_method: 29,
-      set_table_tablespace: 30,
-    };
-
-    const sorted = [...alterations].sort((a, b) => {
-      const priorityDiff =
-        (operationPriority[a.type] ?? 99) - (operationPriority[b.type] ?? 99);
-      if (priorityDiff !== 0) {
-        return priorityDiff;
-      }
-      const aKey = this.getAlterationSortKey(table, a);
-      const bKey = this.getAlterationSortKey(table, b);
-      return aKey.localeCompare(bKey);
-    });
+    const sorted = this.sortTableAlterations(table, alterations);
 
     const builder = new SQLBuilder()
       .p("ALTER TABLE")
