@@ -1383,12 +1383,11 @@ export class SchemaDiffer {
           context
         );
 
-        // Generate a single batched ALTER TABLE statement for all compatible operations
+        // Generate ordered ALTER TABLE statements for compatible operations.
         if (alterations.length > 0) {
-          const batchedStatement = this.batchAlterTableChanges(table, alterations);
-          if (batchedStatement) {
-            statements.push(batchedStatement);
-          }
+          statements.push(
+            ...this.batchAlterTableStatements(table, alterations)
+          );
         }
         statements.push(
           ...this.generateTableColumnStatisticsStatements(
@@ -3779,6 +3778,48 @@ export class SchemaDiffer {
         });
       }
     }
+  }
+
+  /**
+   * Keeps storage-parameter resets explicit while preserving alteration order.
+   */
+  private batchAlterTableStatements(
+    table: Table,
+    alterations: TableAlteration[]
+  ): string[] {
+    const hasStorageReset = alterations.some(function isStorageReset(alteration) {
+      return alteration.type === "reset_table_storage_parameters";
+    });
+    if (!hasStorageReset) {
+      return [this.batchAlterTableChanges(table, alterations)];
+    }
+
+    const beforeReset: TableAlteration[] = [];
+    const resets: TableAlteration[] = [];
+    const afterReset: TableAlteration[] = [];
+
+    for (const alteration of alterations) {
+      switch (alteration.type) {
+        case "reset_table_storage_parameters":
+          resets.push(alteration);
+          break;
+        case "set_table_storage_parameters":
+        case "set_table_access_method":
+        case "set_table_tablespace":
+          afterReset.push(alteration);
+          break;
+        default:
+          beforeReset.push(alteration);
+      }
+    }
+
+    const statements: string[] = [];
+    for (const group of [beforeReset, resets, afterReset]) {
+      if (group.length > 0) {
+        statements.push(this.batchAlterTableChanges(table, group));
+      }
+    }
+    return statements;
   }
 
   /**

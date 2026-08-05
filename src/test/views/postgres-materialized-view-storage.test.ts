@@ -13,6 +13,7 @@ import { DatabaseInspector } from "../../core/schema/inspector";
 import { ViewHandler } from "../../core/schema/handlers/view-handler";
 import { SchemaParser } from "../../core/schema/parser";
 import { generateCreateViewSQL } from "../../utils/sql";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import {
   cleanDatabase,
   createTestClient,
@@ -334,10 +335,37 @@ describe("PostgreSQL materialized view physical storage", function () {
       "TABLESPACE pg_default"
     );
     const resetPlan = await service.plan(resetSchema, ["public"]);
+    const resetStatement =
+      'ALTER MATERIALIZED VIEW "public"."item_summary" RESET (autovacuum_enabled, fillfactor, toast.autovacuum_enabled);';
     expect(resetPlan.transactional).toEqual([
-      'ALTER MATERIALIZED VIEW "public"."item_summary" RESET (autovacuum_enabled, fillfactor, toast.autovacuum_enabled);',
+      resetStatement,
       'ALTER MATERIALIZED VIEW "public"."item_summary" SET TABLESPACE "pg_default";',
     ]);
+    expect(getStatementRisk(resetStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(resetSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [resetStatement],
+    });
+    expect(await inspectView("item_summary")).toMatchObject({
+      storageParameters: {
+        fillfactor: "80",
+        autovacuum_enabled: "false",
+        "toast.autovacuum_enabled": "false",
+      },
+      tablespace: TEST_TABLESPACE,
+    });
+    expect(await getRelationOid("item_summary")).toBe(originalOid);
+    expect(await getRelationOid("item_summary_id_idx")).toBe(originalIndexOid);
+    expect(await client.query("SELECT * FROM public.item_summary")).toMatchObject({
+      rows: [{ id: 1, label: "preserved" }],
+    });
+    expect(await client.query("SELECT * FROM public.item_summary_dependency"))
+      .toMatchObject({ rows: [{ id: 1 }] });
+
     await service.apply(resetSchema, ["public"], true);
     const resetView = await inspectView("item_summary");
     expect(resetView.storageParameters).toBeUndefined();

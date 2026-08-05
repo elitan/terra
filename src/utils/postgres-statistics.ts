@@ -200,7 +200,7 @@ function renderAttributeChanges(
   column: string,
   desired: PostgresColumnStatistics,
   current: PostgresColumnStatistics
-): string[] {
+): { setCommands: string[]; resetCommands: string[] } {
   const setOptions: string[] = [];
   const resetOptions: string[] = [];
   for (const [optionName, field] of ATTRIBUTE_OPTION_FIELDS) {
@@ -217,16 +217,19 @@ function renderAttributeChanges(
   }
 
   const quotedColumn = quoteIdentifier(column);
-  const commands: string[] = [];
+  const setCommands: string[] = [];
+  const resetCommands: string[] = [];
   if (setOptions.length > 0) {
-    commands.push(`ALTER COLUMN ${quotedColumn} SET (${setOptions.join(", ")})`);
+    setCommands.push(
+      `ALTER COLUMN ${quotedColumn} SET (${setOptions.join(", ")})`
+    );
   }
   if (resetOptions.length > 0) {
-    commands.push(
+    resetCommands.push(
       `ALTER COLUMN ${quotedColumn} RESET (${resetOptions.join(", ")})`
     );
   }
-  return commands;
+  return { setCommands, resetCommands };
 }
 
 export function renderPostgresColumnStatisticsChanges(
@@ -242,32 +245,48 @@ export function renderPostgresColumnStatisticsChanges(
       return first.localeCompare(second);
     }
   );
-  const commands: string[] = [];
+  const setCommands: string[] = [];
+  const resetCommands: string[] = [];
 
   for (const column of columns) {
     const desiredEntry = desired.get(column) || { column };
     const currentEntry = current.get(column) || { column };
     if (desiredEntry.statisticsTarget !== currentEntry.statisticsTarget) {
-      commands.push(
-        `ALTER COLUMN ${quoteIdentifier(column)} SET STATISTICS ${
-          desiredEntry.statisticsTarget === undefined
-            ? "-1"
-            : renderNumber(desiredEntry.statisticsTarget)
-        }`
-      );
+      if (desiredEntry.statisticsTarget === undefined) {
+        resetCommands.push(
+          `ALTER COLUMN ${quoteIdentifier(column)} SET STATISTICS -1`
+        );
+      } else {
+        setCommands.push(
+          `ALTER COLUMN ${quoteIdentifier(column)} SET STATISTICS ${renderNumber(
+            desiredEntry.statisticsTarget
+          )}`
+        );
+      }
     }
-    commands.push(
-      ...renderAttributeChanges(column, desiredEntry, currentEntry)
+    const attributeChanges = renderAttributeChanges(
+      column,
+      desiredEntry,
+      currentEntry
     );
+    setCommands.push(...attributeChanges.setCommands);
+    resetCommands.push(...attributeChanges.resetCommands);
   }
 
-  if (commands.length === 0) {
+  if (setCommands.length === 0 && resetCommands.length === 0) {
     return [];
   }
   const prefix = relationKind === "table"
     ? `ALTER TABLE ONLY ${qualifyName(relation)}`
     : `ALTER MATERIALIZED VIEW ${qualifyName(relation)}`;
-  return [`${prefix} ${commands.join(", ")};`];
+  const statements: string[] = [];
+  if (setCommands.length > 0) {
+    statements.push(`${prefix} ${setCommands.join(", ")};`);
+  }
+  for (const resetCommand of resetCommands) {
+    statements.push(`${prefix} ${resetCommand};`);
+  }
+  return statements;
 }
 
 export function renderPostgresExpressionIndexStatistics(

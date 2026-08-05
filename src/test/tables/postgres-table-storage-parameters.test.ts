@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import { createColumnTestServices } from "../columns/column-test-utils";
-import { cleanDatabase, createTestClient } from "../utils";
+import {
+  cleanDatabase,
+  createTestClient,
+  createTestSchemaService,
+} from "../utils";
 
 describe("PostgreSQL table storage parameters", function () {
   let client: Client;
@@ -110,6 +115,13 @@ describe("PostgreSQL table storage parameters", function () {
 
     const plan = await planSchema(schema);
     const sql = plan.transactional.join("\n");
+    expect(plan.transactional).toHaveLength(2);
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "destructive"
+    );
+    expect(getStatementRisk(plan.transactional[1]!, "transactional")).toBe(
+      "safe"
+    );
     expect(sql).toContain(
       "RESET (autovacuum_enabled, toast.autovacuum_enabled, toast_tuple_target)"
     );
@@ -129,21 +141,66 @@ describe("PostgreSQL table storage parameters", function () {
 
   test("resets all parameters when the desired table omits WITH", async function () {
     await client.query(`
-      CREATE TABLE public.parameter_reset (payload text)
+      CREATE TABLE public.parameter_reset (id integer PRIMARY KEY, payload text)
       WITH (fillfactor=75, toast.autovacuum_enabled=false);
+      INSERT INTO public.parameter_reset VALUES (1, 'preserved');
     `);
     const schema = `
-      CREATE TABLE public.parameter_reset (payload text);
+      CREATE TABLE public.parameter_reset (id integer PRIMARY KEY, payload text);
     `;
+    const service = createTestSchemaService();
+    const originalOid = (
+      await client.query(
+        "SELECT 'public.parameter_reset'::regclass::oid::integer AS oid"
+      )
+    ).rows[0]?.oid;
 
-    const plan = await planSchema(schema);
-    expect(plan.transactional.join("\n")).toContain(
-      "RESET (fillfactor, toast.autovacuum_enabled)"
+    const plan = await service.plan(schema, ["public"]);
+    const resetStatement = plan.transactional.find(
+      function findStorageReset(statement) {
+        return statement.includes(
+          "RESET (fillfactor, toast.autovacuum_enabled)"
+        );
+      }
     );
-    await services.executor.executePlan(client, plan, true);
+    expect(resetStatement).toBeDefined();
+    if (!resetStatement) {
+      throw new Error("Expected a storage-parameter reset statement");
+    }
+    expect(getStatementRisk(resetStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(schema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [resetStatement],
+    });
+    expect(await inspectParameters("parameter_reset")).toEqual({
+      fillfactor: "75",
+      "toast.autovacuum_enabled": "false",
+    });
+    expect(
+      (
+        await client.query(
+          "SELECT 'public.parameter_reset'::regclass::oid::integer AS oid"
+        )
+      ).rows[0]?.oid
+    ).toBe(originalOid);
+    expect((await client.query("SELECT * FROM public.parameter_reset")).rows)
+      .toEqual([{ id: 1, payload: "preserved" }]);
+
+    await service.apply(schema, ["public"], true);
 
     expect(await inspectParameters("parameter_reset")).toBeUndefined();
-    expect((await planSchema(schema)).hasChanges).toBe(false);
+    expect(
+      (
+        await client.query(
+          "SELECT 'public.parameter_reset'::regclass::oid::integer AS oid"
+        )
+      ).rows[0]?.oid
+    ).toBe(originalOid);
+    expect((await service.plan(schema, ["public"])).hasChanges).toBe(false);
   });
 
   test("combines parameter and column changes in one table plan", async function () {
@@ -158,6 +215,7 @@ describe("PostgreSQL table storage parameters", function () {
     `;
 
     const plan = await planSchema(schema);
+    expect(plan.transactional).toHaveLength(1);
     const sql = plan.transactional.join("\n");
     expect(sql).toContain('ADD COLUMN "payload" TEXT');
     expect(sql).toContain("SET (fillfactor=75)");

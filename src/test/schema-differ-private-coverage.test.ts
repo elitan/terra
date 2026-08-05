@@ -494,6 +494,44 @@ describe("SchemaDiffer private coverage", () => {
     }).toThrow("without the PostgreSQL server version");
   });
 
+  test("isolates storage resets without splitting safe table alterations", function () {
+    const differ = new SchemaDiffer();
+    const desiredColumns = [
+      makeColumn(),
+      makeColumn({ name: "payload", type: "TEXT", nullable: true }),
+    ];
+    const mixedPlan = differ.generateMigrationPlan(
+      [makeTable({
+        columns: desiredColumns,
+        storageParameters: { fillfactor: "80" },
+      })],
+      [makeTable({
+        storageParameters: {
+          fillfactor: "70",
+          autovacuum_enabled: "false",
+        },
+      })]
+    );
+
+    expect(mixedPlan.transactional).toHaveLength(3);
+    expect(mixedPlan.transactional[0]).toContain('ADD COLUMN "payload" TEXT');
+    expect(mixedPlan.transactional[1]).toContain(
+      "RESET (autovacuum_enabled)"
+    );
+    expect(mixedPlan.transactional[2]).toContain("SET (fillfactor=80)");
+
+    const safePlan = differ.generateMigrationPlan(
+      [makeTable({
+        columns: desiredColumns,
+        storageParameters: { fillfactor: "80" },
+      })],
+      [makeTable()]
+    );
+    expect(safePlan.transactional).toHaveLength(1);
+    expect(safePlan.transactional[0]).toContain('ADD COLUMN "payload" TEXT');
+    expect(safePlan.transactional[0]).toContain("SET (fillfactor=80)");
+  });
+
   test("generateMigrationPlan preserves null uniqueness semantics", function () {
     const differ = new SchemaDiffer();
     const columns = [

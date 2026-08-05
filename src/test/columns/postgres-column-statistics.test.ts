@@ -15,6 +15,7 @@ import { DatabaseInspector } from "../../core/schema/inspector";
 import { ViewHandler } from "../../core/schema/handlers/view-handler";
 import { ValidationError } from "../../types/errors";
 import type { MigrationPlan } from "../../types/migration";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import {
   cleanDatabase,
   createTestClient,
@@ -317,7 +318,10 @@ describe("PostgreSQL column statistics parser", function () {
     const plan = new SchemaDiffer().generateMigrationPlan(desired, current);
     const sql = plan.transactional.join("\n");
     expect(sql).toContain(
-      'ALTER TABLE ONLY "public"."statistics_reset" ALTER COLUMN "payload" SET STATISTICS -1, ALTER COLUMN "payload" RESET (n_distinct, n_distinct_inherited);'
+      'ALTER TABLE ONLY "public"."statistics_reset" ALTER COLUMN "payload" SET STATISTICS -1;'
+    );
+    expect(sql).toContain(
+      'ALTER TABLE ONLY "public"."statistics_reset" ALTER COLUMN "payload" RESET (n_distinct, n_distinct_inherited);'
     );
     expect(sql).toContain(
       'ALTER INDEX "public"."statistics_reset_idx" ALTER COLUMN 1 SET STATISTICS -1;'
@@ -484,6 +488,49 @@ describe("PostgreSQL column statistics lifecycle", function () {
     expect(resetPlan.transactional.join("\n")).toContain(
       "RESET (n_distinct, n_distinct_inherited)"
     );
+    expect(resetPlan.transactional).toHaveLength(7);
+    for (const statement of resetPlan.transactional) {
+      expect(getStatementRisk(statement, "transactional")).toBe(
+        "destructive"
+      );
+    }
+    await expect(
+      service.apply(resetSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: resetPlan.transactional,
+    });
+    const strictTables = await inspector.getCurrentSchema(client);
+    expect(
+      strictTables.find(function findTable(table) {
+        return table.name === "statistics_lifecycle";
+      })?.columnStatistics
+    ).toEqual(changedTable?.columnStatistics);
+    expect(
+      (await inspector.getCurrentViews(client)).find(function findView(view) {
+        return view.name === "statistics_lifecycle_mv";
+      })?.columnStatistics
+    ).toEqual(changedView?.columnStatistics);
+    expect(
+      (
+        await client.query(`
+          SELECT relname, oid::integer
+          FROM pg_class
+          WHERE relname IN (
+            'statistics_lifecycle',
+            'statistics_lifecycle_expr_idx',
+            'statistics_lifecycle_mv',
+            'statistics_lifecycle_mv_expr_idx'
+          )
+          ORDER BY relname
+        `)
+      ).rows
+    ).toEqual(beforeOids);
+    expect(
+      (await client.query("SELECT id, payload FROM statistics_lifecycle"))
+        .rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
+
     expect((await service.apply(resetSchema, ["public"], true)).hasChanges)
       .toBe(true);
     expect((await service.apply(resetSchema, ["public"], true)).hasChanges)
