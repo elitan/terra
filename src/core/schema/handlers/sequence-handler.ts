@@ -18,6 +18,11 @@ type NormalizedSequence = {
   cycle: boolean;
 };
 
+export interface SequenceStatementPlan {
+  beforeTables: string[];
+  afterTables: string[];
+}
+
 function normalizeSequenceNumericValue(
   value: number | string | undefined,
   fallback: string
@@ -141,17 +146,10 @@ function generateOwnedByStatement(sequence: Sequence): string | null {
   return builder.build() + ";";
 }
 
-function generateOwnedByChangeStatement(sequence: Sequence): string {
+function generateOwnedByRemovalStatement(sequence: Sequence): string {
   const builder = new SQLBuilder();
   builder.p("ALTER SEQUENCE").table(sequence.name, sequence.schema);
-  if (!sequence.ownedBy) {
-    builder.p("OWNED BY NONE");
-    return builder.build() + ";";
-  }
-
-  builder.p(
-    `OWNED BY ${renderOwnedByTarget(sequence.ownedBy, sequence.schema)}`
-  );
+  builder.p("OWNED BY NONE");
   return builder.build() + ";";
 }
 
@@ -220,16 +218,19 @@ function splitOwnedByTarget(target: string): string[] {
   return segments;
 }
 
-function generateCreateSequenceStatements(sequence: Sequence): string[] {
+function generateCreateSequencePlan(sequence: Sequence): SequenceStatementPlan {
   const createSequence = sequence.ownedBy
     ? { ...sequence, ownedBy: undefined }
     : sequence;
-  const statements = [generateCreateSequenceSQL(createSequence)];
+  const plan: SequenceStatementPlan = {
+    beforeTables: [generateCreateSequenceSQL(createSequence)],
+    afterTables: [],
+  };
   const ownedByStatement = generateOwnedByStatement(sequence);
   if (ownedByStatement) {
-    statements.push(ownedByStatement);
+    plan.afterTables.push(ownedByStatement);
   }
-  return statements;
+  return plan;
 }
 
 function generateDefinitionChangeStatements(
@@ -285,27 +286,36 @@ function generatePersistenceChangeStatement(
     .build();
 }
 
-function generateAlterSequenceStatements(
+function generateAlterSequencePlan(
   desired: Sequence,
   current: Sequence
-): string[] {
-  const statements = generateDefinitionChangeStatements(desired, current);
+): SequenceStatementPlan {
+  const plan: SequenceStatementPlan = {
+    beforeTables: generateDefinitionChangeStatements(desired, current),
+    afterTables: [],
+  };
 
   const persistenceStatement = generatePersistenceChangeStatement(
     desired,
     current
   );
   if (persistenceStatement) {
-    statements.push(persistenceStatement);
+    plan.beforeTables.push(persistenceStatement);
   }
 
   if (
     normalizeOwnedBy(desired.ownedBy, desired.schema) !==
     normalizeOwnedBy(current.ownedBy, current.schema)
   ) {
-    statements.push(generateOwnedByChangeStatement(desired));
+    if (current.ownedBy) {
+      plan.beforeTables.push(generateOwnedByRemovalStatement(desired));
+    }
+    const ownedByStatement = generateOwnedByStatement(desired);
+    if (ownedByStatement) {
+      plan.afterTables.push(ownedByStatement);
+    }
   }
-  return statements;
+  return plan;
 }
 
 function validateUnloggedSequenceSupport(
@@ -343,8 +353,24 @@ export class SequenceHandler {
     currentSequences: Sequence[],
     context: MigrationContext = {}
   ): string[] {
+    const plan = this.generateStatementPlan(
+      desiredSequences,
+      currentSequences,
+      context
+    );
+    return [...plan.beforeTables, ...plan.afterTables];
+  }
+
+  generateStatementPlan(
+    desiredSequences: Sequence[],
+    currentSequences: Sequence[],
+    context: MigrationContext = {}
+  ): SequenceStatementPlan {
     validateUnloggedSequenceSupport(desiredSequences, context);
-    const statements: string[] = [];
+    const plan: SequenceStatementPlan = {
+      beforeTables: [],
+      afterTables: [],
+    };
     const currentMap = new Map(
       currentSequences.map(function mapCurrentSequence(sequence) {
         return [getSequenceKey(sequence), sequence] as const;
@@ -360,7 +386,9 @@ export class SequenceHandler {
           continue;
         }
 
-        statements.push(generateDropSequenceSQL(currentSequence.name, currentSequence.schema));
+        plan.afterTables.push(
+          generateDropSequenceSQL(currentSequence.name, currentSequence.schema)
+        );
         Logger.info(`Dropping sequence '${key}'`);
       }
     }
@@ -370,23 +398,29 @@ export class SequenceHandler {
       const currentSequence = currentMap.get(key);
 
       if (!currentSequence) {
-        statements.push(...generateCreateSequenceStatements(desiredSequence));
+        const createPlan = generateCreateSequencePlan(desiredSequence);
+        plan.beforeTables.push(...createPlan.beforeTables);
+        plan.afterTables.push(...createPlan.afterTables);
         Logger.info(`Creating sequence '${key}'`);
         continue;
       }
 
-      const alterationStatements = generateAlterSequenceStatements(
+      const alterationPlan = generateAlterSequencePlan(
         desiredSequence,
         currentSequence
       );
-      if (alterationStatements.length > 0) {
-        statements.push(...alterationStatements);
+      if (
+        alterationPlan.beforeTables.length > 0 ||
+        alterationPlan.afterTables.length > 0
+      ) {
+        plan.beforeTables.push(...alterationPlan.beforeTables);
+        plan.afterTables.push(...alterationPlan.afterTables);
         Logger.info(`Updating sequence '${key}'`);
       } else {
         Logger.info(`sequence '${key}' is up to date, skipping`);
       }
     }
 
-    return statements;
+    return plan;
   }
 }

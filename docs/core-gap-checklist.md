@@ -270,6 +270,7 @@
 - done: classify supported SQLite FTS5/RTree `CREATE VIRTUAL TABLE` statements as `table` rather than `other`, matching their ordinary `DROP TABLE` removal category; prove the contract through direct classification and a real JSON CLI plan.
 - done: make CLI category/risk classification lexical-aware so keywords inside PostgreSQL/SQLite strings, quoted identifiers, dollar bodies, line comments, and nested block comments cannot misclassify safe statements or trigger strict-mode blocking; retain real table/domain/type destructive actions and prove direct, executor, property, and strict JSON CLI behavior.
 - done: route only structural PostgreSQL `CREATE [UNIQUE] INDEX CONCURRENTLY` and `DROP INDEX CONCURRENTLY` statements outside the main transaction instead of matching arbitrary `CONCURRENTLY` text; prove simultaneous literal-default changes remain transactional while a real concurrent index remains isolated.
+- done: structure PostgreSQL sequence creation, ownership detachment/attachment, and removal around dependent table changes instead of searching generated SQL for `OWNED BY`; preserve retained sequences during owner-table removal, drop defaults before standalone sequences, accept ownership-keyword identifiers, and normalize quoted `regclass` default casts idempotently.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

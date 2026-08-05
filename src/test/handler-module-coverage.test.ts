@@ -245,6 +245,35 @@ describe("Handler module coverage", () => {
       expect(statements[1]).toContain("OWNED BY public.users.id");
     });
 
+    test("structures sequence operations around table changes", function () {
+      const handler = new SequenceHandler();
+      const createAndDropPlan = handler.generateStatementPlan(
+        [makeSequence({ name: "owned_seq", ownedBy: "public.users.id" })],
+        [makeSequence({ name: "legacy_seq" })]
+      );
+
+      expect(createAndDropPlan.beforeTables).toHaveLength(1);
+      expect(createAndDropPlan.beforeTables[0]).toContain(
+        'CREATE SEQUENCE "owned_seq"'
+      );
+      expect(createAndDropPlan.afterTables).toEqual([
+        'DROP SEQUENCE IF EXISTS "legacy_seq";',
+        'ALTER SEQUENCE "owned_seq" OWNED BY public.users.id;',
+      ]);
+
+      const ownershipChangePlan = handler.generateStatementPlan(
+        [makeSequence({ ownedBy: "public.accounts.id" })],
+        [makeSequence({ ownedBy: "public.users.id" })]
+      );
+
+      expect(ownershipChangePlan.beforeTables).toEqual([
+        'ALTER SEQUENCE "invoice_seq" OWNED BY NONE;',
+      ]);
+      expect(ownershipChangePlan.afterTables).toEqual([
+        'ALTER SEQUENCE "invoice_seq" OWNED BY public.accounts.id;',
+      ]);
+    });
+
     test("qualifies shorthand ownership with the sequence schema", () => {
       const handler = new SequenceHandler();
       const statements = handler.generateStatements(

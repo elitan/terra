@@ -217,6 +217,13 @@ export function normalizeDefault(value: string | null | undefined): string | und
     return undefined;
   }
 
+  normalized = normalized.replace(
+    /\bnextval\s*\(\s*CAST\(\s*('(?:[^']|'')*')\s+AS\s+(?:pg_catalog\.)?regclass\s*\)\s*\)/gi,
+    function normalizeNextvalRegclassCast(_match, sequenceName: string) {
+      return `nextval(${sequenceName}::regclass)`;
+    }
+  );
+
   // Strip PostgreSQL's type cast suffix, including schema-qualified and quoted types.
   const identifier = '(?:"(?:[^"]|"")*"|[a-z_][a-z0-9_$]*)';
   const typeCastSuffix = new RegExp(

@@ -25,6 +25,7 @@ import {
   ProcedureHandler,
   SchemaHandler,
   SequenceHandler,
+  type SequenceStatementPlan,
   SqlObjectHandler,
   TriggerHandler,
   ViewHandler,
@@ -573,7 +574,10 @@ export class SchemaService {
     let enumTypeCreateOperations: PostgresTypeStatement[] = [];
     let enumPreTransactionalStatements: string[] = [];
     let compositeTypeCreateOperations: PostgresTypeStatement[] = [];
-    let sequenceStatements: string[] = [];
+    let sequencePlan: SequenceStatementPlan = {
+      beforeTables: [],
+      afterTables: [],
+    };
     let functionStatements: string[] = [];
     let procedureStatements: string[] = [];
     let triggerStatements: string[] = [];
@@ -614,19 +618,12 @@ export class SchemaService {
     const concurrentStatements = tablePlan.concurrent;
 
     if (this.provider.supportsFeature("sequences")) {
-      sequenceStatements = this.sequenceHandler.generateStatements(
+      sequencePlan = this.sequenceHandler.generateStatementPlan(
         desiredSequences,
         currentSequences,
         migrationContext
       );
     }
-
-    const preSequenceStatements = sequenceStatements.filter(
-      statement => !/\bOWNED\s+BY\b/i.test(statement)
-    );
-    const postSequenceStatements = sequenceStatements.filter(
-      statement => /\bOWNED\s+BY\b/i.test(statement)
-    );
     const plannedTriggerRemovals = this.getRemovedTriggerDescriptions(
       desiredTriggers,
       currentTriggers
@@ -833,7 +830,7 @@ export class SchemaService {
       ...sqlObjectPlan.typeReplaceDrop,
       ...typeCreateStatements,
       ...sqlObjectPlan.typeAlter,
-      ...preSequenceStatements,
+      ...sequencePlan.beforeTables,
       ...sqlObjectPlan.earlyDrop,
       ...prePartitionTriggerStatements,
       ...prePartitionViewStatements,
@@ -844,7 +841,7 @@ export class SchemaService {
       ...postPartitionViewStatements,
       ...postPartitionTableStatements,
       ...sqlObjectPlan.postTableCreate,
-      ...postSequenceStatements,
+      ...sequencePlan.afterTables,
       ...functionStatements,
       ...procedureStatements,
       ...viewStatements,

@@ -243,7 +243,10 @@ instead of being silently ignored.
 PostgreSQL sequences preserve type, bounds, start, increment, cache, cycling,
 column ownership, and logged/unlogged persistence. Existing sequences evolve
 with native `ALTER SEQUENCE` operations so their OIDs, dependents, and live
-counter state are not reset. `UNLOGGED` standalone sequences and explicit
+counter state are not reset. Creation and ownership detachment run before
+dependent table changes, while ownership attachment and safe sequence removal
+run afterward; quoted identifiers containing ownership keywords cannot alter
+that ordering. `UNLOGGED` standalone sequences and explicit
 identity-sequence `LOGGED`/`UNLOGGED` overrides are supported on PostgreSQL
 15–18 and rejected before mutation on PostgreSQL 14. An implicit identity
 sequence follows its table's persistence on PostgreSQL 15–18; PostgreSQL 14's

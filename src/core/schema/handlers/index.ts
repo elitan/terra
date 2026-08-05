@@ -5,7 +5,10 @@ export { ExtensionHandler } from "./extension-handler";
 export { FunctionHandler } from "./function-handler";
 export { ProcedureHandler } from "./procedure-handler";
 export { SchemaHandler } from "./schema-handler";
-export { SequenceHandler } from "./sequence-handler";
+export {
+  SequenceHandler,
+  type SequenceStatementPlan,
+} from "./sequence-handler";
 export { SqlObjectHandler } from "./sql-object-handler";
 export { TriggerHandler } from "./trigger-handler";
 export { ViewHandler } from "./view-handler";

@@ -58,6 +58,19 @@ describe("normalizeDefault", () => {
     expect(normalizeDefault("nextval('users_id_seq'::regclass)")).toBe("nextval('users_id_seq'::regclass)");
   });
 
+  test("should normalize nextval regclass cast syntax", function () {
+    expect(
+      normalizeDefault(
+        `nextval(CAST('"OWNED BY"' AS regclass))`
+      )
+    ).toBe(`nextval('"OWNED BY"'::regclass)`);
+    expect(
+      normalizeDefault(
+        `nextval(CAST('public.user_seq' AS pg_catalog.regclass))`
+      )
+    ).toBe("nextval('public.user_seq'::regclass)");
+  });
+
   test("should trim whitespace", () => {
     expect(normalizeDefault("  100::integer  ")).toBe("100");
   });

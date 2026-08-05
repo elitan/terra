@@ -53,4 +53,42 @@ describe("Regression: owned sequence can be made unowned", function () {
         .hasChanges
     ).toBe(false);
   });
+
+  test("detaches a retained sequence before dropping its owner table", async function () {
+    const initialSchema = `
+      CREATE TABLE users (id integer);
+      CREATE SEQUENCE user_seq OWNED BY users.id;
+    `;
+    const updatedSchema = `
+      CREATE SEQUENCE user_seq;
+    `;
+
+    await service.apply(initialSchema, ["public"], true);
+    const before = await client.query(
+      "SELECT 'public.user_seq'::regclass::oid::integer AS oid"
+    );
+
+    const plan = await service.apply(updatedSchema, ["public"], true);
+    const detachPosition = plan.transactional.findIndex(
+      function findOwnershipRemoval(statement) {
+        return statement.includes("OWNED BY NONE");
+      }
+    );
+    const tableDropPosition = plan.transactional.findIndex(
+      function findTableDrop(statement) {
+        return statement.startsWith('DROP TABLE "public"."users" RESTRICT');
+      }
+    );
+
+    expect(detachPosition).toBeGreaterThanOrEqual(0);
+    expect(tableDropPosition).toBeGreaterThan(detachPosition);
+    const after = await client.query(
+      "SELECT 'public.user_seq'::regclass::oid::integer AS oid"
+    );
+    expect(after.rows[0]?.oid).toBe(before.rows[0]?.oid);
+    expect(
+      (await service.apply(updatedSchema, ["public"], true, undefined, true))
+        .hasChanges
+    ).toBe(false);
+  });
 });

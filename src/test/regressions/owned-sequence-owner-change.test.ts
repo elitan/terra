@@ -42,9 +42,21 @@ describe("Regression: owned sequence ownership changes are detected", function (
     expect(plan.hasChanges).toBe(true);
     const sql = plan.transactional.join("\n");
     expect(sql).toContain("ALTER SEQUENCE");
+    expect(sql).toContain("OWNED BY NONE");
     expect(sql).toContain("OWNED BY public.accounts.id");
     expect(sql).not.toContain("DROP SEQUENCE");
     expect(sql).not.toContain("CREATE SEQUENCE");
+
+    const attachedToUsers = await inspectSequenceState(client);
+    await expect(
+      service.apply(updatedSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([
+        'ALTER SEQUENCE "user_seq" OWNED BY NONE;',
+      ]),
+    });
+    expect(await inspectSequenceState(client)).toEqual(attachedToUsers);
 
     await service.apply(updatedSchema, ["public"], true);
     const after = await client.query(
