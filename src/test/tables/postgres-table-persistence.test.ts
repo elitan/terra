@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import { createColumnTestServices } from "../columns/column-test-utils";
 import {
   cleanDatabase,
@@ -47,6 +48,27 @@ describe("PostgreSQL table persistence", function () {
         return [row.relname, row.relpersistence];
       })
     );
+  }
+
+  async function getPartitionState(name: string): Promise<{
+    oid: number;
+    isPartition: boolean;
+    bound: string | null;
+  }> {
+    const result = await client.query(
+      `
+        SELECT
+          relation.oid::integer AS oid,
+          relation.relispartition AS "isPartition",
+          pg_get_expr(relation.relpartbound, relation.oid) AS bound
+        FROM pg_class relation
+        JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname = 'public'
+          AND relation.relname = $1
+      `,
+      [name]
+    );
+    return result.rows[0];
   }
 
   test("parses and renders unlogged persistence", async function () {
@@ -210,18 +232,44 @@ describe("PostgreSQL table persistence", function () {
     expect(detachIndex).toBeGreaterThanOrEqual(0);
     expect(attachIndex).toBeGreaterThan(detachIndex);
     expect(expandedPlan.transactional.join("\n")).not.toContain("DROP TABLE");
-    await schemaService.apply(
-      expandedSchema,
-      ["public"],
-      true,
-      undefined,
-      false,
-      true
+    const detachStatement = expandedPlan.transactional[detachIndex]!;
+    expect(getStatementRisk(detachStatement, "transactional")).toBe(
+      "destructive"
     );
+    const originalPartition = await getPartitionState("partition_accounts_eu");
+    await expect(
+      schemaService.apply(
+        expandedSchema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([detachStatement]),
+    });
+    expect(await getPartitionState("partition_accounts_eu")).toEqual(
+      originalPartition
+    );
+    expect(
+      (await client.query("SELECT * FROM public.partition_accounts")).rows
+    ).toEqual([{ id: 1, region_id: 80 }]);
+    expect(
+      (await client.query("SELECT * FROM public.partition_accounts_eu")).rows
+    ).toEqual([{ id: 1, region_id: 80 }]);
+
+    await schemaService.apply(expandedSchema, ["public"], true);
 
     expect(
       (await client.query("SELECT * FROM public.partition_accounts")).rows
     ).toEqual([{ id: 1, region_id: 80 }]);
+    expect(await getPartitionState("partition_accounts_eu")).toMatchObject({
+      oid: originalPartition.oid,
+      isPartition: true,
+      bound: "FOR VALUES FROM (0) TO (200)",
+    });
     expect((await schemaService.plan(expandedSchema, ["public"])).hasChanges).toBe(false);
 
     const unsupportedParentChange = expandedSchema.replace(
