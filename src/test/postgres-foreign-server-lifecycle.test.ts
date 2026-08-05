@@ -120,6 +120,66 @@ describe("PostgreSQL foreign server lifecycle", function () {
     });
     expect((await service.plan(changed, [MANAGED_SCHEMA])).hasChanges).toBe(false);
 
+    const versionCleared = `
+      CREATE EXTENSION postgres_fdw;
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE SERVER "${SERVER_NAME}"
+        TYPE 'postgresql'
+        FOREIGN DATA WRAPPER postgres_fdw
+        OPTIONS (
+          fetch_size '1000',
+          port '5432',
+          host 'db.internal'
+        );
+      GRANT USAGE ON FOREIGN SERVER "${SERVER_NAME}" TO PUBLIC;
+    `;
+    const versionClearedPlan = await service.plan(
+      versionCleared,
+      [MANAGED_SCHEMA]
+    );
+    const versionRemovalStatement =
+      `ALTER SERVER "${SERVER_NAME}" VERSION NULL;`;
+
+    expect(versionClearedPlan.transactional).toContain(
+      versionRemovalStatement
+    );
+    expect(getStatementRisk(versionRemovalStatement, "transactional")).toBe(
+      "destructive"
+    );
+    const versionedState = await inspectForeignServer(client);
+    await expect(
+      service.apply(
+        versionCleared,
+        [MANAGED_SCHEMA],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [versionRemovalStatement],
+    });
+    expect(await foreignServerOid(client)).toBe(originalOid);
+    expect(await inspectForeignServer(client)).toEqual(versionedState);
+    expect(await userMappingExists(client)).toBe(true);
+    expect(await foreignTableUsesServer(client)).toBe(true);
+    expect(await publicHasUsage(client)).toBe(true);
+
+    await service.apply(versionCleared, [MANAGED_SCHEMA], true);
+    expect(await foreignServerOid(client)).toBe(originalOid);
+    expect(await inspectForeignServer(client)).toEqual({
+      type: "postgresql",
+      version: null,
+      options: {
+        fetch_size: "1000",
+        host: "db.internal",
+        port: "5432",
+      },
+    });
+    expect((await service.plan(versionCleared, [MANAGED_SCHEMA])).hasChanges)
+      .toBe(false);
+
     const cleared = `
       CREATE EXTENSION postgres_fdw;
       CREATE SCHEMA ${MANAGED_SCHEMA};
@@ -131,14 +191,13 @@ describe("PostgreSQL foreign server lifecycle", function () {
     `;
     const clearedPlan = await service.plan(cleared, [MANAGED_SCHEMA]);
     const clearedStatement =
-      `ALTER SERVER "${SERVER_NAME}" VERSION NULL OPTIONS (` +
-      `DROP "fetch_size");`;
+      `ALTER SERVER "${SERVER_NAME}" OPTIONS (DROP "fetch_size");`;
 
     expect(clearedPlan.transactional).toContain(clearedStatement);
     expect(getStatementRisk(clearedStatement, "transactional")).toBe(
       "destructive"
     );
-    const changedState = await inspectForeignServer(client);
+    const versionClearedState = await inspectForeignServer(client);
     await expect(
       service.apply(
         cleared,
@@ -153,7 +212,7 @@ describe("PostgreSQL foreign server lifecycle", function () {
       statements: expect.arrayContaining([clearedStatement]),
     });
     expect(await foreignServerOid(client)).toBe(originalOid);
-    expect(await inspectForeignServer(client)).toEqual(changedState);
+    expect(await inspectForeignServer(client)).toEqual(versionClearedState);
     expect(await userMappingExists(client)).toBe(true);
     expect(await foreignTableUsesServer(client)).toBe(true);
     expect(await publicHasUsage(client)).toBe(true);

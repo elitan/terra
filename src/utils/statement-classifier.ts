@@ -68,6 +68,10 @@ const ALTER_SERVER_OWNER_PATTERN = new RegExp(
   String.raw`OWNER\s+TO\s+${POSTGRES_IDENTIFIER_PATTERN}\s*;?$`,
   "i"
 );
+const ALTER_SERVER_VERSION_REMOVAL_PATTERN = new RegExp(
+  String.raw`^ALTER\s+SERVER\s+${POSTGRES_IDENTIFIER_PATTERN}\s+` +
+  String.raw`VERSION\s+NULL\s*;?$`
+);
 const SEQUENCE_OWNERSHIP_REMOVAL_PATTERN = new RegExp(
   String.raw`^ALTER\s+SEQUENCE\s+(?:IF\s+EXISTS\s+)?${POSTGRES_QUALIFIED_IDENTIFIER_PATTERN}\s+OWNED\s+BY\s+NONE\s*;?$`
 );
@@ -188,6 +192,7 @@ export function isDestructiveStatement(statement: string): boolean {
     ALTER_SCHEMA_OWNER_PATTERN.test(normalized) ||
     ALTER_SERVER_OPTION_REMOVAL_PATTERN.test(normalized) ||
     ALTER_SERVER_OWNER_PATTERN.test(normalized) ||
+    ALTER_SERVER_VERSION_REMOVAL_PATTERN.test(normalized) ||
     SEQUENCE_OWNERSHIP_REMOVAL_PATTERN.test(normalized) ||
     COMMENT_REMOVAL_PATTERN.test(normalized) ||
     CLUSTER_SELECTION_REMOVAL_PATTERN.test(normalized) ||
