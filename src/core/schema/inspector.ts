@@ -112,6 +112,11 @@ const SERIAL_SEQUENCE_JOIN_SQL = `
         END
         AND serial_sequence_catalog.seqcache = 1
         AND NOT serial_sequence_catalog.seqcycle
+        AND serial_sequence.relpersistence = CASE
+          WHEN current_setting('server_version_num')::integer >= 150000
+            THEN cls.relpersistence
+          ELSE 'p'
+        END
         AS options_match
     FROM pg_depend sequence_ownership
     JOIN pg_class serial_sequence

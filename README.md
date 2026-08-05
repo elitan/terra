@@ -130,11 +130,14 @@ sequence, a `nextval` default, and `NOT NULL` rather than a true type.
 Use an identity column, add a new serial column, or migrate the column and its
 sequence explicitly before managing the resulting schema with TerraDB.
 Owned serial sequences must retain PostgreSQL's canonical start, increment,
-minimum, maximum, cache, and no-cycle definition. Option drift fails before
-mutation because a serial declaration cannot express those changes; use an
-identity column or an explicit sequence when custom options are required. Live
-counter values, including `ALTER SEQUENCE ... RESTART`, are runtime state and do
-not cause schema drift.
+minimum, maximum, cache, no-cycle, and version-appropriate persistence
+definition. On PostgreSQL 15 and later, a serial sequence must have the same
+logged or unlogged persistence as its owning table; PostgreSQL 14 retains its
+logged serial-sequence behavior for unlogged tables. Definition drift fails
+before mutation because a serial declaration cannot express those changes; use
+an identity column or an explicit sequence when custom options are required.
+Live counter values, including `ALTER SEQUENCE ... RESTART`, are runtime state
+and do not cause schema drift.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

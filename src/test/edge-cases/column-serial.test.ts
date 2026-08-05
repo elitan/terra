@@ -60,9 +60,12 @@ describe("Edge case: serial/bigserial columns", function () {
           sequence_catalog.seqmax,
           sequence_catalog.seqcache,
           sequence_catalog.seqcycle,
+          table_class.relpersistence AS table_persistence,
+          sequence_class.relpersistence AS sequence_persistence,
           pg_get_expr(defaults.adbin, defaults.adrelid) AS default_value,
           pg_get_serial_sequence($1, 'id') AS owned_sequence
         FROM pg_attribute attribute
+        JOIN pg_class table_class ON table_class.oid = attribute.attrelid
         JOIN pg_attrdef defaults
           ON defaults.adrelid = attribute.attrelid
           AND defaults.adnum = attribute.attnum
@@ -382,6 +385,77 @@ describe("Edge case: serial/bigserial columns", function () {
       "INSERT INTO serial_restart DEFAULT VALUES RETURNING id"
     )).rows;
     expect(rows).toEqual([{ id: 50 }]);
+  });
+
+  test("detects version-aware serial sequence persistence drift", async function () {
+    const versionResult = await client.query(
+      "SELECT current_setting('server_version_num')::integer AS version_num"
+    );
+    const versionNum = Number(versionResult.rows[0]?.version_num);
+    const unloggedDesired = `
+      CREATE UNLOGGED TABLE serial_unlogged_persistence (
+        id SERIAL,
+        label TEXT
+      );
+    `;
+    await schemaService.apply(unloggedDesired, ["public"], true);
+    const canonicalUnlogged = await getSerialSequenceState(
+      "serial_unlogged_persistence"
+    );
+
+    if (versionNum < 150000) {
+      expect(canonicalUnlogged.table_persistence).toBe("u");
+      expect(canonicalUnlogged.sequence_persistence).toBe("p");
+      expect(
+        (await schemaService.plan(unloggedDesired, ["public"])).hasChanges
+      ).toBe(false);
+      return;
+    }
+
+    expect(canonicalUnlogged.table_persistence).toBe("u");
+    expect(canonicalUnlogged.sequence_persistence).toBe("u");
+    await client.query(`
+      INSERT INTO serial_unlogged_persistence (label) VALUES ('retained');
+      ALTER SEQUENCE serial_unlogged_persistence_id_seq SET LOGGED;
+    `);
+    const driftedUnlogged = await getSerialSequenceState(
+      "serial_unlogged_persistence"
+    );
+    await expect(
+      schemaService.apply(unloggedDesired, ["public"], true)
+    ).rejects.toThrow(/serial sequence options.*not supported/i);
+    expect(await getSerialSequenceState("serial_unlogged_persistence")).toEqual(
+      driftedUnlogged
+    );
+    const retainedUnloggedRows = await client.query(
+      "SELECT id, label FROM serial_unlogged_persistence"
+    );
+    expect(retainedUnloggedRows.rows).toEqual([{ id: 1, label: "retained" }]);
+
+    const loggedDesired = `
+      CREATE TABLE serial_logged_persistence (
+        id SERIAL,
+        label TEXT
+      );
+    `;
+    await schemaService.apply(loggedDesired, ["public"], true);
+    await client.query(`
+      INSERT INTO serial_logged_persistence (label) VALUES ('retained');
+      ALTER SEQUENCE serial_logged_persistence_id_seq SET UNLOGGED;
+    `);
+    const driftedLogged = await getSerialSequenceState(
+      "serial_logged_persistence"
+    );
+    await expect(
+      schemaService.apply(loggedDesired, ["public"], true)
+    ).rejects.toThrow(/serial sequence options.*not supported/i);
+    expect(await getSerialSequenceState("serial_logged_persistence")).toEqual(
+      driftedLogged
+    );
+    const retainedLoggedRows = await client.query(
+      "SELECT id, label FROM serial_logged_persistence"
+    );
+    expect(retainedLoggedRows.rows).toEqual([{ id: 1, label: "retained" }]);
   });
 
   test("adds a serial column to an existing table and reapplies idempotently", async function () {
