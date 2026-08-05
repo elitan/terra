@@ -119,6 +119,7 @@
 - done: rerun sqlite suites and `test:core` green (`137` sqlite pass, `101` core pass).
 - done: add property tests for destructive diff classification with case/whitespace fuzz coverage.
 - done: restore generated PostgreSQL idempotency properties for immutable partial-index predicates, expression indexes, and row-local CHECK expressions; remove stale normalization-limit notes after PostgreSQL 14/18 verification.
+- done: replace the stale PostgreSQL foreign-key action-tracking limitation with an exhaustive generated lifecycle property for all 40 unequal `ON DELETE`/`ON UPDATE` transitions, including plan replacement, row preservation, catalog convergence, empty replan, and runtime behavior across PostgreSQL 14-18.
 - done: fix destructive classifier false positive on safe enum statements (`CREATE TYPE`, `ALTER TYPE ... ADD VALUE`).
 - done: add strict-mode integration regression for enum create + value append.
 - done: rerun property suite and `test:core` green (`3` property pass, `102` core pass).

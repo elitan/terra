@@ -14,6 +14,175 @@ import { configurePropertyTests } from "./property-test-options";
 
 configurePropertyTests();
 
+const foreignKeyActions = [
+  "CASCADE",
+  "SET NULL",
+  "SET DEFAULT",
+  "RESTRICT",
+  "NO ACTION",
+] as const;
+
+type ForeignKeyAction = (typeof foreignKeyActions)[number];
+type ForeignKeyActionDirection = "delete" | "update";
+
+interface ForeignKeyActionTransition {
+  before: ForeignKeyAction;
+  after: ForeignKeyAction;
+}
+
+const foreignKeyActionTransitions: ForeignKeyActionTransition[] = [];
+for (const before of foreignKeyActions) {
+  for (const after of foreignKeyActions) {
+    if (before !== after) {
+      foreignKeyActionTransitions.push({ before, after });
+    }
+  }
+}
+
+const foreignKeyActionTransition = fc.constantFrom(
+  ...foreignKeyActionTransitions
+);
+const foreignKeyActionExamples: Array<[
+  ForeignKeyActionDirection,
+  ForeignKeyActionTransition,
+]> = [];
+for (const direction of ["delete", "update"] as const) {
+  for (const transition of foreignKeyActionTransitions) {
+    foreignKeyActionExamples.push([direction, transition]);
+  }
+}
+
+const foreignKeyActionCodes: Record<ForeignKeyAction, string> = {
+  "NO ACTION": "a",
+  RESTRICT: "r",
+  CASCADE: "c",
+  "SET NULL": "n",
+  "SET DEFAULT": "d",
+};
+
+function renderForeignKeyActionSchema(
+  direction: ForeignKeyActionDirection,
+  action: ForeignKeyAction
+): string {
+  const onDelete = direction === "delete" ? action : "NO ACTION";
+  const onUpdate = direction === "update" ? action : "NO ACTION";
+  return `
+    CREATE TABLE fk_action_parents (
+      id integer PRIMARY KEY
+    );
+
+    CREATE TABLE fk_action_children (
+      id integer PRIMARY KEY,
+      parent_id integer DEFAULT 0,
+      CONSTRAINT fk_action_parent
+        FOREIGN KEY (parent_id) REFERENCES fk_action_parents(id)
+        ON DELETE ${onDelete}
+        ON UPDATE ${onUpdate}
+    );
+  `.trim();
+}
+
+async function expectForeignKeyActionBehavior(
+  client: Client,
+  direction: ForeignKeyActionDirection,
+  action: ForeignKeyAction
+): Promise<void> {
+  const blocksChange = action === "NO ACTION" || action === "RESTRICT";
+  const mutation = direction === "delete"
+    ? "DELETE FROM fk_action_parents WHERE id = 1"
+    : "UPDATE fk_action_parents SET id = 2 WHERE id = 1";
+
+  if (blocksChange) {
+    let errorCode: string | undefined;
+    try {
+      await client.query(mutation);
+    } catch (error) {
+      errorCode = (error as { code?: string }).code;
+    }
+    if (action === "RESTRICT") {
+      expect(["23001", "23503"]).toContain(errorCode);
+    } else {
+      expect(errorCode).toBe("23503");
+    }
+  } else {
+    await client.query(mutation);
+  }
+
+  const result = await client.query(
+    "SELECT parent_id FROM fk_action_children WHERE id = 10"
+  );
+  if (action === "CASCADE" && direction === "delete") {
+    expect(result.rows).toEqual([]);
+    return;
+  }
+
+  expect(result.rows).toHaveLength(1);
+  if (action === "SET NULL") {
+    expect(result.rows[0]?.parent_id).toBeNull();
+  } else if (action === "SET DEFAULT") {
+    expect(result.rows[0]?.parent_id).toBe(0);
+  } else if (action === "CASCADE") {
+    expect(result.rows[0]?.parent_id).toBe(2);
+  } else {
+    expect(result.rows[0]?.parent_id).toBe(1);
+  }
+}
+
+async function verifyForeignKeyActionTransition(
+  service: SchemaService,
+  client: Client,
+  direction: ForeignKeyActionDirection,
+  transition: ForeignKeyActionTransition
+): Promise<void> {
+  await cleanDatabase(client);
+  const initialSchema = renderForeignKeyActionSchema(
+    direction,
+    transition.before
+  );
+  const desiredSchema = renderForeignKeyActionSchema(
+    direction,
+    transition.after
+  );
+
+  await service.apply(initialSchema, ["public"], true);
+  await client.query("INSERT INTO fk_action_parents (id) VALUES (0), (1)");
+  await client.query(
+    "INSERT INTO fk_action_children (id, parent_id) VALUES (10, 1)"
+  );
+
+  const plan = await service.plan(desiredSchema);
+  const sql = plan.transactional.join("\n");
+  expect(plan.hasChanges).toBe(true);
+  expect(plan.concurrent).toEqual([]);
+  expect(sql).toContain('DROP CONSTRAINT "fk_action_parent"');
+  expect(sql).toContain(`ON ${direction.toUpperCase()} ${transition.after}`);
+
+  await service.apply(desiredSchema, ["public"], true);
+  const preserved = await client.query(
+    "SELECT parent_id FROM fk_action_children WHERE id = 10"
+  );
+  expect(preserved.rows[0]?.parent_id).toBe(1);
+
+  const catalog = await client.query(
+    `SELECT confdeltype, confupdtype
+     FROM pg_constraint
+     WHERE conname = 'fk_action_parent'`
+  );
+  const catalogColumn = direction === "delete"
+    ? "confdeltype"
+    : "confupdtype";
+  expect(catalog.rows[0]?.[catalogColumn]).toBe(
+    foreignKeyActionCodes[transition.after]
+  );
+
+  const secondPlan = await service.plan(desiredSchema);
+  expect(secondPlan.hasChanges).toBe(false);
+  expect(secondPlan.transactional).toEqual([]);
+  expect(secondPlan.concurrent).toEqual([]);
+
+  await expectForeignKeyActionBehavior(client, direction, transition.after);
+}
+
 /**
  * Property-Based Tests for Constraint Management
  *
@@ -85,10 +254,27 @@ describe("Property-Based: Constraint Management", () => {
     );
   }, { timeout: 120000 });
 
-  // NOTE: This test is commented out because it reveals a limitation in Terra's FK action tracking
-  // Property-based testing found that Terra doesn't always detect ON DELETE/UPDATE action changes
-  // This is a valuable finding but needs to be fixed in Terra core first
-  // test("property: changing ON DELETE action is detected", async () => { ... });
+  test("property: foreign key action changes are detected and enforced", async function () {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom("delete", "update"),
+        foreignKeyActionTransition,
+        async function runForeignKeyActionTransition(direction, transition) {
+          await verifyForeignKeyActionTransition(
+            service,
+            client,
+            direction,
+            transition
+          );
+        }
+      ),
+      {
+        examples: foreignKeyActionExamples,
+        numRuns: foreignKeyActionExamples.length + 20,
+        verbose: false,
+      }
+    );
+  }, { timeout: 120000 });
 
   test("property: unique constraint creation is idempotent", async () => {
     await fc.assert(
