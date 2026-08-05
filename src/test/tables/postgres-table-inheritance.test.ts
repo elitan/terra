@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
 import { createColumnTestServices } from "../columns/column-test-utils";
-import { cleanDatabase, createTestClient } from "../utils";
+import {
+  cleanDatabase,
+  createTestClient,
+  createTestSchemaService,
+} from "../utils";
 
 describe("PostgreSQL table inheritance", function () {
   let client: Client;
@@ -190,6 +194,27 @@ describe("PostgreSQL table inheritance", function () {
     );
     expect(sql).not.toContain("ADD COLUMN");
     expect(sql).not.toContain("ADD CONSTRAINT");
+    await expect(
+      createTestSchemaService().apply(
+        schema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+    expect(
+      (
+        await client.query(
+          "SELECT id, payload FROM public.inheritance_detach_parent"
+        )
+      ).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
+
     await services.executor.executePlan(client, plan, true);
 
     expect(

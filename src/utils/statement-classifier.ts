@@ -11,6 +11,8 @@ export type StatementChannel =
 
 const POSTGRES_IDENTIFIER_PATTERN =
   String.raw`(?:"(?:[^"]|"")*"|[A-Z_][A-Z0-9_$]*)`;
+const POSTGRES_QUALIFIED_IDENTIFIER_PATTERN =
+  String.raw`${POSTGRES_IDENTIFIER_PATTERN}(?:\s*\.\s*${POSTGRES_IDENTIFIER_PATTERN})?`;
 const ALTER_COLUMN_PREFIX =
   String.raw`\bALTER\s+COLUMN\s+${POSTGRES_IDENTIFIER_PATTERN}\s+`;
 const ALTER_COLUMN_TYPE_PATTERN = new RegExp(
@@ -36,6 +38,9 @@ const EVENT_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN = new RegExp(
 );
 const REPLICA_IDENTITY_NOTHING_PATTERN =
   /\bREPLICA\s+IDENTITY\s+NOTHING\s*;?$/;
+const NO_INHERIT_PARENT_PATTERN = new RegExp(
+  String.raw`\bNO\s+INHERIT\s+${POSTGRES_QUALIFIED_IDENTIFIER_PATTERN}\s*;?$`
+);
 
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
@@ -75,6 +80,7 @@ export function isDestructiveStatement(statement: string): boolean {
     normalized.includes(" SET UNLOGGED") ||
     hasTriggerEnforcementWeakening(normalized) ||
     REPLICA_IDENTITY_NOTHING_PATTERN.test(normalized) ||
+    NO_INHERIT_PARENT_PATTERN.test(normalized) ||
     hasDestructiveAlterColumn(normalized)
   );
 }
