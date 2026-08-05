@@ -63,6 +63,11 @@ Partitioned parents remain intentionally basic-only: PostgreSQL 14-16 reject a
 parent access method, while PostgreSQL 17-18 retain it and use it for future
 partitions. TerraDB rejects both desired definitions and retained external
 parent methods before planning instead of erasing the inheritance distinction.
+PostgreSQL table and materialized-view `SET TABLESPACE` changes move physical
+data files and are classified as destructive, including moves embedded in a
+batched table alteration. Strict mode preserves OIDs, current placement,
+storage parameters, rows, and dependents; ordinary moves and default resets
+then converge across PostgreSQL 14-18.
 
 ## version matrix target
 

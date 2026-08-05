@@ -314,10 +314,37 @@ describe("PostgreSQL materialized view physical storage", function () {
     const originalIndexOid = await getRelationOid("item_summary_id_idx");
 
     const plan = await service.plan(changedSchema, ["public"]);
+    const changedTablespaceStatement =
+      `ALTER MATERIALIZED VIEW "public"."item_summary" SET TABLESPACE "${TEST_TABLESPACE}";`;
     expect(plan.transactional).toEqual([
       'ALTER MATERIALIZED VIEW "public"."item_summary" SET (autovacuum_enabled=false, fillfactor=80, toast.autovacuum_enabled=false);',
-      `ALTER MATERIALIZED VIEW "public"."item_summary" SET TABLESPACE "${TEST_TABLESPACE}";`,
+      changedTablespaceStatement,
     ]);
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "safe"
+    );
+    expect(getStatementRisk(changedTablespaceStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(changedSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [changedTablespaceStatement],
+    });
+    const strictView = await inspectView("item_summary");
+    expect(strictView).toMatchObject({
+      storageParameters: {
+        fillfactor: "70",
+        "toast.autovacuum_enabled": "true",
+      },
+    });
+    expect(strictView.tablespace).toBeUndefined();
+    expect(await getRelationOid("item_summary")).toBe(originalOid);
+    expect(await getRelationOid("item_summary_id_idx")).toBe(originalIndexOid);
+    expect(await client.query("SELECT * FROM public.item_summary")).toMatchObject({
+      rows: [{ id: 1, label: "preserved" }],
+    });
     await service.apply(changedSchema, ["public"], true);
 
     expect(await getRelationOid("item_summary")).toBe(originalOid);
@@ -345,9 +372,11 @@ describe("PostgreSQL materialized view physical storage", function () {
     const resetPlan = await service.plan(resetSchema, ["public"]);
     const resetStatement =
       'ALTER MATERIALIZED VIEW "public"."item_summary" RESET (autovacuum_enabled, fillfactor, toast.autovacuum_enabled);';
+    const resetTablespaceStatement =
+      'ALTER MATERIALIZED VIEW "public"."item_summary" SET TABLESPACE "pg_default";';
     expect(resetPlan.transactional).toEqual([
       resetStatement,
-      'ALTER MATERIALIZED VIEW "public"."item_summary" SET TABLESPACE "pg_default";',
+      resetTablespaceStatement,
     ]);
     expect(getStatementRisk(resetStatement, "transactional")).toBe(
       "destructive"
@@ -356,7 +385,7 @@ describe("PostgreSQL materialized view physical storage", function () {
       service.apply(resetSchema, ["public"], true, undefined, false, true)
     ).rejects.toMatchObject({
       code: "STRICT_MODE_ERROR",
-      statements: [resetStatement],
+      statements: [resetStatement, resetTablespaceStatement],
     });
     expect(await inspectView("item_summary")).toMatchObject({
       storageParameters: {
