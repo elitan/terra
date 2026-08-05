@@ -336,6 +336,24 @@ describe("Property-Based: Destructive Diff Classification", function () {
     }
   });
 
+  test("classifies emitted PostgreSQL replacements by their managed object", function () {
+    expect(
+      getStatementCategory(
+        'CREATE OR REPLACE VIEW "Odd Schema"."Odd View" AS SELECT 1 AS id;'
+      )
+    ).toBe("view");
+    expect(
+      getStatementCategory(
+        'CREATE OR REPLACE FUNCTION "Odd Schema"."Odd Function"() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$;'
+      )
+    ).toBe("function");
+    expect(
+      getStatementCategory(
+        'CREATE OR REPLACE PROCEDURE "Odd Schema"."Odd Procedure"() LANGUAGE sql AS $$ SELECT 1 $$;'
+      )
+    ).toBe("procedure");
+  });
+
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {
     const result = fc.check(
       fc.property(

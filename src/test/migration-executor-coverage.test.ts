@@ -61,6 +61,23 @@ describe("MigrationExecutor coverage", () => {
     ]);
   });
 
+  test("retains categories for PostgreSQL replacement statements", function () {
+    const metadata = buildStatementMetadata({
+      transactional: [
+        "CREATE OR REPLACE VIEW public.items AS SELECT 1 AS id;",
+        "CREATE OR REPLACE FUNCTION public.item_count() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$;",
+        "CREATE OR REPLACE PROCEDURE public.refresh_items() LANGUAGE sql AS $$ SELECT 1 $$;",
+      ],
+      concurrent: [],
+      deferred: [],
+      hasChanges: true,
+    });
+
+    expect(metadata.map(function selectCategory(item) {
+      return item.category;
+    })).toEqual(["view", "function", "procedure"]);
+  });
+
   test("filters destructive operations", async function () {
     const MigrationExecutor = await loadExecutor();
     const executor = new MigrationExecutor({} as any);

@@ -73,6 +73,9 @@ index, ordinary/materialized view, schema, extension, and trigger alterations,
 including materialized-view refreshes, table-hosted trigger-mode changes, and
 constraint/event-trigger creation and removal, instead of degrading them to
 `other`, generic `table`, or `constraint` categories.
+View, function, and procedure replacements emitted with PostgreSQL's
+`CREATE OR REPLACE` syntax likewise retain their managed-object categories in
+ordered CLI plan metadata.
 
 ## version matrix target
 

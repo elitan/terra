@@ -353,6 +353,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE VIEW") ||
+    normalized.startsWith("CREATE OR REPLACE VIEW") ||
     normalized.startsWith("ALTER VIEW") ||
     normalized.startsWith("DROP VIEW")
   ) {
@@ -388,12 +389,14 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE FUNCTION") ||
+    normalized.startsWith("CREATE OR REPLACE FUNCTION") ||
     normalized.startsWith("DROP FUNCTION")
   ) {
     return "function";
   }
   if (
     normalized.startsWith("CREATE PROCEDURE") ||
+    normalized.startsWith("CREATE OR REPLACE PROCEDURE") ||
     normalized.startsWith("DROP PROCEDURE")
   ) {
     return "procedure";

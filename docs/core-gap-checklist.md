@@ -265,6 +265,7 @@
 - done: reject externally retained PostgreSQL 17-18 partitioned-parent access methods, including explicit `heap`, before planning instead of reconstructing them as omitted and losing their documented future-partition inheritance semantics; prove PostgreSQL 14-16 reject parent methods at creation while default-derived leaves still use the current `default_table_access_method`.
 - done: classify PostgreSQL table and materialized-view `SET TABLESPACE` physical data-file moves as destructive, including batched table alterations; prove strict rejection preserves relation/index OIDs, current tablespaces and storage parameters, populated/materialized rows, and view dependents across PostgreSQL 14 and 18 before ordinary custom placement and default resets converge.
 - done: retain exact CLI statement categories for supported PostgreSQL `ALTER INDEX`, `ALTER VIEW`, `ALTER MATERIALIZED VIEW`, materialized-view refresh, `ALTER SCHEMA`, `ALTER EXTENSION`, and constraint/event/table-trigger operations instead of reporting `other`, generic `table`, or `constraint`; prove direct classification and ordered plan metadata across channels.
+- done: classify TerraDB-emitted PostgreSQL `CREATE OR REPLACE VIEW`, `FUNCTION`, and `PROCEDURE` statements as their managed objects instead of `other`; prove the prefixes directly and through ordered CLI plan metadata.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser
