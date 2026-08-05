@@ -148,6 +148,30 @@ describe("Property-Based: Destructive Diff Classification", function () {
     }
   });
 
+  test("distinguishes table constraint actions from other table statements", function () {
+    const constraintActions = [
+      "ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email);",
+      "ALTER TABLE users ALTER CONSTRAINT users_team_fkey DEFERRABLE;",
+      "ALTER TABLE users VALIDATE CONSTRAINT users_team_fkey;",
+      "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_team_fkey RESTRICT;",
+      "ALTER TABLE users RENAME CONSTRAINT users_email_key TO users_login_key;",
+    ];
+
+    for (const statement of constraintActions) {
+      expect(getStatementCategory(statement)).toBe("constraint");
+    }
+    expect(
+      getStatementCategory(
+        "CREATE TABLE users (email text CONSTRAINT users_email_key UNIQUE);"
+      )
+    ).toBe("table");
+    expect(
+      getStatementCategory(
+        "ALTER TABLE users ADD COLUMN email text CONSTRAINT email_required NOT NULL;"
+      )
+    ).toBe("table");
+  });
+
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {
     const result = fc.check(
       fc.property(

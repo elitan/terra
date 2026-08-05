@@ -1532,7 +1532,7 @@ describe("CLI Contract", () => {
   });
 
   test.skipIf(reachablePostgresUrls.length === 0)(
-    "should expose ordered enum additions in the pre-transactional plan channel",
+    "should expose deterministic postgres metadata across execution phases",
     async function () {
       const postgresUrl = reachablePostgresUrls[0];
       if (!postgresUrl) return;
@@ -1550,8 +1550,12 @@ describe("CLI Contract", () => {
           `
           CREATE SCHEMA ${schemaName};
           CREATE TYPE ${schemaName}.priority AS ENUM ('low', 'high');
+          CREATE TABLE ${schemaName}.teams (
+            id INTEGER PRIMARY KEY
+          );
           CREATE TABLE ${schemaName}.tasks (
             id INTEGER PRIMARY KEY,
+            team_id INTEGER,
             priority ${schemaName}.priority NOT NULL DEFAULT 'low'
           );
           `.trim() + "\n"
@@ -1561,10 +1565,17 @@ describe("CLI Contract", () => {
           `
           CREATE SCHEMA ${schemaName};
           CREATE TYPE ${schemaName}.priority AS ENUM ('low', 'can''t wait', 'high');
+          CREATE TABLE ${schemaName}.teams (
+            id INTEGER PRIMARY KEY
+          );
           CREATE TABLE ${schemaName}.tasks (
             id INTEGER PRIMARY KEY,
-            priority ${schemaName}.priority NOT NULL DEFAULT 'can''t wait'
+            team_id INTEGER,
+            priority ${schemaName}.priority NOT NULL DEFAULT 'low'
           );
+          ALTER TABLE ${schemaName}.tasks
+            ADD CONSTRAINT tasks_team_fk FOREIGN KEY (team_id)
+            REFERENCES ${schemaName}.teams (id) NOT VALID;
           CREATE UNIQUE INDEX CONCURRENTLY tasks_priority_idx
             ON ${schemaName}.tasks (priority);
           `.trim() + "\n"
@@ -1622,6 +1633,16 @@ describe("CLI Contract", () => {
           sql: enumStatement,
         });
         expect(payload.counts.transactional).toBe(1);
+        const constraintMetadata = payload.statementMetadata.find(
+          function findConstraint(metadata) {
+            return metadata.sql.includes('ADD CONSTRAINT "tasks_team_fk"');
+          }
+        );
+        expect(constraintMetadata).toMatchObject({
+          channel: "transactional",
+          category: "constraint",
+          risk: "safe",
+        });
         expect(payload.counts.concurrent).toBe(1);
         expect(payload.statementMetadata[2]).toEqual({
           order: 3,

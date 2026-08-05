@@ -46,6 +46,12 @@ export function getStatementRisk(
 export function getStatementCategory(statement: string): CliStatementCategory {
   const normalized = normalizeStatement(statement);
   if (
+    normalized.startsWith("ALTER TABLE") &&
+    /\b(?:ADD|ALTER|VALIDATE|DROP|RENAME)\s+CONSTRAINT\b/.test(normalized)
+  ) {
+    return "constraint";
+  }
+  if (
     normalized.startsWith("CREATE TABLE") ||
     normalized.startsWith("ALTER TABLE") ||
     normalized.startsWith("DROP TABLE")
