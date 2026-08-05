@@ -1,4 +1,5 @@
 import type { MigrationPlan } from "../../types/migration";
+import { parseSync } from "pgsql-parser";
 import { StrictModeError, ValidationError } from "../../types/errors";
 import type {
   DatabaseProvider,
@@ -1056,5 +1057,20 @@ function isPostgresViewDrop(statement: string): boolean {
 }
 
 function isPostgresConstraintDrop(statement: string): boolean {
-  return /^ALTER\s+TABLE\b[\s\S]*\bDROP\s+CONSTRAINT\b/i.test(statement.trim());
+  return (parseSync(statement).stmts || []).some(
+    function hasConstraintDrop(statementNode) {
+      const node = statementNode.stmt!;
+      if (!("AlterTableStmt" in node)) {
+        return false;
+      }
+      return (node.AlterTableStmt.cmds || []).some(
+        function isConstraintDrop(commandNode) {
+          return (
+            "AlterTableCmd" in commandNode &&
+            commandNode.AlterTableCmd.subtype === "AT_DropConstraint"
+          );
+        }
+      );
+    }
+  );
 }

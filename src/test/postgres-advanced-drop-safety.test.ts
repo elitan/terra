@@ -141,6 +141,116 @@ describe("PostgreSQL advanced object drop safety", function () {
     expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
   });
 
+  test("creates partitions before altering keyword-named tables", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE TABLE ${MANAGED_SCHEMA}.old_events (
+        id integer NOT NULL,
+        bucket integer NOT NULL,
+        CONSTRAINT old_events_pkey PRIMARY KEY (id, bucket)
+      ) PARTITION BY RANGE (bucket);
+      CREATE TABLE ${MANAGED_SCHEMA}.old_events_0
+        PARTITION OF ${MANAGED_SCHEMA}.old_events
+        FOR VALUES FROM (0) TO (10);
+      CREATE TABLE ${MANAGED_SCHEMA}.new_events (
+        id integer NOT NULL,
+        bucket integer NOT NULL,
+        CONSTRAINT new_events_pkey PRIMARY KEY (id, bucket)
+      ) PARTITION BY RANGE (bucket);
+      CREATE TABLE ${MANAGED_SCHEMA}."safe DROP CONSTRAINT marker" (
+        id integer PRIMARY KEY,
+        event_id integer,
+        bucket integer
+      );
+    `;
+    const desired = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE TABLE ${MANAGED_SCHEMA}.new_events (
+        id integer NOT NULL,
+        bucket integer NOT NULL,
+        CONSTRAINT new_events_pkey PRIMARY KEY (id, bucket)
+      ) PARTITION BY RANGE (bucket);
+      CREATE TABLE ${MANAGED_SCHEMA}.new_events_0
+        PARTITION OF ${MANAGED_SCHEMA}.new_events
+        FOR VALUES FROM (0) TO (10);
+      CREATE TABLE ${MANAGED_SCHEMA}."safe DROP CONSTRAINT marker" (
+        id integer PRIMARY KEY,
+        event_id integer,
+        bucket integer,
+        CONSTRAINT new_events_fkey
+          FOREIGN KEY (event_id, bucket)
+          REFERENCES ${MANAGED_SCHEMA}.new_events_0 (id, bucket)
+      );
+      CREATE TABLE ${MANAGED_SCHEMA}.partition_audit (
+        id integer PRIMARY KEY,
+        event_id integer,
+        bucket integer,
+        CONSTRAINT partition_audit_fkey
+          FOREIGN KEY (event_id, bucket)
+          REFERENCES ${MANAGED_SCHEMA}.new_events_0 (id, bucket)
+      );
+    `;
+    await service.apply(initial, [MANAGED_SCHEMA], true);
+
+    const plan = await service.plan(desired, [MANAGED_SCHEMA]);
+    const firstPartitionDropIndex = plan.transactional.findIndex(
+      isPartitionDrop
+    );
+    const newPartitionCreateIndex = plan.transactional.findIndex(
+      function isNewPartitionCreate(statement) {
+        return (
+          statement.startsWith("CREATE TABLE") &&
+          statement.includes("new_events_0") &&
+          statement.includes("PARTITION OF")
+        );
+      }
+    );
+    const foreignKeyAddIndex = plan.transactional.findIndex(
+      function isForeignKeyAdd(statement) {
+        return statement.includes('ADD CONSTRAINT "new_events_fkey"');
+      }
+    );
+    const auditTableCreateIndex = plan.transactional.findIndex(
+      function isAuditTableCreate(statement) {
+        return (
+          statement.startsWith("CREATE TABLE") &&
+          statement.includes('"partition_audit"')
+        );
+      }
+    );
+
+    expect(firstPartitionDropIndex).toBeGreaterThanOrEqual(0);
+    expect(newPartitionCreateIndex).toBeGreaterThan(firstPartitionDropIndex);
+    expect(foreignKeyAddIndex).toBeGreaterThan(newPartitionCreateIndex);
+    expect(auditTableCreateIndex).toBeGreaterThan(newPartitionCreateIndex);
+
+    await service.apply(desired, [MANAGED_SCHEMA], true);
+    await client.query(`
+      INSERT INTO ${MANAGED_SCHEMA}.new_events VALUES (1, 1);
+      INSERT INTO ${MANAGED_SCHEMA}."safe DROP CONSTRAINT marker"
+        VALUES (1, 1, 1);
+      INSERT INTO ${MANAGED_SCHEMA}.partition_audit VALUES (1, 1, 1)
+    `);
+    expect(await relationExists(client, `${MANAGED_SCHEMA}.old_events`)).toBe(
+      false
+    );
+    expect(
+      await relationExists(client, `${MANAGED_SCHEMA}.new_events_0`)
+    ).toBe(true);
+    expect(
+      await foreignKeyExists(
+        client,
+        MANAGED_SCHEMA,
+        "safe DROP CONSTRAINT marker"
+      )
+    ).toBe(true);
+    expect(
+      await foreignKeyExists(client, MANAGED_SCHEMA, "partition_audit")
+    ).toBe(true);
+    expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
+  });
+
   test("alters a foreign server without dropping an unmanaged user mapping", async function () {
     await client.query(`
       CREATE EXTENSION IF NOT EXISTS postgres_fdw;

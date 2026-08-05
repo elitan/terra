@@ -134,7 +134,10 @@ also removes those dependencies; an unmanaged view or foreign key blocks and
 rolls back the apply instead of being deleted or stripped by `CASCADE`.
 Partition hierarchy removal follows the same contract: managed triggers, views,
 constraints, policies, and leaves are removed in dependency order before each
-partitioned table is dropped with `RESTRICT`. Declared foreign servers preserve
+partitioned table is dropped with `RESTRICT`. Constraint drops are identified
+from PostgreSQL's parsed statement structure, so keywords in quoted names or
+literals cannot move unrelated table changes ahead of partition creation.
+Declared foreign servers preserve
 their type, version, foreign-data wrapper, and complete option map. Version and
 option changes use native `ALTER SERVER`, preserving the server OID, user
 mappings, foreign tables, and grants; unsupported type or wrapper changes fail

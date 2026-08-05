@@ -274,6 +274,7 @@
 - done: make PostgreSQL SQL-object canonicalization lexical-aware so formatting, comments, and structural `EXECUTE PROCEDURE` normalization cannot rewrite quoted strings, identifiers, or dollar bodies; prove constraint-trigger argument whitespace and keyword changes replace the trigger and change runtime `TG_ARGV` values, with policy literal behavior retained across PostgreSQL 14-18.
 - done: replace PostgreSQL view-definition regex normalization with parsed AST comparison so local schema, source-column qualification, identifier quoting, comments, formatting, and parentheses normalize structurally without rewriting literal whitespace or qualifier-looking text; prove planned replacement, runtime output changes, base-row preservation, and idempotency across PostgreSQL 14-18.
 - done: classify PostgreSQL domain container validation from semantic alterations instead of rendered SQL text, allowing safe default changes when quoted domain names contain validation keywords while retaining pre-mutation rejection for constraint additions, validation, and `SET NOT NULL` across PostgreSQL 14-18.
+- done: route PostgreSQL table constraint drops ahead of partition removals from parsed `AlterTableCmd` nodes instead of rendered SQL text, preventing quoted `DROP CONSTRAINT` names from moving unrelated table creation or foreign-key alteration ahead of a newly referenced partition across PostgreSQL 14-18.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser
