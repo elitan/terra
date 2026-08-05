@@ -120,6 +120,124 @@ describe("PostgreSQL domain and range type lifecycle", function () {
     expect(secondPlan.hasChanges).toBe(false);
   });
 
+  test("blocks domain default and nullability weakening in strict mode", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE SCHEMA "${SCHEMA}";
+      CREATE DOMAIN "${SCHEMA}"."Guard Domain"
+        AS integer DEFAULT 7 NOT NULL;
+      CREATE TABLE "${SCHEMA}"."domain_guard" (
+        id integer PRIMARY KEY,
+        code "${SCHEMA}"."Guard Domain"
+      );
+    `;
+    const weakened = initial.replace(" DEFAULT 7 NOT NULL", "");
+    const dropDefault =
+      `ALTER DOMAIN "${SCHEMA}"."Guard Domain" DROP DEFAULT;`;
+    const dropNotNull =
+      `ALTER DOMAIN "${SCHEMA}"."Guard Domain" DROP NOT NULL;`;
+
+    async function inspectState() {
+      const result = await client.query(`
+        SELECT
+          domain.oid::integer AS domain_oid,
+          domain.typdefault,
+          domain.typnotnull,
+          relation.oid::integer AS table_oid
+        FROM pg_type domain
+        JOIN pg_namespace namespace
+          ON namespace.oid = domain.typnamespace
+        JOIN pg_class relation
+          ON relation.relnamespace = namespace.oid
+          AND relation.relname = 'domain_guard'
+        WHERE namespace.nspname = $1
+          AND domain.typname = 'Guard Domain'
+      `, [SCHEMA]);
+      return result.rows[0];
+    }
+
+    await service.apply(initial, [SCHEMA], true);
+    await client.query(
+      `INSERT INTO "${SCHEMA}"."domain_guard" (id) VALUES (1)`
+    );
+    const originalState = await inspectState();
+    expect(originalState).toMatchObject({
+      typdefault: "7",
+      typnotnull: true,
+    });
+
+    const plan = await service.apply(
+      weakened,
+      [SCHEMA],
+      true,
+      undefined,
+      true
+    );
+    expect(plan.transactional).toEqual(
+      expect.arrayContaining([dropDefault, dropNotNull])
+    );
+    expect(getStatementRisk(dropDefault, "transactional")).toBe(
+      "destructive"
+    );
+    expect(getStatementRisk(dropNotNull, "transactional")).toBe(
+      "destructive"
+    );
+
+    await expect(
+      service.apply(weakened, [SCHEMA], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: expect.arrayContaining([dropDefault, dropNotNull]),
+    });
+    expect(await inspectState()).toEqual(originalState);
+    await client.query(
+      `INSERT INTO "${SCHEMA}"."domain_guard" (id) VALUES (2)`
+    );
+    await expect(
+      client.query(
+        `INSERT INTO "${SCHEMA}"."domain_guard" (id, code) VALUES (3, NULL)`
+      )
+    ).rejects.toThrow();
+
+    await service.apply(weakened, [SCHEMA], true);
+    const weakenedState = await inspectState();
+    expect(weakenedState).toEqual({
+      ...originalState,
+      typdefault: null,
+      typnotnull: false,
+    });
+    expect(
+      (
+        await client.query(
+          `SELECT id, code::integer FROM "${SCHEMA}"."domain_guard" ORDER BY id`
+        )
+      ).rows
+    ).toEqual([
+      { id: 1, code: 7 },
+      { id: 2, code: 7 },
+    ]);
+
+    await client.query(
+      `INSERT INTO "${SCHEMA}"."domain_guard" (id) VALUES (3)`
+    );
+    await client.query(
+      `INSERT INTO "${SCHEMA}"."domain_guard" (id, code) VALUES (4, NULL)`
+    );
+    expect(
+      (
+        await client.query(
+          `SELECT id, code::integer FROM "${SCHEMA}"."domain_guard" ORDER BY id`
+        )
+      ).rows
+    ).toEqual([
+      { id: 1, code: 7 },
+      { id: 2, code: 7 },
+      { id: 3, code: null },
+      { id: 4, code: null },
+    ]);
+    expect((await service.plan(weakened, [SCHEMA])).hasChanges).toBe(false);
+  });
+
   test("renames and validates an equivalent external domain constraint", async function () {
     const service = createTestSchemaService();
     await client.query(`
