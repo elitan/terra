@@ -57,6 +57,7 @@ export function isDestructiveStatement(statement: string): boolean {
     normalized.includes(" DROP CONSTRAINT ") ||
     normalized.includes(" DISABLE ROW LEVEL SECURITY") ||
     normalized.includes(" NO FORCE ROW LEVEL SECURITY") ||
+    normalized.includes(" SET UNLOGGED") ||
     hasDestructiveAlterColumn(normalized)
   );
 }

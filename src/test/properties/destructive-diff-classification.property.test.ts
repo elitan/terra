@@ -68,6 +68,8 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER INDEX users_email_idx ALTER COLUMN 1 SET STATISTICS 500",
       "ALTER TABLE users ENABLE ROW LEVEL SECURITY",
       "ALTER TABLE users FORCE ROW LEVEL SECURITY",
+      "ALTER TABLE users SET LOGGED",
+      "ALTER SEQUENCE user_id_seq SET LOGGED",
     ];
 
     await fc.assert(
@@ -99,6 +101,8 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users ALTER COLUMN total DROP EXPRESSION",
       "ALTER TABLE users DISABLE ROW LEVEL SECURITY",
       "ALTER TABLE users NO FORCE ROW LEVEL SECURITY",
+      "ALTER TABLE users SET UNLOGGED",
+      "ALTER SEQUENCE user_id_seq SET UNLOGGED",
       "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
       "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader RESTRICT",
     ];

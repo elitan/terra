@@ -158,6 +158,56 @@ describe("PostgreSQL sequence persistence and state-preserving evolution", funct
     }
   });
 
+  test("blocks weakening sequence durability in strict mode", async function () {
+    if (postgresVersionNum < VERSION_15) return;
+    const service = createTestSchemaService();
+    const logged = `
+      CREATE SEQUENCE public.persistence_strict_seq
+        AS BIGINT START WITH 10 INCREMENT BY 2 CACHE 1;
+    `;
+    const unlogged = logged.replace(
+      "CREATE SEQUENCE",
+      "CREATE UNLOGGED SEQUENCE"
+    );
+
+    await service.apply(logged, ["public"], true);
+    expect(
+      (
+        await client.query(
+          "SELECT nextval('public.persistence_strict_seq') AS value"
+        )
+      ).rows[0]?.value
+    ).toBe("10");
+    const before = await getRelationPersistence(
+      client,
+      "persistence_strict_seq"
+    );
+    expect(before).toMatchObject({ persistence: "p" });
+    const plan = await service.plan(unlogged, ["public"]);
+    expect(plan.transactional).toEqual([
+      'ALTER SEQUENCE "public"."persistence_strict_seq" SET UNLOGGED;',
+    ]);
+
+    await expect(
+      service.apply(unlogged, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+
+    expect(
+      await getRelationPersistence(client, "persistence_strict_seq")
+    ).toEqual(before);
+    expect(
+      (
+        await client.query(
+          "SELECT nextval('public.persistence_strict_seq') AS value"
+        )
+      ).rows[0]?.value
+    ).toBe("12");
+    expect((await service.plan(logged, ["public"])).hasChanges).toBe(false);
+  });
+
   test("round-trips exact bigint bounds beyond safe JavaScript integers", async function () {
     const service = createTestSchemaService();
     const desired = `

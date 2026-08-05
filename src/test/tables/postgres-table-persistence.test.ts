@@ -570,6 +570,41 @@ describe("PostgreSQL table persistence", function () {
     expect((await planSchema(schema)).hasChanges).toBe(false);
   });
 
+  test("blocks weakening table durability in strict mode", async function () {
+    const service = createTestSchemaService();
+    const logged = `
+      CREATE TABLE public.persistence_strict (
+        id integer PRIMARY KEY,
+        payload text NOT NULL
+      );
+    `;
+    const unlogged = logged.replace("CREATE TABLE", "CREATE UNLOGGED TABLE");
+
+    await service.apply(logged, ["public"], true);
+    await client.query(
+      "INSERT INTO public.persistence_strict VALUES (1, 'preserved')"
+    );
+    const plan = await service.plan(unlogged, ["public"]);
+    expect(plan.transactional).toEqual([
+      'ALTER TABLE "public"."persistence_strict" SET UNLOGGED;',
+    ]);
+
+    await expect(
+      service.apply(unlogged, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+
+    expect(await getRelationPersistence(["persistence_strict"])).toEqual({
+      persistence_strict: "p",
+    });
+    expect(
+      (await client.query("SELECT * FROM public.persistence_strict")).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
+    expect((await service.plan(logged, ["public"])).hasChanges).toBe(false);
+  });
+
   test("converts an unlogged table back to logged without losing data", async function () {
     await client.query(`
       CREATE UNLOGGED TABLE public.persistence_reset (
