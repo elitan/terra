@@ -59,6 +59,10 @@ mode rejects both concrete-method changes and resets while preserving relation
 OIDs, relfilenodes, populated rows, and materialized-view dependents; ordinary
 apply performs the native rewrite and converges. PostgreSQL 14 rejects existing
 relation access-method changes before mutation because it lacks this syntax.
+Partitioned parents remain intentionally basic-only: PostgreSQL 14-16 reject a
+parent access method, while PostgreSQL 17-18 retain it and use it for future
+partitions. TerraDB rejects both desired definitions and retained external
+parent methods before planning instead of erasing the inheritance distinction.
 
 ## version matrix target
 

@@ -711,7 +711,7 @@ function assertPartitionRowsAreSupported(
     }
     if (
       row.relation_access_method &&
-      row.relation_access_method !== "heap"
+      (row.relation_kind === "p" || row.relation_access_method !== "heap")
     ) {
       features.push(`access method ${row.relation_access_method}`);
     }

@@ -266,6 +266,11 @@ describe("DatabaseInspector coverage", () => {
       },
       { relation_options: ["fillfactor=70"], feature: "storage parameters" },
       { relation_tablespace: "fast_tables", feature: "tablespace" },
+      {
+        relation_kind: "p",
+        relation_access_method: "heap",
+        feature: "access method heap",
+      },
       { relation_access_method: "custom_heap", feature: "access method" },
       {
         unsupported_partition_features: ["column payload STORAGE or COMPRESSION"],

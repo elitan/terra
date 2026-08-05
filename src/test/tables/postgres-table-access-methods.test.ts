@@ -105,6 +105,21 @@ describe("PostgreSQL table access methods", function () {
     return result.rows[0];
   }
 
+  async function getCatalogAccessMethods(tableNames: string[]) {
+    const result = await client.query(
+      `SELECT relation.relname,
+              access_method.amname AS access_method
+       FROM pg_class relation
+       JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+       LEFT JOIN pg_am access_method ON access_method.oid = relation.relam
+       WHERE namespace.nspname = 'public'
+         AND relation.relname = ANY($1::text[])
+       ORDER BY relation.relname`,
+      [tableNames]
+    );
+    return result.rows;
+  }
+
   test("parses and quotes a table access method", async function () {
     const desired = await services.parser.parseSchema(`
       CREATE TABLE public.access_method_parser (id integer)
@@ -146,6 +161,93 @@ describe("PostgreSQL table access methods", function () {
       TEST_ACCESS_METHOD
     );
     expect((await planSchema(schema)).hasChanges).toBe(false);
+  });
+
+  test("rejects stored partition parent access methods instead of erasing inheritance semantics", async function () {
+    const context = await getMigrationContext();
+    if ((context.postgresVersionNum || 0) < 170000) {
+      await expect(
+        client.query(`
+          CREATE TABLE public.partition_method_pinned (id integer)
+            PARTITION BY RANGE (id)
+            USING heap
+        `)
+      ).rejects.toMatchObject({ code: "0A000" });
+      const rejectedRelation = await client.query(
+        "SELECT to_regclass('public.partition_method_pinned') AS relation"
+      );
+      expect(rejectedRelation.rows[0]?.relation).toBeNull();
+      await client.query(`
+        CREATE TABLE public.partition_method_default (id integer)
+          PARTITION BY RANGE (id);
+        SET default_table_access_method = ${TEST_ACCESS_METHOD};
+        CREATE TABLE public.partition_method_default_low
+          PARTITION OF public.partition_method_default
+          FOR VALUES FROM (0) TO (10);
+      `);
+      const legacyAccessMethods = await getCatalogAccessMethods([
+        "partition_method_default",
+        "partition_method_default_low",
+      ]);
+      expect(legacyAccessMethods).toEqual([
+        { relname: "partition_method_default", access_method: null },
+        {
+          relname: "partition_method_default_low",
+          access_method: TEST_ACCESS_METHOD,
+        },
+      ]);
+      return;
+    }
+
+    await client.query(`
+      CREATE TABLE public.partition_method_pinned (id integer)
+        PARTITION BY RANGE (id)
+        USING heap;
+      CREATE TABLE public.partition_method_default (id integer)
+        PARTITION BY RANGE (id);
+      SET default_table_access_method = ${TEST_ACCESS_METHOD};
+      CREATE TABLE public.partition_method_pinned_low
+        PARTITION OF public.partition_method_pinned
+        FOR VALUES FROM (0) TO (10);
+      CREATE TABLE public.partition_method_default_low
+        PARTITION OF public.partition_method_default
+        FOR VALUES FROM (0) TO (10);
+    `);
+    const accessMethods = await getCatalogAccessMethods([
+      "partition_method_pinned",
+      "partition_method_default",
+      "partition_method_pinned_low",
+      "partition_method_default_low",
+    ]);
+
+    expect(accessMethods).toEqual([
+      { relname: "partition_method_default", access_method: null },
+      {
+        relname: "partition_method_default_low",
+        access_method: TEST_ACCESS_METHOD,
+      },
+      { relname: "partition_method_pinned", access_method: "heap" },
+      { relname: "partition_method_pinned_low", access_method: "heap" },
+    ]);
+    await client.query(`
+      DROP TABLE public.partition_method_pinned_low;
+      DROP TABLE public.partition_method_default;
+    `);
+    const desiredSchema = `
+      CREATE TABLE public.partition_method_pinned (id integer)
+        PARTITION BY RANGE (id);
+    `;
+    const service = createTestSchemaService();
+    await expect(
+      service.plan(desiredSchema, ["public"])
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("access method heap"),
+    });
+    const pinnedState = await client.query(
+      "SELECT relam <> 0 AS pinned FROM pg_class WHERE oid = 'public.partition_method_pinned'::regclass"
+    );
+    expect(pinnedState.rows[0]?.pinned).toBe(true);
   });
 
   test("changes access method in place on supported versions", async function () {
