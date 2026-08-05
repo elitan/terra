@@ -68,6 +68,11 @@ data files and are classified as destructive, including moves embedded in a
 batched table alteration. Strict mode preserves OIDs, current placement,
 storage parameters, rows, and dependents; ordinary moves and default resets
 then converge across PostgreSQL 14-18.
+CLI statement metadata retains managed-object categories for native PostgreSQL
+index, ordinary/materialized view, schema, extension, and trigger alterations,
+including materialized-view refreshes, table-hosted trigger-mode changes, and
+constraint/event-trigger creation and removal, instead of degrading them to
+`other`, generic `table`, or `constraint` categories.
 
 ## version matrix target
 

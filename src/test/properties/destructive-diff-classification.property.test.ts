@@ -285,6 +285,57 @@ describe("Property-Based: Destructive Diff Classification", function () {
     ).toBe("table");
   });
 
+  test("classifies supported native operations by their managed object", function () {
+    const scenarios = [
+      {
+        category: "index",
+        statements: [
+          'ALTER INDEX "Odd Schema"."Odd Index" ALTER COLUMN 1 SET STATISTICS 500;',
+        ],
+      },
+      {
+        category: "materialized-view",
+        statements: [
+          'ALTER MATERIALIZED VIEW "Odd Schema"."Odd Summary" SET TABLESPACE "Odd Space";',
+          'REFRESH MATERIALIZED VIEW "Odd Schema"."Odd Summary" WITH DATA;',
+        ],
+      },
+      {
+        category: "view",
+        statements: [
+          'ALTER VIEW "Odd Schema"."Odd View" SET (security_barrier=true);',
+        ],
+      },
+      {
+        category: "schema",
+        statements: ['ALTER SCHEMA "Odd Schema" OWNER TO "Odd Owner";'],
+      },
+      {
+        category: "extension",
+        statements: [
+          'ALTER EXTENSION "Odd Extension" UPDATE TO \'2.0\';',
+          'ALTER EXTENSION "Odd Extension" SET SCHEMA "Odd Schema";',
+        ],
+      },
+      {
+        category: "trigger",
+        statements: [
+          'CREATE CONSTRAINT TRIGGER "Odd Trigger" AFTER INSERT ON "Odd Schema"."Odd Table" DEFERRABLE FOR EACH ROW EXECUTE FUNCTION public.audit_row();',
+          'CREATE EVENT TRIGGER "Odd Event Trigger" ON ddl_command_end EXECUTE FUNCTION public.audit_ddl();',
+          'DROP EVENT TRIGGER IF EXISTS "Odd Event Trigger";',
+          'ALTER EVENT TRIGGER "Odd Trigger" ENABLE ALWAYS;',
+          'ALTER TABLE "Odd Schema"."Odd Table" ENABLE TRIGGER "Odd Trigger";',
+        ],
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      for (const statement of scenario.statements) {
+        expect(getStatementCategory(statement)).toBe(scenario.category);
+      }
+    }
+  });
+
   test("property: failing destructive assertion shrinks to a small reproducible case", function () {
     const result = fc.check(
       fc.property(

@@ -24,20 +24,40 @@ async function loadExecutor() {
 describe("MigrationExecutor coverage", () => {
   test("reports statement metadata in execution order", function () {
     const metadata = buildStatementMetadata({
-      preTransactional: ["PRE"],
-      transactional: ["TX"],
-      concurrent: ["CONCURRENT"],
-      deferred: ["DEFER"],
+      preTransactional: ["ALTER EXTENSION vector UPDATE TO '1.0';"],
+      transactional: ["ALTER VIEW public.items SET (security_barrier=true);"],
+      concurrent: ["ALTER INDEX public.items_idx SET TABLESPACE fast_space;"],
+      deferred: ["ALTER EVENT TRIGGER audit_ddl ENABLE ALWAYS;"],
       hasChanges: true,
     });
 
     expect(metadata.map(function selectExecutionFields(item) {
-      return [item.order, item.channel, item.sql];
+      return [item.order, item.channel, item.category, item.sql];
     })).toEqual([
-      [1, "pre-transactional", "PRE"],
-      [2, "transactional", "TX"],
-      [3, "concurrent", "CONCURRENT"],
-      [4, "deferred", "DEFER"],
+      [
+        1,
+        "pre-transactional",
+        "extension",
+        "ALTER EXTENSION vector UPDATE TO '1.0';",
+      ],
+      [
+        2,
+        "transactional",
+        "view",
+        "ALTER VIEW public.items SET (security_barrier=true);",
+      ],
+      [
+        3,
+        "concurrent",
+        "index",
+        "ALTER INDEX public.items_idx SET TABLESPACE fast_space;",
+      ],
+      [
+        4,
+        "deferred",
+        "trigger",
+        "ALTER EVENT TRIGGER audit_ddl ENABLE ALWAYS;",
+      ],
     ]);
   });
 

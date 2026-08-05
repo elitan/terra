@@ -303,6 +303,23 @@ export function getStatementRisk(
 export function getStatementCategory(statement: string): CliStatementCategory {
   const normalized = normalizeStatement(statement);
   if (
+    normalized.startsWith("CREATE TRIGGER") ||
+    normalized.startsWith("CREATE CONSTRAINT TRIGGER") ||
+    normalized.startsWith("CREATE EVENT TRIGGER") ||
+    normalized.startsWith("DROP TRIGGER") ||
+    normalized.startsWith("DROP EVENT TRIGGER") ||
+    normalized.startsWith("ALTER EVENT TRIGGER") ||
+    normalized.startsWith("ALTER TRIGGER") ||
+    (
+      normalized.startsWith("ALTER TABLE") &&
+      /\b(?:DISABLE|ENABLE(?:\s+(?:REPLICA|ALWAYS))?)\s+TRIGGER\b/.test(
+        normalized
+      )
+    )
+  ) {
+    return "trigger";
+  }
+  if (
     normalized.startsWith("ALTER TABLE") &&
     /\b(?:ADD|ALTER|VALIDATE|DROP|RENAME)\s+CONSTRAINT\b/.test(normalized)
   ) {
@@ -318,6 +335,7 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   if (
     normalized.startsWith("CREATE INDEX") ||
     normalized.startsWith("CREATE UNIQUE INDEX") ||
+    normalized.startsWith("ALTER INDEX") ||
     normalized.startsWith("DROP INDEX")
   ) {
     return "index";
@@ -327,11 +345,17 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE MATERIALIZED VIEW") ||
+    normalized.startsWith("ALTER MATERIALIZED VIEW") ||
+    normalized.startsWith("REFRESH MATERIALIZED VIEW") ||
     normalized.startsWith("DROP MATERIALIZED VIEW")
   ) {
     return "materialized-view";
   }
-  if (normalized.startsWith("CREATE VIEW") || normalized.startsWith("DROP VIEW")) {
+  if (
+    normalized.startsWith("CREATE VIEW") ||
+    normalized.startsWith("ALTER VIEW") ||
+    normalized.startsWith("DROP VIEW")
+  ) {
     return "view";
   }
   if (
@@ -350,12 +374,14 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   }
   if (
     normalized.startsWith("CREATE SCHEMA") ||
+    normalized.startsWith("ALTER SCHEMA") ||
     normalized.startsWith("DROP SCHEMA")
   ) {
     return "schema";
   }
   if (
     normalized.startsWith("CREATE EXTENSION") ||
+    normalized.startsWith("ALTER EXTENSION") ||
     normalized.startsWith("DROP EXTENSION")
   ) {
     return "extension";
@@ -371,12 +397,6 @@ export function getStatementCategory(statement: string): CliStatementCategory {
     normalized.startsWith("DROP PROCEDURE")
   ) {
     return "procedure";
-  }
-  if (
-    normalized.startsWith("CREATE TRIGGER") ||
-    normalized.startsWith("DROP TRIGGER")
-  ) {
-    return "trigger";
   }
   if (normalized.startsWith("COMMENT ON")) {
     return "comment";
