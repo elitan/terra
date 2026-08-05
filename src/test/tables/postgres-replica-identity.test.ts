@@ -93,6 +93,46 @@ describe("PostgreSQL replica identity lifecycle", function () {
     );
   });
 
+  test("blocks removing old-row identity in strict mode", async function () {
+    const service = createTestSchemaService();
+    const base = `
+      CREATE TABLE public.replica_strict (
+        id integer PRIMARY KEY,
+        value text NOT NULL
+      );
+    `;
+    const nothing = `${base}
+      ALTER TABLE public.replica_strict REPLICA IDENTITY NOTHING;
+    `;
+    const full = `${base}
+      ALTER TABLE public.replica_strict REPLICA IDENTITY FULL;
+    `;
+
+    await service.apply(nothing, ["public"], true);
+    await client.query(
+      "INSERT INTO public.replica_strict VALUES (1, 'preserved')"
+    );
+    await service.apply(full, ["public"], true, undefined, false, true);
+    expect(await relationReplicaIdentity(client, "replica_strict")).toBe("f");
+
+    const plan = await service.plan(nothing, ["public"]);
+    expect(plan.transactional).toEqual([
+      'ALTER TABLE "public"."replica_strict" REPLICA IDENTITY NOTHING;',
+    ]);
+    await expect(
+      service.apply(nothing, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+
+    expect(await relationReplicaIdentity(client, "replica_strict")).toBe("f");
+    expect(
+      (await client.query("SELECT * FROM public.replica_strict")).rows
+    ).toEqual([{ id: 1, value: "preserved" }]);
+    expect((await service.plan(full, ["public"])).hasChanges).toBe(false);
+  });
+
   test("resets and restores a selected identity around index replacement", async function () {
     const service = createTestSchemaService();
     const original = `

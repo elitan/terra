@@ -74,6 +74,9 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users ENABLE ALWAYS TRIGGER audit_users",
       "ALTER EVENT TRIGGER audit_ddl ENABLE",
       "ALTER EVENT TRIGGER audit_ddl ENABLE ALWAYS",
+      "ALTER TABLE users REPLICA IDENTITY DEFAULT",
+      "ALTER TABLE users REPLICA IDENTITY FULL",
+      "ALTER TABLE users REPLICA IDENTITY USING INDEX users_replica_key",
     ];
 
     await fc.assert(
@@ -111,6 +114,7 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users ENABLE REPLICA TRIGGER audit_users",
       "ALTER EVENT TRIGGER audit_ddl DISABLE",
       "ALTER EVENT TRIGGER audit_ddl ENABLE REPLICA",
+      'ALTER TABLE ONLY "Odd Table" REPLICA IDENTITY NOTHING',
       "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
       "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader RESTRICT",
     ];

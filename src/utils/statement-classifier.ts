@@ -34,6 +34,8 @@ const TABLE_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN = new RegExp(
 const EVENT_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN = new RegExp(
   String.raw`^ALTER\s+EVENT\s+TRIGGER\s+${POSTGRES_IDENTIFIER_PATTERN}\s+(?:DISABLE|ENABLE\s+REPLICA)\s*;?$`
 );
+const REPLICA_IDENTITY_NOTHING_PATTERN =
+  /\bREPLICA\s+IDENTITY\s+NOTHING\s*;?$/;
 
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
@@ -72,6 +74,7 @@ export function isDestructiveStatement(statement: string): boolean {
     normalized.includes(" NO FORCE ROW LEVEL SECURITY") ||
     normalized.includes(" SET UNLOGGED") ||
     hasTriggerEnforcementWeakening(normalized) ||
+    REPLICA_IDENTITY_NOTHING_PATTERN.test(normalized) ||
     hasDestructiveAlterColumn(normalized)
   );
 }
