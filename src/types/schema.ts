@@ -384,6 +384,23 @@ export interface PostgresRoleDefinition {
   connectionLimit: number;
 }
 
+export type PostgresGrantObjectType =
+  | "TABLE"
+  | "SEQUENCE"
+  | "SCHEMA"
+  | "FOREIGN SERVER";
+
+export interface PostgresGrantDefinition {
+  objectType: PostgresGrantObjectType;
+  objectName: string;
+  schema?: string;
+  grantee: string;
+  granteeIsPublic: boolean;
+  privilege: string;
+  grantable: boolean;
+  implicitDefault: boolean;
+}
+
 export interface PostgresTypeRoutineDependent {
   schema: string;
   name: string;
@@ -416,6 +433,7 @@ export interface SqlObject {
   policyDefinition?: PostgresPolicyDefinition;
   foreignServerDefinition?: PostgresForeignServerDefinition;
   roleDefinition?: PostgresRoleDefinition;
+  grantDefinition?: PostgresGrantDefinition;
   triggerTable?: QualifiedName;
   triggerFunction?: QualifiedName;
   triggerEnabled?: PostgresTriggerEnabledMode;

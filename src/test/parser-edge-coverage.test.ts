@@ -836,21 +836,21 @@ describe("Parser edge coverage", () => {
       expect(parser.parseRoleSqlObject({ CreateRoleStmt: {} })).toBeNull();
 
       expect(
-        parser.extractGrantSchema({
-          AlterDefaultPrivilegesStmt: {
-            action: {
-              GrantStmt: {
-                objects: [
-                  {
-                    List: {
-                      items: [{ String: { sval: "audit" } }],
-                    },
-                  },
-                ],
+        parser.parseGrantSqlObjects({
+          is_grant: true,
+          targtype: "ACL_TARGET_OBJECT",
+          objtype: "OBJECT_SCHEMA",
+          objects: [{ String: { sval: "audit" } }],
+          privileges: [{ AccessPriv: { priv_name: "usage" } }],
+          grantees: [
+            {
+              RoleSpec: {
+                roletype: "ROLESPEC_CSTRING",
+                rolename: "reader",
               },
             },
-          },
-        })
+          ],
+        })[0].schema
       ).toBe("audit");
     });
 

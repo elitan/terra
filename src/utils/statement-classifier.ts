@@ -17,6 +17,7 @@ export function isDestructiveStatement(statement: string): boolean {
   const normalized = normalizeStatement(statement);
   return (
     normalized.startsWith("DROP ") ||
+    normalized.startsWith("REVOKE ") ||
     normalized.includes(" DROP COLUMN ") ||
     normalized.includes(" DROP ATTRIBUTE ") ||
     normalized.includes(" DROP CONSTRAINT ") ||

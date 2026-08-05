@@ -403,9 +403,32 @@ export class SchemaService {
     const desiredKeys = new Set(desiredObjects.map(function (item) {
       return item.key;
     }));
+    const desiredForeignServers = new Set(
+      desiredObjects
+        .filter(function isForeignServer(item) {
+          return item.kind === "foreign-server";
+        })
+        .map(function getForeignServerName(item) {
+          return item.name;
+        })
+    );
 
     return currentObjects.filter(function (item) {
+      if (
+        item.kind === "grant" &&
+        item.grantDefinition?.implicitDefault === true &&
+        !desiredKeys.has(item.key)
+      ) {
+        return false;
+      }
       if (item.schema) {
+        return true;
+      }
+      if (
+        item.kind === "grant" &&
+        item.grantDefinition?.objectType === "FOREIGN SERVER" &&
+        desiredForeignServers.has(item.grantDefinition.objectName)
+      ) {
         return true;
       }
       return desiredKeys.has(item.key);

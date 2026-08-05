@@ -409,7 +409,18 @@ describe("Advanced SQL object inspector", function () {
       name: 'GRANT SELECT ON TABLE "public"."users" TO "app_reader";',
       schema: "public",
       createStatement: 'GRANT SELECT ON TABLE "public"."users" TO "app_reader";',
-      dropStatement: 'REVOKE SELECT ON TABLE "public"."users" FROM "app_reader";',
+      dropStatement:
+        'REVOKE SELECT ON TABLE "public"."users" FROM "app_reader" RESTRICT;',
+      grantDefinition: {
+        objectType: "TABLE",
+        objectName: "users",
+        schema: "public",
+        grantee: "app_reader",
+        granteeIsPublic: false,
+        privilege: "SELECT",
+        grantable: false,
+        implicitDefault: false,
+      },
     });
 
     expect(sqlObjects.find(function (item) {
@@ -522,11 +533,19 @@ describe("Advanced SQL object inspector", function () {
 
     expect(sqlObjects.find(function (item) {
       return item.key === "grant:GRANT USAGE ON SCHEMA \"public\" TO \"app_reader\";";
-    })?.dropStatement).toBe('REVOKE USAGE ON SCHEMA "public" FROM "app_reader";');
+    })?.dropStatement).toBe(
+      'REVOKE USAGE ON SCHEMA "public" FROM "app_reader" RESTRICT;'
+    );
 
     expect(sqlObjects.find(function (item) {
-      return item.key === "grant:GRANT USAGE ON FOREIGN SERVER \"analytics_server\" TO \"app_reader\" WITH GRANT OPTION;";
-    })?.dropStatement).toBe('REVOKE USAGE ON FOREIGN SERVER "analytics_server" FROM "app_reader";');
+      return item.key === "grant:GRANT USAGE ON FOREIGN SERVER \"analytics_server\" TO \"app_reader\";";
+    })).toMatchObject({
+      createStatement:
+        'GRANT USAGE ON FOREIGN SERVER "analytics_server" TO "app_reader" WITH GRANT OPTION;',
+      dropStatement:
+        'REVOKE USAGE ON FOREIGN SERVER "analytics_server" FROM "app_reader" RESTRICT;',
+      grantDefinition: { grantable: true, implicitDefault: false },
+    });
   });
 
   test("skips extension-owned relation grants", async function () {
@@ -593,5 +612,49 @@ describe("Advanced SQL object inspector", function () {
     const sqlObjects = await inspector.getCurrentSqlObjects(client, ["public"]);
 
     expect(sqlObjects).toEqual([]);
+  });
+
+  test("preserves privileges outside the portable managed contract", async function () {
+    const inspector = new DatabaseInspector() as any;
+    const client = createClient(function (sql) {
+      if (sql.includes("aclexplode(c.relacl)")) {
+        return {
+          rows: [{
+            schema_name: "public",
+            object_name: "accounts",
+            object_type: "TABLE",
+            grantee_name: "reader",
+            grantee_is_public: false,
+            privilege_type: "MAINTAIN",
+            is_grantable: false,
+          }],
+        };
+      }
+      if (sql.includes("aclexplode(n.nspacl)")) {
+        return {
+          rows: [{
+            schema_name: "public",
+            grantee_name: "reader",
+            grantee_is_public: false,
+            privilege_type: "SELECT",
+            is_grantable: false,
+          }],
+        };
+      }
+      if (sql.includes("aclexplode(s.srvacl)")) {
+        return {
+          rows: [{
+            server_name: "analytics",
+            grantee_name: "reader",
+            grantee_is_public: false,
+            privilege_type: "CONNECT",
+            is_grantable: false,
+          }],
+        };
+      }
+      throw new Error(`Unhandled SQL: ${sql}`);
+    });
+
+    expect(await inspector.getCurrentGrantObjects(client, ["public"])).toEqual([]);
   });
 });

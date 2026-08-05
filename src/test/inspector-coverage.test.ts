@@ -1606,9 +1606,55 @@ describe("DatabaseInspector coverage", () => {
       })
     ).toBe('"count" integer NOT NULL DEFAULT 0');
 
-    expect(inspector.formatGrantTarget("SCHEMA", "public", "public")).toBe('"public"');
-    expect(inspector.formatGrantTarget("FOREIGN SERVER", "analytics_server")).toBe('"analytics_server"');
     expect(inspector.formatOptions(null)).toBe("");
     expect(inspector.formatOptions(["just_flag", "host=127.0.0.1"])).toBe("just_flag, host '127.0.0.1'");
+
+    expect(
+      inspector.buildGrantObject(
+        "TABLE",
+        "accounts",
+        "public",
+        {
+          grantee_name: "PUBLIC",
+          grantee_is_public: true,
+          privilege_type: "SELECT",
+          is_grantable: false,
+          grantor_name: "owner",
+          owner_name: "owner",
+          is_implicit_default: true,
+        }
+      )
+    ).toMatchObject({
+      createStatement: 'GRANT SELECT ON TABLE "public"."accounts" TO PUBLIC;',
+      grantDefinition: { granteeIsPublic: true, implicitDefault: true },
+    });
+    expect(
+      inspector.buildGrantObject(
+        "TABLE",
+        "accounts",
+        "public",
+        {
+          grantee_name: "PUBLIC",
+          grantee_is_public: false,
+          privilege_type: "SELECT",
+          is_grantable: false,
+        }
+      ).createStatement
+    ).toBe('GRANT SELECT ON TABLE "public"."accounts" TO "PUBLIC";');
+    expect(function buildUnsafeGrant() {
+      inspector.buildGrantObject(
+        "TABLE",
+        "accounts",
+        "public",
+        {
+          grantee_name: "reader",
+          grantee_is_public: false,
+          privilege_type: "SELECT",
+          is_grantable: false,
+          grantor_name: "delegated_grantor",
+          owner_name: "owner",
+        }
+      );
+    }).toThrow(/non-owner role/i);
   });
 });

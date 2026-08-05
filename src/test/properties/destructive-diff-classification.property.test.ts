@@ -83,6 +83,7 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users DROP CONSTRAINT users_pkey",
       "ALTER TABLE users ALTER COLUMN age TYPE BIGINT",
       "ALTER TABLE users ALTER COLUMN age SET DATA TYPE BIGINT",
+      "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
     ];
 
     await fc.assert(

@@ -189,7 +189,8 @@ describe("PostgreSQL foreign server lifecycle", function () {
 
     expect(createIndex).toBeGreaterThanOrEqual(0);
     expect(grantIndex).toBeGreaterThan(createIndex);
-    expect(ownerIndex).toBeGreaterThan(grantIndex);
+    expect(ownerIndex).toBeGreaterThan(createIndex);
+    expect(grantIndex).toBeGreaterThan(ownerIndex);
     await service.apply(desired, [MANAGED_SCHEMA], true);
     expect(await foreignServerOwner(client)).toBe(OWNER_ROLE);
     expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);

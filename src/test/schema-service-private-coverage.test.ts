@@ -407,15 +407,60 @@ describe("SchemaService private coverage", function () {
       name: "external_user",
       createStatement: "CREATE ROLE external_user;",
     };
+    const desiredServer = {
+      kind: "foreign-server" as const,
+      key: "foreign-server:analytics",
+      name: "analytics",
+      createStatement: "CREATE SERVER analytics FOREIGN DATA WRAPPER postgres_fdw;",
+    };
+    const serverGrant = {
+      kind: "grant" as const,
+      key: 'grant:GRANT USAGE ON FOREIGN SERVER "analytics" TO "reader";',
+      name: 'GRANT USAGE ON FOREIGN SERVER "analytics" TO "reader";',
+      createStatement: 'GRANT USAGE ON FOREIGN SERVER "analytics" TO "reader";',
+      grantDefinition: {
+        objectType: "FOREIGN SERVER" as const,
+        objectName: "analytics",
+        grantee: "reader",
+        granteeIsPublic: false,
+        privilege: "USAGE",
+        grantable: false,
+        implicitDefault: false,
+      },
+    };
+    const implicitOwnerGrant = {
+      kind: "grant" as const,
+      key: 'grant:GRANT SELECT ON TABLE "public"."users" TO "owner";',
+      name: 'GRANT SELECT ON TABLE "public"."users" TO "owner";',
+      schema: "public",
+      createStatement:
+        'GRANT SELECT ON TABLE "public"."users" TO "owner";',
+      grantDefinition: {
+        objectType: "TABLE" as const,
+        objectName: "users",
+        schema: "public",
+        grantee: "owner",
+        granteeIsPublic: false,
+        privilege: "SELECT",
+        grantable: false,
+        implicitDefault: true,
+      },
+    };
 
     const filtered = privateService.filterCurrentSqlObjects(
-      [scopedPolicy, desiredRole, unrelatedRole],
-      [desiredRole]
+      [
+        scopedPolicy,
+        desiredRole,
+        unrelatedRole,
+        serverGrant,
+        implicitOwnerGrant,
+      ],
+      [desiredRole, desiredServer]
     );
 
     expect(filtered.map(function (item) {
       return item.key;
-    })).toEqual([scopedPolicy.key, desiredRole.key]);
+    })).toEqual([scopedPolicy.key, desiredRole.key, serverGrant.key]);
   });
 
   test("filterCurrentExtensions keeps managed desired and required extensions", function () {

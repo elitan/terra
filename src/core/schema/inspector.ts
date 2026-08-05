@@ -28,6 +28,8 @@ import type {
   PostgresReplicaIdentity,
   PostgresColumnStatistics,
   PostgresRoleDefinition,
+  PostgresGrantDefinition,
+  PostgresGrantObjectType,
   IndexTerm,
 } from "../../types/schema";
 import { ValidationError } from "../../types/errors";
@@ -52,6 +54,12 @@ import {
   renderPostgresRoleCreate,
   renderPostgresRoleDrop,
 } from "../../utils/postgres-role";
+import {
+  isSupportedPostgresGrantPrivilege,
+  postgresGrantKey,
+  renderPostgresGrant,
+  renderPostgresGrantRevoke,
+} from "../../utils/postgres-grant";
 
 const IDENTITY_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
@@ -81,6 +89,16 @@ const IDENTITY_SEQUENCE_JOIN_SQL = `
     LIMIT 1
   ) identity_sequence ON a.attidentity != ''
 `;
+
+type PostgresGrantCatalogRow = {
+  grantee_name: string;
+  grantee_is_public?: boolean;
+  privilege_type: string;
+  is_grantable: boolean;
+  grantor_name?: string;
+  owner_name?: string;
+  is_implicit_default?: boolean;
+};
 
 function getIdentitySequencePersistence(
   persistence: unknown
@@ -4215,8 +4233,27 @@ export class DatabaseInspector {
             ELSE 'TABLE'
           END as object_type,
           COALESCE(grantee.rolname, 'PUBLIC') as grantee_name,
+          privilege.grantee = 0 as grantee_is_public,
           privilege.privilege_type,
-          privilege.is_grantable
+          privilege.is_grantable,
+          pg_get_userbyid(privilege.grantor) as grantor_name,
+          pg_get_userbyid(c.relowner) as owner_name,
+          EXISTS (
+            SELECT 1
+            FROM aclexplode(
+              acldefault(
+                CASE
+                  WHEN c.relkind = 'S' THEN 's'::"char"
+                  ELSE 'r'::"char"
+                END,
+                c.relowner
+              )
+            ) default_privilege
+            WHERE default_privilege.grantor = privilege.grantor
+              AND default_privilege.grantee = privilege.grantee
+              AND default_privilege.privilege_type = privilege.privilege_type
+              AND default_privilege.is_grantable = privilege.is_grantable
+          ) as is_implicit_default
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN LATERAL aclexplode(c.relacl) as privilege ON c.relacl IS NOT NULL
@@ -4231,8 +4268,19 @@ export class DatabaseInspector {
         SELECT
           n.nspname as schema_name,
           COALESCE(grantee.rolname, 'PUBLIC') as grantee_name,
+          privilege.grantee = 0 as grantee_is_public,
           privilege.privilege_type,
-          privilege.is_grantable
+          privilege.is_grantable,
+          pg_get_userbyid(privilege.grantor) as grantor_name,
+          pg_get_userbyid(n.nspowner) as owner_name,
+          EXISTS (
+            SELECT 1
+            FROM aclexplode(acldefault('n', n.nspowner)) default_privilege
+            WHERE default_privilege.grantor = privilege.grantor
+              AND default_privilege.grantee = privilege.grantee
+              AND default_privilege.privilege_type = privilege.privilege_type
+              AND default_privilege.is_grantable = privilege.is_grantable
+          ) as is_implicit_default
         FROM pg_namespace n
         JOIN LATERAL aclexplode(n.nspacl) as privilege ON n.nspacl IS NOT NULL
         LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
@@ -4243,8 +4291,19 @@ export class DatabaseInspector {
         SELECT
           s.srvname as server_name,
           COALESCE(grantee.rolname, 'PUBLIC') as grantee_name,
+          privilege.grantee = 0 as grantee_is_public,
           privilege.privilege_type,
-          privilege.is_grantable
+          privilege.is_grantable,
+          pg_get_userbyid(privilege.grantor) as grantor_name,
+          pg_get_userbyid(s.srvowner) as owner_name,
+          EXISTS (
+            SELECT 1
+            FROM aclexplode(acldefault('F', s.srvowner)) default_privilege
+            WHERE default_privilege.grantor = privilege.grantor
+              AND default_privilege.grantee = privilege.grantee
+              AND default_privilege.privilege_type = privilege.privilege_type
+              AND default_privilege.is_grantable = privilege.is_grantable
+          ) as is_implicit_default
         FROM pg_foreign_server s
         JOIN LATERAL aclexplode(s.srvacl) as privilege ON s.srvacl IS NOT NULL
         LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
@@ -4255,35 +4314,44 @@ export class DatabaseInspector {
     const objects: SqlObject[] = [];
 
     for (const row of classResult.rows) {
+      if (!isSupportedPostgresGrantPrivilege(
+        row.object_type,
+        row.privilege_type
+      )) {
+        continue;
+      }
       objects.push(this.buildGrantObject(
         row.object_type,
         row.object_name,
         row.schema_name,
-        row.grantee_name,
-        row.privilege_type,
-        row.is_grantable
+        row
       ));
     }
 
     for (const row of schemaResult.rows) {
+      if (!isSupportedPostgresGrantPrivilege("SCHEMA", row.privilege_type)) {
+        continue;
+      }
       objects.push(this.buildGrantObject(
         "SCHEMA",
         row.schema_name,
         row.schema_name,
-        row.grantee_name,
-        row.privilege_type,
-        row.is_grantable
+        row
       ));
     }
 
     for (const row of serverResult.rows) {
+      if (!isSupportedPostgresGrantPrivilege(
+        "FOREIGN SERVER",
+        row.privilege_type
+      )) {
+        continue;
+      }
       objects.push(this.buildGrantObject(
         "FOREIGN SERVER",
         row.server_name,
         undefined,
-        row.grantee_name,
-        row.privilege_type,
-        row.is_grantable
+        row
       ));
     }
 
@@ -4431,34 +4499,42 @@ export class DatabaseInspector {
   }
 
   private buildGrantObject(
-    objectType: string,
+    objectType: PostgresGrantObjectType,
     objectName: string,
     schemaName: string | undefined,
-    granteeName: string,
-    privilegeType: string,
-    isGrantable: boolean
+    row: PostgresGrantCatalogRow
   ): SqlObject {
-    const target = this.formatGrantTarget(objectType, objectName, schemaName);
-    const grantOption = isGrantable ? " WITH GRANT OPTION" : "";
-    const createStatement = `GRANT ${privilegeType} ON ${objectType} ${target} TO ${this.quoteRole(granteeName)}${grantOption};`;
+    if (
+      row.grantor_name &&
+      row.owner_name &&
+      row.grantor_name !== row.owner_name
+    ) {
+      throw new ValidationError(
+        `PostgreSQL ${objectType} privilege ${row.privilege_type} on '${objectName}' was granted by non-owner role '${row.grantor_name}', which TerraDB cannot revoke safely without managing grantor provenance`,
+        "grant",
+        objectName
+      );
+    }
+    const definition: PostgresGrantDefinition = {
+      objectType,
+      objectName,
+      ...(schemaName ? { schema: schemaName } : {}),
+      grantee: row.grantee_name,
+      granteeIsPublic: row.grantee_is_public === true,
+      privilege: row.privilege_type,
+      grantable: row.is_grantable,
+      implicitDefault: row.is_implicit_default === true,
+    };
+    const createStatement = renderPostgresGrant(definition);
     return {
       kind: "grant",
-      key: `grant:${createStatement.replace(/\s+/g, " ").trim()}`,
-      name: createStatement.replace(/\s+/g, " ").trim(),
+      key: postgresGrantKey(definition),
+      name: createStatement,
       schema: schemaName,
       createStatement,
-      dropStatement: `REVOKE ${privilegeType} ON ${objectType} ${target} FROM ${this.quoteRole(granteeName)};`,
+      dropStatement: renderPostgresGrantRevoke(definition),
+      grantDefinition: definition,
     };
-  }
-
-  private formatGrantTarget(objectType: string, objectName: string, schemaName?: string): string {
-    if (objectType === "SCHEMA") {
-      return this.quoteIdent(objectName);
-    }
-    if (objectType === "FOREIGN SERVER") {
-      return this.quoteIdent(objectName);
-    }
-    return this.qualifyName(objectName, schemaName);
   }
 
   private formatOptions(options: string[] | null): string {

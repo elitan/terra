@@ -112,6 +112,7 @@ export DATABASE_URL=":memory:"
 | Materialized Views | Yes | No |
 | Schemas | Yes | No |
 | Roles | Yes | No |
+| Object Privileges (`GRANT`) | Yes | No |
 | Object Comments (`COMMENT ON`) | Yes | No |
 | Extensions | Yes | No |
 | Row-Level Security & Policies | Yes | No |
@@ -157,6 +158,21 @@ masked, separately modeled by PostgreSQL, or ignored. `DROP ROLE [IF EXISTS]`
 is the explicit destructive absent-state declaration; PostgreSQL dependency
 checks block it and roll back the transaction while the role still owns objects
 or holds privileges. Undeclared cluster roles remain unmanaged.
+PostgreSQL object privileges are declarative for concrete tables, sequences,
+schemas, and foreign servers. TerraDB expands combined privilege, object, and
+grantee lists into stable atomic grants, distinguishes `PUBLIC` from a quoted
+role named `PUBLIC`, preserves PostgreSQL's implicit owner/default ACL entries,
+and changes `WITH GRANT OPTION` natively. Omitting a managed grant emits a
+destructive `REVOKE ... RESTRICT`, so strict mode can block it. Direct
+`REVOKE`, role-membership grants, column privileges, `ALL`, expanding `ALL ...
+IN SCHEMA`, `ALTER DEFAULT PRIVILEGES`, contextual grantees, explicit grantors,
+and object families whose ACLs are not inspected losslessly fail before
+mutation. Version-specific privileges outside the PostgreSQL 14-18 portable
+contract, including PostgreSQL 18 `MAINTAIN`, remain unmanaged and are
+preserved. A foreign-server grant must declare the corresponding server so
+omission remains scoped after the grant is removed from desired SQL. A grant
+made by a non-owner grantor is rejected during inspection
+because it cannot be revoked safely without managing grantor provenance.
 PostgreSQL per-column planner metadata is declarative for ordinary and
 inherited tables and materialized views: statistics targets, `n_distinct`, and
 `n_distinct_inherited` are parsed, inspected, changed in place, and reset when

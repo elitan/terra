@@ -42,6 +42,7 @@ import {
   postgresRoleDefinitionsEqual,
   renderPostgresRoleAlter,
 } from "../../../utils/postgres-role";
+import { renderPostgresGrantOptionRevoke } from "../../../utils/postgres-grant";
 
 type SqlObjectPlan = {
   bootstrapCreate: string[];
@@ -930,6 +931,38 @@ export class SqlObjectHandler {
         );
       }
 
+      if (currentObject.kind === "grant" || desiredObject.kind === "grant") {
+        if (currentObject.kind !== "grant" || desiredObject.kind !== "grant") {
+          throw new ValidationError(
+            `PostgreSQL SQL object key '${currentObject.key}' collides between ${currentObject.kind} and ${desiredObject.kind} definitions`,
+            "grant",
+            currentObject.key,
+            desiredObject.createStatement
+          );
+        }
+        if (!currentObject.grantDefinition || !desiredObject.grantDefinition) {
+          throw new ValidationError(
+            `PostgreSQL privilege grant '${desiredObject.key}' is missing its lossless canonical definition`,
+            "grant",
+            desiredObject.key,
+            desiredObject.createStatement
+          );
+        }
+        if (
+          currentObject.grantDefinition.grantable !==
+          desiredObject.grantDefinition.grantable
+        ) {
+          if (desiredObject.grantDefinition.grantable) {
+            plan.finalCreate.push(desiredObject.createStatement);
+          } else {
+            plan.earlyDrop.push(
+              renderPostgresGrantOptionRevoke(desiredObject.grantDefinition)
+            );
+          }
+        }
+        continue;
+      }
+
       const currentCanonical = canonicalObjects.get(currentObject)!;
       const desiredCanonical = canonicalObjects.get(desiredObject)!;
       const replicaIdentityChanged = partitionReplicaIdentityChanged(
@@ -1081,7 +1114,7 @@ export class SqlObjectHandler {
       if (owner === undefined) {
         continue;
       }
-      plan.finalCreate.push(
+      plan.preTableCreate.push(
         renderPostgresForeignServerOwnerAlter(server.name, owner)
       );
     }

@@ -92,6 +92,7 @@ import {
 import { parseForeignServerRemovals } from "./foreign-server-removal-parser";
 import { parsePostgresRole } from "./role-parser";
 import { parsePostgresRoleRemovals } from "./role-removal-parser";
+import { parsePostgresGrants } from "./grant-parser";
 
 let wasmInitialization: Promise<void> | undefined;
 
@@ -928,15 +929,19 @@ export class SchemaParser {
             sqlObjects.push(sqlObject);
           }
         } else if (stmt.GrantStmt) {
-          const sqlObject = this.parseGrantSqlObject(stmt);
-          if (sqlObject) {
-            sqlObjects.push(sqlObject);
-          }
+          sqlObjects.push(
+            ...this.parseGrantSqlObjects(stmt.GrantStmt, filePath)
+          );
         } else if (stmt.AlterDefaultPrivilegesStmt) {
-          const sqlObject = this.parseGrantSqlObject(stmt);
-          if (sqlObject) {
-            sqlObjects.push(sqlObject);
-          }
+          throw new ParserError(
+            "PostgreSQL ALTER DEFAULT PRIVILEGES is not supported in desired schemas because TerraDB does not yet inspect pg_default_acl losslessly; manage default privileges separately",
+            filePath
+          );
+        } else if (stmt.GrantRoleStmt) {
+          throw new ParserError(
+            "PostgreSQL role membership GRANT is not supported in desired schemas because membership options and version-specific inheritance state are not modeled; manage role memberships separately",
+            filePath
+          );
         } else if (
           stmt.AlterOwnerStmt?.objectType === "OBJECT_FOREIGN_SERVER"
         ) {
@@ -1082,6 +1087,7 @@ export class SchemaParser {
       pendingForeignServerOwners,
       filePath
     );
+    this.rejectUnboundForeignServerGrants(sqlObjects, filePath);
     rejectDuplicateTriggerDeclarations(triggers, sqlObjects, filePath);
     mergePendingTriggerModes(
       triggers,
@@ -1648,6 +1654,7 @@ export class SchemaParser {
         object.kind !== "policy" &&
         object.kind !== "row-level-security" &&
         object.kind !== "foreign-server" &&
+        object.kind !== "grant" &&
         object.kind !== "role"
       ) {
         continue;
@@ -1660,6 +1667,8 @@ export class SchemaParser {
           label = "row-level security state";
         } else if (object.kind === "role") {
           label = "role";
+        } else if (object.kind === "grant") {
+          label = "privilege grant";
         }
         throw new ParserError(
           `PostgreSQL ${label} '${object.key}' is declared more than once in the desired schema`,
@@ -1667,6 +1676,35 @@ export class SchemaParser {
         );
       }
       seen.add(object.key);
+    }
+  }
+
+  private rejectUnboundForeignServerGrants(
+    objects: SqlObject[],
+    filePath?: string
+  ): void {
+    const declaredServers = new Set(
+      objects
+        .filter(function isPresentForeignServer(object) {
+          return object.kind === "foreign-server" &&
+            object.desiredAbsent !== true;
+        })
+        .map(function getServerName(object) {
+          return object.name;
+        })
+    );
+    for (const object of objects) {
+      const definition = object.grantDefinition;
+      if (
+        definition?.objectType !== "FOREIGN SERVER" ||
+        declaredServers.has(definition.objectName)
+      ) {
+        continue;
+      }
+      throw new ParserError(
+        `PostgreSQL GRANT on foreign server '${definition.objectName}' must also declare that server with CREATE SERVER so omission has a stable database-wide management scope`,
+        filePath
+      );
     }
   }
 
@@ -2155,34 +2193,11 @@ export class SchemaParser {
     return parsePostgresRole(stmt, filePath);
   }
 
-  private parseGrantSqlObject(stmt: any): SqlObject | null {
-    const sql = this.statementToSql(stmt);
-    const schema = this.extractGrantSchema(stmt);
-    return {
-      kind: "grant",
-      key: `grant:${sql.replace(/\s+/g, " ").trim()}`,
-      name: sql.replace(/\s+/g, " ").trim(),
-      schema,
-      createStatement: sql,
-    };
-  }
-
-  private extractGrantSchema(stmt: any): string | undefined {
-    const objects = stmt?.GrantStmt?.objects || stmt?.AlterDefaultPrivilegesStmt?.action?.GrantStmt?.objects || [];
-    for (const object of objects) {
-      const rangeVar = object?.RangeVar;
-      if (rangeVar?.schemaname) {
-        return rangeVar.schemaname;
-      }
-      const list = object?.List?.items || [];
-      for (const item of list) {
-        const stringValue = item?.String?.sval;
-        if (stringValue) {
-          return stringValue;
-        }
-      }
-    }
-    return undefined;
+  private parseGrantSqlObjects(
+    node: any,
+    filePath?: string
+  ): SqlObject[] {
+    return parsePostgresGrants(node, filePath);
   }
 
   /**

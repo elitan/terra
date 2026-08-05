@@ -10,6 +10,112 @@ import {
 } from "../core/schema/parser/role-removal-parser";
 
 describe("Advanced SQL object parsing", function () {
+  test("expands supported object grants into atomic canonical privileges", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      GRANT SELECT, INSERT ON TABLE public.accounts, public.users
+        TO reader, PUBLIC;
+    `);
+    const grants = parsed.sqlObjects?.filter(function isGrant(object) {
+      return object.kind === "grant";
+    });
+
+    expect(grants).toHaveLength(8);
+    expect(grants?.map(function getStatement(object) {
+      return object.createStatement;
+    })).toEqual([
+      'GRANT INSERT ON TABLE "public"."accounts" TO "reader";',
+      'GRANT INSERT ON TABLE "public"."accounts" TO PUBLIC;',
+      'GRANT INSERT ON TABLE "public"."users" TO "reader";',
+      'GRANT INSERT ON TABLE "public"."users" TO PUBLIC;',
+      'GRANT SELECT ON TABLE "public"."accounts" TO "reader";',
+      'GRANT SELECT ON TABLE "public"."accounts" TO PUBLIC;',
+      'GRANT SELECT ON TABLE "public"."users" TO "reader";',
+      'GRANT SELECT ON TABLE "public"."users" TO PUBLIC;',
+    ]);
+    expect(grants?.[0]).toMatchObject({
+      key:
+        'grant:GRANT INSERT ON TABLE "public"."accounts" TO "reader";',
+      schema: "public",
+      grantDefinition: {
+        objectType: "TABLE",
+        objectName: "accounts",
+        schema: "public",
+        grantee: "reader",
+        granteeIsPublic: false,
+        privilege: "INSERT",
+        grantable: false,
+        implicitDefault: false,
+      },
+    });
+  });
+
+  test("distinguishes PUBLIC from a quoted role named PUBLIC", async function () {
+    const parser = new SchemaParser();
+    const parsed = await parser.parseSchema(`
+      GRANT SELECT ON TABLE public.accounts TO PUBLIC, "PUBLIC";
+    `);
+
+    expect(parsed.sqlObjects?.map(function getStatement(object) {
+      return object.createStatement;
+    })).toEqual([
+      'GRANT SELECT ON TABLE "public"."accounts" TO "PUBLIC";',
+      'GRANT SELECT ON TABLE "public"."accounts" TO PUBLIC;',
+    ]);
+    expect(parsed.sqlObjects?.map(function getPublicKind(object) {
+      return object.grantDefinition?.granteeIsPublic;
+    })).toEqual([false, true]);
+
+    const quotedGrantOption = await parser.parseSchema(`
+      GRANT SELECT ON TABLE public.accounts TO "PUBLIC" WITH GRANT OPTION;
+    `);
+    expect(quotedGrantOption.sqlObjects?.[0].createStatement).toBe(
+      'GRANT SELECT ON TABLE "public"."accounts" TO "PUBLIC" WITH GRANT OPTION;'
+    );
+  });
+
+  test("rejects duplicate atomic privilege declarations", async function () {
+    const parser = new SchemaParser();
+    await expect(parser.parseSchema(`
+      GRANT SELECT ON TABLE public.accounts TO reader;
+      GRANT SELECT ON TABLE public.accounts TO reader WITH GRANT OPTION;
+    `)).rejects.toThrow(/privilege grant.*declared more than once/i);
+  });
+
+  test("requires foreign server grants to have a managed target", async function () {
+    const parser = new SchemaParser();
+    await expect(parser.parseSchema(`
+      GRANT USAGE ON FOREIGN SERVER analytics TO reader;
+    `)).rejects.toThrow(/must also declare.*CREATE SERVER/i);
+    await expect(parser.parseSchema(`
+      DROP SERVER analytics;
+      GRANT USAGE ON FOREIGN SERVER analytics TO reader;
+    `)).rejects.toThrow(/must also declare.*CREATE SERVER/i);
+  });
+
+  test("rejects privilege syntax outside the lossless grant contract", async function () {
+    const parser = new SchemaParser();
+    const unsupported = [
+      "REVOKE SELECT ON TABLE public.accounts FROM reader;",
+      "GRANT SELECT (id) ON TABLE public.accounts TO reader;",
+      "GRANT ALL ON TABLE public.accounts TO reader;",
+      "GRANT SELECT ON ALL TABLES IN SCHEMA public TO reader;",
+      "GRANT EXECUTE ON FUNCTION public.work(integer) TO reader;",
+      "GRANT USAGE ON TYPE public.payload TO reader;",
+      "GRANT SELECT ON TABLE public.accounts TO CURRENT_USER;",
+      "GRANT SELECT ON TABLE public.accounts TO reader GRANTED BY CURRENT_USER;",
+      "GRANT SELECT ON TABLE public.accounts TO PUBLIC WITH GRANT OPTION;",
+      "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO reader;",
+    ];
+
+    for (const sql of unsupported) {
+      await expect(parser.parseSchema(sql)).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        message: expect.stringContaining("not supported in desired schemas"),
+      });
+    }
+  });
+
   test("normalizes ROLE and USER aliases to complete role state", async function () {
     const parser = new SchemaParser();
     const parsed = await parser.parseSchema(`
@@ -488,7 +594,6 @@ describe("Advanced SQL object parsing", function () {
       CREATE ROLE app_reader NOLOGIN;
       CREATE USER app_user WITH LOGIN;
       GRANT SELECT ON TABLE public.users TO app_reader;
-      ALTER DEFAULT PRIVILEGES IN SCHEMA audit GRANT SELECT ON TABLES TO app_reader;
     `;
 
     const parsed = await parser.parseSchema(sql);
@@ -507,7 +612,6 @@ describe("Advanced SQL object parsing", function () {
       "domain-type",
       "event-trigger",
       "foreign-server",
-      "grant",
       "grant",
       "partition",
       "partition",

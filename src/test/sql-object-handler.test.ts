@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { SqlObjectHandler } from "../core/schema/handlers/sql-object-handler";
 import type {
+  PostgresGrantDefinition,
   PostgresRoleDefinition,
   SqlObject,
 } from "../types/schema";
@@ -52,7 +53,72 @@ function makeRole(
   });
 }
 
+function makeGrant(
+  grantable: boolean,
+  overrides: Partial<SqlObject> = {}
+): SqlObject {
+  const definition: PostgresGrantDefinition = {
+    objectType: "TABLE",
+    objectName: "accounts",
+    schema: "public",
+    grantee: "reader",
+    granteeIsPublic: false,
+    privilege: "SELECT",
+    grantable,
+    implicitDefault: false,
+  };
+  return makeSqlObject({
+    kind: "grant",
+    key: 'grant:GRANT SELECT ON TABLE "public"."accounts" TO "reader";',
+    name: 'GRANT SELECT ON TABLE "public"."accounts" TO "reader";',
+    createStatement:
+      'GRANT SELECT ON TABLE "public"."accounts" TO "reader"' +
+      (grantable ? " WITH GRANT OPTION;" : ";"),
+    dropStatement:
+      'REVOKE SELECT ON TABLE "public"."accounts" FROM "reader" RESTRICT;',
+    grantDefinition: definition,
+    ...overrides,
+  });
+}
+
 describe("SqlObjectHandler", function () {
+  test("changes privilege grant options without revoking the privilege", async function () {
+    const handler = new SqlObjectHandler();
+
+    const upgrade = await handler.generateStatements(
+      [makeGrant(true)],
+      [makeGrant(false)]
+    );
+    expect(upgrade.finalCreate).toEqual([
+      'GRANT SELECT ON TABLE "public"."accounts" TO "reader" WITH GRANT OPTION;',
+    ]);
+    expect(upgrade.earlyDrop).toEqual([]);
+
+    const downgrade = await handler.generateStatements(
+      [makeGrant(false)],
+      [makeGrant(true)]
+    );
+    expect(downgrade.earlyDrop).toEqual([
+      'REVOKE GRANT OPTION FOR SELECT ON TABLE "public"."accounts" FROM "reader" RESTRICT;',
+    ]);
+    expect(downgrade.finalCreate).toEqual([]);
+  });
+
+  test("rejects incomplete and colliding privilege definitions", async function () {
+    const handler = new SqlObjectHandler();
+    const incomplete = makeGrant(false, { grantDefinition: undefined });
+
+    await expect(
+      handler.generateStatements([incomplete], [makeGrant(false)])
+    ).rejects.toThrow(/missing its lossless canonical definition/i);
+    await expect(
+      handler.generateStatements(
+        [makePolicy({ key: makeGrant(false).key })],
+        [makeGrant(false)]
+      )
+    ).rejects.toThrow(/collides between grant and policy/i);
+  });
+
   test("orders native role alterations and rejects incomplete state", async function () {
     const handler = new SqlObjectHandler();
     const currentDefinition: PostgresRoleDefinition = {
@@ -168,10 +234,9 @@ describe("SqlObjectHandler", function () {
     expect(plan.preTableCreate).toEqual([
       'ALTER SERVER "analytics" VERSION \'15\'\'beta\' OPTIONS ' +
         '(ADD "host" \'db\'\'host\');',
-    ]);
-    expect(plan.finalCreate).toEqual([
       'ALTER SERVER "analytics" OWNER TO "Desired Owner";',
     ]);
+    expect(plan.finalCreate).toEqual([]);
   });
 
   test("orders new foreign server owners after deterministic creation", async function () {
@@ -206,11 +271,10 @@ describe("SqlObjectHandler", function () {
     expect(plan.preTableCreate).toEqual([
       alpha.createStatement,
       zeta.createStatement,
-    ]);
-    expect(plan.finalCreate).toEqual([
       'ALTER SERVER "alpha" OWNER TO "Alpha Owner";',
       'ALTER SERVER "zeta" OWNER TO "Zeta Owner";',
     ]);
+    expect(plan.finalCreate).toEqual([]);
   });
 
   test("orders explicit foreign server removals deterministically", async function () {
