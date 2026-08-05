@@ -28,6 +28,9 @@ are covered. The documented `serial2`, `serial4`, and `serial8` aliases normaliz
 to `smallserial`, `serial`, and `bigserial` with implicit `NOT NULL`, and both
 spellings converge. Existing-column transitions to/from serial or between serial
 sizes reject before mutation and preserve columns, defaults, sequences, and rows.
+Serial-owned sequence start, increment, minimum, maximum, cache, and cycle
+options must retain their canonical definitions; every drift form rejects before
+mutation, while live counter advancement and `RESTART` state remain unmanaged.
 
 ## current feature matrix
 

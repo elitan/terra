@@ -100,7 +100,19 @@ const IDENTITY_SEQUENCE_JOIN_SQL = `
 
 const SERIAL_SEQUENCE_JOIN_SQL = `
   LEFT JOIN LATERAL (
-    SELECT TRUE as is_serial
+    SELECT
+      TRUE as is_serial,
+      serial_sequence_catalog.seqstart = 1
+        AND serial_sequence_catalog.seqincrement = 1
+        AND serial_sequence_catalog.seqmin = 1
+        AND serial_sequence_catalog.seqmax = CASE serial_sequence_catalog.seqtypid
+          WHEN 'smallint'::regtype THEN 32767
+          WHEN 'integer'::regtype THEN 2147483647
+          WHEN 'bigint'::regtype THEN 9223372036854775807
+        END
+        AND serial_sequence_catalog.seqcache = 1
+        AND NOT serial_sequence_catalog.seqcycle
+        AS options_match
     FROM pg_depend sequence_ownership
     JOIN pg_class serial_sequence
       ON serial_sequence.oid = sequence_ownership.objid
@@ -847,6 +859,7 @@ export class DatabaseInspector {
           a.attgenerated,
           a.attidentity,
           COALESCE(serial_sequence.is_serial, FALSE) as is_serial,
+          serial_sequence.options_match as serial_sequence_options_match,
           CASE
             WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
             ELSE NULL
@@ -925,6 +938,9 @@ export class DatabaseInspector {
             nullable: col.is_nullable,
             default: defaultValue,
             serial: col.is_serial || undefined,
+            serialSequenceOptionsMatch: col.is_serial
+              ? Boolean(col.serial_sequence_options_match)
+              : undefined,
             collation,
             storage,
             storageDefault,

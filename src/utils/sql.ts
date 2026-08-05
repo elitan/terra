@@ -318,6 +318,17 @@ export function isPostgresSerialDefault(
   );
 }
 
+export function isInspectedPostgresSerialColumn(column: Column): boolean {
+  return column.serial === true && isPostgresSerialDefault(column.default);
+}
+
+export function hasCanonicalPostgresSerialSequence(column: Column): boolean {
+  return (
+    isInspectedPostgresSerialColumn(column) &&
+    column.serialSequenceOptionsMatch !== false
+  );
+}
+
 function isBalancedOuterParens(str: string): boolean {
   if (!str.startsWith('(') || !str.endsWith(')')) return false;
   let depth = 0;
@@ -423,8 +434,7 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
   // The inspector proves that the default's sequence is owned by this column.
   const desiredUpperType = desired.type.toUpperCase();
   const isDesiredSerial = isPostgresSerialType(desired.type);
-  const currentIsSerial =
-    current.serial === true && isPostgresSerialDefault(current.default);
+  const currentIsSerial = hasCanonicalPostgresSerialSequence(current);
 
   // Make an existing structural SERIAL-to-integer request visible to transition validation.
   const isDesiredBaseInt = ["INT2", "INT4", "INT8", "SMALLINT", "INTEGER", "BIGINT"].includes(desiredUpperType);

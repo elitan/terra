@@ -261,9 +261,14 @@ describe("PostgreSQL serial comparison", function () {
       ...unownedNextval,
       serial: true,
     };
+    const serialWithOptionDrift: Column = {
+      ...serial,
+      serialSequenceOptionsMatch: false,
+    };
 
     expect(columnsAreDifferent(desired, misleading)).toBe(true);
     expect(columnsAreDifferent(desired, unownedNextval)).toBe(true);
     expect(columnsAreDifferent(desired, serial)).toBe(false);
+    expect(columnsAreDifferent(desired, serialWithOptionDrift)).toBe(true);
   });
 });

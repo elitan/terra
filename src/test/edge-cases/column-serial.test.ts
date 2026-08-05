@@ -49,6 +49,38 @@ describe("Edge case: serial/bigserial columns", function () {
     return getTableColumnDetails(client, "t");
   }
 
+  async function getSerialSequenceState(tableName: string) {
+    const result = await client.query(
+      `
+        SELECT
+          sequence_class.oid::text AS oid,
+          sequence_catalog.seqstart,
+          sequence_catalog.seqincrement,
+          sequence_catalog.seqmin,
+          sequence_catalog.seqmax,
+          sequence_catalog.seqcache,
+          sequence_catalog.seqcycle,
+          pg_get_expr(defaults.adbin, defaults.adrelid) AS default_value,
+          pg_get_serial_sequence($1, 'id') AS owned_sequence
+        FROM pg_attribute attribute
+        JOIN pg_attrdef defaults
+          ON defaults.adrelid = attribute.attrelid
+          AND defaults.adnum = attribute.attnum
+        JOIN pg_depend ownership
+          ON ownership.refobjid = attribute.attrelid
+          AND ownership.refobjsubid = attribute.attnum
+          AND ownership.deptype = 'a'
+        JOIN pg_class sequence_class ON sequence_class.oid = ownership.objid
+        JOIN pg_sequence sequence_catalog
+          ON sequence_catalog.seqrelid = sequence_class.oid
+        WHERE attribute.attrelid = to_regclass($1)
+          AND attribute.attname = 'id'
+      `,
+      [tableName]
+    );
+    return result.rows[0];
+  }
+
   test("v1: create and verify idempotency", async function () {
     await schemaService.apply(schemaV1, ["public"], true);
 
@@ -304,6 +336,52 @@ describe("Edge case: serial/bigserial columns", function () {
         sequence_name: "public.expression_serial_id_seq",
       },
     ]);
+  });
+
+  test("rejects drift in every canonical serial sequence option", async function () {
+    const scenarios = [
+      ["start", "START WITH 5"],
+      ["increment", "INCREMENT BY 2"],
+      ["minimum", "MINVALUE 0"],
+      ["maximum", "MAXVALUE 1000"],
+      ["cache", "CACHE 5"],
+      ["cycle", "CYCLE"],
+    ];
+
+    for (const [name, alteration] of scenarios) {
+      const tableName = `serial_${name}_drift`;
+      const sequenceName = `${tableName}_id_seq`;
+      const desired = `CREATE TABLE ${tableName} (id SERIAL, label TEXT);`;
+      await schemaService.apply(desired, ["public"], true);
+      await client.query(
+        `INSERT INTO ${tableName} (label) VALUES ('retained')`
+      );
+      await client.query(`ALTER SEQUENCE ${sequenceName} ${alteration}`);
+      const before = await getSerialSequenceState(tableName);
+
+      await expect(
+        schemaService.apply(desired, ["public"], true)
+      ).rejects.toThrow(/serial sequence options.*not supported/i);
+
+      expect(await getSerialSequenceState(tableName)).toEqual(before);
+      const rows = (await client.query(
+        `SELECT id, label FROM ${tableName}`
+      )).rows;
+      expect(rows).toEqual([{ id: 1, label: "retained" }]);
+      await client.query(`DROP TABLE ${tableName}`);
+    }
+  });
+
+  test("ignores live serial counter restarts that are not schema options", async function () {
+    const desired = `CREATE TABLE serial_restart (id SERIAL);`;
+    await schemaService.apply(desired, ["public"], true);
+    await client.query("ALTER SEQUENCE serial_restart_id_seq RESTART WITH 50");
+
+    expect((await schemaService.plan(desired, ["public"])).hasChanges).toBe(false);
+    const rows = (await client.query(
+      "INSERT INTO serial_restart DEFAULT VALUES RETURNING id"
+    )).rows;
+    expect(rows).toEqual([{ id: 50 }]);
   });
 
   test("adds a serial column to an existing table and reapplies idempotently", async function () {

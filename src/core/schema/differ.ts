@@ -44,7 +44,8 @@ import {
   getBareTableName,
   generateColumnDefinition,
   generateExclusionConstraintClause,
-  isPostgresSerialDefault,
+  hasCanonicalPostgresSerialSequence,
+  isInspectedPostgresSerialColumn,
   isPostgresSerialType,
 } from "../../utils/sql";
 import { expressionsEqual } from "../../utils/expression-comparator";
@@ -3467,14 +3468,32 @@ export class SchemaDiffer {
     const normalizedDesiredType = normalizeType(desiredColumn.type);
     const normalizedCurrentType = normalizeType(currentColumn.type);
     const desiredIsSerial = isPostgresSerialType(desiredColumn.type);
-    const currentIsSerial =
-      currentColumn.serial === true &&
-      isPostgresSerialDefault(currentColumn.default);
+    const currentHasSerialDefinition =
+      isInspectedPostgresSerialColumn(currentColumn);
+    const currentIsSerial = hasCanonicalPostgresSerialSequence(currentColumn);
+
+    if (
+      desiredIsSerial &&
+      currentHasSerialDefinition &&
+      normalizedDesiredType === normalizedCurrentType &&
+      !currentIsSerial
+    ) {
+      const columnName = `${table.schema || "public"}.${table.name}.${desiredColumn.name}`;
+      throw new ValidationError(
+        `PostgreSQL serial sequence options for existing column '${columnName}' differ from the canonical SERIAL defaults, and automatic reconciliation is not supported; use an identity column or model and migrate an explicit sequence before managing the resulting schema with TerraDB`,
+        `column ${columnName}`,
+        "serialSequenceOptions",
+        currentColumn.serialSequenceOptionsMatch
+      );
+    }
+
     const changesToSerial =
       desiredIsSerial &&
       (!currentIsSerial || normalizedDesiredType !== normalizedCurrentType);
     const changesFromSerial =
-      currentIsSerial && !desiredIsSerial && !desiredColumn.generated;
+      currentHasSerialDefinition &&
+      !desiredIsSerial &&
+      !desiredColumn.generated;
 
     if (!changesToSerial && !changesFromSerial) {
       return;

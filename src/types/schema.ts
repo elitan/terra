@@ -26,6 +26,8 @@ export interface Column {
   default?: string;
   /** Set by PostgreSQL inspection when a matching owned sequence is a default dependency. */
   serial?: boolean;
+  /** Whether an inspected serial sequence retains PostgreSQL's canonical definition options. */
+  serialSequenceOptionsMatch?: boolean;
   collation?: QualifiedName;
   storage?: ColumnStorage;
   storageDefault?: ColumnStorage;
