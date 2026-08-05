@@ -298,6 +298,30 @@ describe("Parser edge coverage", () => {
       });
     });
 
+    test("canonicalizes documented serial aliases", function () {
+      const aliases = [
+        ["serial2", "SMALLSERIAL"],
+        ["serial4", "SERIAL"],
+        ["serial8", "BIGSERIAL"],
+      ];
+      const columns = aliases.map(function parseSerialAlias([alias]) {
+        return parseColumn({
+          colname: alias,
+          typeName: { names: [{ String: { sval: alias } }] },
+          constraints: [],
+        });
+      });
+
+      expect(columns.map(function getType(column) {
+        return column?.type;
+      })).toEqual(aliases.map(function getCanonicalType([, canonical]) {
+        return canonical;
+      }));
+      expect(columns.map(function getNullable(column) {
+        return column?.nullable;
+      })).toEqual([false, false, false]);
+    });
+
     test("returns empty list when extractColumns iteration throws", () => {
       const badIterable = {
         [Symbol.iterator]() {

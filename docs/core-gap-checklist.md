@@ -276,6 +276,7 @@
 - done: classify PostgreSQL domain container validation from semantic alterations instead of rendered SQL text, allowing safe default changes when quoted domain names contain validation keywords while retaining pre-mutation rejection for constraint additions, validation, and `SET NOT NULL` across PostgreSQL 14-18.
 - done: route PostgreSQL table constraint drops ahead of partition removals from parsed `AlterTableCmd` nodes instead of rendered SQL text, preventing quoted `DROP CONSTRAINT` names from moving unrelated table creation or foreign-key alteration ahead of a newly referenced partition across PostgreSQL 14-18.
 - done: recognize PostgreSQL serial pseudo-types from structural catalog ownership/default dependencies plus an exact canonical `nextval` expression instead of matching keyword text; preserve create/add/remove/idempotent workflows and reject unsafe existing-column transitions in either direction before changing columns, sequences, defaults, or rows across PostgreSQL 14-18.
+- done: canonicalize PostgreSQL's documented `serial2`, `serial4`, and `serial8` aliases to their `smallserial`, `serial`, and `bigserial` definitions with implicit `NOT NULL`; prove creation, base integer types, owned defaults, alias/canonical idempotency, and equivalent replans across PostgreSQL 14-18.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

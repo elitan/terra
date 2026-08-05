@@ -139,6 +139,43 @@ describe("Edge case: serial/bigserial columns", function () {
     expect(plan.hasChanges).toBe(false);
   });
 
+  test("normalizes documented serial2 serial4 and serial8 aliases", async function () {
+    const aliases = `
+      CREATE TABLE serial_aliases (
+        x SERIAL2,
+        y SERIAL4,
+        z SERIAL8
+      );
+    `;
+    const canonical = `
+      CREATE TABLE serial_aliases (
+        x SMALLSERIAL,
+        y SERIAL,
+        z BIGSERIAL
+      );
+    `;
+
+    await schemaService.apply(aliases, ["public"], true);
+
+    const columns = await getTableColumnDetails(client, "serial_aliases");
+    expect(columns.map(function getType(column) {
+      return column.type;
+    })).toEqual(["smallint", "integer", "bigint"]);
+    expect(columns.map(function getNullable(column) {
+      return column.nullable;
+    })).toEqual([false, false, false]);
+    expect(columns.map(function getDefault(column) {
+      return column.default;
+    })).toEqual([
+      expect.stringMatching(/^nextval/),
+      expect.stringMatching(/^nextval/),
+      expect.stringMatching(/^nextval/),
+    ]);
+
+    expect((await schemaService.plan(aliases, ["public"])).hasChanges).toBe(false);
+    expect((await schemaService.plan(canonical, ["public"])).hasChanges).toBe(false);
+  });
+
   test("does not mistake a default containing nextval text for serial", async function () {
     await client.query(`
       CREATE TABLE misleading (

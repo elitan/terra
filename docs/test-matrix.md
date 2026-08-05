@@ -24,8 +24,10 @@ PostgreSQL serial coverage recognizes catalog type, owned-sequence/default
 dependencies, and the exact canonical `nextval` expression rather than matching
 keyword text. Table/column
 creation, whole-column addition/removal, external convergence, and idempotency
-are covered. Existing-column transitions to/from serial or between serial sizes
-reject before mutation and preserve columns, defaults, sequences, and rows.
+are covered. The documented `serial2`, `serial4`, and `serial8` aliases normalize
+to `smallserial`, `serial`, and `bigserial` with implicit `NOT NULL`, and both
+spellings converge. Existing-column transitions to/from serial or between serial
+sizes reject before mutation and preserve columns, defaults, sequences, and rows.
 
 ## current feature matrix
 

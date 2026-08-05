@@ -23,6 +23,27 @@ import { getColumnPhysicalChanges } from "./column-physical";
 import { renderStorageParameterAssignments } from "./storage-parameters";
 import { renderRoutineConfigurationValue } from "./routine-configuration";
 
+export type PostgresSerialType = "SMALLSERIAL" | "SERIAL" | "BIGSERIAL";
+
+const POSTGRES_SERIAL_TYPE_ALIASES: Record<string, PostgresSerialType> = {
+  SMALLSERIAL: "SMALLSERIAL",
+  SERIAL2: "SMALLSERIAL",
+  SERIAL: "SERIAL",
+  SERIAL4: "SERIAL",
+  BIGSERIAL: "BIGSERIAL",
+  SERIAL8: "BIGSERIAL",
+};
+
+export function normalizePostgresSerialType(
+  type: string
+): PostgresSerialType | undefined {
+  return POSTGRES_SERIAL_TYPE_ALIASES[type.toUpperCase()];
+}
+
+export function isPostgresSerialType(type: string): boolean {
+  return normalizePostgresSerialType(type) !== undefined;
+}
+
 export function splitSchemaTable(qualifiedName: string): [string, string | undefined] {
   const parts = qualifiedName.split('.');
   const [schema, table] = parts;
@@ -93,6 +114,11 @@ export function getQualifiedTableName(table: Table | string, schema?: string): s
 }
 
 export function normalizeType(type: string): string {
+  const serialType = normalizePostgresSerialType(type);
+  if (serialType === "SMALLSERIAL") return "INT2";
+  if (serialType === "SERIAL") return "INT4";
+  if (serialType === "BIGSERIAL") return "INT8";
+
   // Normalize PostgreSQL types to match our parsed types
   const typeMap: Record<string, string> = {
     "character varying": "VARCHAR",
@@ -132,13 +158,6 @@ export function normalizeType(type: string): string {
     // BIT types - varbit is alias for bit varying
     "bit varying": "BIT VARYING",
     varbit: "BIT VARYING",
-    // SERIAL types normalize to their base integer types
-    smallserial: "INT2",
-    serial: "INT4",
-    bigserial: "INT8",
-    SMALLSERIAL: "INT2",
-    SERIAL: "INT4",
-    BIGSERIAL: "INT8",
   };
 
   // Handle array types by extracting base type, normalizing it, and adding single []
@@ -204,16 +223,6 @@ export function normalizeType(type: string): string {
   // Normalize to lowercase first for case-insensitive matching
   const lowerType = type.toLowerCase();
   return typeMap[lowerType] || type.toUpperCase();
-}
-
-const POSTGRES_SERIAL_TYPES = new Set([
-  "SMALLSERIAL",
-  "SERIAL",
-  "BIGSERIAL",
-]);
-
-export function isPostgresSerialType(type: string): boolean {
-  return POSTGRES_SERIAL_TYPES.has(type.toUpperCase());
 }
 
 export function normalizeDefault(value: string | null | undefined): string | undefined {

@@ -4,6 +4,7 @@ import {
   columnsAreDifferent,
   isPostgresSerialDefault,
   isPostgresSerialType,
+  normalizePostgresSerialType,
 } from "../../utils/sql";
 import type { Column } from "../../types/schema";
 
@@ -214,7 +215,13 @@ describe("PostgreSQL serial comparison", function () {
     expect(isPostgresSerialType("serial")).toBe(true);
     expect(isPostgresSerialType("SMALLSERIAL")).toBe(true);
     expect(isPostgresSerialType("BigSerial")).toBe(true);
+    expect(isPostgresSerialType("serial2")).toBe(true);
+    expect(isPostgresSerialType("SERIAL4")).toBe(true);
+    expect(isPostgresSerialType("Serial8")).toBe(true);
     expect(isPostgresSerialType("integer")).toBe(false);
+    expect(normalizePostgresSerialType("serial2")).toBe("SMALLSERIAL");
+    expect(normalizePostgresSerialType("serial4")).toBe("SERIAL");
+    expect(normalizePostgresSerialType("serial8")).toBe("BIGSERIAL");
   });
 
   test("recognizes only an exact nextval regclass default", function () {

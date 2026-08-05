@@ -120,11 +120,13 @@ export DATABASE_URL=":memory:"
 PostgreSQL 14 through 18 are supported. Stored generated columns work across
 that range; virtual generated columns are supported on PostgreSQL 18 and fail
 before mutation on older servers.
-PostgreSQL `smallserial`, `serial`, and `bigserial` are supported when creating
-tables, adding whole columns, retaining existing serial columns, and removing
-whole columns. Existing-column transitions to or from a serial pseudo-type, or
-between serial sizes, fail before mutation because PostgreSQL expands serial to
-an owned sequence, a `nextval` default, and `NOT NULL` rather than a true type.
+PostgreSQL `smallserial`/`serial2`, `serial`/`serial4`, and
+`bigserial`/`serial8` are supported when creating tables, adding whole columns,
+retaining existing serial columns, and removing whole columns. The documented
+aliases normalize to the same implicit `NOT NULL` serial definitions.
+Existing-column transitions to or from a serial pseudo-type, or between serial
+sizes, fail before mutation because PostgreSQL expands serial to an owned
+sequence, a `nextval` default, and `NOT NULL` rather than a true type.
 Use an identity column, add a new serial column, or migrate the column and its
 sequence explicitly before managing the resulting schema with TerraDB.
 PostgreSQL extensions are matched by their database-wide unqualified names,

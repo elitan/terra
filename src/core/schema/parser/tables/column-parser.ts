@@ -13,6 +13,10 @@ import {
   normalizeColumnCompression,
   normalizeColumnStorage,
 } from "../../../../utils/column-physical";
+import {
+  isPostgresSerialType,
+  normalizePostgresSerialType,
+} from "../../../../utils/sql";
 
 /**
  * Extract all columns from CREATE TABLE tableElts array
@@ -46,7 +50,8 @@ export function parseColumn(columnDef: any): Column | null {
     const name = columnDef.colname;
     if (!name) return null;
 
-    const type = extractDataType(columnDef.typeName);
+    const extractedType = extractDataType(columnDef.typeName);
+    const type = normalizePostgresSerialType(extractedType) || extractedType;
 
     const constraints = extractBasicConstraints(columnDef.constraints || []);
 
@@ -61,7 +66,7 @@ export function parseColumn(columnDef: any): Column | null {
 
     const identity = extractIdentityColumn(columnDef.constraints || [], type);
 
-    const isSerial = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"].includes(type.toUpperCase());
+    const isSerial = isPostgresSerialType(type);
     return {
       name,
       type,
