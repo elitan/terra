@@ -3852,6 +3852,9 @@ export class SchemaDiffer {
     if (alteration.type === "alter_column_set_identity_generation") {
       return alteration.generation === "BY DEFAULT";
     }
+    if (alteration.type === "alter_column_set_compression") {
+      return alteration.compression.toLowerCase() === "default";
+    }
     return alteration.type === "alter_column_set_identity_option" &&
       alteration.clause === "CYCLE";
   }

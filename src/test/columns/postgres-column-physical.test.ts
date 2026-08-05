@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import type { MigrationPlan } from "../../types/migration";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import { cleanDatabase, createTestClient, createTestSchemaService } from "../utils";
 import {
   createColumnTestServices,
@@ -187,7 +188,8 @@ describe("PostgreSQL column storage and compression", function () {
     expect((await planSchema(desiredSchema)).hasChanges).toBe(false);
   });
 
-  test("resets storage and compression to their defaults", async function () {
+  test("blocks compression reset while leaving concrete settings safe", async function () {
+    const service = createTestSchemaService();
     const initialSchema = `
       CREATE TABLE public.physical_reset (
         payload text STORAGE PLAIN COMPRESSION lz4
@@ -198,13 +200,74 @@ describe("PostgreSQL column storage and compression", function () {
         payload text
       );
     `;
+    const concreteSchema = `
+      CREATE TABLE public.physical_reset (
+        payload text COMPRESSION pglz
+      );
+    `;
 
-    await services.executor.executePlan(client, await planSchema(initialSchema), true);
-    const plan = await planSchema(desiredSchema);
-    const sql = plan.transactional.join("\n");
-    expect(sql).toContain('ALTER COLUMN "payload" SET STORAGE EXTENDED');
-    expect(sql).toContain('ALTER COLUMN "payload" SET COMPRESSION default');
-    await services.executor.executePlan(client, plan, true);
+    async function getPhysicalState() {
+      return (
+        await client.query(`
+          SELECT relation.oid::integer AS oid,
+                 attribute.attstorage AS storage,
+                 attribute.attcompression AS compression
+          FROM pg_class relation
+          JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+          JOIN pg_attribute attribute ON attribute.attrelid = relation.oid
+          WHERE namespace.nspname = 'public'
+            AND relation.relname = 'physical_reset'
+            AND attribute.attname = 'payload'
+        `)
+      ).rows;
+    }
+
+    await service.apply(initialSchema, ["public"], true);
+    await client.query(
+      "INSERT INTO public.physical_reset VALUES (repeat('payload-', 1000))"
+    );
+    const before = await getPhysicalState();
+    const plan = await service.plan(desiredSchema, ["public"]);
+    expect(plan.transactional).toHaveLength(2);
+    const storageStatement = plan.transactional.find(
+      function findStorageStatement(statement) {
+        return statement.includes("SET STORAGE EXTENDED");
+      }
+    );
+    const compressionStatement = plan.transactional.find(
+      function findCompressionStatement(statement) {
+        return statement.includes("SET COMPRESSION default");
+      }
+    );
+    expect(storageStatement).toBeDefined();
+    expect(compressionStatement).toBeDefined();
+    if (!storageStatement || !compressionStatement) {
+      throw new Error("Expected isolated physical reset statements");
+    }
+    expect(getStatementRisk(storageStatement, "transactional")).toBe("safe");
+    expect(getStatementRisk(compressionStatement, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(
+        desiredSchema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: [compressionStatement],
+    });
+    expect(await getPhysicalState()).toEqual(before);
+    const storedRows = await client.query(
+      "SELECT length(payload) FROM public.physical_reset"
+    );
+    expect(storedRows.rows).toEqual([{ length: 8000 }]);
+
+    await service.apply(desiredSchema, ["public"], true);
 
     const current = await services.inspector.getCurrentSchema(client);
     const table = current.find(function findTable(candidate) {
@@ -215,7 +278,37 @@ describe("PostgreSQL column storage and compression", function () {
       storageDefault: "EXTENDED",
       compression: undefined,
     });
-    expect((await planSchema(desiredSchema)).hasChanges).toBe(false);
+    expect((await getPhysicalState())[0]).toMatchObject({
+      oid: before[0]?.oid,
+      storage: "x",
+      compression: "",
+    });
+    expect((await service.plan(desiredSchema, ["public"])).hasChanges).toBe(
+      false
+    );
+
+    const concretePlan = await service.plan(concreteSchema, ["public"]);
+    expect(concretePlan.transactional).toHaveLength(1);
+    expect(concretePlan.transactional[0]).toContain("SET COMPRESSION pglz");
+    expect(
+      getStatementRisk(concretePlan.transactional[0]!, "transactional")
+    ).toBe("safe");
+    await service.apply(
+      concreteSchema,
+      ["public"],
+      true,
+      undefined,
+      false,
+      true
+    );
+    expect((await getPhysicalState())[0]).toMatchObject({
+      oid: before[0]?.oid,
+      storage: "x",
+      compression: "p",
+    });
+    expect((await service.plan(concreteSchema, ["public"])).hasChanges).toBe(
+      false
+    );
   });
 
   test("applies explicit physical settings after a type change", async function () {
