@@ -134,6 +134,114 @@ describe("PostgreSQL trigger semantics", function () {
     );
   });
 
+  test("blocks trigger enforcement weakening in strict mode", async function () {
+    const service = createTestSchemaService();
+    const baseline = `
+      CREATE TABLE public.trigger_strict_events (
+        kind text NOT NULL
+      );
+
+      CREATE TABLE public.trigger_strict_subject (
+        id integer PRIMARY KEY
+      );
+
+      CREATE FUNCTION public.capture_trigger_strict_row()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        INSERT INTO public.trigger_strict_events(kind) VALUES ('row');
+        RETURN NEW;
+      END;
+      $$;
+
+      CREATE TRIGGER trigger_strict_audit
+        AFTER INSERT ON public.trigger_strict_subject
+        FOR EACH ROW
+        EXECUTE FUNCTION public.capture_trigger_strict_row();
+
+      CREATE FUNCTION public.capture_trigger_strict_ddl()
+      RETURNS event_trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        INSERT INTO public.trigger_strict_events(kind) VALUES ('event');
+      END;
+      $$;
+
+      CREATE EVENT TRIGGER ${EVENT_TRIGGER_NAME}
+        ON ddl_command_end
+        EXECUTE FUNCTION public.capture_trigger_strict_ddl();
+    `;
+    const weakeningCases = [
+      {
+        tableMode: "DISABLE TRIGGER trigger_strict_audit",
+        eventMode: `ALTER EVENT TRIGGER ${EVENT_TRIGGER_NAME} ENABLE REPLICA`,
+        statements: [
+          'ALTER TABLE "public"."trigger_strict_subject" DISABLE TRIGGER "trigger_strict_audit";',
+          `ALTER EVENT TRIGGER "${EVENT_TRIGGER_NAME}" ENABLE REPLICA;`,
+        ],
+      },
+      {
+        tableMode: "ENABLE REPLICA TRIGGER trigger_strict_audit",
+        eventMode: `ALTER EVENT TRIGGER ${EVENT_TRIGGER_NAME} DISABLE`,
+        statements: [
+          'ALTER TABLE "public"."trigger_strict_subject" ENABLE REPLICA TRIGGER "trigger_strict_audit";',
+          `ALTER EVENT TRIGGER "${EVENT_TRIGGER_NAME}" DISABLE;`,
+        ],
+      },
+    ];
+
+    await service.apply(baseline, ["public"], true);
+    await client.query("DELETE FROM public.trigger_strict_events");
+
+    for (const weakening of weakeningCases) {
+      const desired = `${baseline}
+        ALTER TABLE public.trigger_strict_subject
+          ${weakening.tableMode};
+        ${weakening.eventMode};
+      `;
+      const plan = await service.plan(desired, ["public"]);
+      expect(plan.transactional).toEqual(weakening.statements);
+      await expect(
+        service.apply(desired, ["public"], true, undefined, false, true)
+      ).rejects.toMatchObject({
+        code: "STRICT_MODE_ERROR",
+        statements: weakening.statements,
+      });
+    }
+
+    const tableMode = await client.query(`
+      SELECT t.tgenabled
+      FROM pg_trigger t
+      WHERE t.tgname = 'trigger_strict_audit'
+        AND NOT t.tgisinternal
+    `);
+    const eventMode = await client.query(
+      "SELECT evtenabled FROM pg_event_trigger WHERE evtname = $1",
+      [EVENT_TRIGGER_NAME]
+    );
+    expect(tableMode.rows).toEqual([{ tgenabled: "O" }]);
+    expect(eventMode.rows).toEqual([{ evtenabled: "O" }]);
+
+    await client.query(
+      "INSERT INTO public.trigger_strict_subject(id) VALUES (1)"
+    );
+    await client.query("CREATE TABLE public.trigger_strict_probe (id integer)");
+    const events = await client.query(`
+      SELECT kind, count(*)::integer AS count
+      FROM public.trigger_strict_events
+      GROUP BY kind
+      ORDER BY kind
+    `);
+    expect(events.rows).toEqual([
+      { kind: "event", count: 1 },
+      { kind: "row", count: 1 },
+    ]);
+    await client.query("DROP TABLE public.trigger_strict_probe");
+    expect((await service.plan(baseline, ["public"])).hasChanges).toBe(false);
+  });
+
   test("ignores implementation-owned partition trigger clones", async function () {
     const service = createTestSchemaService();
     const schema = `

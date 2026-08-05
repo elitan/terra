@@ -28,6 +28,12 @@ const ALTER_COLUMN_DROP_IDENTITY_PATTERN = new RegExp(
 const ALTER_COLUMN_DROP_EXPRESSION_PATTERN = new RegExp(
   ALTER_COLUMN_PREFIX + String.raw`DROP\s+EXPRESSION\b`
 );
+const TABLE_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN = new RegExp(
+  String.raw`\b(?:DISABLE|ENABLE\s+REPLICA)\s+TRIGGER\s+${POSTGRES_IDENTIFIER_PATTERN}\s*;?$`
+);
+const EVENT_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN = new RegExp(
+  String.raw`^ALTER\s+EVENT\s+TRIGGER\s+${POSTGRES_IDENTIFIER_PATTERN}\s+(?:DISABLE|ENABLE\s+REPLICA)\s*;?$`
+);
 
 function normalizeStatement(statement: string): string {
   return statement.trim().toUpperCase();
@@ -40,6 +46,13 @@ function hasDestructiveAlterColumn(statement: string): boolean {
     ALTER_COLUMN_DROP_NOT_NULL_PATTERN.test(statement) ||
     ALTER_COLUMN_DROP_IDENTITY_PATTERN.test(statement) ||
     ALTER_COLUMN_DROP_EXPRESSION_PATTERN.test(statement)
+  );
+}
+
+function hasTriggerEnforcementWeakening(statement: string): boolean {
+  return (
+    TABLE_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN.test(statement) ||
+    EVENT_TRIGGER_ENFORCEMENT_WEAKENING_PATTERN.test(statement)
   );
 }
 
@@ -58,6 +71,7 @@ export function isDestructiveStatement(statement: string): boolean {
     normalized.includes(" DISABLE ROW LEVEL SECURITY") ||
     normalized.includes(" NO FORCE ROW LEVEL SECURITY") ||
     normalized.includes(" SET UNLOGGED") ||
+    hasTriggerEnforcementWeakening(normalized) ||
     hasDestructiveAlterColumn(normalized)
   );
 }

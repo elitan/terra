@@ -70,6 +70,10 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users FORCE ROW LEVEL SECURITY",
       "ALTER TABLE users SET LOGGED",
       "ALTER SEQUENCE user_id_seq SET LOGGED",
+      "ALTER TABLE users ENABLE TRIGGER audit_users",
+      "ALTER TABLE users ENABLE ALWAYS TRIGGER audit_users",
+      "ALTER EVENT TRIGGER audit_ddl ENABLE",
+      "ALTER EVENT TRIGGER audit_ddl ENABLE ALWAYS",
     ];
 
     await fc.assert(
@@ -103,6 +107,10 @@ describe("Property-Based: Destructive Diff Classification", function () {
       "ALTER TABLE users NO FORCE ROW LEVEL SECURITY",
       "ALTER TABLE users SET UNLOGGED",
       "ALTER SEQUENCE user_id_seq SET UNLOGGED",
+      "ALTER TABLE users DISABLE TRIGGER audit_users",
+      "ALTER TABLE users ENABLE REPLICA TRIGGER audit_users",
+      "ALTER EVENT TRIGGER audit_ddl DISABLE",
+      "ALTER EVENT TRIGGER audit_ddl ENABLE REPLICA",
       "REVOKE SELECT ON TABLE users FROM reader RESTRICT",
       "ALTER DEFAULT PRIVILEGES FOR ROLE owner REVOKE SELECT ON TABLES FROM reader RESTRICT",
     ];
