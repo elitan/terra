@@ -53,6 +53,13 @@
 | performance budgets | partial | partial | perf tests exist, gate script pending |
 | flake rerun gate | partial | partial | script/workflow added, trend tracking pending |
 
+PostgreSQL table and materialized-view `SET ACCESS METHOD` changes are physical
+rewrites on supported server versions and are classified as destructive. Strict
+mode rejects both concrete-method changes and resets while preserving relation
+OIDs, relfilenodes, populated rows, and materialized-view dependents; ordinary
+apply performs the native rewrite and converges. PostgreSQL 14 rejects existing
+relation access-method changes before mutation because it lacks this syntax.
+
 ## version matrix target
 
 | lane | postgres versions | sqlite |

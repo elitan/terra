@@ -94,6 +94,14 @@ describe("PostgreSQL materialized view physical storage", function () {
     return result.rows[0]?.oid;
   }
 
+  async function getRelationFileNode(name: string): Promise<number> {
+    const result = await client.query(
+      "SELECT relfilenode::integer AS relfilenode FROM pg_class WHERE oid = $1::regclass",
+      [`public.${name}`]
+    );
+    return result.rows[0]?.relfilenode;
+  }
+
   async function getServerVersion(): Promise<number> {
     const result = await client.query(
       "SELECT current_setting('server_version_num')::integer AS version"
@@ -394,6 +402,7 @@ describe("PostgreSQL materialized view physical storage", function () {
       REFRESH MATERIALIZED VIEW public.item_summary;
     `);
     const originalOid = await getRelationOid("item_summary");
+    const originalFileNode = await getRelationFileNode("item_summary");
 
     if ((await getServerVersion()) < 150000) {
       await expect(service.plan(changedSchema, ["public"])).rejects.toThrow(
@@ -407,11 +416,28 @@ describe("PostgreSQL materialized view physical storage", function () {
     expect(plan.transactional).toEqual([
       `ALTER MATERIALIZED VIEW "public"."item_summary" SET ACCESS METHOD "${TEST_ACCESS_METHOD}";`,
     ]);
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(changedSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+    expect((await inspectView("item_summary")).accessMethod).toBe("heap");
+    expect(await getRelationOid("item_summary")).toBe(originalOid);
+    expect(await getRelationFileNode("item_summary")).toBe(originalFileNode);
+    expect(await client.query("SELECT * FROM public.item_summary")).toMatchObject({
+      rows: [{ id: 1, label: "preserved" }],
+    });
     await service.apply(changedSchema, ["public"], true);
     expect((await inspectView("item_summary")).accessMethod).toBe(
       TEST_ACCESS_METHOD
     );
     expect(await getRelationOid("item_summary")).toBe(originalOid);
+    const changedFileNode = await getRelationFileNode("item_summary");
+    expect(changedFileNode).not.toBe(originalFileNode);
     expect(await client.query("SELECT * FROM public.item_summary_dependency")).toMatchObject({
       rows: [{ id: 1 }],
     });
@@ -421,9 +447,24 @@ describe("PostgreSQL materialized view physical storage", function () {
     expect(resetPlan.transactional).toEqual([
       'ALTER MATERIALIZED VIEW "public"."item_summary" SET ACCESS METHOD "heap";',
     ]);
+    expect(
+      getStatementRisk(resetPlan.transactional[0]!, "transactional")
+    ).toBe("destructive");
+    await expect(
+      service.apply(initialSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: resetPlan.transactional,
+    });
+    expect((await inspectView("item_summary")).accessMethod).toBe(
+      TEST_ACCESS_METHOD
+    );
+    expect(await getRelationOid("item_summary")).toBe(originalOid);
+    expect(await getRelationFileNode("item_summary")).toBe(changedFileNode);
     await service.apply(initialSchema, ["public"], true);
     expect((await inspectView("item_summary")).accessMethod).toBe("heap");
     expect(await getRelationOid("item_summary")).toBe(originalOid);
+    expect(await getRelationFileNode("item_summary")).not.toBe(changedFileNode);
     expect((await service.plan(initialSchema, ["public"])).hasChanges).toBe(false);
   });
 

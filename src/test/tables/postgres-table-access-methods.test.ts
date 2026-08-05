@@ -9,8 +9,13 @@ import {
 } from "bun:test";
 import type { Client } from "pg";
 import type { MigrationContext, MigrationPlan } from "../../types/migration";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import { createColumnTestServices } from "../columns/column-test-utils";
-import { cleanDatabase, createTestClient } from "../utils";
+import {
+  cleanDatabase,
+  createTestClient,
+  createTestSchemaService,
+} from "../utils";
 
 const TEST_ACCESS_METHOD = "terradb_heap_access_method_test";
 
@@ -90,6 +95,16 @@ describe("PostgreSQL table access methods", function () {
     return table.accessMethod;
   }
 
+  async function getRelationIdentity(tableName: string) {
+    const result = await client.query(
+      `SELECT oid::integer AS oid, relfilenode::integer AS relfilenode
+       FROM pg_class
+       WHERE oid = $1::regclass`,
+      [`public.${tableName}`]
+    );
+    return result.rows[0];
+  }
+
   test("parses and quotes a table access method", async function () {
     const desired = await services.parser.parseSchema(`
       CREATE TABLE public.access_method_parser (id integer)
@@ -134,6 +149,7 @@ describe("PostgreSQL table access methods", function () {
   });
 
   test("changes access method in place on supported versions", async function () {
+    const service = createTestSchemaService();
     await client.query(`
       CREATE TABLE public.access_method_change (
         id integer PRIMARY KEY,
@@ -149,32 +165,57 @@ describe("PostgreSQL table access methods", function () {
       ) USING ${TEST_ACCESS_METHOD};
     `;
     const context = await getMigrationContext();
+    const originalIdentity = await getRelationIdentity("access_method_change");
 
     if ((context.postgresVersionNum || 0) < 150000) {
-      await expect(planSchema(schema)).rejects.toThrow(
+      await expect(service.plan(schema, ["public"])).rejects.toThrow(
         "PostgreSQL 14 cannot change the access method"
       );
       expect(await inspectAccessMethod("access_method_change")).toBe("heap");
       return;
     }
 
-    const plan = await planSchema(schema);
+    const plan = await service.plan(schema, ["public"]);
     const sql = plan.transactional.join("\n");
     expect(sql).toContain(`SET ACCESS METHOD "${TEST_ACCESS_METHOD}"`);
     expect(sql).toContain('ADD COLUMN "added" INT4');
     expect(sql).not.toMatch(/DROP (?:TABLE|COLUMN)/);
-    await services.executor.executePlan(client, plan, true);
+    expect(plan.transactional).toHaveLength(1);
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(schema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+    expect(await inspectAccessMethod("access_method_change")).toBe("heap");
+    expect(await getRelationIdentity("access_method_change")).toEqual(
+      originalIdentity
+    );
+    expect(
+      (await client.query("SELECT * FROM public.access_method_change")).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
+
+    await service.apply(schema, ["public"], true);
 
     expect(await inspectAccessMethod("access_method_change")).toBe(
       TEST_ACCESS_METHOD
     );
+    const changedIdentity = await getRelationIdentity("access_method_change");
+    expect(changedIdentity.oid).toBe(originalIdentity.oid);
+    expect(changedIdentity.relfilenode).not.toBe(
+      originalIdentity.relfilenode
+    );
     expect(
       (await client.query("SELECT * FROM public.access_method_change")).rows
     ).toEqual([{ id: 1, payload: "preserved", added: null }]);
-    expect((await planSchema(schema)).hasChanges).toBe(false);
+    expect((await service.plan(schema, ["public"])).hasChanges).toBe(false);
   });
 
   test("resets a custom access method to heap on supported versions", async function () {
+    const service = createTestSchemaService();
     await client.query(`
       CREATE TABLE public.access_method_reset (id integer, payload text)
       USING ${TEST_ACCESS_METHOD};
@@ -184,9 +225,10 @@ describe("PostgreSQL table access methods", function () {
       CREATE TABLE public.access_method_reset (id integer, payload text);
     `;
     const context = await getMigrationContext();
+    const originalIdentity = await getRelationIdentity("access_method_reset");
 
     if ((context.postgresVersionNum || 0) < 150000) {
-      await expect(planSchema(schema)).rejects.toThrow(
+      await expect(service.plan(schema, ["public"])).rejects.toThrow(
         "PostgreSQL 14 cannot change the access method"
       );
       expect(await inspectAccessMethod("access_method_reset")).toBe(
@@ -195,16 +237,40 @@ describe("PostgreSQL table access methods", function () {
       return;
     }
 
-    const plan = await planSchema(schema);
+    const plan = await service.plan(schema, ["public"]);
     expect(plan.transactional.join("\n")).toContain(
       'SET ACCESS METHOD "heap"'
     );
-    await services.executor.executePlan(client, plan, true);
-
-    expect(await inspectAccessMethod("access_method_reset")).toBe("heap");
+    expect(getStatementRisk(plan.transactional[0]!, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(schema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({
+      code: "STRICT_MODE_ERROR",
+      statements: plan.transactional,
+    });
+    expect(await inspectAccessMethod("access_method_reset")).toBe(
+      TEST_ACCESS_METHOD
+    );
+    expect(await getRelationIdentity("access_method_reset")).toEqual(
+      originalIdentity
+    );
     expect(
       (await client.query("SELECT * FROM public.access_method_reset")).rows
     ).toEqual([{ id: 1, payload: "preserved" }]);
-    expect((await planSchema(schema)).hasChanges).toBe(false);
+
+    await service.apply(schema, ["public"], true);
+
+    expect(await inspectAccessMethod("access_method_reset")).toBe("heap");
+    const resetIdentity = await getRelationIdentity("access_method_reset");
+    expect(resetIdentity.oid).toBe(originalIdentity.oid);
+    expect(resetIdentity.relfilenode).not.toBe(
+      originalIdentity.relfilenode
+    );
+    expect(
+      (await client.query("SELECT * FROM public.access_method_reset")).rows
+    ).toEqual([{ id: 1, payload: "preserved" }]);
+    expect((await service.plan(schema, ["public"])).hasChanges).toBe(false);
   });
 });

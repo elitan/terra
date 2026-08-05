@@ -147,6 +147,12 @@ const ALTER_COLUMN_COMPRESSION_RESET_PATTERN = new RegExp(
   String.raw`ALTER\s+(?:COLUMN\s+)?${POSTGRES_IDENTIFIER_PATTERN}\s+` +
   String.raw`SET\s+COMPRESSION\s+DEFAULT\s*;?$`
 );
+const ALTER_RELATION_ACCESS_METHOD_PATTERN = new RegExp(
+  String.raw`^ALTER\s+(?:${POSTGRES_ALTER_TABLE_TARGET_PATTERN}|` +
+  String.raw`${POSTGRES_ALTER_MATERIALIZED_VIEW_TARGET_PATTERN})\s+` +
+  String.raw`[\s\S]*?\bSET\s+ACCESS\s+METHOD\s+` +
+  String.raw`(?:DEFAULT|${POSTGRES_IDENTIFIER_PATTERN})(?:\s*,|\s*;?\s*$)`
+);
 const ALTER_SEQUENCE_DATA_TYPE_PATTERN = new RegExp(
   String.raw`^ALTER\s+${POSTGRES_ALTER_SEQUENCE_TARGET_PATTERN}\s+` +
   String.raw`AS\s+(?:SMALLINT|INTEGER|BIGINT)(?:\s|;|$)`
@@ -263,6 +269,7 @@ export function isDestructiveStatement(statement: string): boolean {
     ALTER_RELATION_DISTINCT_RESET_PATTERN.test(normalized) ||
     ALTER_STATISTICS_TARGET_RESET_PATTERN.test(normalized) ||
     ALTER_COLUMN_COMPRESSION_RESET_PATTERN.test(normalized) ||
+    ALTER_RELATION_ACCESS_METHOD_PATTERN.test(normalized) ||
     ALTER_SEQUENCE_DATA_TYPE_PATTERN.test(normalized) ||
     ALTER_SEQUENCE_CYCLE_PATTERN.test(normalized) ||
     ALTER_IDENTITY_SEQUENCE_CYCLE_PATTERN.test(normalized) ||
