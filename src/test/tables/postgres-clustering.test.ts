@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Client } from "pg";
 import { DatabaseInspector } from "../../core/schema/inspector";
+import { getStatementRisk } from "../../utils/statement-classifier";
 import {
   cleanDatabase,
   createTestClient,
@@ -55,6 +56,16 @@ describe("PostgreSQL persistent clustering lifecycle", function () {
     expect((await service.plan(selectedSchema, ["public"])).hasChanges).toBe(
       false
     );
+    await client.query(`
+      INSERT INTO public.cluster_records (id, value)
+      VALUES (1, 'Alpha'), (2, 'Beta')
+    `);
+    const tableOidBeforeRemoval = await relationOid(client, "cluster_records");
+    const rowsBeforeRemoval = (await client.query(`
+      SELECT id, value
+      FROM public.cluster_records
+      ORDER BY id
+    `)).rows;
 
     const clearedSchema = selectedSchema.replace(
       /\s*ALTER TABLE public\.cluster_records\s+CLUSTER ON cluster_records_order;/,
@@ -64,10 +75,40 @@ describe("PostgreSQL persistent clustering lifecycle", function () {
     expect(clearPlan.transactional).toContain(
       'ALTER TABLE "public"."cluster_records" SET WITHOUT CLUSTER;'
     );
+    const clearStatement = clearPlan.transactional.find(function findReset(statement) {
+      return statement.includes("SET WITHOUT CLUSTER");
+    });
+    expect(clearStatement).toBeDefined();
+    expect(getStatementRisk(clearStatement!, "transactional")).toBe(
+      "destructive"
+    );
+    await expect(
+      service.apply(clearedSchema, ["public"], true, undefined, false, true)
+    ).rejects.toMatchObject({ code: "STRICT_MODE_ERROR" });
+    expect(await relationOid(client, "cluster_records")).toBe(
+      tableOidBeforeRemoval
+    );
+    expect(await selectedClusterIndex(client, "cluster_records")).toBe(
+      "cluster_records_order"
+    );
+    expect((await client.query(`
+      SELECT id, value
+      FROM public.cluster_records
+      ORDER BY id
+    `)).rows).toEqual(rowsBeforeRemoval);
+
     await service.apply(clearedSchema, ["public"], true);
     expect(await selectedClusterIndex(client, "cluster_records")).toBe(
       undefined
     );
+    expect(await relationOid(client, "cluster_records")).toBe(
+      tableOidBeforeRemoval
+    );
+    expect((await client.query(`
+      SELECT id, value
+      FROM public.cluster_records
+      ORDER BY id
+    `)).rows).toEqual(rowsBeforeRemoval);
     expect((await service.plan(clearedSchema, ["public"])).hasChanges).toBe(
       false
     );
@@ -270,6 +311,73 @@ describe("PostgreSQL persistent clustering lifecycle", function () {
     })).toHaveProperty("clusterIndex", "Cluster Summary Order");
     expect((await service.plan(schema, ["public"])).hasChanges).toBe(false);
 
+    const materializedViewOidBeforeRemoval = await relationOid(
+      client,
+      "Cluster Summary"
+    );
+    const materializedRowsBeforeRemoval = (await client.query(`
+      SELECT "Key"
+      FROM public."Cluster Summary"
+      ORDER BY "Key"
+    `)).rows;
+    const unclusteredSchema = schema.replace(
+      /\s*ALTER MATERIALIZED VIEW public\."Cluster Summary"\s+CLUSTER ON "Cluster Summary Order";/,
+      ""
+    );
+    const clearMaterializedPlan = await service.plan(
+      unclusteredSchema,
+      ["public"]
+    );
+    const clearMaterializedStatement = clearMaterializedPlan.transactional.find(
+      function findMaterializedReset(statement) {
+        return statement.includes(
+          'ALTER MATERIALIZED VIEW "public"."Cluster Summary" SET WITHOUT CLUSTER'
+        );
+      }
+    );
+    expect(clearMaterializedStatement).toBeDefined();
+    expect(
+      getStatementRisk(clearMaterializedStatement!, "transactional")
+    ).toBe("destructive");
+    await expect(
+      service.apply(
+        unclusteredSchema,
+        ["public"],
+        true,
+        undefined,
+        false,
+        true
+      )
+    ).rejects.toMatchObject({ code: "STRICT_MODE_ERROR" });
+    expect(await relationOid(client, "Cluster Summary")).toBe(
+      materializedViewOidBeforeRemoval
+    );
+    expect(await selectedClusterIndex(client, "Cluster Summary")).toBe(
+      "Cluster Summary Order"
+    );
+    expect((await client.query(`
+      SELECT "Key"
+      FROM public."Cluster Summary"
+      ORDER BY "Key"
+    `)).rows).toEqual(materializedRowsBeforeRemoval);
+
+    await service.apply(unclusteredSchema, ["public"], true);
+    expect(await selectedClusterIndex(client, "Cluster Summary")).toBe(
+      undefined
+    );
+    expect(await relationOid(client, "Cluster Summary")).toBe(
+      materializedViewOidBeforeRemoval
+    );
+    expect((await client.query(`
+      SELECT "Key"
+      FROM public."Cluster Summary"
+      ORDER BY "Key"
+    `)).rows).toEqual(materializedRowsBeforeRemoval);
+    expect((await service.plan(unclusteredSchema, ["public"])).hasChanges).toBe(
+      false
+    );
+    await service.apply(schema, ["public"], true);
+
     const rebuilt = schema.replace(
       'ON public."Cluster Summary" ("Key");',
       'ON public."Cluster Summary" ("Key") WITH (fillfactor = 80);'
@@ -421,4 +529,23 @@ async function selectedClusterIndex(
     [relationName]
   );
   return result.rows[0]?.index_name;
+}
+
+async function relationOid(
+  client: Client,
+  relationName: string
+): Promise<string> {
+  const result = await client.query(
+    `SELECT relation.oid::text AS oid
+     FROM pg_class relation
+     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+     WHERE namespace.nspname = 'public'
+       AND relation.relname = $1`,
+    [relationName]
+  );
+  const oid = result.rows[0]?.oid;
+  if (typeof oid !== "string") {
+    throw new Error(`Expected relation '${relationName}' to exist`);
+  }
+  return oid;
 }
