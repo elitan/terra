@@ -14,6 +14,20 @@ const baseSchema = `
   );
 `;
 
+async function getVisibleOrderIds(client: Client): Promise<number[]> {
+  await client.query("SET ROLE pg_signal_backend");
+  try {
+    const result = await client.query(
+      `SELECT id FROM "${SCHEMA}"."Order" ORDER BY id`
+    );
+    return result.rows.map(function getId(row) {
+      return row.id;
+    });
+  } finally {
+    await client.query("RESET ROLE");
+  }
+}
+
 describe("PostgreSQL row-level security and policy lifecycle", function () {
   let client: Client;
 
@@ -249,6 +263,99 @@ describe("PostgreSQL row-level security and policy lifecycle", function () {
       relforcerowsecurity: false,
       policy_count: 0,
     }]);
+  });
+
+  test("rolls back policy and enforcement changes after a later policy failure", async function () {
+    const service = createTestSchemaService();
+    const initial = `${baseSchema}
+      ALTER TABLE "${SCHEMA}"."Order"
+        ENABLE ROW LEVEL SECURITY,
+        FORCE ROW LEVEL SECURITY;
+      CREATE POLICY "A tenant access"
+        ON "${SCHEMA}"."Order"
+        FOR SELECT TO PUBLIC
+        USING (tenant_id = current_setting('app.tenant_id')::integer);
+      GRANT USAGE ON SCHEMA "${SCHEMA}" TO PUBLIC;
+      GRANT SELECT ON TABLE "${SCHEMA}"."Order" TO PUBLIC;
+    `;
+    const failing = `${baseSchema}
+      CREATE POLICY "A tenant access"
+        ON "${SCHEMA}"."Order"
+        FOR SELECT TO PUBLIC
+        USING (tenant_id = 1);
+      CREATE POLICY "Z invalid policy"
+        ON "${SCHEMA}"."Order"
+        FOR SELECT TO PUBLIC
+        USING (missing_column = 1);
+      GRANT USAGE ON SCHEMA "${SCHEMA}" TO PUBLIC;
+      GRANT SELECT ON TABLE "${SCHEMA}"."Order" TO PUBLIC;
+    `;
+
+    await service.apply(initial, [SCHEMA], true);
+    await client.query(
+      `INSERT INTO "${SCHEMA}"."Order" (id, tenant_id) VALUES (1, 1), (2, 2)`
+    );
+    await client.query("SELECT set_config('app.tenant_id', '2', false)");
+    expect(await getVisibleOrderIds(client)).toEqual([2]);
+
+    const plan = await service.plan(failing, [SCHEMA]);
+    const validPolicyIndex = plan.transactional.findIndex(
+      function findValidPolicy(statement) {
+        return statement.includes('CREATE POLICY "A tenant access"');
+      }
+    );
+    const invalidPolicyIndex = plan.transactional.findIndex(
+      function findInvalidPolicy(statement) {
+        return statement.includes('CREATE POLICY "Z invalid policy"');
+      }
+    );
+    expect(plan.transactional).toEqual(
+      expect.arrayContaining([
+        `DROP POLICY IF EXISTS "A tenant access" ON "${SCHEMA}"."Order";`,
+        `ALTER TABLE "${SCHEMA}"."Order" NO FORCE ROW LEVEL SECURITY;`,
+        `ALTER TABLE "${SCHEMA}"."Order" DISABLE ROW LEVEL SECURITY;`,
+      ])
+    );
+    expect(validPolicyIndex).toBeGreaterThanOrEqual(0);
+    expect(invalidPolicyIndex).toBeGreaterThan(validPolicyIndex);
+
+    await expect(service.apply(failing, [SCHEMA], true)).rejects.toThrow(
+      'column "missing_column" does not exist'
+    );
+
+    const state = await client.query(`
+      SELECT
+        relation.relrowsecurity,
+        relation.relforcerowsecurity,
+        policy.polname,
+        policy.polpermissive,
+        policy.polcmd,
+        pg_get_expr(policy.polqual, policy.polrelid) AS using_expression
+      FROM pg_class relation
+      JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      LEFT JOIN pg_policy policy ON policy.polrelid = relation.oid
+      WHERE namespace.nspname = $1 AND relation.relname = 'Order'
+      ORDER BY policy.polname
+    `, [SCHEMA]);
+    expect(state.rows).toEqual([{
+      relrowsecurity: true,
+      relforcerowsecurity: true,
+      polname: "A tenant access",
+      polpermissive: true,
+      polcmd: "r",
+      using_expression:
+        "(tenant_id = (current_setting('app.tenant_id'::text))::integer)",
+    }]);
+    expect(await getVisibleOrderIds(client)).toEqual([2]);
+    const storedRows = await client.query(
+      `SELECT count(*)::integer AS count FROM "${SCHEMA}"."Order"`
+    );
+    expect(storedRows.rows).toEqual([{ count: 2 }]);
+
+    const restoredPlan = await service.plan(initial, [SCHEMA]);
+    expect(restoredPlan.hasChanges).toBe(false);
+    expect(restoredPlan.transactional).toEqual([]);
+    expect(restoredPlan.concurrent).toEqual([]);
   });
 
   test("combines supported table constraints with row security declarations", async function () {
