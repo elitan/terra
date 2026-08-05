@@ -461,6 +461,8 @@ export interface SqlObject {
   dropStatement?: string;
   dependencies?: string[];
   partitionKeyOperatorClasses?: PartitionKeyOperatorClass[];
+  /** Desired PostgreSQL partition-parent column types used for validation. */
+  partitionColumnTypes?: Record<string, string>;
   /** Catalog namespaces for columns reconstructed from an inspected partition. */
   partitionColumnTypeSchemas?: Record<string, string>;
   typeDefinition?: PostgresTypeDefinition;

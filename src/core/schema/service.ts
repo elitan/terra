@@ -17,6 +17,7 @@ import {
 } from "../../utils/statement-classifier";
 import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
 import { collectSQLiteSchemaIdentifiers } from "../../utils/sqlite-identifier";
+import { validatePostgresNumericModifiers } from "../../utils/postgres-numeric";
 import {
   CommentHandler,
   CompositeTypeHandler,
@@ -568,6 +569,17 @@ export class SchemaService {
         [...desiredTriggers, ...currentTriggers]
       )
       : [];
+    const migrationContext = await this.provider.getMigrationContext?.(client);
+    if (this.provider.dialect === "postgres") {
+      validatePostgresNumericModifiers(
+        {
+          tables: desiredSchema,
+          compositeTypes: desiredCompositeTypes,
+          sqlObjects: desiredSqlObjects,
+        },
+        migrationContext?.postgresVersionNum
+      );
+    }
 
     let schemaStatements: string[] = [];
     let extensionCreateStatements: string[] = [];
@@ -608,7 +620,6 @@ export class SchemaService {
       compositeTypeCreateOperations = compositeTypeResult.typeStatements;
     }
 
-    const migrationContext = await this.provider.getMigrationContext?.(client);
     const tablePlan = this.provider.generateMigrationPlan(
       desiredSchema,
       currentSchema,

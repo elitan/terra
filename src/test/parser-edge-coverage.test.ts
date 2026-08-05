@@ -361,6 +361,19 @@ describe("Parser edge coverage", () => {
       expect(parsed?.nullable).toBe(false);
     });
 
+    test("preserves a zero type modifier for validation", function () {
+      const parsed = parseColumn({
+        colname: "invalid_numeric",
+        typeName: {
+          names: [{ String: { sval: "numeric" } }],
+          typmods: [{ A_Const: { ival: {} } }],
+        },
+        constraints: [],
+      });
+
+      expect(parsed?.type).toBe("NUMERIC(0)");
+    });
+
     test("distinguishes unconstrained and primary-key nullability", function () {
       const unconstrained = parseColumn({
         colname: "optional_value",
@@ -776,6 +789,27 @@ describe("Parser edge coverage", () => {
       ).toMatchObject({
         key: "partition:public.accounts_eu",
         dependencies: ["partition:audit.accounts"],
+      });
+      expect(
+        parser.parsePartitionSqlObject({
+          CreateStmt: {
+            relation: { relname: "measurements", schemaname: "public" },
+            tableElts: [{
+              ColumnDef: {
+                colname: "value",
+                typeName: {
+                  names: [{ String: { sval: "numeric" } }],
+                  typmods: [
+                    { A_Const: { ival: { ival: 2 } } },
+                    { A_Const: { ival: { ival: 1 } } },
+                  ],
+                },
+              },
+            }],
+          },
+        })
+      ).toMatchObject({
+        partitionColumnTypes: { value: "NUMERIC(2,1)" },
       });
 
       expect(

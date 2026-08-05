@@ -1913,7 +1913,7 @@ export class SchemaParser {
       return `partition:${parent?.schemaname || schema || "public"}.${parentName}`;
     }).filter(Boolean);
 
-    return this.buildSqlObject(
+    const object = this.buildSqlObject(
       "partition",
       stmt,
       name,
@@ -1921,6 +1921,18 @@ export class SchemaParser {
       `partition:${schema || "public"}.${name}`,
       dependencies
     );
+    const partitionTable = parseCreateTable(stmt.CreateStmt);
+    const partitionColumnTypes = Object.fromEntries(
+      (partitionTable?.columns || []).map(function mapColumnType(column) {
+        return [column.name, column.type];
+      })
+    );
+    return {
+      ...object,
+      ...(Object.keys(partitionColumnTypes).length > 0
+        ? { partitionColumnTypes }
+        : {}),
+    };
   }
 
   private parseAlterTableSqlObjects(

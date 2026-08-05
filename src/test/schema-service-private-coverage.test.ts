@@ -73,6 +73,7 @@ function createValidation(overrides: Partial<ValidationResult> = {}): Validation
 }
 
 function createMockProvider(options: {
+  dialect?: DatabaseProvider["dialect"];
   parsedSchema?: ParsedSchema;
   plan?: MigrationPlan;
   validation?: ValidationResult;
@@ -107,7 +108,7 @@ function createMockProvider(options: {
   };
 
   const provider: DatabaseProvider = {
-    dialect: "postgres",
+    dialect: options.dialect ?? "postgres",
     createClient: async function () {
       return client;
     },
@@ -181,6 +182,12 @@ function createMockProvider(options: {
 }
 
 function createService(provider: DatabaseProvider): SchemaService {
+  if (provider.dialect === "sqlite") {
+    return new SchemaService(provider, {
+      dialect: "sqlite",
+      filename: ":memory:",
+    });
+  }
   return new SchemaService(provider, {
     dialect: "postgres",
     host: "localhost",
@@ -192,6 +199,33 @@ function createService(provider: DatabaseProvider): SchemaService {
 }
 
 describe("SchemaService private coverage", function () {
+  test("validates numeric modifiers only for PostgreSQL", async function () {
+    const invalidNumeric = createParsedSchema({
+      tables: [{
+        name: "measurements",
+        columns: [{ name: "value", type: "NUMERIC(0)" }],
+      }],
+    });
+    const postgres = createMockProvider({
+      parsedSchema: invalidNumeric,
+      migrationContext: { postgresVersionNum: 180000 },
+    });
+    await expect(
+      createService(postgres.provider).plan("CREATE TABLE measurements")
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringMatching(/numeric precision 0/i),
+    });
+
+    const sqlite = createMockProvider({
+      dialect: "sqlite",
+      parsedSchema: invalidNumeric,
+    });
+    await expect(
+      createService(sqlite.provider).plan("CREATE TABLE measurements")
+    ).resolves.toMatchObject({ hasChanges: false });
+  });
+
   test("generateStatements preserves array creates and matching managed objects", function () {
     interface Item {
       name: string;

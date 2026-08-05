@@ -169,6 +169,17 @@ precision boundaries: `float(1)` through `float(24)` normalize to `real`, while
 precision`. The boundary forms converge across columns, arrays, composite
 attributes, domain bases, and range subtypes; precision outside `1` through `53`
 fails during parsing before any preceding schema change is applied.
+PostgreSQL `numeric`/`decimal` modifiers require precision from `1` through
+`1000`. PostgreSQL 14 additionally requires scale from `0` through precision;
+PostgreSQL 15–18 accept scale from `-1000` through `1000`, including negative
+scale and scale above precision. TerraDB validates these version-specific bounds
+before mutation across ordinary and partitioned columns, arrays, composite
+attributes, and domain bases.
+Zero precision remains explicit rather than being treated as omission, so
+definitions such as `timestamp(0)` and `time(0)` retain their catalog semantics.
+Numeric modifiers on range subtypes are rejected because PostgreSQL accepts but
+does not retain the modifier in its range catalog; use an unconstrained numeric
+subtype or a domain when the constraint must remain declarative.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

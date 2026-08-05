@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { Client } from "pg";
+import type { Client } from "pg";
 import {
   createTestClient,
   cleanDatabase,
@@ -7,17 +7,17 @@ import {
   getTableColumnDetails,
 } from "../utils";
 
-describe("Edge case: time/timestamp precision", () => {
+describe("Edge case: time/timestamp precision", function () {
   let client: Client;
   let schemaService: ReturnType<typeof createTestSchemaService>;
 
-  beforeEach(async () => {
+  beforeEach(async function prepareDatabase() {
     client = await createTestClient();
     await cleanDatabase(client);
     schemaService = createTestSchemaService();
   });
 
-  afterEach(async () => {
+  afterEach(async function cleanUpDatabase() {
     await cleanDatabase(client);
     await client?.end();
   });
@@ -55,7 +55,7 @@ describe("Edge case: time/timestamp precision", () => {
     })).toEqual(expectedColumns);
   }
 
-  test("v1: create and verify idempotency", async () => {
+  test("v1: create and verify idempotency", async function () {
     await schemaService.apply(schemaV1, ["public"], true);
 
     await expectTimeColumns([
@@ -68,7 +68,7 @@ describe("Edge case: time/timestamp precision", () => {
     expect(plan.hasChanges).toBe(false);
   });
 
-  test("v1->v2: apply changes and verify idempotency", async () => {
+  test("v1->v2: apply changes and verify idempotency", async function () {
     await schemaService.apply(schemaV1, ["public"], true);
 
     const plan = await schemaService.plan(schemaV2, ["public"]);
@@ -80,12 +80,12 @@ describe("Edge case: time/timestamp precision", () => {
       { name: "c1", type: "timestamp(1) with time zone" },
       { name: "c10", type: "time(6) with time zone" },
       { name: "c2", type: "timestamp with time zone" },
-      { name: "c3", type: "timestamp with time zone" },
+      { name: "c3", type: "timestamp(0) with time zone" },
       { name: "c4", type: "time without time zone" },
       { name: "c5", type: "time(1) without time zone" },
       { name: "c6", type: "timestamp without time zone" },
       { name: "c7", type: "timestamp(5) without time zone" },
-      { name: "c8", type: "time with time zone" },
+      { name: "c8", type: "time(0) with time zone" },
       { name: "c9", type: "time with time zone" },
     ]);
 

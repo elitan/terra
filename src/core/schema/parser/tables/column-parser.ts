@@ -135,7 +135,7 @@ export function extractDataType(typeName: any): string {
     if (typeName.typmods && typeName.typmods.length > 0) {
       const params = typeName.typmods.map((mod: any) => {
         if (mod.A_Const?.ival !== undefined) {
-          return mod.A_Const.ival.ival;
+          return mod.A_Const.ival.ival ?? 0;
         }
         if (mod.A_Const?.sval !== undefined) {
           return mod.A_Const.sval.sval;
@@ -149,7 +149,9 @@ export function extractDataType(typeName: any): string {
         } catch {
           return '';
         }
-      }).filter(Boolean);
+      }).filter(function hasTypeModifier(param: string | number) {
+        return param !== '';
+      });
 
       if (params.length > 0) {
         if (type === "INTERVAL" && params.length === 2 && params[0] === 32767) {
