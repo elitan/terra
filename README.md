@@ -138,6 +138,11 @@ before mutation because a serial declaration cannot express those changes; use
 an identity column or an explicit sequence when custom options are required.
 Live counter values, including `ALTER SEQUENCE ... RESTART`, are runtime state
 and do not cause schema drift.
+Because serial already supplies `NOT NULL` and a sequence-backed default,
+desired serial declarations with an explicit `NULL`, `DEFAULT`, identity, or
+generated clause fail during parsing before any database mutation. An explicit
+`NOT NULL` clause and ordinary key, check, unique, or reference constraints
+remain compatible with serial.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

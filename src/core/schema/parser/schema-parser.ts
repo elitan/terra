@@ -84,6 +84,7 @@ import {
   renderPostgresForeignServerCreate,
   sortPostgresForeignServerOptions,
 } from "../../../utils/postgres-foreign-server";
+import { isPostgresSerialType } from "../../../utils/sql";
 import {
   mergeForeignServerOwners,
   parseForeignServerOwner,
@@ -110,6 +111,13 @@ type PendingTableConstraint = {
       constraint: NonNullable<Table["checkConstraints"]>[number];
     }
 );
+
+const POSTGRES_SERIAL_CONFLICTING_CLAUSES: ReadonlyMap<string, string> = new Map([
+  ["CONSTR_NULL", "NULL"],
+  ["CONSTR_DEFAULT", "DEFAULT"],
+  ["CONSTR_IDENTITY", "identity"],
+  ["CONSTR_GENERATED", "generated"],
+]);
 
 function getPostgresStatementSource(sql: string, wrapper: any): string {
   const bytes = Buffer.from(sql, "utf8");
@@ -784,6 +792,10 @@ export class SchemaParser {
             stmt.CreateStmt,
             filePath
           );
+          this.rejectConflictingSerialColumnClauses(
+            stmt.CreateStmt,
+            filePath
+          );
           this.rejectUnsupportedConstraintSemantics(
             stmt.CreateStmt,
             filePath
@@ -1378,6 +1390,39 @@ export class SchemaParser {
           filePath
         );
       }
+    }
+  }
+
+  private rejectConflictingSerialColumnClauses(
+    stmt: any,
+    filePath?: string
+  ): void {
+    for (const element of stmt.tableElts || []) {
+      const column = element.ColumnDef;
+      if (!column || !isPostgresSerialType(extractDataType(column.typeName))) {
+        continue;
+      }
+
+      const conflicts: string[] = [];
+      for (const wrapper of column.constraints || []) {
+        const label = POSTGRES_SERIAL_CONFLICTING_CLAUSES.get(
+          wrapper.Constraint?.contype
+        );
+        if (label && !conflicts.includes(label)) {
+          conflicts.push(label);
+        }
+      }
+      if (conflicts.length === 0) {
+        continue;
+      }
+
+      const schema = stmt.relation?.schemaname || "public";
+      const table = stmt.relation?.relname || "<unnamed>";
+      const name = column.colname || "<unnamed>";
+      throw new ParserError(
+        `PostgreSQL serial column '${schema}.${table}.${name}' declares ${conflicts.join(", ")}, which conflicts with SERIAL's implicit NOT NULL and sequence-backed default. Remove the conflicting clause or use an integer identity column or explicit sequence-backed default instead`,
+        filePath
+      );
     }
   }
 

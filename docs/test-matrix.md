@@ -33,6 +33,11 @@ version-appropriate persistence must retain their canonical definitions; every
 drift form rejects before mutation, while live counter advancement and `RESTART`
 state remain unmanaged. Persistence matches the owning table on PostgreSQL 15+
 and remains logged for PostgreSQL 14 unlogged tables.
+Desired serial columns reject explicit `NULL`, `DEFAULT`, identity, and
+generated clauses before planning because those conflict with serial's implicit
+`NOT NULL` and sequence default; explicit `NOT NULL` remains equivalent and
+idempotent. Parser and apply-level scenarios cover canonical and alias spellings,
+pre-mutation failure, and non-application of preceding desired changes.
 
 ## current feature matrix
 

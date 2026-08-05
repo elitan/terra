@@ -279,6 +279,7 @@
 - done: canonicalize PostgreSQL's documented `serial2`, `serial4`, and `serial8` aliases to their `smallserial`, `serial`, and `bigserial` definitions with implicit `NOT NULL`; prove creation, base integer types, owned defaults, alias/canonical idempotency, and equivalent replans across PostgreSQL 14-18.
 - done: inspect canonical PostgreSQL serial-owned sequence start, increment, minimum, maximum, cache, and cycle options; reject every definition drift before mutation while preserving sequence OIDs/options, defaults, ownership, rows, and live values, and continue treating counter advancement plus `RESTART` as unmanaged runtime state across PostgreSQL 14-18.
 - done: inspect PostgreSQL serial-owned sequence persistence using version-aware server semantics; require logged/unlogged persistence to match the owning table on PostgreSQL 15-18, retain PostgreSQL 14's logged sequence behavior for unlogged tables, and reject external persistence drift before mutation while preserving exact sequence state, ownership, defaults, and rows.
+- done: reject PostgreSQL serial and serial-alias declarations with explicit `NULL`, `DEFAULT`, identity, or generated clauses during parsing because they conflict with serial's implicit `NOT NULL` and sequence default; preserve explicit `NOT NULL` as an equivalent spelling and prove pre-mutation failure before preceding desired changes across PostgreSQL 14-18.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser
