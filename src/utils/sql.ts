@@ -206,6 +206,16 @@ export function normalizeType(type: string): string {
   return typeMap[lowerType] || type.toUpperCase();
 }
 
+const POSTGRES_SERIAL_TYPES = new Set([
+  "SMALLSERIAL",
+  "SERIAL",
+  "BIGSERIAL",
+]);
+
+export function isPostgresSerialType(type: string): boolean {
+  return POSTGRES_SERIAL_TYPES.has(type.toUpperCase());
+}
+
 export function normalizeDefault(value: string | null | undefined): string | undefined {
   if (value === null || value === undefined) {
     return undefined;
@@ -285,6 +295,18 @@ export function normalizeDefault(value: string | null | undefined): string | und
   normalized = normalized.replace(/\s+/g, ' ').trim();
 
   return normalized;
+}
+
+export function isPostgresSerialDefault(
+  value: string | null | undefined
+): boolean {
+  const normalized = normalizeDefault(value);
+  if (!normalized) {
+    return false;
+  }
+  return /^nextval\s*\(\s*'(?:[^']|'')+'\s*::\s*regclass\s*\)$/i.test(
+    normalized
+  );
 }
 
 function isBalancedOuterParens(str: string): boolean {
@@ -388,40 +410,21 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
   const normalizedDesiredType = normalizeType(desired.type);
   const normalizedCurrentType = normalizeType(current.type);
 
-  // Map SERIAL types to their base PostgreSQL types
-  const serialTypeMap: Record<string, string> = {
-    SERIAL: "integer",
-    SMALLSERIAL: "smallint",
-    BIGSERIAL: "bigint",
-  };
-
-  // Map base types to their SERIAL equivalents for reverse lookup
-  const baseToSerialMap: Record<string, string> = {
-    INTEGER: "SERIAL",
-    SMALLINT: "SMALLSERIAL",
-    BIGINT: "BIGSERIAL",
-  };
-
   // Special handling for SERIAL-like columns (SERIAL, SMALLSERIAL, BIGSERIAL)
-  // These become integer/smallint/bigint with nextval() default in database
+  // The inspector proves that the default's sequence is owned by this column.
   const desiredUpperType = desired.type.toUpperCase();
-  const isDesiredSerial = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"].includes(desiredUpperType);
-  if (isDesiredSerial && normalizedDesiredType === normalizedCurrentType) {
-    if (current.default?.includes("nextval")) {
-      // Serial columns are implicitly NOT NULL, so desired.nullable being undefined means NOT NULL
-      const desiredIsNotNull = desired.nullable === false || desired.nullable === undefined;
-      const currentIsNotNull = current.nullable === false;
-      return desiredIsNotNull !== currentIsNotNull;
-    }
-  }
+  const isDesiredSerial = isPostgresSerialType(desired.type);
+  const currentIsSerial =
+    current.serial === true && isPostgresSerialDefault(current.default);
 
-  // If desired is a base integer type and current has nextval default,
-  // the current column is actually a SERIAL type that we want to convert to plain integer
+  // Make an existing structural SERIAL-to-integer request visible to transition validation.
   const isDesiredBaseInt = ["INT2", "INT4", "INT8", "SMALLINT", "INTEGER", "BIGINT"].includes(desiredUpperType);
-  if (isDesiredBaseInt && current.default?.includes("nextval")) {
-    if (normalizedDesiredType === normalizedCurrentType) {
-      return true; // Need to modify to remove the SERIAL behavior (drop default)
-    }
+  if (
+    isDesiredBaseInt &&
+    currentIsSerial &&
+    normalizedDesiredType === normalizedCurrentType
+  ) {
+    return true;
   }
 
   // Check if types are different
@@ -450,9 +453,7 @@ export function columnsAreDifferent(desired: Column, current: Column): boolean {
 
   // Only consider it different if one has a non-null/non-undefined default and the other doesn't
   if (currentDefault !== desiredDefault) {
-    // Special case: SERIAL-like columns with nextval defaults are expected
-    const serialTypes = ["SERIAL", "SMALLSERIAL", "BIGSERIAL"];
-    if (serialTypes.includes(desired.type.toUpperCase()) && current.default?.includes("nextval")) {
+    if (isDesiredSerial && currentIsSerial) {
       return false;
     }
     return true;

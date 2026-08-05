@@ -44,6 +44,8 @@ import {
   getBareTableName,
   generateColumnDefinition,
   generateExclusionConstraintClause,
+  isPostgresSerialDefault,
+  isPostgresSerialType,
 } from "../../utils/sql";
 import { expressionsEqual } from "../../utils/expression-comparator";
 import { SQLBuilder } from "../../utils/sql-builder";
@@ -2111,6 +2113,9 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
     const tableName = getQualifiedTableName(table);
+    this.validateSerialColumnTransition(table, desiredColumn, currentColumn);
+    const normalizedDesiredType = normalizeType(desiredColumn.type);
+    const normalizedCurrentType = normalizeType(currentColumn.type);
 
     // Special handling for generated columns - they need drop and recreate
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
@@ -2155,8 +2160,6 @@ export class SchemaDiffer {
       return statements;
     }
 
-    const normalizedDesiredType = normalizeType(desiredColumn.type);
-    const normalizedCurrentType = normalizeType(currentColumn.type);
     const typeIsChanging = normalizedDesiredType !== normalizedCurrentType;
     const collationIsChanging = collationsAreDifferent(
       desiredColumn.collation,
@@ -3105,7 +3108,12 @@ export class SchemaDiffer {
         // Check for column modifications
         const currentColumn = currentColumns.get(column.name)!;
         if (columnsAreDifferent(column, currentColumn)) {
-          this.collectColumnModificationAlterations(column, currentColumn, alterations);
+          this.collectColumnModificationAlterations(
+            desiredTable,
+            column,
+            currentColumn,
+            alterations
+          );
         }
       }
     }
@@ -3336,10 +3344,13 @@ export class SchemaDiffer {
    * Collects alterations for column modifications (type, default, nullable changes)
    */
   private collectColumnModificationAlterations(
+    table: Table,
     desiredColumn: Column,
     currentColumn: Column,
     alterations: TableAlteration[]
   ): void {
+    this.validateSerialColumnTransition(table, desiredColumn, currentColumn);
+
     // Special handling for generated columns - they need drop and recreate
     // We'll still do this as separate statements for now (not batched)
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
@@ -3446,6 +3457,40 @@ export class SchemaDiffer {
         });
       }
     }
+  }
+
+  private validateSerialColumnTransition(
+    table: Table,
+    desiredColumn: Column,
+    currentColumn: Column
+  ): void {
+    const normalizedDesiredType = normalizeType(desiredColumn.type);
+    const normalizedCurrentType = normalizeType(currentColumn.type);
+    const desiredIsSerial = isPostgresSerialType(desiredColumn.type);
+    const currentIsSerial =
+      currentColumn.serial === true &&
+      isPostgresSerialDefault(currentColumn.default);
+    const changesToSerial =
+      desiredIsSerial &&
+      (!currentIsSerial || normalizedDesiredType !== normalizedCurrentType);
+    const changesFromSerial =
+      currentIsSerial && !desiredIsSerial && !desiredColumn.generated;
+
+    if (!changesToSerial && !changesFromSerial) {
+      return;
+    }
+
+    const columnName = `${table.schema || "public"}.${table.name}.${desiredColumn.name}`;
+    throw new ValidationError(
+      `PostgreSQL serial pseudo-type transition for existing column '${columnName}' is not supported because SERIAL expands to an owned sequence, a nextval default, and NOT NULL rather than a real data type; add a new serial or identity column, or migrate the existing column and its sequence explicitly before managing the result with TerraDB`,
+      `column ${columnName}`,
+      "type",
+      {
+        desired: desiredColumn.type,
+        current: currentColumn.type,
+        currentIsSerial,
+      }
+    );
   }
 
   private collectIdentityAlterations(

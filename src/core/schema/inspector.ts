@@ -98,6 +98,31 @@ const IDENTITY_SEQUENCE_JOIN_SQL = `
   ) identity_sequence ON a.attidentity != ''
 `;
 
+const SERIAL_SEQUENCE_JOIN_SQL = `
+  LEFT JOIN LATERAL (
+    SELECT TRUE as is_serial
+    FROM pg_depend sequence_ownership
+    JOIN pg_class serial_sequence
+      ON serial_sequence.oid = sequence_ownership.objid
+      AND serial_sequence.relkind = 'S'
+    JOIN pg_sequence serial_sequence_catalog
+      ON serial_sequence_catalog.seqrelid = serial_sequence.oid
+      AND serial_sequence_catalog.seqtypid = a.atttypid
+    JOIN pg_depend default_dependency
+      ON default_dependency.refobjid = serial_sequence.oid
+      AND default_dependency.classid = 'pg_attrdef'::regclass
+      AND default_dependency.objid = ad.oid
+      AND default_dependency.refclassid = 'pg_class'::regclass
+      AND default_dependency.deptype = 'n'
+    WHERE sequence_ownership.refobjid = a.attrelid
+      AND sequence_ownership.refobjsubid = a.attnum
+      AND sequence_ownership.classid = 'pg_class'::regclass
+      AND sequence_ownership.refclassid = 'pg_class'::regclass
+      AND sequence_ownership.deptype = 'a'
+    LIMIT 1
+  ) serial_sequence ON a.attidentity = ''
+`;
+
 type PostgresGrantCatalogRow = {
   grantee_name: string;
   grantee_is_public?: boolean;
@@ -821,6 +846,7 @@ export class DatabaseInspector {
           pg_get_expr(ad.adbin, ad.adrelid) as column_default,
           a.attgenerated,
           a.attidentity,
+          COALESCE(serial_sequence.is_serial, FALSE) as is_serial,
           CASE
             WHEN a.attgenerated != '' THEN pg_get_expr(ad.adbin, ad.adrelid)
             ELSE NULL
@@ -850,6 +876,7 @@ export class DatabaseInspector {
         JOIN pg_class cls ON cls.oid = a.attrelid
         JOIN pg_namespace n ON n.oid = cls.relnamespace
         ${IDENTITY_SEQUENCE_JOIN_SQL}
+        ${SERIAL_SEQUENCE_JOIN_SQL}
         ${COLUMN_COLLATION_JOIN_SQL}
         WHERE cls.relname = $1 AND n.nspname = $2 AND a.attnum > 0 AND NOT a.attisdropped
         ORDER BY a.attnum
@@ -897,6 +924,7 @@ export class DatabaseInspector {
             type: type,
             nullable: col.is_nullable,
             default: defaultValue,
+            serial: col.is_serial || undefined,
             collation,
             storage,
             storageDefault,

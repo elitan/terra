@@ -24,6 +24,8 @@ export interface Column {
   type: string;
   nullable: boolean;
   default?: string;
+  /** Set by PostgreSQL inspection when a matching owned sequence is a default dependency. */
+  serial?: boolean;
   collation?: QualifiedName;
   storage?: ColumnStorage;
   storageDefault?: ColumnStorage;

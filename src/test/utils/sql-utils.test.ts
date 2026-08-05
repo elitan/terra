@@ -1,5 +1,10 @@
 import { describe, test, expect } from "bun:test";
-import { normalizeDefault, columnsAreDifferent } from "../../utils/sql";
+import {
+  normalizeDefault,
+  columnsAreDifferent,
+  isPostgresSerialDefault,
+  isPostgresSerialType,
+} from "../../utils/sql";
 import type { Column } from "../../types/schema";
 
 describe("normalizeDefault", () => {
@@ -201,5 +206,57 @@ describe("columnsAreDifferent - default value comparison", () => {
     };
 
     expect(columnsAreDifferent(desired, current)).toBe(false);
+  });
+});
+
+describe("PostgreSQL serial comparison", function () {
+  test("recognizes only serial pseudo-type names", function () {
+    expect(isPostgresSerialType("serial")).toBe(true);
+    expect(isPostgresSerialType("SMALLSERIAL")).toBe(true);
+    expect(isPostgresSerialType("BigSerial")).toBe(true);
+    expect(isPostgresSerialType("integer")).toBe(false);
+  });
+
+  test("recognizes only an exact nextval regclass default", function () {
+    expect(
+      isPostgresSerialDefault("nextval('users_id_seq'::regclass)")
+    ).toBe(true);
+    expect(
+      isPostgresSerialDefault(
+        "pg_catalog.nextval('public.users_id_seq'::pg_catalog.regclass)"
+      )
+    ).toBe(true);
+    expect(isPostgresSerialDefault("length('nextval'::text)")).toBe(false);
+    expect(
+      isPostgresSerialDefault("nextval('users_id_seq'::regclass) + 10")
+    ).toBe(false);
+  });
+
+  test("requires inspected serial ownership instead of nextval text", function () {
+    const desired: Column = {
+      name: "id",
+      type: "SERIAL",
+      nullable: false,
+    };
+    const misleading: Column = {
+      name: "id",
+      type: "integer",
+      nullable: false,
+      default: "length('nextval'::text)",
+    };
+    const unownedNextval: Column = {
+      name: "id",
+      type: "integer",
+      nullable: false,
+      default: "nextval('users_id_seq'::regclass)",
+    };
+    const serial: Column = {
+      ...unownedNextval,
+      serial: true,
+    };
+
+    expect(columnsAreDifferent(desired, misleading)).toBe(true);
+    expect(columnsAreDifferent(desired, unownedNextval)).toBe(true);
+    expect(columnsAreDifferent(desired, serial)).toBe(false);
   });
 });
