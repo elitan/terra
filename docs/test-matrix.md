@@ -85,6 +85,10 @@ CLI category and destructive-risk classification follows SQL lexical structure:
 quoted strings/identifiers, PostgreSQL dollar bodies, SQLite bracket/backtick
 identifiers, line comments, and nested block comments cannot inject keywords
 such as `DROP CONSTRAINT` or `SET UNLOGGED` into metadata or strict-mode checks.
+PostgreSQL planner channel routing recognizes only structural
+`CREATE [UNIQUE] INDEX CONCURRENTLY` and `DROP INDEX CONCURRENTLY` commands;
+defaults, index predicates, and identifiers containing `CONCURRENTLY` remain
+inside the transactional migration instead of losing atomicity.
 
 ## version matrix target
 

@@ -79,6 +79,13 @@ import {
   getPostgresIndexTerms,
 } from "../../utils/postgres-index";
 
+const CONCURRENT_INDEX_STATEMENT_PATTERN =
+  /^(?:CREATE\s+(?:UNIQUE\s+)?INDEX|DROP\s+INDEX)\s+CONCURRENTLY\b/i;
+
+function isConcurrentIndexStatement(statement: string): boolean {
+  return CONCURRENT_INDEX_STATEMENT_PATTERN.test(statement.trim());
+}
+
 type TableIndexCandidate =
   | { kind: "standalone"; index: Index }
   | { kind: "primary"; constraint: PrimaryKeyConstraint }
@@ -1587,7 +1594,7 @@ export class SchemaDiffer {
     const concurrent: string[] = [];
 
     for (const statement of statements) {
-      if (statement.includes("CONCURRENTLY")) {
+      if (isConcurrentIndexStatement(statement)) {
         concurrent.push(statement);
       } else {
         transactional.push(statement);

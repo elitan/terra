@@ -115,6 +115,75 @@ describe("Concurrent Index Operations", () => {
       );
     });
 
+    test("should ignore CONCURRENTLY inside transactional SQL content", function () {
+      const { SchemaDiffer } = require("../../core/schema/differ");
+      const differ = new SchemaDiffer();
+      const currentSchema: Table[] = [
+        {
+          name: "users",
+          schema: "public",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            { name: "note", type: "TEXT", nullable: true, default: "'before'" },
+          ],
+          indexes: [],
+        },
+      ];
+      const desiredSchema: Table[] = [
+        {
+          name: "users",
+          schema: "public",
+          columns: [
+            { name: "id", type: "INTEGER", nullable: false },
+            {
+              name: "note",
+              type: "TEXT",
+              nullable: true,
+              default: "'CONCURRENTLY'",
+            },
+            { name: "CONCURRENTLY", type: "TEXT", nullable: true },
+          ],
+          indexes: [
+            {
+              name: "users_note_literal_idx",
+              tableName: "users",
+              schema: "public",
+              columns: ["note"],
+              type: "btree",
+              concurrent: false,
+              where: "note = 'CONCURRENTLY'",
+            },
+            {
+              name: "users_note_idx",
+              tableName: "users",
+              schema: "public",
+              columns: ["note"],
+              type: "btree",
+              concurrent: true,
+            },
+          ],
+        },
+      ];
+
+      const plan = differ.generateMigrationPlan(desiredSchema, currentSchema);
+
+      expect(plan.transactional.some(function hasDefaultChange(statement) {
+        return statement.includes("SET DEFAULT 'CONCURRENTLY'");
+      })).toBe(true);
+      expect(plan.transactional.some(function hasConcurrentIdentifier(statement) {
+        return statement.includes('ADD COLUMN "CONCURRENTLY" TEXT');
+      })).toBe(true);
+      expect(plan.transactional.some(function hasConcurrentPredicate(statement) {
+        return (
+          statement.startsWith('CREATE INDEX "users_note_literal_idx"') &&
+          statement.includes("WHERE note = 'CONCURRENTLY'")
+        );
+      })).toBe(true);
+      expect(plan.concurrent).toEqual([
+        'CREATE INDEX CONCURRENTLY "users_note_idx" ON "public"."users" ("note");',
+      ]);
+    });
+
     test("should use CONCURRENTLY for index drops by default", async () => {
       const { SchemaDiffer } = require("../../core/schema/differ");
       const differ = new SchemaDiffer();
