@@ -175,11 +175,17 @@ PostgreSQL 15–18 accept scale from `-1000` through `1000`, including negative
 scale and scale above precision. TerraDB validates these version-specific bounds
 before mutation across ordinary and partitioned columns, arrays, composite
 attributes, and domain bases.
-Zero precision remains explicit rather than being treated as omission, so
-definitions such as `timestamp(0)` and `time(0)` retain their catalog semantics.
 Numeric modifiers on range subtypes are rejected because PostgreSQL accepts but
 does not retain the modifier in its range catalog; use an unconstrained numeric
 subtype or a domain when the constraint must remain declarative.
+PostgreSQL `time`, `timestamp`, and `interval` fractional precision is validated
+from `0` through `6` before planning, preventing the server from silently
+clamping larger values to 6. Zero remains explicit rather than becoming omitted,
+and all documented `interval` field restrictions, from `YEAR` through `MINUTE TO
+SECOND`, round-trip across ordinary and partitioned columns, bounded arrays,
+composite attributes, and domain bases. Temporal modifiers on range subtypes are
+rejected because PostgreSQL accepts but does not retain them in the range
+catalog; use an unconstrained temporal subtype or a domain instead.
 PostgreSQL extensions are matched by their database-wide unqualified names,
 including when their member objects are installed outside a managed schema.
 `CASCADE` installation dependencies are inspected recursively so a required

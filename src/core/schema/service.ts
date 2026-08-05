@@ -18,6 +18,7 @@ import {
 import { hasSQLiteTableRecreation } from "../../utils/sqlite-recreation";
 import { collectSQLiteSchemaIdentifiers } from "../../utils/sqlite-identifier";
 import { validatePostgresNumericModifiers } from "../../utils/postgres-numeric";
+import { validatePostgresTemporalModifiers } from "../../utils/postgres-temporal";
 import {
   CommentHandler,
   CompositeTypeHandler,
@@ -579,6 +580,11 @@ export class SchemaService {
         },
         migrationContext?.postgresVersionNum
       );
+      validatePostgresTemporalModifiers({
+        tables: desiredSchema,
+        compositeTypes: desiredCompositeTypes,
+        sqlObjects: desiredSqlObjects,
+      });
     }
 
     let schemaStatements: string[] = [];

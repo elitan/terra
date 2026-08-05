@@ -110,6 +110,44 @@ function renderTypeIdentifier(value: string): string {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+const POSTGRES_INTERVAL_FIELDS = new Map<number, string>([
+  [4, "YEAR"],
+  [2, "MONTH"],
+  [8, "DAY"],
+  [1024, "HOUR"],
+  [2048, "MINUTE"],
+  [4096, "SECOND"],
+  [6, "YEAR TO MONTH"],
+  [1032, "DAY TO HOUR"],
+  [3080, "DAY TO MINUTE"],
+  [7176, "DAY TO SECOND"],
+  [3072, "HOUR TO MINUTE"],
+  [7168, "HOUR TO SECOND"],
+  [6144, "MINUTE TO SECOND"],
+]);
+
+function appendPostgresIntervalModifiers(
+  type: string,
+  params: Array<string | number>
+): string {
+  const fieldMask = params[0];
+  if (typeof fieldMask !== "number") {
+    return `${type}(${params.join(",")})`;
+  }
+
+  if (fieldMask === 32767) {
+    return params[1] === undefined ? type : `${type}(${params[1]})`;
+  }
+
+  const fields = POSTGRES_INTERVAL_FIELDS.get(fieldMask);
+  if (!fields) {
+    return `${type}(${params.join(",")})`;
+  }
+  return params[1] === undefined
+    ? `${type} ${fields}`
+    : `${type} ${fields}(${params[1]})`;
+}
+
 /**
  * Extract data type from typeName node
  */
@@ -154,8 +192,8 @@ export function extractDataType(typeName: any): string {
       });
 
       if (params.length > 0) {
-        if (type === "INTERVAL" && params.length === 2 && params[0] === 32767) {
-          type += `(${params[1]})`;
+        if (type === "INTERVAL") {
+          type = appendPostgresIntervalModifiers(type, params);
         } else {
           type += `(${params.join(',')})`;
         }

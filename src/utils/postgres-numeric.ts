@@ -1,26 +1,16 @@
-import type { CompositeType, SqlObject, Table } from "../types/schema";
 import { ValidationError } from "../types/errors";
-
-interface PostgresNumericTypeUsage {
-  type: string;
-  location: string;
-  rangeSubtype: boolean;
-}
+import {
+  collectPostgresTypeUsages,
+  type PostgresTypeUsage,
+  type PostgresTypeUsageSchema,
+} from "./postgres-type-usage";
 
 interface PostgresNumericModifier {
   precision: number;
   scale: number;
 }
 
-export interface PostgresNumericModifierSchema {
-  tables: Table[];
-  compositeTypes: CompositeType[];
-  sqlObjects: SqlObject[];
-}
-
-function getQualifiedName(name: string, schema: string | undefined): string {
-  return `${schema || "public"}.${name}`;
-}
+export type PostgresNumericModifierSchema = PostgresTypeUsageSchema;
 
 function parsePostgresNumericModifier(
   type: string
@@ -39,63 +29,8 @@ function hasPostgresNumericModifierSyntax(type: string): boolean {
   return /^(?:numeric|decimal)\s*\(/i.test(type.trim());
 }
 
-function collectPostgresNumericTypeUsages(
-  schema: PostgresNumericModifierSchema
-): PostgresNumericTypeUsage[] {
-  const usages: PostgresNumericTypeUsage[] = [];
-  for (const table of schema.tables) {
-    const tableName = getQualifiedName(table.name, table.schema);
-    for (const column of table.columns) {
-      usages.push({
-        type: column.type,
-        location: `column ${tableName}.${column.name}`,
-        rangeSubtype: false,
-      });
-    }
-  }
-  for (const compositeType of schema.compositeTypes) {
-    const typeName = getQualifiedName(compositeType.name, compositeType.schema);
-    for (const attribute of compositeType.attributes) {
-      usages.push({
-        type: attribute.type,
-        location: `composite attribute ${typeName}.${attribute.name}`,
-        rangeSubtype: false,
-      });
-    }
-  }
-  for (const object of schema.sqlObjects) {
-    if (object.kind === "partition" && object.partitionColumnTypes) {
-      const tableName = getQualifiedName(object.name, object.schema);
-      for (const [name, type] of Object.entries(object.partitionColumnTypes)) {
-        usages.push({
-          type,
-          location: `partition column ${tableName}.${name}`,
-          rangeSubtype: false,
-        });
-      }
-    }
-    const definition = object.typeDefinition;
-    if (!definition) continue;
-    const typeName = getQualifiedName(object.name, object.schema);
-    if (definition.kind === "domain") {
-      usages.push({
-        type: definition.baseType,
-        location: `domain ${typeName}`,
-        rangeSubtype: false,
-      });
-    } else {
-      usages.push({
-        type: definition.subtype,
-        location: `range subtype ${typeName}`,
-        rangeSubtype: true,
-      });
-    }
-  }
-  return usages;
-}
-
 function validatePostgresNumericModifier(
-  usage: PostgresNumericTypeUsage,
+  usage: PostgresTypeUsage,
   modifier: PostgresNumericModifier,
   postgresVersionNum: number | undefined
 ): void {
@@ -151,7 +86,7 @@ export function validatePostgresNumericModifiers(
   schema: PostgresNumericModifierSchema,
   postgresVersionNum: number | undefined
 ): void {
-  for (const usage of collectPostgresNumericTypeUsages(schema)) {
+  for (const usage of collectPostgresTypeUsages(schema)) {
     const modifier = parsePostgresNumericModifier(usage.type);
     if (!modifier) {
       if (hasPostgresNumericModifierSyntax(usage.type)) {

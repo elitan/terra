@@ -374,6 +374,49 @@ describe("Parser edge coverage", () => {
       expect(parsed?.type).toBe("NUMERIC(0)");
     });
 
+    test("decodes every PostgreSQL interval field mask", async function () {
+      const parser = new SchemaParser();
+      const tables = await parser.parseCreateTableStatements(`
+        CREATE TABLE interval_fields (
+          plain INTERVAL,
+          precision_only INTERVAL(0),
+          year_only INTERVAL YEAR,
+          month_only INTERVAL MONTH,
+          day_only INTERVAL DAY,
+          hour_only INTERVAL HOUR,
+          minute_only INTERVAL MINUTE,
+          second_only INTERVAL SECOND,
+          year_month INTERVAL YEAR TO MONTH,
+          day_hour INTERVAL DAY TO HOUR,
+          day_minute INTERVAL DAY TO MINUTE,
+          day_second INTERVAL DAY TO SECOND(6),
+          hour_minute INTERVAL HOUR TO MINUTE,
+          hour_second INTERVAL HOUR TO SECOND(3),
+          minute_second INTERVAL MINUTE TO SECOND(0)
+        );
+      `);
+
+      expect(tables[0]?.columns.map(function getType(column) {
+        return column.type;
+      })).toEqual([
+        "INTERVAL",
+        "INTERVAL(0)",
+        "INTERVAL YEAR",
+        "INTERVAL MONTH",
+        "INTERVAL DAY",
+        "INTERVAL HOUR",
+        "INTERVAL MINUTE",
+        "INTERVAL SECOND",
+        "INTERVAL YEAR TO MONTH",
+        "INTERVAL DAY TO HOUR",
+        "INTERVAL DAY TO MINUTE",
+        "INTERVAL DAY TO SECOND(6)",
+        "INTERVAL HOUR TO MINUTE",
+        "INTERVAL HOUR TO SECOND(3)",
+        "INTERVAL MINUTE TO SECOND(0)",
+      ]);
+    });
+
     test("distinguishes unconstrained and primary-key nullability", function () {
       const unconstrained = parseColumn({
         colname: "optional_value",

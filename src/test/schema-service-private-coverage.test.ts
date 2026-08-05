@@ -199,7 +199,7 @@ function createService(provider: DatabaseProvider): SchemaService {
 }
 
 describe("SchemaService private coverage", function () {
-  test("validates numeric modifiers only for PostgreSQL", async function () {
+  test("validates PostgreSQL-only type modifiers only for PostgreSQL", async function () {
     const invalidNumeric = createParsedSchema({
       tables: [{
         name: "measurements",
@@ -223,6 +223,31 @@ describe("SchemaService private coverage", function () {
     });
     await expect(
       createService(sqlite.provider).plan("CREATE TABLE measurements")
+    ).resolves.toMatchObject({ hasChanges: false });
+
+    const invalidTemporal = createParsedSchema({
+      tables: [{
+        name: "events",
+        columns: [{ name: "recorded_at", type: "TIMESTAMP(7)" }],
+      }],
+    });
+    const temporalPostgres = createMockProvider({
+      parsedSchema: invalidTemporal,
+      migrationContext: { postgresVersionNum: 180000 },
+    });
+    await expect(
+      createService(temporalPostgres.provider).plan("CREATE TABLE events")
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringMatching(/temporal precision 7/i),
+    });
+
+    const temporalSqlite = createMockProvider({
+      dialect: "sqlite",
+      parsedSchema: invalidTemporal,
+    });
+    await expect(
+      createService(temporalSqlite.provider).plan("CREATE TABLE events")
     ).resolves.toMatchObject({ hasChanges: false });
   });
 
