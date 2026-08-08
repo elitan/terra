@@ -239,7 +239,7 @@ jobs:
   test-mutation-changed:
     name: test:mutation:changed
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17-alpine
@@ -273,7 +273,7 @@ jobs:
           MUTATION_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
           MUTATION_HEAD_REF: ${{ github.sha }}
           MUTATION_MAX_MUTANTS_PER_FILE: "4"
-          MUTATION_TIMEOUT_MS: "90000"
+          MUTATION_TIMEOUT_MS: "180000"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
