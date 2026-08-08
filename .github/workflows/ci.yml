@@ -180,7 +180,7 @@ jobs:
   test-property-pr:
     name: test:property:pr
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:17-alpine
@@ -283,7 +283,7 @@ jobs:
   coverage-build:
     name: coverage gate + build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:17-alpine

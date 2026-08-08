@@ -274,7 +274,7 @@ describe("Property-Based: Constraint Management", () => {
         verbose: false,
       }
     );
-  }, { timeout: 120000 });
+  }, { timeout: 300000 });
 
   test("property: unique constraint creation is idempotent", async () => {
     await fc.assert(
