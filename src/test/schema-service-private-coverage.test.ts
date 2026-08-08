@@ -632,6 +632,39 @@ describe("SchemaService private coverage", function () {
     ]);
   });
 
+  test("filterCurrentExtensions protects dependencies of unmanaged extensions", function () {
+    const mock = createMockProvider();
+    const service = createService(mock.provider);
+    const privateService = service as unknown as {
+      filterCurrentExtensions: (
+        current: ParsedSchema["extensions"],
+        desired: ParsedSchema["extensions"],
+        schemas: string[]
+      ) => ParsedSchema["extensions"];
+    };
+    const current = [
+      { name: "shared", schema: "public" },
+      {
+        name: "external_consumer",
+        schema: "external",
+        dependencies: ["shared"],
+      },
+    ];
+
+    expect(privateService.filterCurrentExtensions(
+      current,
+      [],
+      ["public"]
+    )).toEqual([]);
+    expect(privateService.filterCurrentExtensions(
+      current,
+      [{ name: "shared", schema: "public" }],
+      ["public"]
+    )).toEqual([
+      { name: "shared", schema: "public" },
+    ]);
+  });
+
   test("orders planned trigger removal before its dependent function", async function () {
     const mock = createMockProvider({
       features: new Set(["stored_functions", "triggers"]),

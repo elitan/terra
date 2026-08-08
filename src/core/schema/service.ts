@@ -513,8 +513,32 @@ export class SchemaService {
       }
     }
 
+    const externallyRequiredNames = new Set<string>();
+
+    function protectDependencies(name: string): void {
+      const extension = byName.get(name);
+      if (!extension) {
+        return;
+      }
+      for (const dependency of extension.dependencies || []) {
+        if (externallyRequiredNames.has(dependency)) {
+          continue;
+        }
+        externallyRequiredNames.add(dependency);
+        protectDependencies(dependency);
+      }
+    }
+
+    for (const extension of currentExtensions) {
+      if (!includedNames.has(extension.name)) {
+        protectDependencies(extension.name);
+      }
+    }
+
     return currentExtensions.filter(function isIncluded(extension) {
-      return includedNames.has(extension.name);
+      return includedNames.has(extension.name) &&
+        (desiredNames.has(extension.name) ||
+          !externallyRequiredNames.has(extension.name));
     });
   }
 

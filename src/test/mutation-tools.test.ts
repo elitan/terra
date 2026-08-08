@@ -298,26 +298,26 @@ test("changed mutation candidates stay inside added and modified lines", functio
 test("mutation gate resolves clean-checkout base and head refs", function () {
   const pullRequestReport = runMutationGate([], {
     MUTATION_BASE_REF: "HEAD",
-    MUTATION_HEAD_REF: "HEAD~1",
+    MUTATION_HEAD_REF: "HEAD^0",
   });
   const defaultHeadReport = runMutationGate([], {
     MUTATION_BASE_REF: "HEAD",
   });
   const commandLineReport = runMutationGate([
     "--base",
-    "HEAD~1",
+    "HEAD^0",
     "--head",
     "HEAD",
   ], {
     MUTATION_BASE_REF: "HEAD",
-    MUTATION_HEAD_REF: "HEAD~1",
+    MUTATION_HEAD_REF: "HEAD^0",
   });
 
   expect(pullRequestReport.diffRef).toBe(
-    "HEAD...HEAD~1"
+    "HEAD...HEAD^0"
   );
   expect(defaultHeadReport.diffRef).toBe("HEAD...HEAD");
-  expect(commandLineReport.diffRef).toBe("HEAD~1...HEAD");
+  expect(commandLineReport.diffRef).toBe("HEAD^0...HEAD");
   expect(runMutationGate([], {}).diffRef).toBe("HEAD");
   expect(runMutationGate([
     "--files",
