@@ -119,6 +119,30 @@ describe("SQLite Unsupported Features Validation", () => {
     expect(result.errors.find(e => e.code === "SQLITE_NO_PROCEDURES")).toBeDefined();
   });
 
+  test("rejects generated-column forms SQLite cannot represent", async function () {
+    const cases = [
+      {
+        sql: "CREATE TABLE generated_default (source TEXT, normalized TEXT AS (lower(source)) DEFAULT 'fallback');",
+        message: "cannot use DEFAULT on a generated column",
+      },
+      {
+        sql: "CREATE TABLE generated_primary_key (source TEXT, normalized TEXT AS (lower(source)), PRIMARY KEY (normalized));",
+        message: "generated columns cannot be part of the PRIMARY KEY",
+      },
+      {
+        sql: "CREATE TABLE only_generated (normalized TEXT AS ('constant'));",
+        message: "must have at least one non-generated column",
+      },
+    ];
+
+    for (const scenario of cases) {
+      await expect(provider.parseSchema(scenario.sql)).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        message: expect.stringContaining(scenario.message),
+      });
+    }
+  });
+
   test("should reject schemas", () => {
     const schema = {
       tables: [],
