@@ -815,8 +815,16 @@ export class SchemaService {
         plannedTriggerRemovals
       );
     }
-    const virtualGeneratedOperatorInfo =
-      await this.getVirtualGeneratedOperatorInfo(client, schemas);
+    let virtualGeneratedOperatorInfo = {
+      userDefinedKeys: new Set<string>(),
+      builtInNames: new Set<string>(),
+    };
+    if (hasVirtualGeneratedColumns(desiredSchema)) {
+      virtualGeneratedOperatorInfo = await this.getVirtualGeneratedOperatorInfo(
+        client,
+        schemas
+      );
+    }
     this.validateVirtualGeneratedFunctionDependencies(
       desiredSchema,
       desiredFunctions,
@@ -1550,6 +1558,14 @@ export class SchemaService {
 
 function isPostgresViewDrop(statement: string): boolean {
   return /^DROP\s+(?:MATERIALIZED\s+)?VIEW\b/i.test(statement.trim());
+}
+
+function hasVirtualGeneratedColumns(tables: Table[]): boolean {
+  return tables.some(function hasVirtualGeneratedColumn(table) {
+    return table.columns.some(function isVirtualGeneratedColumn(column) {
+      return Boolean(column.generated && !column.generated.stored);
+    });
+  });
 }
 
 function getGeneratedExpressionFunctionKeys(

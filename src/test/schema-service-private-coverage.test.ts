@@ -234,6 +234,44 @@ describe("SchemaService private coverage", function () {
     expect(sqliteMock.state.clientQueries).toEqual([]);
   });
 
+  test("loads virtual generated operator metadata only when a PostgreSQL plan needs it", async function () {
+    await loadModule();
+    const plainSchema = createMockProvider({
+      parsedSchema: createParsedSchema({
+        tables: [{
+          name: "records",
+          columns: [{ name: "source", type: "TEXT" }],
+        }],
+      }),
+    });
+
+    await createService(plainSchema.provider).plan("CREATE TABLE records");
+
+    expect(plainSchema.state.clientQueries).toEqual([]);
+
+    const virtualSchema = createMockProvider({
+      parsedSchema: createParsedSchema({
+        tables: [{
+          name: "records",
+          columns: [
+            { name: "source", type: "TEXT" },
+            {
+              name: "normalized",
+              type: "TEXT",
+              generated: { expression: "source", always: true, stored: false },
+            },
+          ],
+        }],
+      }),
+    });
+
+    await createService(virtualSchema.provider).plan("CREATE TABLE records");
+
+    expect(virtualSchema.state.clientQueries).toHaveLength(2);
+    expect(virtualSchema.state.clientQueries[0]).toContain("pg_operator");
+    expect(virtualSchema.state.clientQueries[1]).toContain("pg_catalog");
+  });
+
   test("validates PostgreSQL-only type modifiers only for PostgreSQL", async function () {
     const invalidNumeric = createParsedSchema({
       tables: [{
