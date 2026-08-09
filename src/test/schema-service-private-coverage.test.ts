@@ -996,7 +996,11 @@ describe("SchemaService private coverage", function () {
         functions: any[],
         enums: any[],
         compositeTypes: any[],
-        sqlObjects: any[]
+        sqlObjects: any[],
+        currentEnums?: any[],
+        currentCompositeTypes?: any[],
+        currentSqlObjects?: any[],
+        currentFunctions?: any[]
       ): void;
     };
     expect(function rejectsUnqualifiedVirtualUserFunction() {
@@ -1035,6 +1039,48 @@ describe("SchemaService private coverage", function () {
         []
       );
     }).toThrow("cannot use user-defined type public.virtual_payload");
+    expect(function rejectsExistingVirtualUserType() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "payload",
+            type: "virtual_payload",
+            generated: { expression: "source", always: true, stored: false },
+          }],
+        }],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [{ name: "virtual_payload" }]
+      );
+    }).toThrow("cannot use user-defined type public.virtual_payload");
+    expect(function rejectsExistingVirtualUserFunction() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "normalized",
+            type: "TEXT",
+            generated: {
+              expression: "normalize_value(source)",
+              always: true,
+              stored: false,
+            },
+          }],
+        }],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [{ name: "normalize_value", parameters: [] }]
+      );
+    }).toThrow("cannot reference user-defined function public.normalize_value");
     expect(function rejectsVirtualDomainType() {
       validate.validateVirtualGeneratedFunctionDependencies(
         [{

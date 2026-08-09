@@ -820,7 +820,11 @@ export class SchemaService {
       desiredFunctions,
       desiredEnums,
       desiredCompositeTypes,
-      desiredSqlObjects
+      desiredSqlObjects,
+      currentEnums,
+      currentCompositeTypes,
+      currentSqlObjects,
+      currentFunctions
     );
     const generatedColumnFunctionStatements =
       this.getGeneratedColumnFunctionStatements(
@@ -1199,22 +1203,30 @@ export class SchemaService {
     functions: Function[],
     enums: Array<{ name: string; schema?: string }>,
     compositeTypes: Array<{ name: string; schema?: string }>,
-    sqlObjects: Array<{ kind: string; name: string; schema?: string }>
+    sqlObjects: Array<{ kind: string; name: string; schema?: string }>,
+    currentEnums: Array<{ name: string; schema?: string }> = [],
+    currentCompositeTypes: Array<{ name: string; schema?: string }> = [],
+    currentSqlObjects: Array<{ kind: string; name: string; schema?: string }> = [],
+    currentFunctions: Function[] = []
   ): void {
     if (this.provider.dialect !== "postgres") {
       return;
     }
 
-    const userDefinedFunctions = new Set(functions.map(function getFunctionKey(func) {
+    const userDefinedFunctions = new Set([...functions, ...currentFunctions].map(function getFunctionKey(func) {
       return `${func.schema || "public"}.${func.name}`;
     }));
     const userDefinedTypes = new Set([
       ...enums,
       ...compositeTypes,
-      ...sqlObjects.filter(function isTypeObject(object) {
-        return object.kind === "domain-type" || object.kind === "range-type";
-      }),
-    ].map(function getTypeKey(type) {
+      ...currentEnums,
+      ...currentCompositeTypes,
+      ...sqlObjects,
+      ...currentSqlObjects,
+    ].filter(function isTypeObject(object) {
+      return !('kind' in object) ||
+        object.kind === "domain-type" || object.kind === "range-type";
+    }).map(function getTypeKey(type) {
       return `${type.schema || "public"}.${type.name}`;
     }));
     for (const table of tables) {

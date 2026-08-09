@@ -139,4 +139,110 @@ describe("PostgreSQL generated-column function dependencies", function () {
       ).toEqual([{ type: null, relation: null }]);
     }
   });
+
+  test("rejects virtual generated columns using existing user-defined types before planning other work", async function () {
+    const service = createTestSchemaService();
+    const versionResult = await client.query("SHOW server_version_num");
+    const scenarios = [
+      {
+        name: "enum",
+        definition: "CREATE TYPE public.existing_virtual_dependency_enum AS ENUM ('valid')",
+      },
+      {
+        name: "composite",
+        definition: "CREATE TYPE public.existing_virtual_dependency_composite AS (value text)",
+      },
+      {
+        name: "domain",
+        definition: "CREATE DOMAIN public.existing_virtual_dependency_domain AS text",
+      },
+      {
+        name: "range",
+        definition: "CREATE TYPE public.existing_virtual_dependency_range AS RANGE (SUBTYPE = integer)",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const typeName = `existing_virtual_dependency_${scenario.name}`;
+      const tableName = `existing_virtual_dependency_${scenario.name}_records`;
+      const unrelatedTableName = `unrelated_virtual_dependency_${scenario.name}_records`;
+      await client.query(scenario.definition);
+      const desired = `
+        CREATE TABLE public.${unrelatedTableName} (
+          id integer PRIMARY KEY
+        );
+
+        CREATE TABLE public.${tableName} (
+          source text NOT NULL,
+          computed public.${typeName} GENERATED ALWAYS AS (source) VIRTUAL
+        );
+      `;
+
+      const error = await service.plan(desired, ["public"]).then(
+        function planUnexpectedlySucceeded() {
+          throw new Error("Expected virtual generated column planning to fail");
+        },
+        function returnPlanError(reason) {
+          return reason;
+        }
+      );
+
+      expect(error).toMatchObject({ code: "VALIDATION_ERROR" });
+      if (Number(versionResult.rows[0]?.server_version_num) >= 180000) {
+        expect(String(error)).toContain("cannot use user-defined type");
+      } else {
+        expect(String(error)).toContain("does not support virtual generated columns");
+      }
+      expect(
+        (await client.query("SELECT to_regclass($1) AS relation", [
+          `public.${unrelatedTableName}`,
+        ])).rows
+      ).toEqual([{ relation: null }]);
+    }
+  });
+
+  test("rejects a virtual generated column using an existing user-defined function before planning other work", async function () {
+    await client.query(`
+      CREATE FUNCTION public.existing_virtual_dependency_normalize(value text)
+      RETURNS text
+      LANGUAGE sql
+      IMMUTABLE
+      AS $$ SELECT lower(value); $$
+    `);
+    const service = createTestSchemaService();
+    const versionResult = await client.query("SHOW server_version_num");
+    const desired = `
+      CREATE TABLE public.unrelated_virtual_function_records (
+        id integer PRIMARY KEY
+      );
+
+      CREATE TABLE public.existing_virtual_function_records (
+        source text NOT NULL,
+        normalized text GENERATED ALWAYS AS (
+          public.existing_virtual_dependency_normalize(source)
+        ) VIRTUAL
+      );
+    `;
+
+    const error = await service.plan(desired, ["public"]).then(
+      function planUnexpectedlySucceeded() {
+        throw new Error("Expected virtual generated column planning to fail");
+      },
+      function returnPlanError(reason) {
+        return reason;
+      }
+    );
+
+    expect(error).toMatchObject({ code: "VALIDATION_ERROR" });
+    if (Number(versionResult.rows[0]?.server_version_num) >= 180000) {
+      expect(String(error)).toContain("cannot reference user-defined function");
+    } else {
+      expect(String(error)).toContain("does not support virtual generated columns");
+    }
+    expect(
+      (await client.query(
+        "SELECT to_regclass('public.unrelated_virtual_function_records') AS relation"
+      )).rows
+    ).toEqual([{ relation: null }]);
+  });
 });
