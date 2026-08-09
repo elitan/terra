@@ -201,6 +201,27 @@ function resolveForeignServerString(
   return undefined;
 }
 
+function getPartitionKeyColumnReferences(value: unknown): string[] {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(function getReferences(item) {
+      return getPartitionKeyColumnReferences(item);
+    });
+  }
+
+  const node = value as Record<string, any>;
+  const fields = node.ColumnRef?.fields;
+  if (Array.isArray(fields)) {
+    const name = fields.at(-1)?.String?.sval;
+    return typeof name === "string" ? [name] : [];
+  }
+  return Object.values(node).flatMap(function getNestedReferences(item) {
+    return getPartitionKeyColumnReferences(item);
+  });
+}
+
 function skipPostgresSpaceAndComments(statement: string, start: number): number {
   let index = start;
   while (index < statement.length) {
@@ -792,6 +813,7 @@ export class SchemaParser {
             stmt.CreateStmt,
             filePath
           );
+          this.rejectGeneratedPartitionKey(stmt.CreateStmt, filePath);
           this.rejectInvalidSerialTypeForms(
             stmt.CreateStmt,
             filePath
@@ -1342,6 +1364,46 @@ export class SchemaParser {
 
     throw new ParserError(
       `PostgreSQL partition definition uses unsupported persistent features: ${features.join(", ")}. TerraDB cannot inspect these features losslessly; use a basic partitioned parent and direct CREATE TABLE ... PARTITION OF leaf, or manage the hierarchy outside TerraDB`,
+      filePath
+    );
+  }
+
+  private rejectGeneratedPartitionKey(stmt: any, filePath?: string): void {
+    if (!stmt.partspec) {
+      return;
+    }
+
+    const table = parseCreateTable(stmt);
+    if (!table) {
+      return;
+    }
+    const generatedColumnNames = new Set(
+      table.columns.filter(function isGeneratedColumn(column) {
+        return Boolean(column.generated);
+      }).map(function getColumnName(column) {
+        return column.name;
+      })
+    );
+    if (generatedColumnNames.size !== 0) {
+      return;
+    }
+
+    const generatedPartitionColumn = (stmt.partspec.partParams || []).flatMap(
+      function getPartitionKeyReferences(wrapper: any) {
+        const element = wrapper?.PartitionElem;
+        return element?.name
+          ? [element.name]
+          : getPartitionKeyColumnReferences(element?.expr);
+      }
+    ).find(function findGeneratedPartitionColumn(name: string) {
+      return generatedColumnNames.has(name);
+    });
+    if (!generatedPartitionColumn) {
+      return;
+    }
+
+    throw new ParserError(
+      `PostgreSQL generated column '${generatedPartitionColumn}' cannot be part of a partition key; use a non-generated source column instead`,
       filePath
     );
   }

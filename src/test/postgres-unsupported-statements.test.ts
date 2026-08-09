@@ -239,6 +239,47 @@ describe("PostgreSQL unsupported desired-schema statements", function () {
     }
   });
 
+  test("rejects generated columns in direct and expression partition keys", async function () {
+    const parser = new SchemaParser();
+    const cases = [
+      "CREATE TABLE public.events (source text, normalized text GENERATED ALWAYS AS (lower(source)) STORED) PARTITION BY RANGE (normalized);",
+      "CREATE TABLE public.events (source text, normalized text GENERATED ALWAYS AS (lower(source)) STORED) PARTITION BY RANGE (lower(normalized));",
+    ];
+
+    for (const sql of cases) {
+      await expect(
+        parser.parseSchema(sql, "generated-partition.sql")
+      ).rejects.toMatchObject({
+        code: "PARSER_ERROR",
+        filePath: "generated-partition.sql",
+        message: expect.stringContaining("generated column 'normalized' cannot be part of a partition key"),
+      });
+    }
+  });
+
+  test("rejects generated partition keys before surrounding DDL can mutate", async function () {
+    const service = createTestSchemaService();
+    await expect(service.plan(`
+      CREATE TABLE public.unrelated_generated_partition_records (
+        id integer PRIMARY KEY
+      );
+      CREATE TABLE public.generated_partition_records (
+        source text,
+        normalized text GENERATED ALWAYS AS (lower(source)) STORED
+      ) PARTITION BY RANGE (lower(normalized));
+    `, ["public"])).rejects.toMatchObject({
+      code: "PARSER_ERROR",
+      message: expect.stringContaining("generated column 'normalized' cannot be part of a partition key"),
+    });
+    expect(
+      (await client.query(`
+        SELECT
+          to_regclass('public.unrelated_generated_partition_records') AS unrelated,
+          to_regclass('public.generated_partition_records') AS invalid
+      `)).rows
+    ).toEqual([{ unrelated: null, invalid: null }]);
+  });
+
   test("rejects imperative partition attachment commands", async function () {
     const parser = new SchemaParser();
     const cases = [
