@@ -8,7 +8,7 @@ import type {
   AdvisoryLockOptions,
   ParsedSchema,
 } from "../../providers/types";
-import type { Extension, Function, Table, Trigger, View } from "../../types/schema";
+import type { Column, Extension, Function, Table, Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import {
   getCreatedPostgresServerName,
@@ -816,6 +816,7 @@ export class SchemaService {
       );
     }
     this.validateGeneratedColumnReferences(desiredSchema);
+    this.validateGeneratedColumnInheritance(desiredSchema, currentSchema);
 
     let virtualGeneratedOperatorInfo = {
       userDefinedKeys: new Set<string>(),
@@ -1429,6 +1430,118 @@ export class SchemaService {
           column.name,
           column.generated.expression
         );
+      }
+    }
+  }
+
+  private validateGeneratedColumnInheritance(
+    desiredTables: Table[],
+    currentTables: Table[]
+  ): void {
+    if (this.provider.dialect !== "postgres") {
+      return;
+    }
+
+    const tableKey = function getTableKey(table: Pick<Table, "name" | "schema">): string {
+      return `${table.schema || "public"}.${table.name}`;
+    };
+    const tablesByKey = new Map<string, Table>();
+    for (const table of [...currentTables, ...desiredTables]) {
+      tablesByKey.set(tableKey(table), table);
+    }
+    const effectiveColumns = new Map<string, Map<string, Column>>();
+    const visiting = new Set<string>();
+    const getEffectiveColumns = function resolveEffectiveColumns(table: Table): Map<string, Column> {
+      const key = tableKey(table);
+      const existing = effectiveColumns.get(key);
+      if (existing) {
+        return existing;
+      }
+      if (visiting.has(key)) {
+        return new Map();
+      }
+
+      visiting.add(key);
+      const columns = new Map<string, Column>();
+      for (const parent of table.inherits || []) {
+        const parentTable = tablesByKey.get(`${parent.schema || table.schema || "public"}.${parent.name}`);
+        if (!parentTable) {
+          continue;
+        }
+        for (const [name, column] of getEffectiveColumns(parentTable)) {
+          columns.set(name, column);
+        }
+      }
+      for (const column of table.inheritedColumns || []) {
+        columns.set(column.name, column);
+      }
+      for (const column of table.columns) {
+        columns.set(column.name, column);
+      }
+      visiting.delete(key);
+      effectiveColumns.set(key, columns);
+      return columns;
+    };
+
+    for (const table of desiredTables) {
+      if (!table.inherits || table.inherits.length === 0) {
+        continue;
+      }
+
+      const inheritedColumns = new Map<string, Column[]>();
+      for (const parent of table.inherits) {
+        const parentTable = tablesByKey.get(`${parent.schema || table.schema || "public"}.${parent.name}`);
+        if (!parentTable) {
+          continue;
+        }
+        for (const [name, column] of getEffectiveColumns(parentTable)) {
+          const columns = inheritedColumns.get(name) || [];
+          columns.push(column);
+          inheritedColumns.set(name, columns);
+        }
+      }
+
+      for (const [name, parentColumns] of inheritedColumns) {
+        const generatedModes = new Set(parentColumns.map(function getGeneratedMode(column) {
+          if (!column.generated) {
+            return "ordinary";
+          }
+          return column.generated.stored ? "stored" : "virtual";
+        }));
+        const tableName = `${table.schema || "public"}.${table.name}`;
+        if (generatedModes.size > 1) {
+          throw new ValidationError(
+            `PostgreSQL inherited column ${tableName}.${name} has incompatible generated definitions across its parents`,
+            tableName,
+            name
+          );
+        }
+
+        const childColumn = table.columns.find(function findChildColumn(column) {
+          return column.name === name;
+        });
+        if (!childColumn) {
+          continue;
+        }
+        const parentColumn = parentColumns[0]!;
+        if (Boolean(parentColumn.generated) !== Boolean(childColumn.generated)) {
+          throw new ValidationError(
+            `PostgreSQL inherited column ${tableName}.${name} must ${parentColumn.generated ? "remain generated" : "not become generated"}`,
+            tableName,
+            name
+          );
+        }
+        if (
+          parentColumn.generated &&
+          childColumn.generated &&
+          parentColumn.generated.stored !== childColumn.generated.stored
+        ) {
+          throw new ValidationError(
+            `PostgreSQL inherited generated column ${tableName}.${name} must use the same storage kind as its parent`,
+            tableName,
+            name
+          );
+        }
       }
     }
   }

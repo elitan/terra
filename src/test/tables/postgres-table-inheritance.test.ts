@@ -96,6 +96,104 @@ describe("PostgreSQL table inheritance", function () {
     expect((await planSchema(schema)).hasChanges).toBe(false);
   });
 
+  test("preserves a stored generated column inherited without an override", async function () {
+    const schema = `
+      CREATE TABLE public.generated_inheritance_parent (
+        source text NOT NULL,
+        normalized text GENERATED ALWAYS AS (lower(source)) STORED
+      );
+      CREATE TABLE public.generated_inheritance_child (
+        extra text
+      ) INHERITS (public.generated_inheritance_parent);
+    `;
+
+    await services.executor.executePlan(client, await planSchema(schema), true);
+    await client.query(`
+      INSERT INTO public.generated_inheritance_child (source, extra)
+      VALUES ('MIXED Case', 'child');
+    `);
+    expect((await client.query(`
+      SELECT source, normalized, extra
+      FROM public.generated_inheritance_child
+    `)).rows).toEqual([
+      { source: "MIXED Case", normalized: "mixed case", extra: "child" },
+    ]);
+    expect((await planSchema(schema)).hasChanges).toBe(false);
+  });
+
+  test("rejects incompatible generated inheritance before surrounding DDL can mutate", async function () {
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE TABLE public.unrelated_generated_inheritance_records (
+        id integer PRIMARY KEY
+      );
+      CREATE TABLE public.generated_inheritance_parent (
+        source text,
+        normalized text
+      );
+      CREATE TABLE public.generated_inheritance_child (
+        normalized text GENERATED ALWAYS AS (lower(source)) STORED
+      ) INHERITS (public.generated_inheritance_parent);
+    `;
+
+    await expect(service.plan(desired, ["public"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("must not become generated"),
+    });
+    expect((await client.query(`
+      SELECT
+        to_regclass('public.unrelated_generated_inheritance_records') AS unrelated,
+        to_regclass('public.generated_inheritance_parent') AS parent,
+        to_regclass('public.generated_inheritance_child') AS child
+    `)).rows).toEqual([{ unrelated: null, parent: null, child: null }]);
+
+    const generatedParent = `
+      CREATE TABLE public.unrelated_generated_inheritance_records (
+        id integer PRIMARY KEY
+      );
+      CREATE TABLE public.generated_inheritance_parent (
+        source text,
+        normalized text GENERATED ALWAYS AS (lower(source)) STORED
+      );
+      CREATE TABLE public.generated_inheritance_child (
+        normalized text
+      ) INHERITS (public.generated_inheritance_parent);
+    `;
+    await expect(service.plan(generatedParent, ["public"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("must remain generated"),
+    });
+    expect((await client.query(`
+      SELECT
+        to_regclass('public.unrelated_generated_inheritance_records') AS unrelated,
+        to_regclass('public.generated_inheritance_parent') AS parent,
+        to_regclass('public.generated_inheritance_child') AS child
+    `)).rows).toEqual([{ unrelated: null, parent: null, child: null }]);
+
+    await client.query(`
+      CREATE TABLE public.external_generated_inheritance_parent (
+        source text,
+        normalized text
+      );
+    `);
+    await expect(service.plan(`
+      CREATE TABLE public.unrelated_generated_inheritance_records (
+        id integer PRIMARY KEY
+      );
+      CREATE TABLE public.generated_inheritance_child (
+        normalized text GENERATED ALWAYS AS (lower(source)) STORED
+      ) INHERITS (public.external_generated_inheritance_parent);
+    `, ["public"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("must not become generated"),
+    });
+    expect((await client.query(`
+      SELECT
+        to_regclass('public.unrelated_generated_inheritance_records') AS unrelated,
+        to_regclass('public.generated_inheritance_child') AS child
+    `)).rows).toEqual([{ unrelated: null, child: null }]);
+  });
+
   test("includes child rows in parent queries", async function () {
     const schema = `
       CREATE TABLE public.inheritance_query_parent (id integer, payload text);

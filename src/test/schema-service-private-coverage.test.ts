@@ -1204,6 +1204,84 @@ describe("SchemaService private coverage", function () {
       }]);
     }).not.toThrow();
 
+    const validateGeneratedInheritance = postgres as unknown as {
+      validateGeneratedColumnInheritance(desired: any[], current: any[]): void;
+    };
+    expect(function rejectsGeneratedInheritedColumnOverride() {
+      validateGeneratedInheritance.validateGeneratedColumnInheritance([{
+        name: "child",
+        inherits: [{ name: "parent", schema: "public" }],
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: true },
+        }],
+      }, {
+        name: "parent",
+        columns: [{ name: "normalized", type: "TEXT" }],
+      }], []);
+    }).toThrow("PostgreSQL inherited column public.child.normalized must not become generated");
+    expect(function rejectsOrdinaryInheritedColumnOverride() {
+      validateGeneratedInheritance.validateGeneratedColumnInheritance([{
+        name: "child",
+        inherits: [{ name: "parent", schema: "public" }],
+        columns: [{ name: "normalized", type: "TEXT" }],
+      }, {
+        name: "parent",
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: true },
+        }],
+      }], []);
+    }).toThrow("PostgreSQL inherited column public.child.normalized must remain generated");
+    expect(function rejectsIncompatibleGeneratedParentColumns() {
+      validateGeneratedInheritance.validateGeneratedColumnInheritance([{
+        name: "child",
+        inherits: [
+          { name: "ordinary_parent", schema: "public" },
+          { name: "generated_parent", schema: "public" },
+        ],
+        columns: [],
+      }, {
+        name: "ordinary_parent",
+        columns: [{ name: "normalized", type: "TEXT" }],
+      }, {
+        name: "generated_parent",
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: true },
+        }],
+      }], []);
+    }).toThrow("PostgreSQL inherited column public.child.normalized has incompatible generated definitions across its parents");
+    expect(function allowsInheritedGeneratedColumnWithoutAnOverride() {
+      validateGeneratedInheritance.validateGeneratedColumnInheritance([{
+        name: "child",
+        inherits: [{ name: "parent", schema: "public" }, { name: "missing", schema: "public" }],
+        columns: [],
+      }, {
+        name: "parent",
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: true },
+        }],
+      }], []);
+    }).not.toThrow();
+    const sqliteGeneratedInheritance = sqlite as unknown as {
+      validateGeneratedColumnInheritance(desired: any[], current: any[]): void;
+    };
+    expect(function skipsGeneratedInheritanceValidationForSQLite() {
+      sqliteGeneratedInheritance.validateGeneratedColumnInheritance([{
+        name: "child",
+        inherits: [{ name: "parent", schema: "public" }],
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: true },
+        }],
+      }, {
+        name: "parent",
+        columns: [{ name: "normalized", type: "TEXT" }],
+      }], []);
+    }).not.toThrow();
+
     const validate = postgres as unknown as {
       validateVirtualGeneratedFunctionDependencies(
         tables: any[],

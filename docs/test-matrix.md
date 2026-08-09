@@ -118,6 +118,12 @@ PostgreSQL planner channel routing recognizes only structural
 defaults, index predicates, and identifiers containing `CONCURRENTLY` remain
 inside the transactional migration instead of losing atomicity.
 
+Stored generated-column inheritance is lifecycle-tested on PostgreSQL 14-18:
+an undeclared child column inherits and computes the parent expression, while
+ordinary-to-generated and generated-to-ordinary overrides, incompatible
+multiple-parent definitions, and mismatches against an existing inspected
+parent fail during planning before any surrounding desired DDL can mutate.
+
 ## version matrix target
 
 | lane | postgres versions | sqlite |

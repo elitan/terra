@@ -15,6 +15,7 @@
 - done: reject PostgreSQL stored and virtual generated expressions that read prohibited system columns before planning, preserving unrelated target state across PostgreSQL 14-18 while permitting the documented `tableoid` exception.
 - done: reject PostgreSQL generated columns that also declare a default or identity before planning, preserving unrelated target state across PostgreSQL 14-18 rather than silently omitting the unsupported clause.
 - done: reject PostgreSQL generated columns in direct and expression partition keys during parsing, before unrelated target state can mutate, because PostgreSQL prohibits generated partition keys on 14-18.
+- done: reject PostgreSQL inheritance declarations that change an inherited column into or out of generated form, use a different generated storage kind, or merge incompatible generated parent columns before surrounding DDL can mutate on 14-18.
 - done: add PostgreSQL in-place role-alteration rollback integration coverage: an invalid later routine preserves the original managed role attributes and empty re-plan.
 - done: add PostgreSQL sequence-alteration rollback integration coverage: an invalid later routine definition restores the sequence OID, options, live counter, and empty original-schema re-plan.
 - done: add PostgreSQL trigger replacement rollback integration coverage: an invalid later trigger creation rolls back the prior drop-and-recreate replacement, retains original timing and firing behavior, and replans the original schema empty.
