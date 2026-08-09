@@ -290,6 +290,8 @@
 - done: preserve PostgreSQL whitespace inside ordinary, escape, dollar-quoted, and identifier literals during expression comparison instead of collapsing token contents in a string fast path; fail closed for unequal unparsable expressions; prove domain default/check, table check, generated-column, expression/partial-index, policy, rollback, OID/row preservation, and convergence behavior across PostgreSQL 14-18; and classify the shared comparator as mutation-critical with focused real-engine tests.
 - done: snapshot successful PostgreSQL and SQLite CLI JSON bytes for `plan` and real `apply` from a pending create through an empty convergence re-plan; normalize omitted Commander booleans so successful `apply` always emits the typed `dryRun: false` and `strict: false` fields.
 - done: prove a PostgreSQL schema creation rolls back when a later managed unique constraint fails on duplicate existing rows, retaining the original table OID, rows, and absent constraint with no residual schema.
+- done: prove a successful PostgreSQL object grant rolls back when a later grant targets a missing role, retaining the original ACL state.
+- done: retain a just-created database-wide PostgreSQL extension during immediate reinspection from a non-`public` managed schema, preventing a false duplicate `CREATE EXTENSION` plan across PostgreSQL 14 and 18.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser

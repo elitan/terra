@@ -77,6 +77,20 @@ describe("PostgreSQL extension dependency safety", function () {
     expect((await service.plan(withoutExtensions, [MANAGED_SCHEMA])).hasChanges).toBe(false);
   });
 
+  test("replans a database-wide extension from a non-public managed schema", async function () {
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE EXTENSION postgres_fdw;
+    `;
+
+    await service.apply(desired, [MANAGED_SCHEMA], true);
+    expect(await installedExtensions(client, ["postgres_fdw"])).toEqual([
+      { name: "postgres_fdw", schema: "public" },
+    ]);
+    expect((await service.plan(desired, [MANAGED_SCHEMA])).hasChanges).toBe(false);
+  });
+
   test("rolls back removal when an unmanaged object depends on the extension", async function () {
     await client.query(`
       CREATE SCHEMA ${MANAGED_SCHEMA};
@@ -159,7 +173,7 @@ async function installedExtensions(
 
 async function cleanup(client: Client): Promise<void> {
   await client.query(`DROP SCHEMA IF EXISTS ${EXTERNAL_SCHEMA} CASCADE`);
-  for (const extension of ["earthdistance", "cube", "hstore", "pgcrypto"]) {
+  for (const extension of ["earthdistance", "cube", "hstore", "pgcrypto", "postgres_fdw"]) {
     await client.query(`DROP EXTENSION IF EXISTS ${extension} CASCADE`);
   }
   await client.query(`DROP SCHEMA IF EXISTS ${MANAGED_SCHEMA} CASCADE`);

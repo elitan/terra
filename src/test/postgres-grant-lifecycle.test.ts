@@ -9,6 +9,8 @@ const READER_ROLE = "grant_contract_reader";
 const CHILD_ROLE = "grant_contract_child";
 const GRANTOR_ROLE = "grant_contract_grantor";
 const MARKER_ROLE = "grant_contract_rollback_marker";
+const ROLLBACK_READER_ROLE = "grant_contract_rollback_reader";
+const MISSING_ROLLBACK_ROLE = "zz_grant_contract_missing_reader";
 
 describe("PostgreSQL privilege grant lifecycle", function () {
   let client!: Client;
@@ -236,6 +238,48 @@ describe("PostgreSQL privilege grant lifecycle", function () {
     });
     expect(await roleExists(client, MARKER_ROLE)).toBe(false);
   });
+
+  test("rolls back an earlier grant when a later grantee does not exist", async function () {
+    const service = createTestSchemaService();
+    await client.query(`
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE TABLE ${MANAGED_SCHEMA}.accounts (id integer PRIMARY KEY);
+      CREATE ROLE ${ROLLBACK_READER_ROLE};
+    `);
+
+    const desired = `
+      CREATE SCHEMA ${MANAGED_SCHEMA};
+      CREATE TABLE ${MANAGED_SCHEMA}.accounts (id integer PRIMARY KEY);
+      GRANT SELECT ON TABLE ${MANAGED_SCHEMA}.accounts TO ${ROLLBACK_READER_ROLE};
+      GRANT SELECT ON TABLE ${MANAGED_SCHEMA}.accounts TO ${MISSING_ROLLBACK_ROLE};
+    `;
+    const expectedInitialGrant =
+      `GRANT SELECT ON TABLE "${MANAGED_SCHEMA}"."accounts" ` +
+      `TO "${ROLLBACK_READER_ROLE}";`;
+    const expectedFailingGrant =
+      `GRANT SELECT ON TABLE "${MANAGED_SCHEMA}"."accounts" ` +
+      `TO "${MISSING_ROLLBACK_ROLE}";`;
+    const plan = await service.plan(desired, [MANAGED_SCHEMA]);
+
+    expect(plan.transactional).toEqual([
+      expectedInitialGrant,
+      expectedFailingGrant,
+    ]);
+    await expect(
+      service.apply(desired, [MANAGED_SCHEMA], true)
+    ).rejects.toMatchObject({ code: "MIGRATION_ERROR" });
+
+    expect(
+      await hasPrivilege(
+        client,
+        ROLLBACK_READER_ROLE,
+        "TABLE",
+        "accounts",
+        "SELECT"
+      )
+    ).toEqual({ granted: false, grantable: false });
+    expect(await roleExists(client, MISSING_ROLLBACK_ROLE)).toBe(false);
+  });
 });
 
 function desiredPrivileges(selectGrantable: boolean, includeInsert: boolean): string {
@@ -415,6 +459,7 @@ async function cleanup(client: Client): Promise<void> {
     CHILD_ROLE,
     GRANTOR_ROLE,
     MARKER_ROLE,
+    ROLLBACK_READER_ROLE,
     READER_ROLE,
     "PUBLIC",
   ]) {

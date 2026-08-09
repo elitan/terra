@@ -575,7 +575,8 @@ export class SchemaService {
     const currentProcedures = await this.provider.getCurrentProcedures(client, schemas);
     const currentTriggers = await this.provider.getCurrentTriggers(client, schemas);
     const currentSequences = await this.provider.getCurrentSequences(client, schemas);
-    const inspectedExtensions = await this.provider.getCurrentExtensions(client, schemas);
+    const getCurrentExtensions = this.provider.getCurrentExtensions.bind(this.provider);
+    const inspectedExtensions = await getCurrentExtensions(client, schemas);
     const currentExtensions = this.filterCurrentExtensions(
       inspectedExtensions,
       desiredExtensions,
