@@ -817,7 +817,10 @@ export class SchemaService {
     }
     this.validateVirtualGeneratedFunctionDependencies(
       desiredSchema,
-      desiredFunctions
+      desiredFunctions,
+      desiredEnums,
+      desiredCompositeTypes,
+      desiredSqlObjects
     );
     const generatedColumnFunctionStatements =
       this.getGeneratedColumnFunctionStatements(
@@ -1193,7 +1196,10 @@ export class SchemaService {
 
   private validateVirtualGeneratedFunctionDependencies(
     tables: Table[],
-    functions: Function[]
+    functions: Function[],
+    enums: Array<{ name: string; schema?: string }>,
+    compositeTypes: Array<{ name: string; schema?: string }>,
+    sqlObjects: Array<{ kind: string; name: string; schema?: string }>
   ): void {
     if (this.provider.dialect !== "postgres") {
       return;
@@ -1202,10 +1208,32 @@ export class SchemaService {
     const userDefinedFunctions = new Set(functions.map(function getFunctionKey(func) {
       return `${func.schema || "public"}.${func.name}`;
     }));
+    const userDefinedTypes = new Set([
+      ...enums,
+      ...compositeTypes,
+      ...sqlObjects.filter(function isTypeObject(object) {
+        return object.kind === "domain-type" || object.kind === "range-type";
+      }),
+    ].map(function getTypeKey(type) {
+      return `${type.schema || "public"}.${type.name}`;
+    }));
     for (const table of tables) {
       for (const column of table.columns) {
         if (!column.generated || column.generated.stored) {
           continue;
+        }
+        const typeKey = getDeclaredTypeKey(
+          column.type,
+          table.schema || "public"
+        );
+        if (typeKey && userDefinedTypes.has(typeKey)) {
+          const tableName = `${table.schema || "public"}.${table.name}`;
+          throw new ValidationError(
+            `PostgreSQL virtual generated column ${tableName}.${column.name} cannot use user-defined type ${typeKey}; virtual generated expressions may use only built-in functions and types`,
+            tableName,
+            column.name,
+            column.type
+          );
         }
         const functionKey = getGeneratedExpressionFunctionKeys(
           column.generated.expression,
@@ -1402,6 +1430,18 @@ function getGeneratedExpressionFunctionKeys(
   } catch {
     return [];
   }
+}
+
+function getDeclaredTypeKey(type: string, defaultSchema: string): string | undefined {
+  const match = type.trim().match(
+    /^(?:(?:"([^"]+)"|([a-z_][a-z0-9_$]*))\.)?(?:"([^"]+)"|([a-z_][a-z0-9_$]*))/i
+  );
+  if (!match) {
+    return undefined;
+  }
+  const schema = match[1] || match[2] || defaultSchema;
+  const name = match[3] || match[4];
+  return name ? `${schema}.${name}` : undefined;
 }
 
 function collectFunctionCallKeys(

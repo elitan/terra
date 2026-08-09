@@ -82,4 +82,61 @@ describe("PostgreSQL generated-column function dependencies", function () {
       `)).rows
     ).toEqual([{ routine: null, relation: null }]);
   });
+
+  test("rejects same-apply user-defined virtual generated column types before mutation", async function () {
+    const service = createTestSchemaService();
+    const scenarios = [
+      {
+        name: "enum",
+        definition: "CREATE TYPE public.virtual_dependency_enum AS ENUM ('valid');",
+      },
+      {
+        name: "composite",
+        definition: "CREATE TYPE public.virtual_dependency_composite AS (value text);",
+      },
+      {
+        name: "domain",
+        definition: "CREATE DOMAIN public.virtual_dependency_domain AS text;",
+      },
+      {
+        name: "range",
+        definition: "CREATE TYPE public.virtual_dependency_range AS RANGE (SUBTYPE = integer);",
+      },
+    ];
+    const versionResult = await client.query("SHOW server_version_num");
+
+    for (const scenario of scenarios) {
+      const typeName = `virtual_dependency_${scenario.name}`;
+      const tableName = `virtual_dependency_${scenario.name}_records`;
+      const desired = `
+        ${scenario.definition}
+
+        CREATE TABLE public.${tableName} (
+          source text NOT NULL,
+          computed public.${typeName} GENERATED ALWAYS AS (source) VIRTUAL
+        );
+      `;
+      const error = await service.plan(desired, ["public"]).then(
+        function planUnexpectedlySucceeded() {
+          throw new Error("Expected virtual generated column planning to fail");
+        },
+        function returnPlanError(reason) {
+          return reason;
+        }
+      );
+
+      expect(error).toMatchObject({ code: "VALIDATION_ERROR" });
+      if (Number(versionResult.rows[0]?.server_version_num) >= 180000) {
+        expect(String(error)).toContain("cannot use user-defined type");
+      } else {
+        expect(String(error)).toContain("does not support virtual generated columns");
+      }
+      expect(
+        (await client.query(
+          "SELECT to_regtype($1) AS type, to_regclass($2) AS relation",
+          [`public.${typeName}`, `public.${tableName}`]
+        )).rows
+      ).toEqual([{ type: null, relation: null }]);
+    }
+  });
 });

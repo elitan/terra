@@ -993,7 +993,10 @@ describe("SchemaService private coverage", function () {
     const validate = postgres as unknown as {
       validateVirtualGeneratedFunctionDependencies(
         tables: any[],
-        functions: any[]
+        functions: any[],
+        enums: any[],
+        compositeTypes: any[],
+        sqlObjects: any[]
       ): void;
     };
     expect(function rejectsUnqualifiedVirtualUserFunction() {
@@ -1002,6 +1005,7 @@ describe("SchemaService private coverage", function () {
           name: "records",
           columns: [{
             name: "normalized",
+            type: "TEXT",
             generated: {
               expression: "normalize_value(source)",
               always: true,
@@ -1009,20 +1013,77 @@ describe("SchemaService private coverage", function () {
             },
           }],
         }],
-        [{ name: "normalize_value", parameters: [] }]
+        [{ name: "normalize_value", parameters: [] }],
+        [],
+        [],
+        []
       );
     }).toThrow("cannot reference user-defined function public.normalize_value");
+    expect(function rejectsUnqualifiedVirtualUserType() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "payload",
+            type: "virtual_payload",
+            generated: { expression: "source", always: true, stored: false },
+          }],
+        }],
+        [],
+        [],
+        [{ name: "virtual_payload" }],
+        []
+      );
+    }).toThrow("cannot use user-defined type public.virtual_payload");
+    expect(function rejectsVirtualDomainType() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "payload",
+            type: "virtual_payload",
+            generated: { expression: "source", always: true, stored: false },
+          }],
+        }],
+        [],
+        [],
+        [],
+        [{ kind: "domain-type", name: "virtual_payload" }]
+      );
+    }).toThrow("cannot use user-defined type public.virtual_payload");
+    expect(function rejectsVirtualRangeType() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "payload",
+            type: "virtual_payload",
+            generated: { expression: "source", always: true, stored: false },
+          }],
+        }],
+        [],
+        [],
+        [],
+        [{ kind: "range-type", name: "virtual_payload" }]
+      );
+    }).toThrow("cannot use user-defined type public.virtual_payload");
 
     const sqliteValidate = sqlite as unknown as {
       validateVirtualGeneratedFunctionDependencies(
         tables: any[],
-        functions: any[]
+        functions: any[],
+        enums: any[],
+        compositeTypes: any[],
+        sqlObjects: any[]
       ): void;
     };
     expect(function ignoresSqliteVirtualFunctionValidation() {
       sqliteValidate.validateVirtualGeneratedFunctionDependencies(
         [{ name: "records", columns: [] }],
-        [{ name: "normalize_value", parameters: [] }]
+        [{ name: "normalize_value", parameters: [] }],
+        [],
+        [],
+        []
       );
     }).not.toThrow();
   });
