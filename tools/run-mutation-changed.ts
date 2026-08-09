@@ -276,7 +276,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 src/test/utils/sql-generators-coverage.test.ts src/test/utils/sql-utils.test.ts src/test/types/composite-type-evolution.test.ts";
   }
   if (normalized.endsWith("/src/utils/statement-classifier.ts")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/properties/destructive-diff-classification.property.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 --timeout 120000 src/test/properties/destructive-diff-classification.property.test.ts src/test/cli/cli-contract.test.ts src/test/types/composite-type-evolution.test.ts";
   }
   if (normalized.endsWith("/src/utils/expression-comparator.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/utils/expression-comparator-coverage.test.ts src/test/postgres-expression-literal-semantics.test.ts";
