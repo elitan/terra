@@ -1383,6 +1383,23 @@ export class SchemaService {
         if (!column.generated) {
           continue;
         }
+        const tableName = `${table.schema || "public"}.${table.name}`;
+        if (column.default !== undefined) {
+          throw new ValidationError(
+            `PostgreSQL generated column ${tableName}.${column.name} cannot declare a default`,
+            tableName,
+            column.name,
+            column.default
+          );
+        }
+        if (column.identity) {
+          throw new ValidationError(
+            `PostgreSQL generated column ${tableName}.${column.name} cannot declare an identity`,
+            tableName,
+            column.name,
+            column.identity.generation
+          );
+        }
         const referencedColumnNames = getGeneratedExpressionColumnNames(
           column.generated.expression
         );
@@ -1391,7 +1408,6 @@ export class SchemaService {
             return POSTGRES_GENERATED_PROHIBITED_SYSTEM_COLUMNS.has(name);
           }
         );
-        const tableName = `${table.schema || "public"}.${table.name}`;
         if (prohibitedSystemColumn) {
           throw new ValidationError(
             `PostgreSQL generated column ${tableName}.${column.name} cannot reference system column ${prohibitedSystemColumn}; only tableoid is permitted`,

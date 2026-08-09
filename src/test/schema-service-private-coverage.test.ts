@@ -1110,6 +1110,38 @@ describe("SchemaService private coverage", function () {
         columns: [{ name: "source", type: "TEXT" }],
       }]);
     }).not.toThrow();
+    expect(function rejectsGeneratedColumnDefault() {
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [{
+          name: "normalized",
+          default: "'fallback'",
+          generated: {
+            expression: "lower(source)",
+            always: true,
+            stored: true,
+          },
+        }],
+      }]);
+    }).toThrow(
+      "PostgreSQL generated column public.records.normalized cannot declare a default"
+    );
+    expect(function rejectsGeneratedColumnIdentity() {
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [{
+          name: "normalized",
+          identity: { generation: "BY DEFAULT" },
+          generated: {
+            expression: "lower(source)",
+            always: true,
+            stored: true,
+          },
+        }],
+      }]);
+    }).toThrow(
+      "PostgreSQL generated column public.records.normalized cannot declare an identity"
+    );
     expect(function rejectsProhibitedGeneratedSystemColumn() {
       validateGeneratedReferences.validateGeneratedColumnReferences([{
         name: "records",
