@@ -159,6 +159,72 @@ describe("PostgreSQL sequence persistence and state-preserving evolution", funct
     }
   });
 
+  test("rolls a sequence alteration back when a later routine definition fails", async function () {
+    const service = createTestSchemaService();
+    const initial = `
+      CREATE SEQUENCE public.sequence_rollback_guard
+        AS BIGINT START WITH 10 INCREMENT BY 1 CACHE 1 NO CYCLE;
+    `;
+    const failing = `
+      CREATE SEQUENCE public.sequence_rollback_guard
+        AS BIGINT START WITH 10 INCREMENT BY 7 CACHE 4 CYCLE;
+
+      CREATE FUNCTION public.sequence_rollback_invalid()
+      RETURNS void
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        RAISE NOTICE;
+      END;
+      $$;
+    `;
+
+    await service.apply(initial, ["public"], true);
+    await client.query("SELECT setval('public.sequence_rollback_guard', 42, true)");
+    const before = await client.query(`
+      SELECT relation.oid::integer AS oid,
+             sequence.seqincrement::text AS increment,
+             sequence.seqcache::text AS cache,
+             sequence.seqcycle AS cycle,
+             state.last_value::text AS last_value,
+             state.is_called
+      FROM pg_sequence sequence
+      JOIN pg_class relation ON relation.oid = sequence.seqrelid
+      JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      CROSS JOIN public.sequence_rollback_guard state
+      WHERE namespace.nspname = 'public'
+        AND relation.relname = 'sequence_rollback_guard'
+    `);
+
+    const plan = await service.plan(failing, ["public"]);
+    const sequencePosition = plan.transactional.findIndex(function findsSequenceAlteration(statement) {
+      return statement.startsWith('ALTER SEQUENCE "public"."sequence_rollback_guard"');
+    });
+    const functionPosition = plan.transactional.findIndex(function findsInvalidFunction(statement) {
+      return statement.includes('CREATE FUNCTION "public"."sequence_rollback_invalid"');
+    });
+    expect(sequencePosition).toBeGreaterThanOrEqual(0);
+    expect(functionPosition).toBeGreaterThan(sequencePosition);
+
+    await expect(service.apply(failing, ["public"], true)).rejects.toThrow();
+    const after = await client.query(`
+      SELECT relation.oid::integer AS oid,
+             sequence.seqincrement::text AS increment,
+             sequence.seqcache::text AS cache,
+             sequence.seqcycle AS cycle,
+             state.last_value::text AS last_value,
+             state.is_called
+      FROM pg_sequence sequence
+      JOIN pg_class relation ON relation.oid = sequence.seqrelid
+      JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+      CROSS JOIN public.sequence_rollback_guard state
+      WHERE namespace.nspname = 'public'
+        AND relation.relname = 'sequence_rollback_guard'
+    `);
+    expect(after.rows).toEqual(before.rows);
+    expect((await service.plan(initial, ["public"])).hasChanges).toBe(false);
+  });
+
   test("blocks standalone sequence type changes in strict mode", async function () {
     const service = createTestSchemaService();
     const bigintSchema = `
