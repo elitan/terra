@@ -412,6 +412,41 @@ export function getStatementCategory(statement: string): CliStatementCategory {
   const normalized = normalizeStatement(statement);
   const syntax = maskSqlNonKeywordContent(normalized);
   if (
+    normalized.startsWith("CREATE ROLE") ||
+    normalized.startsWith("ALTER ROLE") ||
+    normalized.startsWith("DROP ROLE")
+  ) {
+    return "role";
+  }
+  if (normalized.startsWith("ALTER DEFAULT PRIVILEGES")) {
+    return "default-privilege";
+  }
+  if (
+    normalized.startsWith("GRANT ") ||
+    normalized.startsWith("REVOKE ")
+  ) {
+    return "grant";
+  }
+  if (
+    normalized.startsWith("CREATE SERVER") ||
+    normalized.startsWith("ALTER SERVER") ||
+    normalized.startsWith("DROP SERVER")
+  ) {
+    return "foreign-server";
+  }
+  if (
+    normalized.startsWith("CREATE POLICY") ||
+    normalized.startsWith("DROP POLICY") ||
+    (
+      normalized.startsWith("ALTER TABLE") &&
+      /\b(?:ENABLE|DISABLE|FORCE|NO\s+FORCE)\s+ROW\s+LEVEL\s+SECURITY\b/.test(
+        syntax
+      )
+    )
+  ) {
+    return "policy";
+  }
+  if (
     normalized.startsWith("CREATE TRIGGER") ||
     normalized.startsWith("CREATE CONSTRAINT TRIGGER") ||
     normalized.startsWith("CREATE EVENT TRIGGER") ||

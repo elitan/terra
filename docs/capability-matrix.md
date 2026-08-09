@@ -36,7 +36,7 @@ safe rejection.
 | extensions and foreign servers | 14–18 | not an SQLite feature | `src/test/extensions/`, `src/test/postgres-extension-dependencies.test.ts`, `src/test/postgres-foreign-server-lifecycle.test.ts` | database-wide extensions replan correctly even when the managed schema is non-`public`; dependency-aware `RESTRICT` removal; server type/wrapper changes and unsafe cascade operations reject |
 | row-level security and policies | 14–18 | not an SQLite feature | `src/test/postgres-row-security.test.ts` | policy expressions are compared lexically safely; unmanaged policies are preserved |
 | SQLite virtual tables: FTS5 and RTree | not applicable | 3.45.1 with required compile features | `src/test/sqlite/virtual-tables.test.ts`, `src/test/sqlite/runtime-contract.test.ts` | implementation-owned shadow tables stay unmanaged; unavailable runtime features fail the runtime contract |
-| CLI plan/apply contract: JSON schema, deterministic ordering, categories, risk, exit/error behavior | 14–18 | 3.45.1 | `src/test/cli/cli-contract.test.ts` | successful plan/apply JSON is byte-snapshotted through creation and empty re-plan; strict mode and error JSON are also contract-tested |
+| CLI plan/apply contract: JSON schema, deterministic ordering, categories, risk, exit/error behavior | 14–18 | 3.45.1 | `src/test/cli/cli-contract.test.ts`, `src/test/migration-executor-coverage.test.ts`, `src/test/properties/destructive-diff-classification.property.test.ts` | successful plan/apply JSON is byte-snapshotted through creation and empty re-plan; all advertised PostgreSQL object families retain a managed category and lexical-safe risk in ordered metadata; strict mode and error JSON are also contract-tested |
 
 ## deliberate exclusions that fail safely
 

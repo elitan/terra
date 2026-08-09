@@ -37,6 +37,11 @@ export type CliStatementCategory =
   | "function"
   | "procedure"
   | "trigger"
+  | "role"
+  | "grant"
+  | "default-privilege"
+  | "policy"
+  | "foreign-server"
   | "comment"
   | "type"
   | "other";

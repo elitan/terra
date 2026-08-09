@@ -332,6 +332,46 @@ describe("Property-Based: Destructive Diff Classification", function () {
           'ALTER TABLE "Odd Schema"."Odd Table" ENABLE TRIGGER "Odd Trigger";',
         ],
       },
+      {
+        category: "role",
+        statements: [
+          'CREATE ROLE "Odd Role" WITH LOGIN;',
+          'ALTER ROLE "Odd Role" WITH NOLOGIN CONNECTION LIMIT 5;',
+          'DROP ROLE IF EXISTS "Odd Role";',
+        ],
+      },
+      {
+        category: "grant",
+        statements: [
+          'GRANT SELECT ON TABLE "Odd Schema"."Odd Table" TO "Odd Role";',
+          'REVOKE SELECT ON TABLE "Odd Schema"."Odd Table" FROM "Odd Role" RESTRICT;',
+        ],
+      },
+      {
+        category: "default-privilege",
+        statements: [
+          'ALTER DEFAULT PRIVILEGES FOR ROLE "Odd Owner" IN SCHEMA "Odd Schema" GRANT SELECT ON TABLES TO "Odd Role";',
+          'ALTER DEFAULT PRIVILEGES FOR ROLE "Odd Owner" REVOKE EXECUTE ON ROUTINES FROM PUBLIC RESTRICT;',
+        ],
+      },
+      {
+        category: "policy",
+        statements: [
+          'ALTER TABLE "Odd Schema"."Odd Table" ENABLE ROW LEVEL SECURITY;',
+          'ALTER TABLE "Odd Schema"."Odd Table" FORCE ROW LEVEL SECURITY;',
+          'CREATE POLICY "Odd Policy" ON "Odd Schema"."Odd Table" FOR SELECT TO "Odd Role" USING (true);',
+          'DROP POLICY IF EXISTS "Odd Policy" ON "Odd Schema"."Odd Table";',
+        ],
+      },
+      {
+        category: "foreign-server",
+        statements: [
+          'CREATE SERVER "Odd Server" FOREIGN DATA WRAPPER "postgres_fdw";',
+          'ALTER SERVER "Odd Server" VERSION \'2.0\' OPTIONS (SET "host" \'db.example\');',
+          'ALTER SERVER "Odd Server" OWNER TO "Odd Role";',
+          'DROP SERVER IF EXISTS "Odd Server" RESTRICT;',
+        ],
+      },
     ] as const;
 
     for (const scenario of scenarios) {

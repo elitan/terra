@@ -94,6 +94,41 @@ describe("MigrationExecutor coverage", () => {
     })).toEqual(["table", "sequence"]);
   });
 
+  test("retains categories and risk for PostgreSQL authorization statements", function () {
+    const metadata = buildStatementMetadata({
+      transactional: [
+        'CREATE ROLE "app reader" WITH LOGIN;',
+        'GRANT SELECT ON TABLE public.items TO "app reader";',
+        'ALTER DEFAULT PRIVILEGES FOR ROLE "app owner" GRANT SELECT ON TABLES TO "app reader";',
+        'ALTER TABLE public.items ENABLE ROW LEVEL SECURITY;',
+        'CREATE POLICY "reader policy" ON public.items FOR SELECT TO "app reader" USING (true);',
+        'CREATE SERVER "reporting" FOREIGN DATA WRAPPER "postgres_fdw";',
+        'REVOKE SELECT ON TABLE public.items FROM "app reader" RESTRICT;',
+        'ALTER DEFAULT PRIVILEGES FOR ROLE "app owner" REVOKE SELECT ON TABLES FROM "app reader" RESTRICT;',
+        'ALTER TABLE public.items DISABLE ROW LEVEL SECURITY;',
+        'DROP SERVER IF EXISTS "reporting" RESTRICT;',
+      ],
+      concurrent: [],
+      deferred: [],
+      hasChanges: true,
+    });
+
+    expect(metadata.map(function selectClassification(item) {
+      return [item.category, item.risk];
+    })).toEqual([
+      ["role", "safe"],
+      ["grant", "safe"],
+      ["default-privilege", "safe"],
+      ["policy", "safe"],
+      ["policy", "safe"],
+      ["foreign-server", "safe"],
+      ["grant", "destructive"],
+      ["default-privilege", "destructive"],
+      ["policy", "destructive"],
+      ["foreign-server", "destructive"],
+    ]);
+  });
+
   test("ignores metadata keywords inside statement content", function () {
     const metadata = buildStatementMetadata({
       transactional: [
