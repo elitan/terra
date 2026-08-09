@@ -815,6 +815,10 @@ export class SchemaService {
         plannedTriggerRemovals
       );
     }
+    this.validateVirtualGeneratedFunctionDependencies(
+      desiredSchema,
+      desiredFunctions
+    );
     const generatedColumnFunctionStatements =
       this.getGeneratedColumnFunctionStatements(
         functionStatements,
@@ -1185,6 +1189,41 @@ export class SchemaService {
       }
     }
     return { beforeTables, remaining };
+  }
+
+  private validateVirtualGeneratedFunctionDependencies(
+    tables: Table[],
+    functions: Function[]
+  ): void {
+    if (this.provider.dialect !== "postgres") {
+      return;
+    }
+
+    const userDefinedFunctions = new Set(functions.map(function getFunctionKey(func) {
+      return `${func.schema || "public"}.${func.name}`;
+    }));
+    for (const table of tables) {
+      for (const column of table.columns) {
+        if (!column.generated || column.generated.stored) {
+          continue;
+        }
+        const functionKey = getGeneratedExpressionFunctionKeys(
+          column.generated.expression,
+          table.schema || "public"
+        ).find(function findUserDefinedFunction(key) {
+          return userDefinedFunctions.has(key);
+        });
+        if (functionKey) {
+          const tableName = `${table.schema || "public"}.${table.name}`;
+          throw new ValidationError(
+            `PostgreSQL virtual generated column ${tableName}.${column.name} cannot reference user-defined function ${functionKey}; virtual generated expressions may use only built-in functions and types`,
+            tableName,
+            column.name,
+            column.generated.expression
+          );
+        }
+      }
+    }
   }
 
   private async canonicalizeDesiredViews(

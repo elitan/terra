@@ -53,4 +53,33 @@ describe("PostgreSQL generated-column function dependencies", function () {
     ).toEqual([{ source: "TeRrAdB", normalized: "terradb" }]);
     expect((await service.plan(desired, ["public"])).hasChanges).toBe(false);
   });
+
+  test("rejects a same-apply function in a virtual generated expression before mutation", async function () {
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE FUNCTION public.virtual_dependency_normalize(value text)
+      RETURNS text
+      LANGUAGE sql
+      IMMUTABLE
+      AS $$ SELECT lower(value); $$;
+
+      CREATE TABLE public.virtual_dependency_records (
+        source text NOT NULL,
+        normalized text GENERATED ALWAYS AS (
+          public.virtual_dependency_normalize(source)
+        ) VIRTUAL
+      );
+    `;
+
+    await expect(service.plan(desired, ["public"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+    });
+    expect(
+      (await client.query(`
+        SELECT
+          to_regprocedure('public.virtual_dependency_normalize(text)') AS routine,
+          to_regclass('public.virtual_dependency_records') AS relation
+      `)).rows
+    ).toEqual([{ routine: null, relation: null }]);
+  });
 });

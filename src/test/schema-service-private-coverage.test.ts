@@ -989,6 +989,42 @@ describe("SchemaService private coverage", function () {
       [{ name: "records", columns: [] }],
       []
     )).toEqual({ beforeTables: [], remaining: statements });
+
+    const validate = postgres as unknown as {
+      validateVirtualGeneratedFunctionDependencies(
+        tables: any[],
+        functions: any[]
+      ): void;
+    };
+    expect(function rejectsUnqualifiedVirtualUserFunction() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "normalized",
+            generated: {
+              expression: "normalize_value(source)",
+              always: true,
+              stored: false,
+            },
+          }],
+        }],
+        [{ name: "normalize_value", parameters: [] }]
+      );
+    }).toThrow("cannot reference user-defined function public.normalize_value");
+
+    const sqliteValidate = sqlite as unknown as {
+      validateVirtualGeneratedFunctionDependencies(
+        tables: any[],
+        functions: any[]
+      ): void;
+    };
+    expect(function ignoresSqliteVirtualFunctionValidation() {
+      sqliteValidate.validateVirtualGeneratedFunctionDependencies(
+        [{ name: "records", columns: [] }],
+        [{ name: "normalize_value", parameters: [] }]
+      );
+    }).not.toThrow();
   });
 
   test("plan throws on validation errors and closes client", async function () {
