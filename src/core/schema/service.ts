@@ -1292,6 +1292,18 @@ export class SchemaService {
             column.generated.expression
           );
         }
+        const qualifiedOperatorKey = getGeneratedExpressionQualifiedOperatorKeys(
+          column.generated.expression
+        )[0];
+        if (qualifiedOperatorKey && !qualifiedOperatorKey.startsWith("pg_catalog.")) {
+          const tableName = `${table.schema || "public"}.${table.name}`;
+          throw new ValidationError(
+            `PostgreSQL virtual generated column ${tableName}.${column.name} cannot reference user-defined operator ${qualifiedOperatorKey}; virtual generated expressions may use only built-in functions and types`,
+            tableName,
+            column.name,
+            column.generated.expression
+          );
+        }
         const functionKey = getGeneratedExpressionFunctionKeys(
           column.generated.expression,
           table.schema || "public"
@@ -1518,6 +1530,19 @@ function getGeneratedExpressionColumnNames(expression: string): string[] {
   }
 }
 
+function getGeneratedExpressionQualifiedOperatorKeys(expression: string): string[] {
+  try {
+    const parsed = parseSync(`SELECT ${expression} AS terradb_generated_expression`) as {
+      stmts?: Array<{ stmt?: unknown }>;
+    };
+    const keys = new Set<string>();
+    collectQualifiedOperatorKeys(parsed.stmts, keys);
+    return Array.from(keys);
+  } catch {
+    return [];
+  }
+}
+
 function getDeclaredTypeKey(type: string, defaultSchema: string): string | undefined {
   const match = type.trim().match(
     /^(?:(?:"([^"]+)"|([a-z_][a-z0-9_$]*))\.)?(?:"([^"]+)"|([a-z_][a-z0-9_$]*))/i
@@ -1620,6 +1645,33 @@ function collectColumnReferenceNames(value: unknown, names: Set<string>): void {
 
   for (const child of Object.values(node)) {
     collectColumnReferenceNames(child, names);
+  }
+}
+
+function collectQualifiedOperatorKeys(value: unknown, keys: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectQualifiedOperatorKeys(item, keys);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as Record<string, unknown>;
+  const expression = node.A_Expr as Record<string, unknown> | undefined;
+  if (expression) {
+    const nameParts = getPostgresNameParts(expression.name);
+    if (nameParts.length > 1) {
+      const schema = nameParts[nameParts.length - 2]!;
+      const name = nameParts[nameParts.length - 1]!;
+      keys.add(`${schema}.${name}`);
+    }
+  }
+
+  for (const child of Object.values(node)) {
+    collectQualifiedOperatorKeys(child, keys);
   }
 }
 

@@ -364,4 +364,62 @@ describe("PostgreSQL generated-column function dependencies", function () {
       )).rows
     ).toEqual([{ relation: null }]);
   });
+
+  test("rejects a virtual generated expression that invokes a user-defined operator", async function () {
+    await client.query(`
+      CREATE FUNCTION public.existing_virtual_operator(left_value text, right_value text)
+      RETURNS boolean
+      LANGUAGE sql
+      IMMUTABLE
+      AS $$ SELECT left_value = right_value; $$
+    `);
+    await client.query(`
+      CREATE OPERATOR public.#=# (
+        PROCEDURE = public.existing_virtual_operator,
+        LEFTARG = text,
+        RIGHTARG = text
+      )
+    `);
+    const service = createTestSchemaService();
+    const versionResult = await client.query("SHOW server_version_num");
+    const desired = `
+      CREATE FUNCTION public.existing_virtual_operator(left_value text, right_value text)
+      RETURNS boolean
+      LANGUAGE sql
+      IMMUTABLE
+      AS $$ SELECT left_value = right_value; $$;
+
+      CREATE TABLE public.unrelated_virtual_operator_records (
+        id integer PRIMARY KEY
+      );
+
+      CREATE TABLE public.existing_virtual_operator_records (
+        source text NOT NULL,
+        matches_source boolean GENERATED ALWAYS AS (
+          source OPERATOR(public.#=#) 'expected'
+        ) VIRTUAL
+      );
+    `;
+
+    const error = await service.plan(desired, ["public"]).then(
+      function planUnexpectedlySucceeded() {
+        throw new Error("Expected virtual generated column planning to fail");
+      },
+      function returnPlanError(reason) {
+        return reason;
+      }
+    );
+
+    expect(error).toMatchObject({ code: "VALIDATION_ERROR" });
+    if (Number(versionResult.rows[0]?.server_version_num) >= 180000) {
+      expect(String(error)).toContain("cannot reference user-defined operator");
+    } else {
+      expect(String(error)).toContain("does not support virtual generated columns");
+    }
+    expect(
+      (await client.query(
+        "SELECT to_regclass('public.unrelated_virtual_operator_records') AS relation"
+      )).rows
+    ).toEqual([{ relation: null }]);
+  });
 });

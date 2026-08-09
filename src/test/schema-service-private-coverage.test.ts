@@ -1156,6 +1156,54 @@ describe("SchemaService private coverage", function () {
         [{ kind: "domain-type", name: "virtual_payload" }]
       );
     }).not.toThrow();
+    expect(function rejectsVirtualExpressionUserOperator() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [
+            { name: "source", type: "TEXT" },
+            {
+              name: "matches_source",
+              type: "BOOLEAN",
+              generated: {
+                expression: "source OPERATOR(public.#=#) 'expected'",
+                always: true,
+                stored: false,
+              },
+            },
+          ],
+        }],
+        [],
+        [],
+        [],
+        []
+      );
+    }).toThrow(
+      "PostgreSQL virtual generated column public.records.matches_source cannot reference user-defined operator public.#=#"
+    );
+    expect(function allowsVirtualExpressionBuiltinOperator() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [
+            { name: "source", type: "TEXT" },
+            {
+              name: "matches_source",
+              type: "BOOLEAN",
+              generated: {
+                expression: "source OPERATOR(pg_catalog.=) 'expected'",
+                always: true,
+                stored: false,
+              },
+            },
+          ],
+        }],
+        [],
+        [],
+        [],
+        []
+      );
+    }).not.toThrow();
     expect(function rejectsExistingVirtualRowType() {
       validate.validateVirtualGeneratedFunctionDependencies(
         [{
