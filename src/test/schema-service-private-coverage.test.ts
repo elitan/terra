@@ -1110,6 +1110,40 @@ describe("SchemaService private coverage", function () {
         columns: [{ name: "source", type: "TEXT" }],
       }]);
     }).not.toThrow();
+    expect(function rejectsProhibitedGeneratedSystemColumn() {
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [
+          { name: "source", type: "TEXT" },
+          {
+            name: "location",
+            generated: {
+              expression: "ctid::text",
+              always: true,
+              stored: true,
+            },
+          },
+        ],
+      }]);
+    }).toThrow(
+      "PostgreSQL generated column public.records.location cannot reference system column ctid"
+    );
+    expect(function allowsTableoidInGeneratedExpression() {
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [
+          { name: "source", type: "TEXT" },
+          {
+            name: "table_identity",
+            generated: {
+              expression: "tableoid::regclass::text",
+              always: true,
+              stored: true,
+            },
+          },
+        ],
+      }]);
+    }).not.toThrow();
 
     const sqliteGeneratedReferences = sqlite as unknown as {
       validateGeneratedColumnReferences(tables: any[]): void;

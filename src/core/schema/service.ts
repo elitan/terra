@@ -1383,16 +1383,30 @@ export class SchemaService {
         if (!column.generated) {
           continue;
         }
-        const referencedGeneratedColumn = getGeneratedExpressionColumnNames(
+        const referencedColumnNames = getGeneratedExpressionColumnNames(
           column.generated.expression
-        ).find(function findGeneratedColumn(name) {
+        );
+        const prohibitedSystemColumn = referencedColumnNames.find(
+          function findProhibitedSystemColumn(name) {
+            return POSTGRES_GENERATED_PROHIBITED_SYSTEM_COLUMNS.has(name);
+          }
+        );
+        const tableName = `${table.schema || "public"}.${table.name}`;
+        if (prohibitedSystemColumn) {
+          throw new ValidationError(
+            `PostgreSQL generated column ${tableName}.${column.name} cannot reference system column ${prohibitedSystemColumn}; only tableoid is permitted`,
+            tableName,
+            column.name,
+            column.generated.expression
+          );
+        }
+        const referencedGeneratedColumn = referencedColumnNames.find(function findGeneratedColumn(name) {
           return generatedColumnNames.has(name);
         });
         if (!referencedGeneratedColumn) {
           continue;
         }
 
-        const tableName = `${table.schema || "public"}.${table.name}`;
         throw new ValidationError(
           `PostgreSQL generated column ${tableName}.${column.name} cannot reference generated column ${referencedGeneratedColumn}; generation expressions may reference only non-generated columns`,
           tableName,
@@ -1598,6 +1612,14 @@ export class SchemaService {
     return `"${value.replace(/"/g, '""')}"`;
   }
 }
+
+const POSTGRES_GENERATED_PROHIBITED_SYSTEM_COLUMNS = new Set([
+  "ctid",
+  "xmin",
+  "cmin",
+  "xmax",
+  "cmax",
+]);
 
 function isPostgresViewDrop(statement: string): boolean {
   return /^DROP\s+(?:MATERIALIZED\s+)?VIEW\b/i.test(statement.trim());
