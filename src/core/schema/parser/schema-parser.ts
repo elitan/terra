@@ -1384,7 +1384,7 @@ export class SchemaParser {
         return column.name;
       })
     );
-    if (generatedColumnNames.size !== 0) {
+    if (generatedColumnNames.size === 0) {
       return;
     }
 
