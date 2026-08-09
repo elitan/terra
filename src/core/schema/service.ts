@@ -1266,6 +1266,32 @@ export class SchemaService {
             column.generated.expression
           );
         }
+        const expressionColumnNames = new Set(
+          getGeneratedExpressionColumnNames(column.generated.expression)
+        );
+        const userDefinedExpressionColumn = table.columns.find(
+          function findUserDefinedExpressionColumn(candidate) {
+            const candidateTypeKey = getDeclaredTypeKey(
+              candidate.type,
+              table.schema || "public"
+            );
+            return expressionColumnNames.has(candidate.name) &&
+              Boolean(candidateTypeKey && userDefinedTypes.has(candidateTypeKey));
+          }
+        );
+        if (userDefinedExpressionColumn) {
+          const tableName = `${table.schema || "public"}.${table.name}`;
+          const referencedTypeKey = getDeclaredTypeKey(
+            userDefinedExpressionColumn.type,
+            table.schema || "public"
+          )!;
+          throw new ValidationError(
+            `PostgreSQL virtual generated column ${tableName}.${column.name} cannot reference user-defined type ${referencedTypeKey} through column ${userDefinedExpressionColumn.name}; virtual generated expressions may use only built-in functions and types`,
+            tableName,
+            column.name,
+            column.generated.expression
+          );
+        }
         const functionKey = getGeneratedExpressionFunctionKeys(
           column.generated.expression,
           table.schema || "public"
@@ -1479,6 +1505,19 @@ function getGeneratedExpressionTypeKeys(
   }
 }
 
+function getGeneratedExpressionColumnNames(expression: string): string[] {
+  try {
+    const parsed = parseSync(`SELECT ${expression} AS terradb_generated_expression`) as {
+      stmts?: Array<{ stmt?: unknown }>;
+    };
+    const names = new Set<string>();
+    collectColumnReferenceNames(parsed.stmts, names);
+    return Array.from(names);
+  } catch {
+    return [];
+  }
+}
+
 function getDeclaredTypeKey(type: string, defaultSchema: string): string | undefined {
   const match = type.trim().match(
     /^(?:(?:"([^"]+)"|([a-z_][a-z0-9_$]*))\.)?(?:"([^"]+)"|([a-z_][a-z0-9_$]*))/i
@@ -1556,6 +1595,31 @@ function collectTypeNameKeys(
 
   for (const child of Object.values(node)) {
     collectTypeNameKeys(child, defaultSchema, keys);
+  }
+}
+
+function collectColumnReferenceNames(value: unknown, names: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectColumnReferenceNames(item, names);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as Record<string, unknown>;
+  const columnRef = node.ColumnRef as Record<string, unknown> | undefined;
+  if (columnRef) {
+    const nameParts = getPostgresNameParts(columnRef.fields);
+    if (nameParts.length > 0) {
+      names.add(nameParts[nameParts.length - 1]!);
+    }
+  }
+
+  for (const child of Object.values(node)) {
+    collectColumnReferenceNames(child, names);
   }
 }
 
