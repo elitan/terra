@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import { readFile, unlink, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
+import { loadModule } from "pgsql-parser";
 import { SchemaService } from "../core/schema/service";
 import { generateStatements } from "../core/schema/handlers/base-handler";
 import { TriggerHandler } from "../core/schema/handlers/trigger-handler";
@@ -891,7 +892,7 @@ describe("SchemaService private coverage", function () {
     expect(mock.state.clientEndCalls).toBe(1);
   });
 
-  test("plan logs transactional deferred and concurrent changes", async function () {
+  test("plan moves a new-table concurrent index into the transaction", async function () {
     const migrationContext = {
       postgresVersionNum: 170000,
       defaultTableAccessMethod: "heap",
@@ -911,11 +912,30 @@ describe("SchemaService private coverage", function () {
     const plan = await service.plan("CREATE TABLE users (id INT);");
 
     expect(plan.hasChanges).toBe(true);
-    expect(plan.transactional).toHaveLength(1);
-    expect(plan.deferred).toHaveLength(1);
-    expect(plan.concurrent).toHaveLength(1);
+    expect(plan.transactional).toHaveLength(3);
+    expect(plan.deferred).toHaveLength(0);
+    expect(plan.concurrent).toHaveLength(0);
     expect(mock.state.migrationContexts).toEqual([migrationContext]);
     expect(mock.state.clientEndCalls).toBe(1);
+  });
+
+  test("concurrent index-drop recognition is PostgreSQL-only and fails closed", async function () {
+    await loadModule();
+    const postgres = createService(createMockProvider().provider) as unknown as {
+      isConcurrentIndexDrop(statement: string): boolean;
+    };
+    const sqlite = createService(createMockProvider({ dialect: "sqlite" }).provider) as unknown as {
+      isConcurrentIndexDrop(statement: string): boolean;
+    };
+
+    expect(postgres.isConcurrentIndexDrop(
+      'DROP INDEX CONCURRENTLY "public"."users_email_idx";'
+    )).toBe(true);
+    expect(postgres.isConcurrentIndexDrop("DROP TABLE CONCURRENTLY users;")).toBe(false);
+    expect(postgres.isConcurrentIndexDrop("not valid SQL")).toBe(false);
+    expect(sqlite.isConcurrentIndexDrop(
+      'DROP INDEX CONCURRENTLY "public"."users_email_idx";'
+    )).toBe(false);
   });
 
   test("plan throws on validation errors and closes client", async function () {

@@ -38,12 +38,14 @@ describe("PostgreSQL persistent clustering lifecycle", function () {
     `;
 
     const createPlan = await service.plan(selectedSchema, ["public"]);
-    expect(createPlan.concurrent).toEqual([
-      'CREATE INDEX CONCURRENTLY "cluster_records_order" ON "public"."cluster_records" (lower(value));',
-    ]);
-    expect(createPlan.deferred).toEqual([
+    expect(createPlan.concurrent).toEqual([]);
+    expect(createPlan.deferred).toEqual([]);
+    expect(createPlan.transactional).toContain(
+      'CREATE INDEX "cluster_records_order" ON "public"."cluster_records" (lower(value));'
+    );
+    expect(createPlan.transactional).toContain(
       'ALTER TABLE "public"."cluster_records" CLUSTER ON "cluster_records_order";',
-    ]);
+    );
     await service.apply(selectedSchema, ["public"], true);
 
     const inspected = await new DatabaseInspector().getCurrentSchema(
@@ -139,7 +141,8 @@ describe("PostgreSQL persistent clustering lifecycle", function () {
     expect(plan.transactional).toContain(
       'DROP INDEX "public"."cluster_replace_order";'
     );
-    expect(plan.deferred).toEqual([
+    expect(plan.deferred).toEqual([]);
+    expect(plan.transactional.slice(-2)).toEqual([
       'ALTER TABLE "public"."cluster_replace" REPLICA IDENTITY USING INDEX "cluster_replace_order";',
       'ALTER TABLE "public"."cluster_replace" CLUSTER ON "cluster_replace_order";',
     ]);
@@ -417,13 +420,16 @@ describe("PostgreSQL persistent clustering lifecycle", function () {
       undefined
     );
 
-    const repairPlan = await service.plan(repairSchema, ["public"]);
-    expect(repairPlan.concurrent).toContain(
-      'CREATE INDEX CONCURRENTLY "cluster_repair_order" ON "public"."cluster_repair" ("id");'
+    await expect(service.plan(repairSchema, ["public"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      entity: "concurrent index",
+      field: "standalone migration",
+    });
+    const repairIndexSchema = repairSchema.replace(
+      /\s*ALTER TABLE public\.cluster_repair\s+CLUSTER ON cluster_repair_order;/,
+      ""
     );
-    expect(repairPlan.deferred).toContain(
-      'ALTER TABLE "public"."cluster_repair" CLUSTER ON "cluster_repair_order";'
-    );
+    await service.apply(repairIndexSchema, ["public"], true);
     await service.apply(repairSchema, ["public"], true);
     expect((await service.plan(repairSchema, ["public"])).hasChanges).toBe(
       false

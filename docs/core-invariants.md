@@ -25,6 +25,7 @@
 3. concurrent statements must report exact failing statement.
 4. pre-transactional enum additions must be the only planned change; mixed plans fail before mutation.
 5. concurrent statements must finish before deferred transactional statements that depend on them.
+6. PostgreSQL explicit concurrent index work must be one standalone statement; failed creates remove only their newly-created invalid artifact. Once no concurrent statement remains, every deferred statement joins the main transaction.
 
 ## error contract
 

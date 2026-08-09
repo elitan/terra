@@ -352,9 +352,15 @@ behind when a selected index is dropped, and resets identity before replacing
 or renaming a selected index. `USING INDEX` is validated before mutation: the
 target must be a unique, non-partial, immediate, column-only index whose key
 columns are `NOT NULL`; nullable `INCLUDE` payload columns remain valid.
-Standalone indexes may be built concurrently and are assigned in a final
-transaction only after the concurrent build succeeds. Constraint-backed index
-changes and assignments remain atomic in the main transaction. Replica
+Standalone indexes on existing tables may be built or dropped concurrently only
+as one-statement migrations. A desired schema that combines concurrent work
+with another change is rejected before mutation, and a failed concurrent create
+removes its invalid PostgreSQL index artifact. A `CONCURRENTLY` declaration on
+a newly created table is created transactionally because it has no concurrent
+writer to protect, together with dependent `REPLICA IDENTITY` or `CLUSTER`
+assignments. Generated index removals that share other work are likewise
+transactional; only an otherwise standalone removal retains `CONCURRENTLY`.
+Constraint-backed index changes and assignments remain atomic in the main transaction. Replica
 identity is tracked independently for ordinary tables, partitioned parents,
 and leaf partitions because PostgreSQL does not propagate it through a
 partition hierarchy. Within the supported partition contract, `USING INDEX`
@@ -365,8 +371,9 @@ PostgreSQL's persistent clustering choice is declarative through `ALTER TABLE
 `pg_index.indisclustered`, validates that the selected index is declared,
 non-partial, and uses a built-in clusterable access method (`btree` or `gist`),
 and restores the choice after index replacement. Standalone index assignments
-run only after any concurrent build succeeds, while constraint-backed table
-indexes and materialized-view indexes remain transactional. Expression-backed
+require their concurrent build to have been applied in a prior migration, while
+constraint-backed table indexes and materialized-view indexes remain
+transactional. Expression-backed
 exclusion constraints must be explicitly named when selected because
 PostgreSQL-generated constraint names are not a declarative contract. The choice is
 relation-local for inheritance hierarchies. Partition clustering is rejected

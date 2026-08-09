@@ -37,12 +37,14 @@ describe("PostgreSQL replica identity lifecycle", function () {
     `;
 
     const createPlan = await service.plan(selectedSchema, ["public"]);
-    expect(createPlan.concurrent).toEqual([
-      'CREATE UNIQUE INDEX CONCURRENTLY "replica_records_identity" ON "public"."replica_records" ("id");',
-    ]);
-    expect(createPlan.deferred).toEqual([
+    expect(createPlan.concurrent).toEqual([]);
+    expect(createPlan.transactional).toContain(
+      'CREATE UNIQUE INDEX "replica_records_identity" ON "public"."replica_records" ("id");'
+    );
+    expect(createPlan.deferred).toEqual([]);
+    expect(createPlan.transactional).toContain(
       'ALTER TABLE "public"."replica_records" REPLICA IDENTITY USING INDEX "replica_records_identity";',
-    ]);
+    );
     await service.apply(selectedSchema, ["public"], true);
 
     const inspected = await new DatabaseInspector().getCurrentSchema(
@@ -59,19 +61,15 @@ describe("PostgreSQL replica identity lifecycle", function () {
       false
     );
 
-    const fullSchema = selectedSchema
-      .replace(/CREATE UNIQUE INDEX[\s\S]*?\(id\);/, "")
-      .replace(
-        /REPLICA IDENTITY USING INDEX replica_records_identity/,
-        "REPLICA IDENTITY FULL"
-      );
+    const fullSchema = selectedSchema.replace(
+      /REPLICA IDENTITY USING INDEX replica_records_identity/,
+      "REPLICA IDENTITY FULL"
+    );
     const fullPlan = await service.plan(fullSchema, ["public"]);
     expect(fullPlan.transactional).toContain(
       'ALTER TABLE "public"."replica_records" REPLICA IDENTITY FULL;'
     );
-    expect(fullPlan.concurrent).toEqual([
-      'DROP INDEX CONCURRENTLY "public"."replica_records_identity";',
-    ]);
+    expect(fullPlan.concurrent).toEqual([]);
     await service.apply(fullSchema, ["public"], true);
     expect(await relationReplicaIdentity(client, "replica_records")).toBe(
       "f"
@@ -80,7 +78,20 @@ describe("PostgreSQL replica identity lifecycle", function () {
       false
     );
 
-    const defaultSchema = fullSchema.replace(
+    const fullWithoutIndex = fullSchema.replace(
+      /CREATE UNIQUE INDEX[\s\S]*?\(id\);/,
+      ""
+    );
+    const dropPlan = await service.plan(fullWithoutIndex, ["public"]);
+    expect(dropPlan.concurrent).toEqual([
+      'DROP INDEX CONCURRENTLY "public"."replica_records_identity";',
+    ]);
+    await service.apply(fullWithoutIndex, ["public"], true);
+    expect((await service.plan(fullWithoutIndex, ["public"])).hasChanges).toBe(
+      false
+    );
+
+    const defaultSchema = fullWithoutIndex.replace(
       /\s*ALTER TABLE public\.replica_records\s+REPLICA IDENTITY FULL;/,
       ""
     );
@@ -204,9 +215,10 @@ describe("PostgreSQL replica identity lifecycle", function () {
     expect(plan.transactional).toContain(
       'DROP INDEX "public"."replica_replace_identity";'
     );
-    expect(plan.deferred).toEqual([
+    expect(plan.deferred).toEqual([]);
+    expect(plan.transactional).toContain(
       'ALTER TABLE "public"."replica_replace" REPLICA IDENTITY USING INDEX "replica_replace_identity";',
-    ]);
+    );
 
     await service.apply(changed, ["public"], true);
     expect(await relationReplicaIdentity(client, "replica_replace")).toBe(

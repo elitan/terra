@@ -273,14 +273,22 @@ export class SchemaService {
     }
 
     if (plan.concurrent.length > 0) {
-      for (const statement of plan.concurrent) {
-        try {
-          await client.query(statement);
-          Logger.success(`Executed: ${statement.substring(0, 60)}...`);
-        } catch (error) {
-          Logger.error(`Failed: ${statement}`);
-          throw error;
-        }
+      const statement = plan.concurrent[0]!;
+      const creation = this.getConcurrentIndexCreation(statement);
+      const existingTarget = creation
+        ? await this.getPostgresIndexState(client, creation.index)
+        : undefined;
+      try {
+        await client.query(statement);
+        Logger.success(`Executed: ${statement.substring(0, 60)}...`);
+      } catch (error) {
+        await this.cleanupFailedConcurrentIndexCreate(
+          client,
+          creation?.index,
+          existingTarget
+        );
+        Logger.error(`Failed: ${statement}`);
+        throw error;
       }
     }
 
@@ -379,6 +387,135 @@ export class SchemaService {
       const serverName = getPostgresServerOwnerTransferName(statement);
       return !serverName || !createdServerNames.has(serverName);
     });
+  }
+
+  private getConcurrentIndexCreation(statement: string):
+    | {
+      index: { schema: string; name: string };
+      table: { schema: string; name: string };
+    }
+    | undefined {
+    if (this.provider.dialect !== "postgres") {
+      return undefined;
+    }
+    let node:
+      | {
+        concurrent?: boolean;
+        idxname?: string;
+        relation?: { schemaname?: string; relname?: string };
+      }
+      | undefined;
+    try {
+      const parsed = parseSync(statement) as unknown as {
+        stmts?: Array<{ stmt?: { IndexStmt?: unknown } }>;
+      };
+      node = parsed.stmts?.[0]?.stmt?.IndexStmt as typeof node;
+    } catch {
+      return undefined;
+    }
+    if (!node?.concurrent || !node.idxname || !node.relation?.relname) {
+      return undefined;
+    }
+    return {
+      index: {
+        schema: node.relation.schemaname || "public",
+        name: node.idxname,
+      },
+      table: {
+        schema: node.relation.schemaname || "public",
+        name: node.relation.relname,
+      },
+    };
+  }
+
+  private transactionalizeNewTableConcurrentIndexes(
+    statements: string[],
+    currentTables: { name: string; schema?: string }[]
+  ): { transactional: string[]; concurrent: string[] } {
+    const currentTableKeys = new Set(currentTables.map(function (table) {
+      return `${table.schema || "public"}.${table.name}`;
+    }));
+    const transactional: string[] = [];
+    const concurrent: string[] = [];
+
+    for (const statement of statements) {
+      const creation = this.getConcurrentIndexCreation(statement);
+      const tableKey = creation && `${creation.table.schema}.${creation.table.name}`;
+      if (creation && tableKey && !currentTableKeys.has(tableKey)) {
+        transactional.push(statement.replace(/\s+CONCURRENTLY\b/i, ""));
+      } else {
+        concurrent.push(statement);
+      }
+    }
+    return { transactional, concurrent };
+  }
+
+  private isConcurrentIndexDrop(statement: string): boolean {
+    if (this.provider.dialect !== "postgres") {
+      return false;
+    }
+    try {
+      const parsed = parseSync(statement) as unknown as {
+        stmts?: Array<{
+          stmt?: {
+            DropStmt?: { concurrent?: boolean; removeType?: string };
+          };
+        }>;
+      };
+      const node = parsed.stmts?.[0]?.stmt?.DropStmt;
+      return node?.concurrent === true && node.removeType === "OBJECT_INDEX";
+    } catch {
+      return false;
+    }
+  }
+
+  private transactionalizeMixedConcurrentIndexDrops(
+    statements: string[],
+    hasOtherMigrationWork: boolean
+  ): { transactional: string[]; concurrent: string[] } {
+    const transactional: string[] = [];
+    const concurrent: string[] = [];
+
+    for (const statement of statements) {
+      if (hasOtherMigrationWork && this.isConcurrentIndexDrop(statement)) {
+        transactional.push(statement.replace(/\s+CONCURRENTLY\b/i, ""));
+      } else {
+        concurrent.push(statement);
+      }
+    }
+    return { transactional, concurrent };
+  }
+
+  private async getPostgresIndexState(
+    client: DatabaseClient,
+    target: { schema: string; name: string }
+  ): Promise<{ invalid: boolean } | undefined> {
+    const result = await client.query<{ invalid: boolean }>(
+      `SELECT NOT index_catalog.indisvalid AS invalid
+       FROM pg_class index_relation
+       JOIN pg_namespace namespace ON namespace.oid = index_relation.relnamespace
+       JOIN pg_index index_catalog ON index_catalog.indexrelid = index_relation.oid
+       WHERE namespace.nspname = $1 AND index_relation.relname = $2`,
+      [target.schema, target.name]
+    );
+    return result.rows[0];
+  }
+
+  private async cleanupFailedConcurrentIndexCreate(
+    client: DatabaseClient,
+    target: { schema: string; name: string } | undefined,
+    existingTarget: { invalid: boolean } | undefined
+  ): Promise<void> {
+    if (!target || existingTarget) {
+      return;
+    }
+    const state = await this.getPostgresIndexState(client, target);
+    if (!state?.invalid) {
+      return;
+    }
+    await client.query(
+      `DROP INDEX CONCURRENTLY ${this.quoteIdentifier(target.schema)}.${this.quoteIdentifier(target.name)};`
+    );
   }
 
   private filterUnmanagedSchemas(
@@ -656,8 +793,8 @@ export class SchemaService {
       migrationContext
     );
     const tableStatements = tablePlan.transactional;
-    const deferredTableStatements = tablePlan.deferred;
-    const concurrentStatements = tablePlan.concurrent;
+    let deferredTableStatements = tablePlan.deferred;
+    let concurrentStatements = tablePlan.concurrent;
 
     if (this.provider.supportsFeature("sequences")) {
       sequencePlan = this.sequenceHandler.generateStatementPlan(
@@ -863,7 +1000,7 @@ export class SchemaService {
         })
       : tableStatements;
 
-    const transactionalPreview = [
+    let transactionalPreview = [
       ...sqlObjectPlan.bootstrapCreate,
       ...sqlObjectPlan.preSchemaCreate,
       ...schemaStatements,
@@ -896,6 +1033,37 @@ export class SchemaService {
       ...extensionDropStatements,
     ];
 
+    const normalizedConcurrent = this.transactionalizeNewTableConcurrentIndexes(
+      concurrentStatements,
+      currentSchema
+    );
+    transactionalPreview = [
+      ...transactionalPreview,
+      ...normalizedConcurrent.transactional,
+    ];
+    concurrentStatements = normalizedConcurrent.concurrent;
+
+    const normalizedDrops = this.transactionalizeMixedConcurrentIndexDrops(
+      concurrentStatements,
+      enumPreTransactionalStatements.length > 0 ||
+        transactionalPreview.length > 0 ||
+        deferredTableStatements.length > 0 ||
+        concurrentStatements.length > 1
+    );
+    transactionalPreview = [
+      ...transactionalPreview,
+      ...normalizedDrops.transactional,
+    ];
+    concurrentStatements = normalizedDrops.concurrent;
+
+    if (concurrentStatements.length === 0 && deferredTableStatements.length > 0) {
+      transactionalPreview = [
+        ...transactionalPreview,
+        ...deferredTableStatements,
+      ];
+      deferredTableStatements = [];
+    }
+
     if (enumPreTransactionalStatements.length > 0 && (
       transactionalPreview.length > 0 ||
       deferredTableStatements.length > 0 ||
@@ -906,6 +1074,20 @@ export class SchemaService {
         "enum",
         "label addition",
         enumPreTransactionalStatements
+      );
+    }
+
+    if (concurrentStatements.length > 0 && (
+      concurrentStatements.length !== 1 ||
+      enumPreTransactionalStatements.length > 0 ||
+      transactionalPreview.length > 0 ||
+      deferredTableStatements.length > 0
+    )) {
+      throw new ValidationError(
+        "PostgreSQL concurrent index work must be applied as one standalone statement so a later failure cannot leave committed index state behind",
+        "concurrent index",
+        "standalone migration",
+        concurrentStatements
       );
     }
 
