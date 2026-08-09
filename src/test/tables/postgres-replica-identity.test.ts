@@ -133,6 +133,55 @@ describe("PostgreSQL replica identity lifecycle", function () {
     expect((await service.plan(full, ["public"])).hasChanges).toBe(false);
   });
 
+  test("rolls an identity change back when a later constraint fails", async function () {
+    const service = createTestSchemaService();
+    await client.query(`
+      CREATE TABLE public.replica_rollback (
+        id integer NOT NULL,
+        value text NOT NULL
+      );
+      ALTER TABLE public.replica_rollback REPLICA IDENTITY NOTHING;
+      INSERT INTO public.replica_rollback (id, value) VALUES
+        (1, 'duplicate'),
+        (2, 'duplicate');
+    `);
+    const originalOid = await relationOid(client, "replica_rollback");
+    const desired = `
+      CREATE TABLE public.replica_rollback (
+        id integer NOT NULL,
+        value text NOT NULL,
+        CONSTRAINT replica_rollback_value_key UNIQUE (value)
+      );
+      ALTER TABLE public.replica_rollback REPLICA IDENTITY FULL;
+    `;
+
+    const plan = await service.plan(desired, ["public"]);
+    expect(plan.transactional[0]).toBe(
+      'ALTER TABLE "public"."replica_rollback" REPLICA IDENTITY FULL;'
+    );
+    await expect(
+      service.apply(desired, ["public"], true)
+    ).rejects.toMatchObject({ code: "MIGRATION_ERROR" });
+
+    expect(await relationReplicaIdentity(client, "replica_rollback")).toBe(
+      "n"
+    );
+    expect(await relationOid(client, "replica_rollback")).toBe(originalOid);
+    expect(
+      (
+        await client.query(
+          "SELECT id, value FROM public.replica_rollback ORDER BY id"
+        )
+      ).rows
+    ).toEqual([
+      { id: 1, value: "duplicate" },
+      { id: 2, value: "duplicate" },
+    ]);
+    expect(await constraintExists(client, "replica_rollback_value_key")).toBe(
+      false
+    );
+  });
+
   test("resets and restores a selected identity around index replacement", async function () {
     const service = createTestSchemaService();
     const original = `
@@ -444,6 +493,30 @@ async function relationReplicaIdentity(
     [tableName]
   );
   return result.rows[0]?.relreplident;
+}
+
+async function relationOid(client: Client, tableName: string): Promise<number> {
+  const result = await client.query(
+    "SELECT $1::regclass::oid AS oid",
+    [`public.${tableName}`]
+  );
+  return Number(result.rows[0]?.oid);
+}
+
+async function constraintExists(
+  client: Client,
+  constraintName: string
+): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1
+     FROM pg_constraint constraint_catalog
+     JOIN pg_class relation ON relation.oid = constraint_catalog.conrelid
+     JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+     WHERE namespace.nspname = 'public'
+       AND constraint_catalog.conname = $1`,
+    [constraintName]
+  );
+  return result.rowCount === 1;
 }
 
 async function tableExists(client: Client, tableName: string): Promise<boolean> {
