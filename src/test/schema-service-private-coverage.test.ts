@@ -1081,6 +1081,31 @@ describe("SchemaService private coverage", function () {
         [{ name: "normalize_value", parameters: [] }]
       );
     }).toThrow("cannot reference user-defined function public.normalize_value");
+    expect(function rejectsVirtualExpressionUserType() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "normalized",
+            type: "TEXT",
+            generated: {
+              expression: "(source::virtual_payload)::text",
+              always: true,
+              stored: false,
+            },
+          }],
+        }],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [{ kind: "domain-type", name: "virtual_payload" }]
+      );
+    }).toThrow(
+      "PostgreSQL virtual generated column public.records.normalized cannot reference user-defined type public.virtual_payload"
+    );
     expect(function rejectsVirtualDomainType() {
       validate.validateVirtualGeneratedFunctionDependencies(
         [{

@@ -1247,6 +1247,21 @@ export class SchemaService {
             column.type
           );
         }
+        const expressionTypeKey = getGeneratedExpressionTypeKeys(
+          column.generated.expression,
+          table.schema || "public"
+        ).find(function findUserDefinedType(key) {
+          return userDefinedTypes.has(key);
+        });
+        if (expressionTypeKey) {
+          const tableName = `${table.schema || "public"}.${table.name}`;
+          throw new ValidationError(
+            `PostgreSQL virtual generated column ${tableName}.${column.name} cannot reference user-defined type ${expressionTypeKey}; virtual generated expressions may use only built-in functions and types`,
+            tableName,
+            column.name,
+            column.generated.expression
+          );
+        }
         const functionKey = getGeneratedExpressionFunctionKeys(
           column.generated.expression,
           table.schema || "public"
@@ -1444,6 +1459,22 @@ function getGeneratedExpressionFunctionKeys(
   }
 }
 
+function getGeneratedExpressionTypeKeys(
+  expression: string,
+  defaultSchema: string
+): string[] {
+  try {
+    const parsed = parseSync(`SELECT ${expression} AS terradb_generated_expression`) as {
+      stmts?: Array<{ stmt?: unknown }>;
+    };
+    const keys = new Set<string>();
+    collectTypeNameKeys(parsed.stmts, defaultSchema, keys);
+    return Array.from(keys);
+  } catch {
+    return [];
+  }
+}
+
 function getDeclaredTypeKey(type: string, defaultSchema: string): string | undefined {
   const match = type.trim().match(
     /^(?:(?:"([^"]+)"|([a-z_][a-z0-9_$]*))\.)?(?:"([^"]+)"|([a-z_][a-z0-9_$]*))/i
@@ -1486,6 +1517,41 @@ function collectFunctionCallKeys(
 
   for (const child of Object.values(node)) {
     collectFunctionCallKeys(child, defaultSchema, keys);
+  }
+}
+
+function collectTypeNameKeys(
+  value: unknown,
+  defaultSchema: string,
+  keys: Set<string>
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectTypeNameKeys(item, defaultSchema, keys);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as Record<string, unknown>;
+  const typeName = (node.TypeName || node.typeName) as
+    | Record<string, unknown>
+    | undefined;
+  if (typeName) {
+    const nameParts = getPostgresNameParts(typeName.names);
+    if (nameParts.length > 0) {
+      const name = nameParts[nameParts.length - 1]!;
+      const schema = nameParts.length > 1
+        ? nameParts[nameParts.length - 2]!
+        : defaultSchema;
+      keys.add(`${schema}.${name}`);
+    }
+  }
+
+  for (const child of Object.values(node)) {
+    collectTypeNameKeys(child, defaultSchema, keys);
   }
 }
 
