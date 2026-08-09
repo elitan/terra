@@ -824,7 +824,8 @@ export class SchemaService {
       currentEnums,
       currentCompositeTypes,
       currentSqlObjects,
-      currentFunctions
+      currentFunctions,
+      currentSchema
     );
     const generatedColumnFunctionStatements =
       this.getGeneratedColumnFunctionStatements(
@@ -1207,7 +1208,8 @@ export class SchemaService {
     currentEnums: Array<{ name: string; schema?: string }> = [],
     currentCompositeTypes: Array<{ name: string; schema?: string }> = [],
     currentSqlObjects: Array<{ kind: string; name: string; schema?: string }> = [],
-    currentFunctions: Function[] = []
+    currentFunctions: Function[] = [],
+    currentTables: Table[] = []
   ): void {
     if (this.provider.dialect !== "postgres") {
       return;
@@ -1221,6 +1223,8 @@ export class SchemaService {
       ...compositeTypes,
       ...currentEnums,
       ...currentCompositeTypes,
+      ...tables,
+      ...currentTables,
       ...sqlObjects,
       ...currentSqlObjects,
     ].filter(function isTypeObject(object) {

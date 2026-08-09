@@ -1000,7 +1000,8 @@ describe("SchemaService private coverage", function () {
         currentEnums?: any[],
         currentCompositeTypes?: any[],
         currentSqlObjects?: any[],
-        currentFunctions?: any[]
+        currentFunctions?: any[],
+        currentTables?: any[]
       ): void;
     };
     expect(function rejectsUnqualifiedVirtualUserFunction() {
@@ -1106,6 +1107,27 @@ describe("SchemaService private coverage", function () {
     }).toThrow(
       "PostgreSQL virtual generated column public.records.normalized cannot reference user-defined type public.virtual_payload"
     );
+    expect(function rejectsExistingVirtualRowType() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [{
+            name: "payload",
+            type: "virtual_payload",
+            generated: { expression: "source", always: true, stored: false },
+          }],
+        }],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [{ name: "virtual_payload", columns: [] }]
+      );
+    }).toThrow("cannot use user-defined type public.virtual_payload");
     expect(function rejectsVirtualDomainType() {
       validate.validateVirtualGeneratedFunctionDependencies(
         [{
