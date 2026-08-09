@@ -62,6 +62,10 @@ function extractJsonOutputLine(output: string): string {
   return findJsonOutputLine(output);
 }
 
+function expectExactJsonOutput(result: { output: string }, expected: unknown): void {
+  expect(extractJsonOutputLine(result.output)).toBe(JSON.stringify(expected));
+}
+
 async function isPostgresReachable(connectionString: string): Promise<boolean> {
   const client = new Client({
     connectionString,
@@ -1280,6 +1284,140 @@ CREATE VIEW item_labels AS
     }
   });
 
+  test("should keep successful SQLite plan and apply json snapshots stable", async function () {
+    const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+    try {
+      const schemaPath = join(dir, "successful-output.sqlite.sql");
+      const dbPath = join(dir, "successful-output.sqlite");
+      const databaseUrl = `sqlite:///${dbPath}`;
+      const createUsersSql = `CREATE TABLE "users" (
+          id INTEGER PRIMARY KEY,
+          email TEXT NOT NULL
+        );`;
+      const planOutput = {
+        schemaVersion: 2,
+        command: "plan",
+        dialect: "sqlite",
+        file: schemaPath,
+        schemas: ["public"],
+        hasChanges: true,
+        counts: {
+          preTransactional: 0,
+          transactional: 1,
+          deferred: 0,
+          concurrent: 0,
+          total: 1,
+        },
+        statements: {
+          preTransactional: [],
+          transactional: [createUsersSql],
+          deferred: [],
+          concurrent: [],
+        },
+        statementMetadata: [
+          {
+            order: 1,
+            channel: "transactional",
+            category: "table",
+            risk: "safe",
+            sql: createUsersSql,
+          },
+        ],
+      };
+      const emptyPlanOutput = {
+        schemaVersion: 2,
+        command: "plan",
+        dialect: "sqlite",
+        file: schemaPath,
+        schemas: ["public"],
+        hasChanges: false,
+        counts: {
+          preTransactional: 0,
+          transactional: 0,
+          deferred: 0,
+          concurrent: 0,
+          total: 0,
+        },
+        statements: {
+          preTransactional: [],
+          transactional: [],
+          deferred: [],
+          concurrent: [],
+        },
+        statementMetadata: [],
+      };
+      const applyOutput = {
+        schemaVersion: 2,
+        command: "apply",
+        dialect: "sqlite",
+        file: schemaPath,
+        schemas: ["public"],
+        dryRun: false,
+        strict: false,
+        hasChanges: true,
+        counts: planOutput.counts,
+        statements: planOutput.statements,
+        statementMetadata: planOutput.statementMetadata,
+      };
+
+      await writeFile(
+        schemaPath,
+        `
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY,
+          email TEXT NOT NULL
+        );
+        `.trim() + "\n"
+      );
+
+      const planArgs = [
+        "run",
+        "src/index.ts",
+        "plan",
+        "-f",
+        schemaPath,
+        "-u",
+        databaseUrl,
+        "--format",
+        "json",
+        "--no-color",
+      ];
+      const firstPlan = await runCli(planArgs, { DATABASE_URL: "" });
+      const repeatedPlan = await runCli(planArgs, { DATABASE_URL: "" });
+
+      expect(firstPlan.exitCode).toBe(0);
+      expect(repeatedPlan.exitCode).toBe(0);
+      expectExactJsonOutput(firstPlan, planOutput);
+      expectExactJsonOutput(repeatedPlan, planOutput);
+
+      const applyResult = await runCli(
+        [
+          "run",
+          "src/index.ts",
+          "apply",
+          "-f",
+          schemaPath,
+          "-u",
+          databaseUrl,
+          "--auto-approve",
+          "--format",
+          "json",
+          "--no-color",
+        ],
+        { DATABASE_URL: "" }
+      );
+
+      expect(applyResult.exitCode).toBe(0);
+      expectExactJsonOutput(applyResult, applyOutput);
+
+      const convergedPlan = await runCli(planArgs, { DATABASE_URL: "" });
+      expect(convergedPlan.exitCode).toBe(0);
+      expectExactJsonOutput(convergedPlan, emptyPlanOutput);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("should return deterministic mixed statement metadata in plan json", async () => {
     const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
     try {
@@ -1621,6 +1759,152 @@ CREATE VIEW item_labels AS
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test.skipIf(reachablePostgresUrls.length === 0)(
+    "should keep successful PostgreSQL plan and apply json snapshots stable",
+    async function () {
+      const dir = await mkdtemp(join(tmpdir(), "terradb-cli-"));
+      try {
+        for (const postgresUrl of reachablePostgresUrls) {
+          const suffix = `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+          const tableName = `cli_successful_output_${suffix}`;
+          const schemaPath = join(dir, `${tableName}.sql`);
+          const createTableSql = `CREATE TABLE "${tableName}" (\n  "id" INT4 NOT NULL,\n  "email" TEXT NOT NULL,\n  CONSTRAINT "${tableName}_pkey" PRIMARY KEY ("id")\n);`;
+          const planOutput = {
+            schemaVersion: 2,
+            command: "plan",
+            dialect: "postgres",
+            file: schemaPath,
+            schemas: ["public"],
+            hasChanges: true,
+            counts: {
+              preTransactional: 0,
+              transactional: 1,
+              deferred: 0,
+              concurrent: 0,
+              total: 1,
+            },
+            statements: {
+              preTransactional: [],
+              transactional: [createTableSql],
+              deferred: [],
+              concurrent: [],
+            },
+            statementMetadata: [
+              {
+                order: 1,
+                channel: "transactional",
+                category: "table",
+                risk: "safe",
+                sql: createTableSql,
+              },
+            ],
+          };
+          const emptyPlanOutput = {
+            schemaVersion: 2,
+            command: "plan",
+            dialect: "postgres",
+            file: schemaPath,
+            schemas: ["public"],
+            hasChanges: false,
+            counts: {
+              preTransactional: 0,
+              transactional: 0,
+              deferred: 0,
+              concurrent: 0,
+              total: 0,
+            },
+            statements: {
+              preTransactional: [],
+              transactional: [],
+              deferred: [],
+              concurrent: [],
+            },
+            statementMetadata: [],
+          };
+          const applyOutput = {
+            schemaVersion: 2,
+            command: "apply",
+            dialect: "postgres",
+            file: schemaPath,
+            schemas: ["public"],
+            dryRun: false,
+            strict: false,
+            hasChanges: true,
+            counts: planOutput.counts,
+            statements: planOutput.statements,
+            statementMetadata: planOutput.statementMetadata,
+          };
+          const client = new Client({ connectionString: postgresUrl });
+
+          try {
+            await writeFile(
+              schemaPath,
+              `
+              CREATE TABLE ${tableName} (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+              );
+              `.trim() + "\n"
+            );
+
+            const planArgs = [
+              "run",
+              "src/index.ts",
+              "plan",
+              "-f",
+              schemaPath,
+              "-u",
+              postgresUrl,
+              "--format",
+              "json",
+              "--no-color",
+            ];
+            const firstPlan = await runCli(planArgs, { DATABASE_URL: "" });
+            const repeatedPlan = await runCli(planArgs, { DATABASE_URL: "" });
+
+            expect(firstPlan.exitCode).toBe(0);
+            expect(repeatedPlan.exitCode).toBe(0);
+            expectExactJsonOutput(firstPlan, planOutput);
+            expectExactJsonOutput(repeatedPlan, planOutput);
+
+            const applyResult = await runCli(
+              [
+                "run",
+                "src/index.ts",
+                "apply",
+                "-f",
+                schemaPath,
+                "-u",
+                postgresUrl,
+                "--auto-approve",
+                "--format",
+                "json",
+                "--no-color",
+              ],
+              { DATABASE_URL: "" }
+            );
+
+            expect(applyResult.exitCode).toBe(0);
+            expectExactJsonOutput(applyResult, applyOutput);
+
+            const convergedPlan = await runCli(planArgs, { DATABASE_URL: "" });
+            expect(convergedPlan.exitCode).toBe(0);
+            expectExactJsonOutput(convergedPlan, emptyPlanOutput);
+          } finally {
+            try {
+              await client.connect();
+              await client.query(`DROP TABLE IF EXISTS "${tableName}"`);
+            } finally {
+              await client.end();
+            }
+          }
+        }
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
 
   test.skipIf(reachablePostgresUrls.length === 0)(
     "should expose deterministic postgres metadata across execution phases",

@@ -94,6 +94,7 @@ export async function applyCommand(
   }
 
   const schemas = getSchemas(options.schema);
+  const dryRun = options.dryRun === true;
   const strict = options.strict === true;
   const lockOptions = provider.supportsFeature("advisory_locks")
     ? {
@@ -108,7 +109,7 @@ export async function applyCommand(
       schemas,
       options.autoApprove,
       lockOptions,
-      options.dryRun,
+      dryRun,
       strict
     );
     return;
@@ -119,7 +120,7 @@ export async function applyCommand(
     schemas,
     options.autoApprove,
     lockOptions,
-    options.dryRun,
+    dryRun,
     strict
   );
 
@@ -129,7 +130,7 @@ export async function applyCommand(
     dialect: config.dialect,
     file: options.file,
     schemas,
-    dryRun: options.dryRun,
+    dryRun,
     strict,
     hasChanges: plan.hasChanges,
     counts: toCounts(plan),
