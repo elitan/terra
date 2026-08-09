@@ -136,6 +136,103 @@ describe("Triggers", () => {
     }
   });
 
+  test("rolls a trigger replacement back when a later trigger is invalid", async function () {
+    const initialSchema = `
+      CREATE TABLE public.trigger_rollback_events (
+        trigger_name text NOT NULL
+      );
+
+      CREATE TABLE public.trigger_rollback_subject (
+        id integer PRIMARY KEY
+      );
+
+      CREATE FUNCTION public.capture_trigger_rollback()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        INSERT INTO public.trigger_rollback_events(trigger_name) VALUES (TG_NAME);
+        RETURN NEW;
+      END;
+      $$;
+
+      CREATE TRIGGER trigger_rollback_audit
+        AFTER INSERT ON public.trigger_rollback_subject
+        FOR EACH ROW
+        EXECUTE FUNCTION public.capture_trigger_rollback();
+    `;
+    const failingSchema = `
+      CREATE TABLE public.trigger_rollback_events (
+        trigger_name text NOT NULL
+      );
+
+      CREATE TABLE public.trigger_rollback_subject (
+        id integer PRIMARY KEY
+      );
+
+      CREATE FUNCTION public.capture_trigger_rollback()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        INSERT INTO public.trigger_rollback_events(trigger_name) VALUES (TG_NAME);
+        RETURN NEW;
+      END;
+      $$;
+
+      CREATE TRIGGER trigger_rollback_audit
+        BEFORE INSERT ON public.trigger_rollback_subject
+        FOR EACH ROW
+        EXECUTE FUNCTION public.capture_trigger_rollback();
+
+      CREATE TRIGGER trigger_rollback_invalid
+        AFTER INSERT ON public.trigger_rollback_subject
+        FOR EACH ROW
+        EXECUTE FUNCTION public.missing_trigger_rollback_function();
+    `;
+
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const plan = await schemaService.plan(failingSchema, ["public"]);
+    const replacementPosition = plan.transactional.findIndex(function findsReplacement(statement) {
+      return statement.startsWith('DROP TRIGGER IF EXISTS "trigger_rollback_audit"');
+    });
+    const invalidPosition = plan.transactional.findIndex(function findsInvalidTrigger(statement) {
+      return statement.includes('"trigger_rollback_invalid"');
+    });
+    expect(replacementPosition).toBeGreaterThanOrEqual(0);
+    expect(invalidPosition).toBeGreaterThan(replacementPosition);
+
+    await expect(schemaService.apply(failingSchema, ["public"], true)).rejects.toThrow();
+
+    const client = await databaseService.createClient();
+    try {
+      const definition = await client.query(`
+        SELECT pg_get_triggerdef(t.oid) AS trigger_def
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relname = 'trigger_rollback_subject'
+          AND t.tgname = 'trigger_rollback_audit'
+          AND NOT t.tgisinternal
+      `);
+      expect(definition.rows).toHaveLength(1);
+      expect(definition.rows[0].trigger_def).toContain("AFTER INSERT");
+
+      await client.query("INSERT INTO public.trigger_rollback_subject(id) VALUES (1)");
+      const events = await client.query(
+        "SELECT trigger_name FROM public.trigger_rollback_events"
+      );
+      expect(events.rows).toEqual([{ trigger_name: "trigger_rollback_audit" }]);
+    } finally {
+      await client.end();
+    }
+
+    const originalPlan = await schemaService.plan(initialSchema, ["public"]);
+    expect(originalPlan.hasChanges).toBe(false);
+  });
+
   test("should update trigger when when clause and function args change", async () => {
     const schema1 = `
       CREATE TABLE audit_logs (
