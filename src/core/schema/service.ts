@@ -815,6 +815,8 @@ export class SchemaService {
         plannedTriggerRemovals
       );
     }
+    const virtualGeneratedOperatorInfo =
+      await this.getVirtualGeneratedOperatorInfo(client, schemas);
     this.validateVirtualGeneratedFunctionDependencies(
       desiredSchema,
       desiredFunctions,
@@ -825,7 +827,9 @@ export class SchemaService {
       currentCompositeTypes,
       currentSqlObjects,
       currentFunctions,
-      currentSchema
+      currentSchema,
+      virtualGeneratedOperatorInfo.userDefinedKeys,
+      virtualGeneratedOperatorInfo.builtInNames
     );
     const generatedColumnFunctionStatements =
       this.getGeneratedColumnFunctionStatements(
@@ -1209,7 +1213,9 @@ export class SchemaService {
     currentCompositeTypes: Array<{ name: string; schema?: string }> = [],
     currentSqlObjects: Array<{ kind: string; name: string; schema?: string }> = [],
     currentFunctions: Function[] = [],
-    currentTables: Table[] = []
+    currentTables: Table[] = [],
+    userDefinedOperatorKeys: Set<string> = new Set(),
+    builtInOperatorNames: Set<string> = new Set()
   ): void {
     if (this.provider.dialect !== "postgres") {
       return;
@@ -1299,6 +1305,29 @@ export class SchemaService {
           const tableName = `${table.schema || "public"}.${table.name}`;
           throw new ValidationError(
             `PostgreSQL virtual generated column ${tableName}.${column.name} cannot reference user-defined operator ${qualifiedOperatorKey}; virtual generated expressions may use only built-in functions and types`,
+            tableName,
+            column.name,
+            column.generated.expression
+          );
+        }
+        const defaultSchema = table.schema || "public";
+        const unqualifiedOperatorKey = getGeneratedExpressionUnqualifiedOperatorNames(
+          column.generated.expression
+        ).map(function getOperatorKey(name) {
+          const matchingSchema = [defaultSchema, "public"].find(
+            function findOperatorSchema(schema) {
+              return userDefinedOperatorKeys.has(`${schema}.${name}`) &&
+                !builtInOperatorNames.has(name);
+            }
+          );
+          return matchingSchema ? `${matchingSchema}.${name}` : undefined;
+        }).find(function hasUserDefinedOperator(key) {
+          return key !== undefined;
+        });
+        if (unqualifiedOperatorKey) {
+          const tableName = `${table.schema || "public"}.${table.name}`;
+          throw new ValidationError(
+            `PostgreSQL virtual generated column ${tableName}.${column.name} cannot reference user-defined operator ${unqualifiedOperatorKey}; virtual generated expressions may use only built-in functions and types`,
             tableName,
             column.name,
             column.generated.expression
@@ -1452,6 +1481,44 @@ export class SchemaService {
     return descriptions;
   }
 
+  private async getVirtualGeneratedOperatorInfo(
+    client: DatabaseClient,
+    schemas: string[]
+  ): Promise<{ userDefinedKeys: Set<string>; builtInNames: Set<string> }> {
+    if (this.provider.dialect !== "postgres") {
+      return { userDefinedKeys: new Set(), builtInNames: new Set() };
+    }
+
+    const managedSchemas = Array.from(new Set([...schemas, "public"]));
+    const [userDefinedOperators, builtInOperators] = await Promise.all([
+      client.query<{ schema_name: string; operator_name: string }>(`
+        SELECT namespace.nspname AS schema_name, op.oprname AS operator_name
+        FROM pg_operator op
+        JOIN pg_namespace namespace ON namespace.oid = op.oprnamespace
+        WHERE namespace.nspname = ANY($1::text[])
+      `, [managedSchemas]),
+      client.query<{ operator_name: string }>(`
+        SELECT op.oprname AS operator_name
+        FROM pg_operator op
+        JOIN pg_namespace namespace ON namespace.oid = op.oprnamespace
+        WHERE namespace.nspname = 'pg_catalog'
+      `),
+    ]);
+
+    return {
+      userDefinedKeys: new Set(userDefinedOperators.rows.map(
+        function getOperatorKey(operator) {
+          return `${operator.schema_name}.${operator.operator_name}`;
+        }
+      )),
+      builtInNames: new Set(builtInOperators.rows.map(
+        function getOperatorName(operator) {
+          return operator.operator_name;
+        }
+      )),
+    };
+  }
+
   private getDescriptionIdentifiers(value: string): string[] {
     return Array.from(new Set([value, this.quoteIdentifier(value)]));
   }
@@ -1538,6 +1605,19 @@ function getGeneratedExpressionQualifiedOperatorKeys(expression: string): string
     const keys = new Set<string>();
     collectQualifiedOperatorKeys(parsed.stmts, keys);
     return Array.from(keys);
+  } catch {
+    return [];
+  }
+}
+
+function getGeneratedExpressionUnqualifiedOperatorNames(expression: string): string[] {
+  try {
+    const parsed = parseSync(`SELECT ${expression} AS terradb_generated_expression`) as {
+      stmts?: Array<{ stmt?: unknown }>;
+    };
+    const names = new Set<string>();
+    collectUnqualifiedOperatorNames(parsed.stmts, names);
+    return Array.from(names);
   } catch {
     return [];
   }
@@ -1672,6 +1752,31 @@ function collectQualifiedOperatorKeys(value: unknown, keys: Set<string>): void {
 
   for (const child of Object.values(node)) {
     collectQualifiedOperatorKeys(child, keys);
+  }
+}
+
+function collectUnqualifiedOperatorNames(value: unknown, names: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectUnqualifiedOperatorNames(item, names);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as Record<string, unknown>;
+  const expression = node.A_Expr as Record<string, unknown> | undefined;
+  if (expression) {
+    const nameParts = getPostgresNameParts(expression.name);
+    if (nameParts.length === 1) {
+      names.add(nameParts[0]!);
+    }
+  }
+
+  for (const child of Object.values(node)) {
+    collectUnqualifiedOperatorNames(child, names);
   }
 }
 

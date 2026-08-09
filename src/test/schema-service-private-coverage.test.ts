@@ -200,6 +200,40 @@ function createService(provider: DatabaseProvider): SchemaService {
 }
 
 describe("SchemaService private coverage", function () {
+  test("loads virtual generated operator metadata only for PostgreSQL", async function () {
+    const postgresMock = createMockProvider();
+    const postgresService = createService(postgresMock.provider) as unknown as {
+      getVirtualGeneratedOperatorInfo(
+        client: DatabaseClient,
+        schemas: string[]
+      ): Promise<{ userDefinedKeys: Set<string>; builtInNames: Set<string> }>;
+    };
+    const postgresClient = await postgresMock.provider.createClient();
+    const postgresInfo = await postgresService.getVirtualGeneratedOperatorInfo(
+      postgresClient,
+      ["tenant_a"]
+    );
+
+    expect(postgresInfo.userDefinedKeys).toEqual(new Set());
+    expect(postgresInfo.builtInNames).toEqual(new Set());
+    expect(postgresMock.state.clientQueries).toHaveLength(2);
+    expect(postgresMock.state.clientQueries[0]).toContain("pg_operator");
+    expect(postgresMock.state.clientQueries[1]).toContain("pg_catalog");
+
+    const sqliteMock = createMockProvider({ dialect: "sqlite" });
+    const sqliteService = createService(sqliteMock.provider) as unknown as {
+      getVirtualGeneratedOperatorInfo(
+        client: DatabaseClient,
+        schemas: string[]
+      ): Promise<{ userDefinedKeys: Set<string>; builtInNames: Set<string> }>;
+    };
+    const sqliteClient = await sqliteMock.provider.createClient();
+    await expect(
+      sqliteService.getVirtualGeneratedOperatorInfo(sqliteClient, ["public"])
+    ).resolves.toEqual({ userDefinedKeys: new Set(), builtInNames: new Set() });
+    expect(sqliteMock.state.clientQueries).toEqual([]);
+  });
+
   test("validates PostgreSQL-only type modifiers only for PostgreSQL", async function () {
     const invalidNumeric = createParsedSchema({
       tables: [{
@@ -1001,7 +1035,9 @@ describe("SchemaService private coverage", function () {
         currentCompositeTypes?: any[],
         currentSqlObjects?: any[],
         currentFunctions?: any[],
-        currentTables?: any[]
+        currentTables?: any[],
+        userDefinedOperatorKeys?: Set<string>,
+        builtInOperatorNames?: Set<string>
       ): void;
     };
     expect(function rejectsUnqualifiedVirtualUserFunction() {
@@ -1202,6 +1238,51 @@ describe("SchemaService private coverage", function () {
         [],
         [],
         []
+      );
+    }).not.toThrow();
+    expect(function rejectsVirtualExpressionUnqualifiedUserOperator() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [
+            { name: "source", type: "TEXT" },
+            {
+              name: "matches_source",
+              type: "BOOLEAN",
+              generated: {
+                expression: "source #=# 'expected'",
+                always: true,
+                stored: false,
+              },
+            },
+          ],
+        }],
+        [], [], [], [], [], [], [], [], [],
+        new Set(["public.#=#"])
+      );
+    }).toThrow(
+      "PostgreSQL virtual generated column public.records.matches_source cannot reference user-defined operator public.#=#"
+    );
+    expect(function allowsBuiltinOperatorNameWithUnrelatedCustomOperator() {
+      validate.validateVirtualGeneratedFunctionDependencies(
+        [{
+          name: "records",
+          columns: [
+            { name: "source", type: "INTEGER" },
+            {
+              name: "incremented",
+              type: "INTEGER",
+              generated: {
+                expression: "source + 1",
+                always: true,
+                stored: false,
+              },
+            },
+          ],
+        }],
+        [], [], [], [], [], [], [], [], [],
+        new Set(["public.+"]),
+        new Set(["+"])
       );
     }).not.toThrow();
     expect(function rejectsExistingVirtualRowType() {
