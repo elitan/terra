@@ -82,6 +82,75 @@ describe("Functions", () => {
     }
   });
 
+  test("rolls routine replacements back when a later procedure definition fails", async function () {
+    const initialSchema = `
+      CREATE FUNCTION public.routine_rollback_function()
+      RETURNS integer
+      LANGUAGE sql
+      AS $$ SELECT 1 $$;
+
+      CREATE PROCEDURE public.routine_rollback_procedure()
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        RAISE NOTICE 'original routine body';
+      END;
+      $$;
+    `;
+    const failingSchema = `
+      CREATE FUNCTION public.routine_rollback_function()
+      RETURNS integer
+      LANGUAGE sql
+      AS $$ SELECT 2 $$;
+
+      CREATE PROCEDURE public.routine_rollback_procedure()
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        RAISE NOTICE;
+      END;
+      $$;
+    `;
+
+    await schemaService.apply(initialSchema, ["public"], true);
+
+    const plan = await schemaService.plan(failingSchema, ["public"]);
+    const functionPosition = plan.transactional.findIndex(function findsFunction(statement) {
+      return statement.includes('CREATE OR REPLACE FUNCTION "public"."routine_rollback_function"');
+    });
+    const procedurePosition = plan.transactional.findIndex(function findsProcedure(statement) {
+      return statement.includes('CREATE OR REPLACE PROCEDURE "public"."routine_rollback_procedure"');
+    });
+    expect(functionPosition).toBeGreaterThanOrEqual(0);
+    expect(procedurePosition).toBeGreaterThan(functionPosition);
+
+    await expect(schemaService.apply(failingSchema, ["public"], true)).rejects.toThrow();
+
+    const client = await databaseService.createClient();
+    try {
+      const functionResult = await client.query(
+        "SELECT public.routine_rollback_function() AS result"
+      );
+      expect(functionResult.rows[0].result).toBe(1);
+
+      const procedureResult = await client.query(`
+        SELECT p.prosrc
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public'
+          AND p.proname = 'routine_rollback_procedure'
+          AND p.prokind = 'p'
+      `);
+      expect(procedureResult.rows).toHaveLength(1);
+      expect(procedureResult.rows[0].prosrc).toContain("original routine body");
+    } finally {
+      await client.end();
+    }
+
+    const originalPlan = await schemaService.plan(initialSchema, ["public"]);
+    expect(originalPlan.hasChanges).toBe(false);
+  });
+
   test("should drop function when removed from schema", async () => {
     const schema1 = `
       CREATE FUNCTION test_function()

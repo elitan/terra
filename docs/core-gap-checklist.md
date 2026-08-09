@@ -2,6 +2,7 @@
 
 ## active tracker
 
+- done: add PostgreSQL function/procedure replacement rollback integration coverage: an invalid later procedure definition rolls back an earlier function replacement, preserves both original routine bodies, and replans the original schema empty.
 - done: add cli deterministic raw json byte-equality test.
 - done: add strict + dry-run destructive-block contract test.
 - done: rerun `src/test/cli/cli-contract.test.ts` and `test:core` green.
