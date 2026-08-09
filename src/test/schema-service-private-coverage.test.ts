@@ -1233,6 +1233,22 @@ describe("SchemaService private coverage", function () {
         }],
       }], []);
     }).toThrow("PostgreSQL inherited column public.child.normalized must remain generated");
+    expect(function rejectsGeneratedStorageKindOverride() {
+      validateGeneratedInheritance.validateGeneratedColumnInheritance([{
+        name: "child",
+        inherits: [{ name: "parent", schema: "public" }],
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: true },
+        }],
+      }, {
+        name: "parent",
+        columns: [{
+          name: "normalized",
+          generated: { expression: "lower(source)", always: true, stored: false },
+        }],
+      }], []);
+    }).toThrow("PostgreSQL inherited generated column public.child.normalized must use the same storage kind as its parent");
     expect(function rejectsIncompatibleGeneratedParentColumns() {
       validateGeneratedInheritance.validateGeneratedColumnInheritance([{
         name: "child",
