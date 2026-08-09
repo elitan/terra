@@ -51,7 +51,7 @@
     "test:doctor": "bun run tools/test-doctor.ts",
     "test": "bun --env-file=.env test src/test",
     "test:core": "bun --env-file=.env test --max-concurrency=1 src/test/schema-service.test.ts src/test/schema-service-private-coverage.test.ts src/test/schema-differ-private-coverage.test.ts src/test/schema-parser-private-coverage.test.ts src/test/parser-edge-coverage.test.ts src/test/inspector-coverage.test.ts src/test/clean-database.test.ts",
-    "test:coverage": "bun --env-file=.env test --max-concurrency=1 --coverage --coverage-reporter=lcov --timeout 120000 $(rg --files src/test -g '*.test.ts' -g '!src/test/columns/performance/**') && bun run tools/check-coverage-gate.ts coverage/lcov.info 95 95 src/core/schema/parser:98:98 src/core/schema/differ.ts:98:98 src/core/schema/inspector.ts:98:98 src/core/schema/service.ts:98:98",
+    "test:coverage": "bun --env-file=.env test --max-concurrency=1 --coverage --coverage-reporter=lcov --timeout 120000 $(find src/test -type f -name '*.test.ts' -not -path 'src/test/columns/performance/*' | sort) && bun run tools/check-coverage-gate.ts coverage/lcov.info 95 95 src/core/schema/parser:98:98 src/core/schema/differ.ts:98:98 src/core/schema/inspector.ts:98:98 src/core/schema/service.ts:98:98",
     "test:coverage:full": "bun --env-file=.env test --max-concurrency=1 --coverage --coverage-reporter=lcov --timeout 120000 src/test && bun run tools/check-coverage-gate.ts coverage/lcov.info 95 95 src/core/schema/parser:98:98 src/core/schema/differ.ts:98:98 src/core/schema/inspector.ts:98:98 src/core/schema/service.ts:98:98",
     "test:watch": "bun --env-file=.env test --watch src/test",
     "test:sqlite": "bun --env-file=.env test src/test/sqlite",

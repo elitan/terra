@@ -120,12 +120,6 @@ export class SchemaService {
           });
         }
 
-        if (result.deferredPreview.length > 0) {
-          Logger.info("Deferred changes (after concurrent changes):");
-          result.deferredPreview.forEach((stmt, i) => {
-            Logger.cyan(`  ${i + 1}. ${stmt}`);
-          });
-        }
       }
 
       return plan;
@@ -218,11 +212,6 @@ export class SchemaService {
       if (result.concurrentPreview.length > 0) {
         Logger.print(OutputFormatter.warningSection("Concurrent (non-transactional)"));
         Logger.print(OutputFormatter.box(result.concurrentPreview));
-      }
-
-      if (result.deferredPreview.length > 0) {
-        Logger.print(OutputFormatter.section("Deferred (after concurrent changes)"));
-        Logger.print(OutputFormatter.box(result.deferredPreview));
       }
 
       console.log();
