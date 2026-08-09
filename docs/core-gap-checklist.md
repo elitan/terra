@@ -5,6 +5,7 @@
 - done: classify emitted PostgreSQL role, grant, default-privilege, policy/RLS, and foreign-server statements in ordered CLI metadata instead of degrading them to `other`, with safe/destructive risk regression coverage.
 - done: serialize the shared-database PostgreSQL property gate so unrelated property cases cannot clean or recreate `public` objects during another case's apply/re-plan assertion.
 - done: give the changed-file mutation classifier preflight the same explicit per-test timeout as its composite-type regression suite, preventing a healthy slow CI case from being reported as a mutation failure.
+- done: add PostgreSQL ordinary-index rollback integration coverage: an invalid later routine rolls back index creation, preserves table OID/data, leaves no index artifact, and replans the original schema empty.
 - done: add PostgreSQL in-place role-alteration rollback integration coverage: an invalid later routine preserves the original managed role attributes and empty re-plan.
 - done: add PostgreSQL sequence-alteration rollback integration coverage: an invalid later routine definition restores the sequence OID, options, live counter, and empty original-schema re-plan.
 - done: add PostgreSQL trigger replacement rollback integration coverage: an invalid later trigger creation rolls back the prior drop-and-recreate replacement, retains original timing and firing behavior, and replans the original schema empty.
