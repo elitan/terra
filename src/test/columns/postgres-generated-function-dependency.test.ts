@@ -54,6 +54,33 @@ describe("PostgreSQL generated-column function dependencies", function () {
     expect((await service.plan(desired, ["public"])).hasChanges).toBe(false);
   });
 
+  test("rejects a generated expression that reads another generated column before mutation", async function () {
+    const service = createTestSchemaService();
+    const desired = `
+      CREATE TABLE public.unrelated_generated_reference_records (
+        id integer PRIMARY KEY
+      );
+
+      CREATE TABLE public.generated_reference_records (
+        source text NOT NULL,
+        normalized text GENERATED ALWAYS AS (lower(source)) STORED,
+        decorated text GENERATED ALWAYS AS (normalized || '!') STORED
+      );
+    `;
+
+    await expect(service.plan(desired, ["public"])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: expect.stringContaining("cannot reference generated column normalized"),
+    });
+    expect(
+      (await client.query(`
+        SELECT
+          to_regclass('public.unrelated_generated_reference_records') AS unrelated,
+          to_regclass('public.generated_reference_records') AS invalid
+      `)).rows
+    ).toEqual([{ unrelated: null, invalid: null }]);
+  });
+
   test("rejects a same-apply function in a virtual generated expression before mutation", async function () {
     const service = createTestSchemaService();
     const desired = `

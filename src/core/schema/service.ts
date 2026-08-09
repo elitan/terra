@@ -815,6 +815,8 @@ export class SchemaService {
         plannedTriggerRemovals
       );
     }
+    this.validateGeneratedColumnReferences(desiredSchema);
+
     let virtualGeneratedOperatorInfo = {
       userDefinedKeys: new Set<string>(),
       builtInNames: new Set<string>(),
@@ -1356,6 +1358,47 @@ export class SchemaService {
             column.generated.expression
           );
         }
+      }
+    }
+  }
+
+  private validateGeneratedColumnReferences(tables: Table[]): void {
+    if (this.provider.dialect !== "postgres") {
+      return;
+    }
+
+    for (const table of tables) {
+      const generatedColumnNames = new Set(table.columns.filter(
+        function isGeneratedColumn(column) {
+          return Boolean(column.generated);
+        }
+      ).map(function getColumnName(column) {
+        return column.name;
+      }));
+      if (generatedColumnNames.size === 0) {
+        continue;
+      }
+
+      for (const column of table.columns) {
+        if (!column.generated) {
+          continue;
+        }
+        const referencedGeneratedColumn = getGeneratedExpressionColumnNames(
+          column.generated.expression
+        ).find(function findGeneratedColumn(name) {
+          return generatedColumnNames.has(name);
+        });
+        if (!referencedGeneratedColumn) {
+          continue;
+        }
+
+        const tableName = `${table.schema || "public"}.${table.name}`;
+        throw new ValidationError(
+          `PostgreSQL generated column ${tableName}.${column.name} cannot reference generated column ${referencedGeneratedColumn}; generation expressions may reference only non-generated columns`,
+          tableName,
+          column.name,
+          column.generated.expression
+        );
       }
     }
   }

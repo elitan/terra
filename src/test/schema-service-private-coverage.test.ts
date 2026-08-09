@@ -1062,6 +1062,82 @@ describe("SchemaService private coverage", function () {
       []
     )).toEqual({ beforeTables: [], remaining: statements });
 
+    const validateGeneratedReferences = postgres as unknown as {
+      validateGeneratedColumnReferences(tables: any[]): void;
+    };
+    expect(function rejectsGeneratedColumnReference() {
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [
+          {
+            name: "normalized",
+            generated: {
+              expression: "lower(source)",
+              always: true,
+              stored: true,
+            },
+          },
+          {
+            name: "decorated",
+            generated: {
+              expression: "normalized || '!'",
+              always: true,
+              stored: true,
+            },
+          },
+        ],
+      }]);
+    }).toThrow(
+      "PostgreSQL generated column public.records.decorated cannot reference generated column normalized"
+    );
+    expect(function allowsNonGeneratedColumnReference() {
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [
+          { name: "source", type: "TEXT" },
+          {
+            name: "normalized",
+            generated: {
+              expression: "lower(source)",
+              always: true,
+              stored: true,
+            },
+          },
+        ],
+      }]);
+      validateGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "ordinary_records",
+        columns: [{ name: "source", type: "TEXT" }],
+      }]);
+    }).not.toThrow();
+
+    const sqliteGeneratedReferences = sqlite as unknown as {
+      validateGeneratedColumnReferences(tables: any[]): void;
+    };
+    expect(function keepsSQLiteGeneratedReferenceSupport() {
+      sqliteGeneratedReferences.validateGeneratedColumnReferences([{
+        name: "records",
+        columns: [
+          {
+            name: "normalized",
+            generated: {
+              expression: "lower(source)",
+              always: true,
+              stored: true,
+            },
+          },
+          {
+            name: "decorated",
+            generated: {
+              expression: "normalized || '!'",
+              always: true,
+              stored: true,
+            },
+          },
+        ],
+      }]);
+    }).not.toThrow();
+
     const validate = postgres as unknown as {
       validateVirtualGeneratedFunctionDependencies(
         tables: any[],
