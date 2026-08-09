@@ -8,6 +8,7 @@ const EXTERNAL_SCHEMA = "role_contract_external";
 const ROLE_NAME = "TerraDB Lifecycle Role";
 const MEMBER_NAME = "TerraDB Lifecycle Member";
 const CONNECTION_LIMIT_ROLE = "TerraDB Connection Limited Role";
+const ROLLBACK_ROLE = "TerraDB Role Rollback";
 const REMOVAL_ROLE = "TerraDB Removal Role";
 const UNSUPPORTED_ROLE = "TerraDB Unsupported Role";
 const REMOVAL_GUARD = "removal_guard";
@@ -41,7 +42,7 @@ describe("PostgreSQL role lifecycle", function () {
     const initialPlan = await service.plan(initial, [MANAGED_SCHEMA]);
 
     expect(initialPlan.transactional).toContain(createStatement);
-    await service.apply(initial, [MANAGED_SCHEMA], true);
+    await service.apply(initial, [MANAGED_SCHEMA, "public"], true);
     const original = await inspectRole(client, ROLE_NAME);
     expect(original).toMatchObject({
       login: false,
@@ -258,6 +259,43 @@ describe("PostgreSQL role lifecycle", function () {
     );
   });
 
+  test("rolls an in-place role alteration back when a later routine fails", async function () {
+    const service = createTestSchemaService();
+    const initial = `CREATE ROLE "${ROLLBACK_ROLE}" LOGIN CONNECTION LIMIT 2;`;
+    const failing = `
+      CREATE ROLE "${ROLLBACK_ROLE}" NOLOGIN CONNECTION LIMIT 7;
+
+      CREATE FUNCTION public.role_rollback_invalid()
+      RETURNS void
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        RAISE NOTICE;
+      END;
+      $$;
+    `;
+
+    await service.apply(initial, [MANAGED_SCHEMA], true);
+    const before = await inspectRole(client, ROLLBACK_ROLE);
+    const plan = await service.plan(failing, [MANAGED_SCHEMA, "public"]);
+    const rolePosition = plan.transactional.findIndex(function findsRoleAlteration(statement) {
+      return statement.startsWith(`ALTER ROLE "${ROLLBACK_ROLE}"`);
+    });
+    const functionPosition = plan.transactional.findIndex(function findsInvalidFunction(statement) {
+      return statement.includes('CREATE FUNCTION "public"."role_rollback_invalid"');
+    });
+    expect(rolePosition).toBeGreaterThanOrEqual(0);
+    expect(functionPosition).toBeGreaterThan(rolePosition);
+
+    await expect(
+      service.apply(failing, [MANAGED_SCHEMA, "public"], true)
+    ).rejects.toThrow();
+    expect(await inspectRole(client, ROLLBACK_ROLE)).toEqual(before);
+    expect((await service.plan(initial, [MANAGED_SCHEMA, "public"])).hasChanges).toBe(
+      false
+    );
+  });
+
   test("removes roles explicitly, blocks strict mode, and rolls back dependencies", async function () {
     await client.query(`CREATE ROLE "${REMOVAL_ROLE}"`);
     await client.query(
@@ -412,6 +450,7 @@ async function cleanup(client: Client): Promise<void> {
     MEMBER_NAME,
     ROLE_NAME,
     CONNECTION_LIMIT_ROLE,
+    ROLLBACK_ROLE,
     REMOVAL_ROLE,
     UNSUPPORTED_ROLE,
   ]) {
