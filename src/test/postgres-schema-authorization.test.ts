@@ -6,6 +6,8 @@ import { createTestClient, createTestSchemaService } from "./utils";
 
 const ROLE_NAME = "TerraDB Schema Contract Owner";
 const GUARD_TABLE = "terradb_schema_contract_guard";
+const ROLLBACK_SCHEMA = "terradb_schema_rollback";
+const ROLLBACK_GUARD_TABLE = "terradb_schema_rollback_guard";
 
 describe("PostgreSQL CREATE SCHEMA parser fidelity", function () {
   test("preserves concrete authorization and implicit schema names", async function () {
@@ -142,6 +144,64 @@ describe("PostgreSQL schema authorization lifecycle", function () {
     );
     expect(result.rows[0]?.relation).toBeNull();
   });
+
+  test("rolls back schema creation when a later managed constraint fails", async function () {
+    const service = createTestSchemaService();
+    await client.query(`
+      CREATE TABLE public.${ROLLBACK_GUARD_TABLE} (
+        id integer PRIMARY KEY,
+        email text NOT NULL
+      )
+    `);
+    await client.query(
+      `INSERT INTO public.${ROLLBACK_GUARD_TABLE} (id, email) VALUES
+        (1, 'duplicate@example.com'),
+        (2, 'duplicate@example.com')`
+    );
+    const originalOid = await relationOid(
+      client,
+      `public.${ROLLBACK_GUARD_TABLE}`
+    );
+
+    const desired = `
+      CREATE SCHEMA ${ROLLBACK_SCHEMA};
+      CREATE TABLE public.${ROLLBACK_GUARD_TABLE} (
+        id integer PRIMARY KEY,
+        email text NOT NULL,
+        CONSTRAINT ${ROLLBACK_GUARD_TABLE}_email_key UNIQUE (email)
+      );
+    `;
+
+    await expect(
+      service.apply(desired, ["public", ROLLBACK_SCHEMA], true)
+    ).rejects.toMatchObject({ code: "MIGRATION_ERROR" });
+
+    expect(await schemaOid(client, ROLLBACK_SCHEMA)).toBeUndefined();
+    expect(
+      await relationOid(client, `public.${ROLLBACK_GUARD_TABLE}`)
+    ).toBe(originalOid);
+    expect(
+      (
+        await client.query(
+          `SELECT id, email FROM public.${ROLLBACK_GUARD_TABLE} ORDER BY id`
+        )
+      ).rows
+    ).toEqual([
+      { id: 1, email: "duplicate@example.com" },
+      { id: 2, email: "duplicate@example.com" },
+    ]);
+    expect(
+      (
+        await client.query(
+          `SELECT conname
+           FROM pg_constraint
+           WHERE conrelid = $1::regclass
+             AND conname = $2`,
+          [`public.${ROLLBACK_GUARD_TABLE}`, `${ROLLBACK_GUARD_TABLE}_email_key`]
+        )
+      ).rows
+    ).toEqual([]);
+  });
 });
 
 async function schemaOwner(client: Client, schema: string): Promise<string | null> {
@@ -164,6 +224,14 @@ async function schemaOid(client: Client, schema: string): Promise<number> {
   return result.rows[0]?.oid;
 }
 
+async function relationOid(client: Client, relation: string): Promise<number> {
+  const result = await client.query(
+    "SELECT $1::regclass::oid::integer AS oid",
+    [relation]
+  );
+  return result.rows[0]?.oid;
+}
+
 async function currentUser(client: Client): Promise<string> {
   const result = await client.query("SELECT current_user AS name");
   return result.rows[0]?.name;
@@ -171,6 +239,8 @@ async function currentUser(client: Client): Promise<string> {
 
 async function cleanup(client: Client): Promise<void> {
   await client.query(`DROP TABLE IF EXISTS public.${GUARD_TABLE}`);
+  await client.query(`DROP TABLE IF EXISTS public.${ROLLBACK_GUARD_TABLE}`);
+  await client.query(`DROP SCHEMA IF EXISTS ${ROLLBACK_SCHEMA} CASCADE`);
   await client.query("DROP SCHEMA IF EXISTS inline_contract CASCADE");
   await client.query(`DROP SCHEMA IF EXISTS ${client.escapeIdentifier(ROLE_NAME)} CASCADE`);
   await client.query(`DROP ROLE IF EXISTS ${client.escapeIdentifier(ROLE_NAME)}`);

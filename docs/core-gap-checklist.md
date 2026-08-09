@@ -289,6 +289,7 @@
 - done: certify SQLite's ordered declared-type affinity rules through real storage classes and table recreation, preserve ignored type parameters as exact schema identity, verify ordinary versus strict `ANY`, enforce the six-name `STRICT` type whitelist before target mutation, and retain rows and idempotency with the pinned SQLite 3.45.1 runtime.
 - done: preserve PostgreSQL whitespace inside ordinary, escape, dollar-quoted, and identifier literals during expression comparison instead of collapsing token contents in a string fast path; fail closed for unequal unparsable expressions; prove domain default/check, table check, generated-column, expression/partial-index, policy, rollback, OID/row preservation, and convergence behavior across PostgreSQL 14-18; and classify the shared comparator as mutation-critical with focused real-engine tests.
 - done: snapshot successful PostgreSQL and SQLite CLI JSON bytes for `plan` and real `apply` from a pending create through an empty convergence re-plan; normalize omitted Commander booleans so successful `apply` always emits the typed `dryRun: false` and `strict: false` fields.
+- done: prove a PostgreSQL schema creation rolls back when a later managed unique constraint fails on duplicate existing rows, retaining the original table OID, rows, and absent constraint with no residual schema.
 - next: continue the official PostgreSQL 14-18 and SQLite grammar/catalog audit and select the next highest-impact lossless schema gap.
 
 ## parser
