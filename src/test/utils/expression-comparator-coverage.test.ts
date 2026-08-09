@@ -1,6 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { loadModule } from "pgsql-parser";
-import { expressionsEqual } from "../../utils/expression-comparator";
+import {
+  expressionsEqual,
+  expressionsEqualInSchema,
+} from "../../utils/expression-comparator";
 
 describe("Expression comparator coverage", () => {
   beforeAll(async () => {
@@ -104,5 +107,22 @@ describe("Expression comparator coverage", () => {
 
   test("normalizes pg_catalog-qualified function calls", () => {
     expect(expressionsEqual("pg_catalog.upper(name)", "upper(name)")).toBe(true);
+  });
+
+  test("normalizes only local-schema function and type qualification", function () {
+    expect(
+      expressionsEqualInSchema(
+        "public.normalize_value(value::public.custom_value)",
+        "normalize_value(value::custom_value)",
+        "public"
+      )
+    ).toBe(true);
+    expect(
+      expressionsEqualInSchema(
+        "tenant_a.normalize_value(value)",
+        "normalize_value(value)",
+        "public"
+      )
+    ).toBe(false);
   });
 });

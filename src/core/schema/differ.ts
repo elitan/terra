@@ -49,7 +49,10 @@ import {
   isPostgresSerialType,
   postgresTypesAreEquivalent,
 } from "../../utils/sql";
-import { expressionsEqual } from "../../utils/expression-comparator";
+import {
+  expressionsEqual,
+  expressionsEqualInSchema,
+} from "../../utils/expression-comparator";
 import { SQLBuilder } from "../../utils/sql-builder";
 import {
   getIdentityOptionChanges,
@@ -2120,7 +2123,7 @@ export class SchemaDiffer {
     // Special handling for generated columns - they need drop and recreate
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
       (!desiredColumn.generated || !currentColumn.generated ||
-       !expressionsEqual(desiredColumn.generated.expression, currentColumn.generated.expression) ||
+       !expressionsEqualInSchema(desiredColumn.generated.expression, currentColumn.generated.expression, table.schema || "public") ||
        desiredColumn.generated.always !== currentColumn.generated.always ||
        desiredColumn.generated.stored !== currentColumn.generated.stored);
 
@@ -3359,7 +3362,7 @@ export class SchemaDiffer {
     // We'll still do this as separate statements for now (not batched)
     const generatedChanging = (desiredColumn.generated || currentColumn.generated) &&
       (!desiredColumn.generated || !currentColumn.generated ||
-       !expressionsEqual(desiredColumn.generated.expression, currentColumn.generated.expression) ||
+       !expressionsEqualInSchema(desiredColumn.generated.expression, currentColumn.generated.expression, table.schema || "public") ||
        desiredColumn.generated.always !== currentColumn.generated.always ||
        desiredColumn.generated.stored !== currentColumn.generated.stored);
 

@@ -1,4 +1,4 @@
-import { parseSync } from "pgsql-parser";
+import { deparseSync, parseSync } from "pgsql-parser";
 
 const AST_LOCATION_FIELDS = new Set([
   "location",
@@ -351,5 +351,69 @@ export function expressionsEqual(expr1: string, expr2: string): boolean {
     return JSON.stringify(norm1) === JSON.stringify(norm2);
   } catch {
     return false;
+  }
+}
+
+export function expressionsEqualInSchema(
+  expr1: string,
+  expr2: string,
+  schema: string
+): boolean {
+  return expressionsEqual(
+    normalizeExpressionLocalSchema(expr1, schema),
+    normalizeExpressionLocalSchema(expr2, schema)
+  );
+}
+
+function normalizeExpressionLocalSchema(expression: string, schema: string): string {
+  try {
+    const parsed = parseSync(`SELECT ${expression} AS terradb_expression`) as {
+      stmts?: Array<{ stmt?: unknown }>;
+    };
+    for (const statement of parsed.stmts || []) {
+      removeLocalSchemaQualification(statement.stmt, schema);
+    }
+    return deparseSync(parsed as any).trim();
+  } catch {
+    return expression;
+  }
+}
+
+function removeLocalSchemaQualification(value: unknown, schema: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      removeLocalSchemaQualification(item, schema);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as Record<string, unknown>;
+  removeLeadingLocalSchema(node.FuncCall, "funcname", schema);
+  removeLeadingLocalSchema(node.TypeName, "names", schema);
+  removeLeadingLocalSchema(node.typeName, "names", schema);
+  for (const child of Object.values(node)) {
+    removeLocalSchemaQualification(child, schema);
+  }
+}
+
+function removeLeadingLocalSchema(
+  node: unknown,
+  property: string,
+  schema: string
+): void {
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  const value = node as Record<string, unknown>;
+  const names = value[property];
+  if (!Array.isArray(names) || names.length < 2) {
+    return;
+  }
+  const first = names[0] as { String?: { sval?: unknown } } | undefined;
+  if (first?.String?.sval === schema) {
+    names.shift();
   }
 }

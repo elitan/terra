@@ -938,6 +938,59 @@ describe("SchemaService private coverage", function () {
     )).toBe(false);
   });
 
+  test("promotes only new-table generated-expression function dependencies", async function () {
+    await loadModule();
+    const postgres = createService(createMockProvider().provider) as unknown as {
+      getGeneratedColumnFunctionStatements(
+        statements: string[],
+        desiredTables: any[],
+        currentTables: any[]
+      ): { beforeTables: string[]; remaining: string[] };
+    };
+    const statements = [
+      'CREATE FUNCTION "public"."normalize_value"("value" text ) RETURNS text AS $$ SELECT lower(value); $$ LANGUAGE sql IMMUTABLE;',
+      'CREATE FUNCTION "public"."unrelated_value"("value" text ) RETURNS text AS $$ SELECT upper(value); $$ LANGUAGE sql IMMUTABLE;',
+      "SELECT 1;",
+    ];
+    const result = postgres.getGeneratedColumnFunctionStatements(
+      statements,
+      [{
+        name: "records",
+        schema: "public",
+        columns: [{
+          name: "normalized",
+          generated: {
+            expression: "public.normalize_value(source)",
+            always: true,
+            stored: true,
+          },
+        }],
+      }],
+      []
+    );
+
+    expect(result.beforeTables).toEqual([statements[0]]);
+    expect(result.remaining).toEqual([statements[1], statements[2]]);
+    expect(postgres.getGeneratedColumnFunctionStatements(
+      statements,
+      [{ name: "records", schema: "public", columns: [] }],
+      []
+    )).toEqual({ beforeTables: [], remaining: statements });
+
+    const sqlite = createService(createMockProvider({ dialect: "sqlite" }).provider) as unknown as {
+      getGeneratedColumnFunctionStatements(
+        input: string[],
+        desired: any[],
+        current: any[]
+      ): { beforeTables: string[]; remaining: string[] };
+    };
+    expect(sqlite.getGeneratedColumnFunctionStatements(
+      statements,
+      [{ name: "records", columns: [] }],
+      []
+    )).toEqual({ beforeTables: [], remaining: statements });
+  });
+
   test("plan throws on validation errors and closes client", async function () {
     const mock = createMockProvider({
       validation: createValidation({

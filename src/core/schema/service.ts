@@ -8,7 +8,7 @@ import type {
   AdvisoryLockOptions,
   ParsedSchema,
 } from "../../providers/types";
-import type { Extension, Trigger, View } from "../../types/schema";
+import type { Extension, Function, Table, Trigger, View } from "../../types/schema";
 import { Logger } from "../../utils/logger";
 import {
   getCreatedPostgresServerName,
@@ -815,6 +815,13 @@ export class SchemaService {
         plannedTriggerRemovals
       );
     }
+    const generatedColumnFunctionStatements =
+      this.getGeneratedColumnFunctionStatements(
+        functionStatements,
+        desiredSchema,
+        currentSchema
+      );
+    functionStatements = generatedColumnFunctionStatements.remaining;
 
     if (this.provider.supportsFeature("stored_procedures")) {
       procedureStatements = this.procedureHandler.generateStatements(
@@ -1010,6 +1017,7 @@ export class SchemaService {
       ...typeCreateStatements,
       ...sqlObjectPlan.typeAlter,
       ...sequencePlan.beforeTables,
+      ...generatedColumnFunctionStatements.beforeTables,
       ...sqlObjectPlan.earlyDrop,
       ...prePartitionTriggerStatements,
       ...prePartitionViewStatements,
@@ -1128,6 +1136,55 @@ export class SchemaService {
       deferredPreview: deferredTableStatements,
       concurrentPreview: concurrentStatements,
     };
+  }
+
+  private getGeneratedColumnFunctionStatements(
+    statements: string[],
+    desiredTables: Table[],
+    currentTables: Table[]
+  ): { beforeTables: string[]; remaining: string[] } {
+    if (this.provider.dialect !== "postgres") {
+      return { beforeTables: [], remaining: statements };
+    }
+
+    const currentTableKeys = new Set(currentTables.map(function getTableKey(table) {
+      return `${table.schema || "public"}.${table.name}`;
+    }));
+    const requiredFunctions = new Set<string>();
+
+    for (const table of desiredTables) {
+      const tableKey = `${table.schema || "public"}.${table.name}`;
+      if (currentTableKeys.has(tableKey)) {
+        continue;
+      }
+      for (const column of table.columns) {
+        if (!column.generated) {
+          continue;
+        }
+        for (const functionKey of getGeneratedExpressionFunctionKeys(
+          column.generated.expression,
+          table.schema || "public"
+        )) {
+          requiredFunctions.add(functionKey);
+        }
+      }
+    }
+
+    if (requiredFunctions.size === 0) {
+      return { beforeTables: [], remaining: statements };
+    }
+
+    const beforeTables: string[] = [];
+    const remaining: string[] = [];
+    for (const statement of statements) {
+      const functionKey = getCreatedFunctionKey(statement);
+      if (functionKey && requiredFunctions.has(functionKey)) {
+        beforeTables.push(statement);
+      } else {
+        remaining.push(statement);
+      }
+    }
+    return { beforeTables, remaining };
   }
 
   private async canonicalizeDesiredViews(
@@ -1290,6 +1347,95 @@ export class SchemaService {
 
 function isPostgresViewDrop(statement: string): boolean {
   return /^DROP\s+(?:MATERIALIZED\s+)?VIEW\b/i.test(statement.trim());
+}
+
+function getGeneratedExpressionFunctionKeys(
+  expression: string,
+  defaultSchema: string
+): string[] {
+  try {
+    const parsed = parseSync(`SELECT ${expression} AS terradb_generated_expression`) as {
+      stmts?: Array<{ stmt?: unknown }>;
+    };
+    const keys = new Set<string>();
+    collectFunctionCallKeys(parsed.stmts, defaultSchema, keys);
+    return Array.from(keys);
+  } catch {
+    return [];
+  }
+}
+
+function collectFunctionCallKeys(
+  value: unknown,
+  defaultSchema: string,
+  keys: Set<string>
+): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectFunctionCallKeys(item, defaultSchema, keys);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const node = value as Record<string, unknown>;
+  const functionCall = node.FuncCall as Record<string, unknown> | undefined;
+  if (functionCall) {
+    const nameParts = getPostgresNameParts(functionCall.funcname);
+    if (nameParts.length > 0) {
+      const name = nameParts[nameParts.length - 1]!;
+      const schema = nameParts.length > 1
+        ? nameParts[nameParts.length - 2]!
+        : defaultSchema;
+      keys.add(`${schema}.${name}`);
+    }
+  }
+
+  for (const child of Object.values(node)) {
+    collectFunctionCallKeys(child, defaultSchema, keys);
+  }
+}
+
+function getCreatedFunctionKey(statement: string): string | undefined {
+  try {
+    const parsed = parseSync(statement) as {
+      stmts?: Array<{
+        stmt?: {
+          CreateFunctionStmt?: { funcname?: unknown };
+        };
+      }>;
+    };
+    const nameParts = getPostgresNameParts(
+      parsed.stmts?.[0]?.stmt?.CreateFunctionStmt?.funcname
+    );
+    if (nameParts.length === 0) {
+      return undefined;
+    }
+    const name = nameParts[nameParts.length - 1]!;
+    const schema = nameParts.length > 1
+      ? nameParts[nameParts.length - 2]!
+      : "public";
+    return `${schema}.${name}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function getPostgresNameParts(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const parts: string[] = [];
+  for (const item of value) {
+    const stringNode = (item as { String?: { sval?: unknown } }).String;
+    if (!stringNode || typeof stringNode.sval !== "string") {
+      return [];
+    }
+    parts.push(stringNode.sval);
+  }
+  return parts;
 }
 
 function isPostgresConstraintDrop(statement: string): boolean {

@@ -164,6 +164,71 @@ describe("SchemaDiffer private coverage", () => {
     expect(statements[1]).toContain("STORED");
   });
 
+  test("compares local generated expressions and detects expression-only changes in both paths", function () {
+    const differ = new SchemaDiffer() as any;
+    const desired = makeColumn({
+      name: "normalized",
+      type: "TEXT",
+      nullable: true,
+      generated: {
+        always: true,
+        expression: "public.normalize_value(source)",
+        stored: true,
+      },
+    });
+    const equivalent = makeColumn({
+      name: "normalized",
+      type: "TEXT",
+      nullable: true,
+      generated: {
+        always: true,
+        expression: "normalize_value(source)",
+        stored: true,
+      },
+    });
+    const changed = makeColumn({
+      name: "normalized",
+      type: "TEXT",
+      nullable: true,
+      generated: {
+        always: true,
+        expression: "other_value(source)",
+        stored: true,
+      },
+    });
+    const table = makeTable({
+      schema: undefined,
+      columns: [makeColumn({ name: "source", type: "TEXT", nullable: true })],
+    });
+
+    expect(
+      differ.generateColumnModificationStatements(table, desired, equivalent)
+    ).toEqual([]);
+    expect(
+      differ.generateColumnModificationStatements(table, desired, changed)
+    ).toHaveLength(2);
+
+    const equivalentAlterations: unknown[] = [];
+    differ.collectColumnModificationAlterations(
+      table,
+      desired,
+      equivalent,
+      equivalentAlterations
+    );
+    expect(equivalentAlterations).toEqual([]);
+
+    const changedAlterations: Array<{ type: string }> = [];
+    differ.collectColumnModificationAlterations(
+      table,
+      desired,
+      changed,
+      changedAlterations
+    );
+    expect(changedAlterations.map(function getType(alteration) {
+      return alteration.type;
+    })).toEqual(["drop_column", "add_column"]);
+  });
+
   test("validates PostgreSQL 18 virtual generated column support", function () {
     const differ = new SchemaDiffer();
     const virtualTable = makeTable({

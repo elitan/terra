@@ -212,7 +212,7 @@ function resolveTestCommand(file: string, override?: string): string {
     return "bun --env-file=.env test --max-concurrency=1 --timeout 120000 src/test/schema-service-private-coverage.test.ts src/test/postgres-concurrent-index-safety.test.ts src/test/tables/postgres-clustering.test.ts src/test/tables/postgres-replica-identity.test.ts src/test/destructive-operations.test.ts src/test/edge-cases/index-desc.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/differ.ts")) {
-    return "bun --env-file=.env test --max-concurrency=1 src/test/schema-differ-private-coverage.test.ts src/test/postgres-table-drop-safety.test.ts src/test/destructive-operations.test.ts src/test/columns/postgres-specific/type-cast-normalization.test.ts src/test/columns/postgres-column-statistics.test.ts src/test/indexes/postgres-index-keys.test.ts src/test/enums/postgres-enum-dependencies.test.ts";
+    return "bun --env-file=.env test --max-concurrency=1 --timeout 120000 src/test/schema-differ-private-coverage.test.ts src/test/columns/postgres-generated-function-dependency.test.ts";
   }
   if (normalized.endsWith("/src/core/schema/parser/sequence-parser.ts")) {
     return "bun --env-file=.env test --max-concurrency=1 src/test/sequences/sequence-parsing.test.ts src/test/parser-module-coverage.test.ts";
