@@ -133,6 +133,22 @@ describe("SQLite Unsupported Features Validation", () => {
         sql: "CREATE TABLE only_generated (normalized TEXT AS ('constant'));",
         message: "must have at least one non-generated column",
       },
+      {
+        sql: "CREATE TABLE generated_rowid (source TEXT, value TEXT AS (rowid));",
+        message: "no such column: rowid",
+      },
+      {
+        sql: "CREATE TABLE generated_subquery (source TEXT, value TEXT AS ((SELECT source)));",
+        message: "subqueries prohibited in generated columns",
+      },
+      {
+        sql: "CREATE TABLE generated_aggregate (source INTEGER, value INTEGER AS (sum(source)));",
+        message: "misuse of aggregate function sum()",
+      },
+      {
+        sql: "CREATE TABLE generated_cycle (source INTEGER, value INTEGER AS (value + 1));",
+        message: 'generated column loop on "value"',
+      },
     ];
 
     for (const scenario of cases) {
