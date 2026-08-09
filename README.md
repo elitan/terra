@@ -435,13 +435,12 @@ valid zero-label enum types. TerraDB can add labels at any position while
 preserving the relative order of existing labels. Removing or reordering
 existing labels is rejected before execution because PostgreSQL has no safe
 in-place operation for those changes. Enum additions are committed in a
-pre-transactional phase before the main schema transaction, allowing later DDL
-in the same apply to use a newly added label. JSON plan/apply output schema
+standalone pre-transactional migration: a desired schema that combines a new
+label with any other change is rejected before mutation. Apply the enum-only
+change first, then apply the dependent schema change. This prevents a later
+failure from leaving a committed label behind. JSON plan/apply output schema
 version 2 exposes this phase through `counts.preTransactional`,
 `statements.preTransactional`, and the `pre-transactional` metadata channel.
-Because this phase commits first, an added label remains as a safe additive
-change if a later transactional statement fails; rerunning apply resumes the
-remaining work.
 Enum removal inspects direct and array relation attributes, composite
 attributes, derived domains and ranges, function/procedure signatures, and
 owning defaults, constraints, and indexes.

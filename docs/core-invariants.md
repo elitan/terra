@@ -23,7 +23,7 @@
 1. transactional statements must execute atomically.
 2. failures must leave database in previous consistent state.
 3. concurrent statements must report exact failing statement.
-4. pre-transactional statements must commit before main transactional statements.
+4. pre-transactional enum additions must be the only planned change; mixed plans fail before mutation.
 5. concurrent statements must finish before deferred transactional statements that depend on them.
 
 ## error contract

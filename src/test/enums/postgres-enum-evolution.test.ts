@@ -93,7 +93,7 @@ describe("PostgreSQL enum evolution", function () {
     expect(secondPlan.hasChanges).toBe(false);
   });
 
-  test("inserts a quoted label in order before using it as a default", async function () {
+  test("requires enum additions before dependent schema changes", async function () {
     const service = createTestSchemaService();
     const initial = `
       CREATE SCHEMA "${SCHEMA}";
@@ -113,18 +113,35 @@ describe("PostgreSQL enum evolution", function () {
     `;
 
     await service.apply(initial, [SCHEMA], true);
-    const plan = await service.apply(
-      desired,
-      [SCHEMA],
-      true,
-      undefined,
-      true
-    );
+    await expect(service.plan(desired, [SCHEMA])).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      entity: "enum",
+      field: "label addition",
+    });
+    await expect(
+      service.apply(desired, [SCHEMA], true)
+    ).rejects.toMatchObject({
+      code: "VALIDATION_ERROR",
+      entity: "enum",
+      field: "label addition",
+    });
+    expect(await readEnumLabels(client, "priority")).toEqual(["low", "high"]);
 
-    expect(plan.preTransactional).toEqual([
+    const enumOnly = initial.replace(
+      "'low', 'high'",
+      "'low', 'can''t wait', 'high'"
+    );
+    const enumPlan = await service.plan(enumOnly, [SCHEMA]);
+    expect(enumPlan.preTransactional).toEqual([
       `ALTER TYPE "${SCHEMA}"."priority" ADD VALUE 'can''t wait' BEFORE 'high';`,
     ]);
-    expect(plan.transactional.join("\n")).toContain("SET DEFAULT 'can''t wait'");
+    expect(enumPlan.transactional).toEqual([]);
+    await service.apply(enumOnly, [SCHEMA], true);
+    expect(await readEnumLabels(client, "priority")).toEqual([
+      "low",
+      "can't wait",
+      "high",
+    ]);
 
     await service.apply(desired, [SCHEMA], true);
     expect(await readEnumLabels(client, "priority")).toEqual([

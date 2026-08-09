@@ -64,6 +64,7 @@
 - done: rerun `test:core` and full `test:coverage` gate green (`1308` pass, `98.02%` line, `96.72%` function).
 - done: add enum integration regression for ordered middle-value insertion.
 - done: support insertion-only enum evolution while rejecting retained-label reordering.
+- done: reject mixed PostgreSQL enum-label additions with transactional, concurrent, or deferred work before mutation, because PostgreSQL enum labels cannot be rolled back after their required committed phase; require an enum-only apply before dependent work.
 - done: add schema-qualified same-name enum integration test for scoped append behavior.
 - done: fix enum introspection grouping by schema+name to avoid cross-schema enum value merge.
 - done: harden enum suite cleanup to include `tenant_a` schema.

@@ -1907,7 +1907,7 @@ CREATE VIEW item_labels AS
   );
 
   test.skipIf(reachablePostgresUrls.length === 0)(
-    "should expose deterministic postgres metadata across execution phases",
+    "should expose deterministic postgres metadata for standalone enum additions",
     async function () {
       const postgresUrl = reachablePostgresUrls[0];
       if (!postgresUrl) return;
@@ -1917,6 +1917,7 @@ CREATE VIEW item_labels AS
       const schemaName = `cli_enum_phase_${suffix}`;
       const seedSchemaPath = join(dir, `enum-phase-seed-${suffix}.sql`);
       const nextSchemaPath = join(dir, `enum-phase-next-${suffix}.sql`);
+      const mixedSchemaPath = join(dir, `enum-phase-mixed-${suffix}.sql`);
       const client = new Client({ connectionString: postgresUrl });
 
       try {
@@ -1946,13 +1947,23 @@ CREATE VIEW item_labels AS
           CREATE TABLE ${schemaName}.tasks (
             id INTEGER PRIMARY KEY,
             team_id INTEGER,
+            priority ${schemaName}.priority NOT NULL DEFAULT 'low'
+          );
+          `.trim() + "\n"
+        );
+        await writeFile(
+          mixedSchemaPath,
+          `
+          CREATE SCHEMA ${schemaName};
+          CREATE TYPE ${schemaName}.priority AS ENUM ('low', 'can''t wait', 'high');
+          CREATE TABLE ${schemaName}.teams (
+            id INTEGER PRIMARY KEY
+          );
+          CREATE TABLE ${schemaName}.tasks (
+            id INTEGER PRIMARY KEY,
+            team_id INTEGER,
             priority ${schemaName}.priority NOT NULL DEFAULT 'can''t wait'
           );
-          ALTER TABLE ${schemaName}.tasks
-            ADD CONSTRAINT tasks_team_fk FOREIGN KEY (team_id)
-            REFERENCES ${schemaName}.teams (id) NOT VALID;
-          CREATE UNIQUE INDEX CONCURRENTLY tasks_priority_idx
-            ON ${schemaName}.tasks (priority);
           `.trim() + "\n"
         );
 
@@ -1973,6 +1984,29 @@ CREATE VIEW item_labels AS
           { DATABASE_URL: "" }
         );
         expect(seedResult.exitCode).toBe(0);
+
+        const mixedResult = await runCli(
+          [
+            "run",
+            "src/index.ts",
+            "plan",
+            "-f",
+            mixedSchemaPath,
+            "-u",
+            postgresUrl,
+            "--schema",
+            schemaName,
+            "--format",
+            "json",
+            "--no-color",
+          ],
+          { DATABASE_URL: "" }
+        );
+        expect(mixedResult.exitCode).toBe(1);
+        expect(parseJsonOutput(mixedResult.output).error).toMatchObject({
+          code: "VALIDATION_ERROR",
+          message: expect.stringContaining("standalone migration"),
+        });
 
         const planResult = await runCli(
           [
@@ -2007,27 +2041,8 @@ CREATE VIEW item_labels AS
           risk: "safe",
           sql: enumStatement,
         });
-        expect(payload.counts.transactional).toBe(1);
-        const constraintMetadata = payload.statementMetadata.find(
-          function findConstraint(metadata) {
-            return metadata.sql.includes('ADD CONSTRAINT "tasks_team_fk"');
-          }
-        );
-        expect(constraintMetadata).toMatchObject({
-          channel: "transactional",
-          category: "constraint",
-          risk: "safe",
-        });
-        expect(payload.counts.concurrent).toBe(1);
-        expect(payload.statementMetadata[2]).toEqual({
-          order: 3,
-          channel: "concurrent",
-          category: "index",
-          risk: "concurrent",
-          sql:
-            `CREATE UNIQUE INDEX CONCURRENTLY "tasks_priority_idx" ` +
-            `ON "${schemaName}"."tasks" ("priority");`,
-        });
+        expect(payload.counts.transactional).toBe(0);
+        expect(payload.counts.concurrent).toBe(0);
 
         const strictResult = await runCli(
           [

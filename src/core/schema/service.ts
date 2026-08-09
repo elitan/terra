@@ -896,6 +896,19 @@ export class SchemaService {
       ...extensionDropStatements,
     ];
 
+    if (enumPreTransactionalStatements.length > 0 && (
+      transactionalPreview.length > 0 ||
+      deferredTableStatements.length > 0 ||
+      concurrentStatements.length > 0
+    )) {
+      throw new ValidationError(
+        "PostgreSQL enum label additions must be applied in a standalone migration before other schema changes so a later failure cannot leave a committed label behind",
+        "enum",
+        "label addition",
+        enumPreTransactionalStatements
+      );
+    }
+
     const totalChanges =
       enumPreTransactionalStatements.length +
       transactionalPreview.length +
