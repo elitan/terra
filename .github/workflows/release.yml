@@ -7,6 +7,11 @@ on:
         description: "Version to publish (e.g., 0.2.3, 0.3.0, 1.0.0)"
         required: true
         type: string
+      resume_existing_tag:
+        description: "Resume a partially published version whose tag already exists"
+        required: false
+        default: false
+        type: boolean
 
 env:
   FORCE_COLOR: "0"
@@ -32,7 +37,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate release state
+        id: release_state
+        env:
+          RESUME_EXISTING_TAG: ${{ inputs.resume_existing_tag }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag="v$VERSION"
+          if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+            if [ "$RESUME_EXISTING_TAG" != "true" ]; then
+              echo "Tag $tag already exists. Set resume_existing_tag to resume this release."
+              exit 1
+            fi
+
+            git checkout --detach "$tag"
+            package_version="$(jq -r '.version' package.json)"
+            if [ "$package_version" != "$VERSION" ]; then
+              echo "Tag $tag contains package version $package_version, expected $VERSION."
+              exit 1
+            fi
+
+            echo "existing_tag=true" >> "$GITHUB_OUTPUT"
+          else
+            if [ "$RESUME_EXISTING_TAG" = "true" ]; then
+              echo "Cannot resume $tag because the tag does not exist."
+              exit 1
+            fi
+
+            echo "existing_tag=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -43,29 +78,68 @@ jobs:
       - run: bun install
       - run: bun run build
       - run: npm pack --dry-run
+      - name: Check npm publication state
+        id: npm_state
+        env:
+          EXISTING_TAG: ${{ steps.release_state.outputs.existing_tag }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          package_name="$(jq -r '.name' package.json)"
+          if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
+            if [ "$EXISTING_TAG" != "true" ]; then
+              echo "$package_name@$VERSION is already published, but its git tag is missing."
+              exit 1
+            fi
+
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
       - run: npm version ${{ github.event.inputs.version }} --no-git-tag-version
+        if: steps.release_state.outputs.existing_tag != 'true'
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+        if: steps.release_state.outputs.existing_tag != 'true'
       - run: |
           git add package.json
           git commit -m "chore(release): bump to v${{ github.event.inputs.version }}"
+        if: steps.release_state.outputs.existing_tag != 'true'
       - run: git tag v${{ github.event.inputs.version }}
+        if: steps.release_state.outputs.existing_tag != 'true'
       - run: |
           git push origin main
           git push origin v${{ github.event.inputs.version }}
+        if: steps.release_state.outputs.existing_tag != 'true'
       - run: npm publish --provenance --access public
+        if: steps.npm_state.outputs.published != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Create GitHub Release
         uses: actions/github-script@v7
         with:
           script: |
             const version = '${{ github.event.inputs.version }}';
+            const currentTag = `v${version}`;
+            try {
+              await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: currentTag
+              });
+              core.info(`GitHub release ${currentTag} already exists.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+            }
+
             const { data: tags } = await github.rest.repos.listTags({
               owner: context.repo.owner,
               repo: context.repo.repo,
               per_page: 10
             });
-            const currentTag = `v${version}`;
             const previousTag = tags.find((t) => t.name !== currentTag)?.name;
             let body = "";
             if (previousTag) {
