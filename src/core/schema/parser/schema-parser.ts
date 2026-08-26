@@ -1829,13 +1829,29 @@ export class SchemaParser {
           continue;
         }
 
-        const referencedTableKey = SchemaParser.referencedTableKey(
+        let referencedTableKey = SchemaParser.referencedTableKey(
           foreignKey.referencedTable
         );
         const sourceTableKey = SchemaParser.tableKey(table.name, table.schema);
         const errorPrefix =
           `Cannot resolve implicit referenced columns for foreign key on ${sourceTableKey}`;
-        const referencedTable = tableMap.get(referencedTableKey);
+        let referencedTable = tableMap.get(referencedTableKey);
+        if (
+          !referencedTable &&
+          !foreignKey.referencedTable.includes(".") &&
+          table.schema &&
+          table.schema !== "public"
+        ) {
+          const sameSchemaKey = SchemaParser.tableKey(
+            foreignKey.referencedTable,
+            table.schema
+          );
+          referencedTable = tableMap.get(sameSchemaKey);
+          if (referencedTable) {
+            referencedTableKey = sameSchemaKey;
+            foreignKey.referencedTable = sameSchemaKey;
+          }
+        }
         if (!referencedTable) {
           throw new ParserError(
             `${errorPrefix}: referenced table ${referencedTableKey} is not defined in the desired schema; specify referenced columns explicitly for external or unmanaged tables`,
