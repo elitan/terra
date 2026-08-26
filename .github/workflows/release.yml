@@ -16,7 +16,7 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     permissions:
       contents: write
       id-token: write
