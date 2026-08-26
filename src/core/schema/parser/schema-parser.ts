@@ -112,12 +112,6 @@ type PendingTableConstraint = {
   }
 );
 
-type PendingTableColumn = {
-  tableName: string;
-  schemaName?: string;
-  tableFragment: Table;
-};
-
 const POSTGRES_SERIAL_CONFLICTING_CLAUSES: ReadonlyMap<string, string> = new Map([
   ["CONSTR_NULL", "NULL"],
   ["CONSTR_DEFAULT", "DEFAULT"],
@@ -849,7 +843,6 @@ export class SchemaParser {
     const comments: Comment[] = [];
     const sqlObjects: SqlObject[] = [];
     const pendingTableConstraints: PendingTableConstraint[] = [];
-    const pendingTableColumns: PendingTableColumn[] = [];
     const pendingTriggerModes: PendingTriggerMode[] = [];
     const pendingReplicaIdentities: PendingReplicaIdentity[] = [];
     const pendingClusteringChoices: PendingClusteringChoice[] = [];
@@ -1102,11 +1095,6 @@ export class SchemaParser {
             filePath
           );
           pendingPostgresStatistics.push(...statisticsChanges);
-          const tableColumns = this.parseAlterTableColumns(
-            stmt.AlterTableStmt,
-            filePath
-          );
-          pendingTableColumns.push(...tableColumns);
           const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
             function isNotDeclarativeStateCommand(item: any) {
               const subtype = item?.AlterTableCmd?.subtype;
@@ -1114,8 +1102,7 @@ export class SchemaParser {
                 !isTableTriggerModeSubtype(subtype) &&
                 !isReplicaIdentitySubtype(subtype) &&
                 !isClusteringSubtype(subtype) &&
-                !isPostgresStatisticsSubtype(subtype) &&
-                subtype !== "AT_AddColumn";
+                !isPostgresStatisticsSubtype(subtype);
             }
           );
           if (remainingCommands.length > 0) {
@@ -1130,8 +1117,7 @@ export class SchemaParser {
             triggerModes.length === 0 &&
             replicaIdentities.length === 0 &&
             clusteringChoices.length === 0 &&
-            statisticsChanges.length === 0 &&
-            tableColumns.length === 0
+            statisticsChanges.length === 0
           ) {
             throw this.unsupportedAlterTableError(filePath);
           }
@@ -1244,7 +1230,6 @@ export class SchemaParser {
       pendingPostgresStatistics,
       filePath
     );
-    this.mergePendingTableColumns(tables, pendingTableColumns, filePath);
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
     this.resolveImplicitForeignKeyColumns(tables, filePath);
 
@@ -1732,118 +1717,6 @@ export class SchemaParser {
       .toUpperCase();
   }
 
-  private parseAlterTableColumns(
-    stmt: any,
-    filePath?: string
-  ): PendingTableColumn[] {
-    const relation = stmt?.relation;
-    const tableName = relation?.relname;
-    const schemaName = relation?.schemaname;
-    if (!tableName) {
-      throw this.unsupportedAlterTableError(filePath);
-    }
-
-    const pending: PendingTableColumn[] = [];
-    for (const commandWrapper of stmt.cmds || []) {
-      const command = commandWrapper?.AlterTableCmd;
-      if (command?.subtype !== "AT_AddColumn") {
-        continue;
-      }
-      const columnDefinition = command.def?.ColumnDef;
-      if (!columnDefinition) {
-        throw this.unsupportedAlterTableError(filePath);
-      }
-
-      const createStatement = {
-        relation,
-        tableElts: [{ ColumnDef: columnDefinition }],
-      };
-      this.rejectInvalidSerialTypeForms(createStatement, filePath);
-      this.rejectConflictingSerialColumnClauses(createStatement, filePath);
-      this.rejectUnsupportedConstraintSemantics(createStatement, filePath);
-      const tableFragment = parseCreateTable(createStatement);
-      if (!tableFragment || tableFragment.columns.length !== 1) {
-        throw this.unsupportedAlterTableError(filePath);
-      }
-      pending.push({ tableName, schemaName, tableFragment });
-    }
-    return pending;
-  }
-
-  private mergePendingTableColumns(
-    tables: Table[],
-    pendingColumns: PendingTableColumn[],
-    filePath?: string
-  ): void {
-    if (pendingColumns.length === 0) {
-      return;
-    }
-
-    const tableMap = new Map(
-      tables.map(function (table) {
-        return [SchemaParser.tableKey(table.name, table.schema), table] as const;
-      })
-    );
-
-    for (const pending of pendingColumns) {
-      const table = tableMap.get(
-        SchemaParser.tableKey(pending.tableName, pending.schemaName)
-      );
-      if (!table) {
-        throw new ParserError(
-          `ALTER TABLE target not found in schema definitions: ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}`,
-          filePath
-        );
-      }
-
-      const column = pending.tableFragment.columns[0]!;
-      const duplicateColumn = table.columns.some(function (existingColumn) {
-        return existingColumn.name === column.name;
-      });
-      if (duplicateColumn) {
-        throw new ParserError(
-          `ALTER TABLE ADD COLUMN duplicates desired column: ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}.${column.name}`,
-          filePath
-        );
-      }
-      table.columns.push(column);
-
-      if (pending.tableFragment.primaryKey) {
-        if (table.primaryKey) {
-          throw new ParserError(
-            `ALTER TABLE ADD COLUMN declares a second primary key on ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}`,
-            filePath
-          );
-        }
-        table.primaryKey = pending.tableFragment.primaryKey;
-      }
-      if (pending.tableFragment.foreignKeys) {
-        table.foreignKeys = [
-          ...(table.foreignKeys || []),
-          ...pending.tableFragment.foreignKeys,
-        ];
-      }
-      if (pending.tableFragment.checkConstraints) {
-        table.checkConstraints = [
-          ...(table.checkConstraints || []),
-          ...pending.tableFragment.checkConstraints,
-        ];
-      }
-      if (pending.tableFragment.uniqueConstraints) {
-        table.uniqueConstraints = [
-          ...(table.uniqueConstraints || []),
-          ...pending.tableFragment.uniqueConstraints,
-        ];
-      }
-      if (pending.tableFragment.exclusionConstraints) {
-        table.exclusionConstraints = [
-          ...(table.exclusionConstraints || []),
-          ...pending.tableFragment.exclusionConstraints,
-        ];
-      }
-    }
-  }
-
   private parseAlterTableConstraints(
     stmt: any,
     filePath?: string
@@ -1998,7 +1871,7 @@ export class SchemaParser {
     return new ParserError(
       "This ALTER TABLE statement is not supported in schema definitions. " +
         "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
-        "ADD COLUMN, ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
+        "ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
         "named trigger firing modes, replica identity state, and persistent " +
         "clustering choices, per-column statistics, and expression-index " +
         "statistics targets; " +

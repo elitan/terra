@@ -94,51 +94,19 @@ describe("Parser Error Handling", () => {
       ]);
     });
 
-    test("should merge ALTER TABLE ADD COLUMN statements into desired table state", async () => {
+    test("should throw ParserError for ALTER TABLE statements", async () => {
       const sqlWithAlter = `
-        CREATE TABLE people (id SERIAL PRIMARY KEY);
-        CREATE TABLE internal_departments (id SERIAL PRIMARY KEY);
-        CREATE TABLE fortnox.cost_centers (id SERIAL PRIMARY KEY);
-        ALTER TABLE internal_departments
-          ADD COLUMN name VARCHAR(100) NOT NULL,
-          ADD COLUMN fortnox_cost_center_id INTEGER
-            REFERENCES fortnox.cost_centers(id) ON DELETE SET NULL;
+        CREATE TABLE users (id SERIAL PRIMARY KEY);
+        ALTER TABLE users ADD COLUMN name VARCHAR(100);
       `;
 
-      const result = await parser.parseSchema(sqlWithAlter);
-      const departments = result.tables.find(function (table) {
-        return table.name === "internal_departments";
-      });
-
-      expect(departments?.columns.map(function (column) {
-        return {
-          name: column.name,
-          type: column.type,
-          nullable: column.nullable,
-        };
-      })).toEqual([
-        { name: "id", type: "SERIAL", nullable: false },
-        { name: "name", type: "VARCHAR(100)", nullable: false },
-        {
-          name: "fortnox_cost_center_id",
-          type: "INT4",
-          nullable: true,
-        },
-      ]);
-      expect(departments?.foreignKeys).toContainEqual({
-        name: undefined,
-        columns: ["fortnox_cost_center_id"],
-        referencedTable: "fortnox.cost_centers",
-        referencedColumns: ["id"],
-        onDelete: "SET NULL",
-        onUpdate: "NO ACTION",
-      });
+      await expect(parser.parseSchema(sqlWithAlter)).rejects.toThrow(ParserError);
     });
 
-    test("should have descriptive message for unsupported ALTER TABLE mutations", async () => {
+    test("should have descriptive message for ALTER TABLE", async () => {
       const sqlWithAlter = `
-        CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);
-        ALTER TABLE users ALTER COLUMN name TYPE VARCHAR(100);
+        CREATE TABLE users (id SERIAL PRIMARY KEY);
+        ALTER TABLE users ADD COLUMN name VARCHAR(100);
       `;
 
       try {
@@ -180,7 +148,7 @@ describe("Parser Error Handling", () => {
 
     test("should include file path for declarative violations when parsing from file", async () => {
       const testFile = "/tmp/test-alter-error.sql";
-      const sqlWithAlter = "ALTER TABLE users ALTER COLUMN name TYPE VARCHAR(100);";
+      const sqlWithAlter = "ALTER TABLE users ADD COLUMN name VARCHAR(100);";
       writeFileSync(testFile, sqlWithAlter);
 
       try {
