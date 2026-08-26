@@ -58,6 +58,18 @@ describe("Expression comparator coverage", () => {
     expect(expressionsEqual("status = ANY (ARRAY['a', 'b'])", "status IN ('a', 'b')")).toBe(true);
   });
 
+  test("normalizes single-value IN forms to equality", function () {
+    expect(
+      expressionsEqual("status IN ('active')", "status = 'active'::text")
+    ).toBe(true);
+    expect(
+      expressionsEqual(
+        "status = ANY (ARRAY['active']::text[])",
+        "status = 'active'"
+      )
+    ).toBe(true);
+  });
+
   test("normalizes ANY and ALL forms with explicit array type casts", () => {
     expect(expressionsEqual("status = ANY (ARRAY['a', 'b']::text[])", "status IN ('a', 'b')")).toBe(true);
     expect(expressionsEqual("status <> ALL (ARRAY['a', 'b']::text[])", "status NOT IN ('a', 'b')")).toBe(true);

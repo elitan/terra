@@ -109,8 +109,14 @@ type PendingTableConstraint = {
   | {
       kind: "check";
       constraint: NonNullable<Table["checkConstraints"]>[number];
-    }
+  }
 );
+
+type PendingTableColumn = {
+  tableName: string;
+  schemaName?: string;
+  tableFragment: Table;
+};
 
 const POSTGRES_SERIAL_CONFLICTING_CLAUSES: ReadonlyMap<string, string> = new Map([
   ["CONSTR_NULL", "NULL"],
@@ -347,6 +353,75 @@ function isCanonicalPartitionBoundDatum(datum: any, strategy: string): boolean {
   return sentinel === "minvalue" || sentinel === "maxvalue";
 }
 
+function protectReservedKeywordSegments(sql: string): {
+  sql: string;
+  segments: string[];
+} {
+  const segments: string[] = [];
+  const output: string[] = [];
+  let index = 0;
+
+  function protect(end: number): void {
+    const placeholder = `__TERRADB_PROTECTED_SQL_${segments.length}__`;
+    segments.push(sql.slice(index, end));
+    output.push(placeholder);
+    index = end;
+  }
+
+  while (index < sql.length) {
+    if (sql.slice(index, index + 2) === "--") {
+      const lineEnd = sql.indexOf("\n", index + 2);
+      protect(lineEnd === -1 ? sql.length : lineEnd);
+      continue;
+    }
+    if (sql.slice(index, index + 2) === "/*") {
+      let end = index + 2;
+      let depth = 1;
+      while (end < sql.length && depth > 0) {
+        if (sql.slice(end, end + 2) === "/*") {
+          depth += 1;
+          end += 2;
+        } else if (sql.slice(end, end + 2) === "*/") {
+          depth -= 1;
+          end += 2;
+        } else {
+          end += 1;
+        }
+      }
+      protect(end);
+      continue;
+    }
+    if (sql[index] === "'" || sql[index] === '"') {
+      protect(skipPostgresQuoted(sql, index, sql[index] as "'" | '"'));
+      continue;
+    }
+    const dollarEnd = postgresDollarQuoteEnd(sql, index);
+    if (dollarEnd !== undefined) {
+      protect(dollarEnd);
+      continue;
+    }
+    output.push(sql[index]!);
+    index += 1;
+  }
+
+  return { sql: output.join(""), segments };
+}
+
+function restoreReservedKeywordSegments(
+  sql: string,
+  segments: string[]
+): string {
+  for (const [index, segment] of segments.entries()) {
+    sql = sql.replace(
+      `__TERRADB_PROTECTED_SQL_${index}__`,
+      function restoreSegment() {
+        return segment;
+      }
+    );
+  }
+  return sql;
+}
+
 export class SchemaParser {
   private async ensureWasmLoaded() {
     if (!wasmInitialization) {
@@ -405,6 +480,8 @@ export class SchemaParser {
    * Auto-quote common reserved keywords when used as identifiers
    */
   private autoQuoteReservedKeywords(sql: string): string {
+    const protectedSql = protectReservedKeywordSegments(sql);
+    sql = protectedSql.sql;
     // List of commonly used PostgreSQL reserved keywords that users might use as column names
     // Note: Excludes highly ambiguous keywords like 'table', 'column', 'index' that appear in DDL
     const keywords = [
@@ -432,7 +509,7 @@ export class SchemaParser {
       sql = sql.replace(keyPattern, `$1"${keyword}"`);
     }
 
-    return sql;
+    return restoreReservedKeywordSegments(sql, protectedSql.segments);
   }
 
   /**
@@ -772,6 +849,7 @@ export class SchemaParser {
     const comments: Comment[] = [];
     const sqlObjects: SqlObject[] = [];
     const pendingTableConstraints: PendingTableConstraint[] = [];
+    const pendingTableColumns: PendingTableColumn[] = [];
     const pendingTriggerModes: PendingTriggerMode[] = [];
     const pendingReplicaIdentities: PendingReplicaIdentity[] = [];
     const pendingClusteringChoices: PendingClusteringChoice[] = [];
@@ -1024,6 +1102,11 @@ export class SchemaParser {
             filePath
           );
           pendingPostgresStatistics.push(...statisticsChanges);
+          const tableColumns = this.parseAlterTableColumns(
+            stmt.AlterTableStmt,
+            filePath
+          );
+          pendingTableColumns.push(...tableColumns);
           const remainingCommands = (stmt.AlterTableStmt.cmds || []).filter(
             function isNotDeclarativeStateCommand(item: any) {
               const subtype = item?.AlterTableCmd?.subtype;
@@ -1031,7 +1114,8 @@ export class SchemaParser {
                 !isTableTriggerModeSubtype(subtype) &&
                 !isReplicaIdentitySubtype(subtype) &&
                 !isClusteringSubtype(subtype) &&
-                !isPostgresStatisticsSubtype(subtype);
+                !isPostgresStatisticsSubtype(subtype) &&
+                subtype !== "AT_AddColumn";
             }
           );
           if (remainingCommands.length > 0) {
@@ -1046,7 +1130,8 @@ export class SchemaParser {
             triggerModes.length === 0 &&
             replicaIdentities.length === 0 &&
             clusteringChoices.length === 0 &&
-            statisticsChanges.length === 0
+            statisticsChanges.length === 0 &&
+            tableColumns.length === 0
           ) {
             throw this.unsupportedAlterTableError(filePath);
           }
@@ -1159,6 +1244,7 @@ export class SchemaParser {
       pendingPostgresStatistics,
       filePath
     );
+    this.mergePendingTableColumns(tables, pendingTableColumns, filePath);
     this.mergePendingTableConstraints(tables, pendingTableConstraints, filePath);
     this.resolveImplicitForeignKeyColumns(tables, filePath);
 
@@ -1646,6 +1732,118 @@ export class SchemaParser {
       .toUpperCase();
   }
 
+  private parseAlterTableColumns(
+    stmt: any,
+    filePath?: string
+  ): PendingTableColumn[] {
+    const relation = stmt?.relation;
+    const tableName = relation?.relname;
+    const schemaName = relation?.schemaname;
+    if (!tableName) {
+      throw this.unsupportedAlterTableError(filePath);
+    }
+
+    const pending: PendingTableColumn[] = [];
+    for (const commandWrapper of stmt.cmds || []) {
+      const command = commandWrapper?.AlterTableCmd;
+      if (command?.subtype !== "AT_AddColumn") {
+        continue;
+      }
+      const columnDefinition = command.def?.ColumnDef;
+      if (!columnDefinition) {
+        throw this.unsupportedAlterTableError(filePath);
+      }
+
+      const createStatement = {
+        relation,
+        tableElts: [{ ColumnDef: columnDefinition }],
+      };
+      this.rejectInvalidSerialTypeForms(createStatement, filePath);
+      this.rejectConflictingSerialColumnClauses(createStatement, filePath);
+      this.rejectUnsupportedConstraintSemantics(createStatement, filePath);
+      const tableFragment = parseCreateTable(createStatement);
+      if (!tableFragment || tableFragment.columns.length !== 1) {
+        throw this.unsupportedAlterTableError(filePath);
+      }
+      pending.push({ tableName, schemaName, tableFragment });
+    }
+    return pending;
+  }
+
+  private mergePendingTableColumns(
+    tables: Table[],
+    pendingColumns: PendingTableColumn[],
+    filePath?: string
+  ): void {
+    if (pendingColumns.length === 0) {
+      return;
+    }
+
+    const tableMap = new Map(
+      tables.map(function (table) {
+        return [SchemaParser.tableKey(table.name, table.schema), table] as const;
+      })
+    );
+
+    for (const pending of pendingColumns) {
+      const table = tableMap.get(
+        SchemaParser.tableKey(pending.tableName, pending.schemaName)
+      );
+      if (!table) {
+        throw new ParserError(
+          `ALTER TABLE target not found in schema definitions: ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}`,
+          filePath
+        );
+      }
+
+      const column = pending.tableFragment.columns[0]!;
+      const duplicateColumn = table.columns.some(function (existingColumn) {
+        return existingColumn.name === column.name;
+      });
+      if (duplicateColumn) {
+        throw new ParserError(
+          `ALTER TABLE ADD COLUMN duplicates desired column: ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}.${column.name}`,
+          filePath
+        );
+      }
+      table.columns.push(column);
+
+      if (pending.tableFragment.primaryKey) {
+        if (table.primaryKey) {
+          throw new ParserError(
+            `ALTER TABLE ADD COLUMN declares a second primary key on ${pending.schemaName ? `${pending.schemaName}.` : ""}${pending.tableName}`,
+            filePath
+          );
+        }
+        table.primaryKey = pending.tableFragment.primaryKey;
+      }
+      if (pending.tableFragment.foreignKeys) {
+        table.foreignKeys = [
+          ...(table.foreignKeys || []),
+          ...pending.tableFragment.foreignKeys,
+        ];
+      }
+      if (pending.tableFragment.checkConstraints) {
+        table.checkConstraints = [
+          ...(table.checkConstraints || []),
+          ...pending.tableFragment.checkConstraints,
+        ];
+      }
+      if (pending.tableFragment.uniqueConstraints) {
+        table.uniqueConstraints = [
+          ...(table.uniqueConstraints || []),
+          ...pending.tableFragment.uniqueConstraints,
+        ];
+      }
+      if (pending.tableFragment.exclusionConstraints) {
+        table.exclusionConstraints = [
+          ...(table.exclusionConstraints || []),
+          ...pending.tableFragment.exclusionConstraints,
+        ];
+      }
+    }
+  }
+
   private parseAlterTableConstraints(
     stmt: any,
     filePath?: string
@@ -1732,14 +1930,6 @@ export class SchemaParser {
         if (!table.foreignKeys) {
           table.foreignKeys = [];
         }
-        if (
-          pending.schemaName &&
-          pending.schemaName !== "public" &&
-          !pending.constraint.referencedTable.includes(".")
-        ) {
-          pending.constraint.referencedTable =
-            `${pending.schemaName}.${pending.constraint.referencedTable}`;
-        }
         table.foreignKeys.push(pending.constraint);
       } else {
         if (!table.checkConstraints) {
@@ -1808,7 +1998,7 @@ export class SchemaParser {
     return new ParserError(
       "This ALTER TABLE statement is not supported in schema definitions. " +
         "TerraDB is a declarative schema tool and accepts ALTER TABLE only for " +
-        "ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
+        "ADD COLUMN, ADD FOREIGN KEY and ADD CHECK constraints, row security flags, and " +
         "named trigger firing modes, replica identity state, and persistent " +
         "clustering choices, per-column statistics, and expression-index " +
         "statistics targets; " +

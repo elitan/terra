@@ -133,6 +133,19 @@ describe("Table parser coverage", () => {
     expect(parsed?.foreignKeys?.[0]?.referencedTable).toBe("parent_records");
   });
 
+  test("keeps unqualified references from non-public tables on the search path", async function () {
+    const ast = await parse(`
+      CREATE TABLE fortnox.employees (
+        id integer PRIMARY KEY,
+        person_id integer REFERENCES people(id)
+      );
+    `);
+
+    const parsed = parseCreateTable(ast.stmts[0]?.stmt?.CreateStmt);
+
+    expect(parsed?.foreignKeys?.[0]?.referencedTable).toBe("people");
+  });
+
   test("parses custom and default table tablespaces", async function () {
     const ast = await parse(`
       CREATE TABLE custom_space (id integer) TABLESPACE "Fast Space";

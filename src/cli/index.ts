@@ -56,6 +56,15 @@ export async function runCLI() {
       collectSchemas,
       []
     )
+    .option(
+      "--ignore-privileges",
+      "Leave grants and default privileges unmanaged"
+    )
+    .option("--ignore-comments", "Leave database comments unmanaged")
+    .option(
+      "--ignore-constraint-validation",
+      "Leave existing constraint validation state unmanaged"
+    )
     .option("--format <format>", "Output format (text|json)", "text")
     .action(async function action(options) {
       configureOutput(program.opts<GlobalCliOptions>());
@@ -79,6 +88,15 @@ export async function runCLI() {
       "Database schema to manage (can be specified multiple times, defaults to 'public')",
       collectSchemas,
       []
+    )
+    .option(
+      "--ignore-privileges",
+      "Leave grants and default privileges unmanaged"
+    )
+    .option("--ignore-comments", "Leave database comments unmanaged")
+    .option(
+      "--ignore-constraint-validation",
+      "Leave existing constraint validation state unmanaged"
     )
     .option("--auto-approve", "Skip confirmation prompt")
     .option("--dry-run", "Show migration plan without executing changes")

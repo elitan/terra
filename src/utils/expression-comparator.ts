@@ -192,6 +192,16 @@ function normalizeAstNode(node: unknown): unknown {
       const elements = arrayExpr?.elements;
       if (elements) {
         const normalizedItems = elements.map(e => normalizeAstNode(e));
+        if (getOperatorName(aExpr) === "=" && normalizedItems.length === 1) {
+          return {
+            A_Expr: {
+              kind: "AEXPR_OP",
+              name: aExpr.name,
+              lexpr: col,
+              rexpr: normalizedItems[0],
+            },
+          };
+        }
         return {
           A_Expr: {
             kind: "AEXPR_IN",
@@ -269,6 +279,23 @@ function normalizeAstNode(node: unknown): unknown {
                 rexpr: item,
               },
             })),
+          },
+        };
+      }
+    }
+
+    if (aExpr.kind === "AEXPR_IN" && getOperatorName(aExpr) === "=") {
+      const col = normalizeAstNode(aExpr.lexpr);
+      const rexpr = aExpr.rexpr as Record<string, unknown>;
+      const list = rexpr?.List as Record<string, unknown[]>;
+      const items = list?.items;
+      if (items?.length === 1) {
+        return {
+          A_Expr: {
+            kind: "AEXPR_OP",
+            name: aExpr.name,
+            lexpr: col,
+            rexpr: normalizeAstNode(items[0]),
           },
         };
       }

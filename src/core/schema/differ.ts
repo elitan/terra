@@ -171,6 +171,10 @@ function normalizeReferencedTableName(referencedTable: string): string {
   return `${schema || "public"}.${name}`;
 }
 
+function getForeignKeyStructuralKey(constraint: ForeignKeyConstraint): string {
+  return `${constraint.columns.join(",")}->${normalizeReferencedTableName(constraint.referencedTable)}.${constraint.referencedColumns.join(",")}`;
+}
+
 function normalizeForeignKeyMatchType(
   matchType: ForeignKeyConstraint["matchType"]
 ): "FULL" | "SIMPLE" {
@@ -569,7 +573,8 @@ type CheckConstraintChange = "none" | "validate" | "replace";
 
 function getCheckConstraintChange(
   desired: CheckConstraint,
-  current: CheckConstraint
+  current: CheckConstraint,
+  manageValidation: boolean = true
 ): CheckConstraintChange {
   if (!expressionsEqual(desired.expression, current.expression)) {
     return "replace";
@@ -577,7 +582,10 @@ function getCheckConstraintChange(
   if (Boolean(desired.noInherit) !== Boolean(current.noInherit)) {
     return "replace";
   }
-  if (Boolean(desired.notValid) === Boolean(current.notValid)) {
+  if (
+    !manageValidation ||
+    Boolean(desired.notValid) === Boolean(current.notValid)
+  ) {
     return "none";
   }
   return current.notValid && !desired.notValid ? "validate" : "replace";
@@ -585,7 +593,8 @@ function getCheckConstraintChange(
 
 function findMatchingCheckConstraint(
   desired: CheckConstraint,
-  unmatchedCurrent: Set<CheckConstraint>
+  unmatchedCurrent: Set<CheckConstraint>,
+  manageValidation: boolean = true
 ): CheckConstraint | undefined {
   if (desired.name) {
     for (const current of unmatchedCurrent) {
@@ -601,7 +610,11 @@ function findMatchingCheckConstraint(
     if (!expressionsEqual(desired.expression, current.expression)) {
       continue;
     }
-    const change = getCheckConstraintChange(desired, current);
+    const change = getCheckConstraintChange(
+      desired,
+      current,
+      manageValidation
+    );
     if (change === "none") {
       return current;
     }
@@ -1973,23 +1986,13 @@ export class SchemaDiffer {
 
   private createResolverInputTables(tables: Table[]): Table[] {
     const tableKeys = new Set(tables.map((table) => this.getTableKey(table)));
-    const keysByName = new Map<string, string[]>();
-
-    for (const table of tables) {
-      const key = this.getTableKey(table);
-      const matches = keysByName.get(table.name) || [];
-      matches.push(key);
-      keysByName.set(table.name, matches);
-    }
 
     return tables.map((table) => {
       const resolverName = this.getTableKey(table);
       const foreignKeys = (table.foreignKeys || []).map((foreignKey) => {
         const referencedTable = this.resolveResolverReferencedTableKey(
           foreignKey.referencedTable,
-          table.schema,
-          tableKeys,
-          keysByName
+          tableKeys
         );
         if (!referencedTable) {
           return foreignKey;
@@ -2000,9 +2003,7 @@ export class SchemaDiffer {
       const inherits = (table.inherits || []).map(function mapParent(parent) {
         const parentKey = differ.resolveResolverReferencedTableKey(
           parent.schema ? `${parent.schema}.${parent.name}` : parent.name,
-          table.schema,
-          tableKeys,
-          keysByName
+          tableKeys
         );
         return parentKey ? { name: parentKey } : parent;
       });
@@ -2019,9 +2020,7 @@ export class SchemaDiffer {
 
   private resolveResolverReferencedTableKey(
     referencedTable: string,
-    currentSchema: string | undefined,
-    tableKeys: Set<string>,
-    keysByName: Map<string, string[]>
+    tableKeys: Set<string>
   ): string | undefined {
     const [referencedName, referencedSchema] = splitSchemaTable(referencedTable);
 
@@ -2030,14 +2029,9 @@ export class SchemaDiffer {
       return tableKeys.has(directKey) ? directKey : undefined;
     }
 
-    const schemaKey = `${currentSchema || "public"}.${referencedName}`;
-    if (tableKeys.has(schemaKey)) {
-      return schemaKey;
-    }
-
-    const matches = keysByName.get(referencedName) || [];
-    if (matches.length === 1) {
-      return matches[0];
+    const publicKey = `public.${referencedName}`;
+    if (tableKeys.has(publicKey)) {
+      return publicKey;
     }
 
     return undefined;
@@ -2871,20 +2865,17 @@ export class SchemaDiffer {
   ): string[] {
     const statements: string[] = [];
 
-    const getStructuralKey = (c: ForeignKeyConstraint) =>
-      `${c.columns.join(',')}->${c.referencedTable}.${c.referencedColumns.join(',')}`;
-
     const currentByName = new Map(
       currentConstraints.filter(c => c.name).map(c => [c.name!, c])
     );
     const currentByStructure = new Map(
-      currentConstraints.map(c => [getStructuralKey(c), c])
+      currentConstraints.map(c => [getForeignKeyStructuralKey(c), c])
     );
 
     const matchedCurrentNames = new Set<string>();
 
     for (const desired of desiredConstraints) {
-      const structKey = getStructuralKey(desired);
+      const structKey = getForeignKeyStructuralKey(desired);
 
       if (desired.name) {
         const currentByNameMatch = currentByName.get(desired.name);
@@ -2990,10 +2981,15 @@ export class SchemaDiffer {
 
   private getForeignKeyChange(
     desired: ForeignKeyConstraint,
-    current: ForeignKeyConstraint
+    current: ForeignKeyConstraint,
+    manageValidation: boolean = true
   ): ForeignKeyChange {
     if (this.foreignKeyDefinitionsDiffer(desired, current)) {
       return "replace";
+    }
+
+    if (!manageValidation) {
+      return "none";
     }
 
     const desiredNotValid = Boolean(desired.notValid);
@@ -3178,6 +3174,7 @@ export class SchemaDiffer {
       desiredTable.name,
       desiredTable.checkConstraints || [],
       comparableCurrentChecks,
+      context.constraintValidationManaged !== false,
       alterations
     );
 
@@ -3190,6 +3187,7 @@ export class SchemaDiffer {
       desiredTable.foreignKeys || [],
       currentTable.foreignKeys || [],
       droppedColumns,
+      context.constraintValidationManaged !== false,
       alterations
     );
 
@@ -3652,6 +3650,7 @@ export class SchemaDiffer {
     tableName: string,
     desiredConstraints: CheckConstraint[],
     currentConstraints: CheckConstraint[],
+    manageValidation: boolean,
     alterations: TableAlteration[]
   ): void {
     const unmatchedCurrent = new Set(currentConstraints);
@@ -3659,13 +3658,18 @@ export class SchemaDiffer {
     for (const desired of desiredConstraints) {
       const matchingCurrent = findMatchingCheckConstraint(
         desired,
-        unmatchedCurrent
+        unmatchedCurrent,
+        manageValidation
       );
       if (matchingCurrent) {
         unmatchedCurrent.delete(matchingCurrent);
         const nameChanged =
           Boolean(desired.name) && matchingCurrent.name !== desired.name;
-        const change = getCheckConstraintChange(desired, matchingCurrent);
+        const change = getCheckConstraintChange(
+          desired,
+          matchingCurrent,
+          manageValidation
+        );
         if (nameChanged || change === "replace") {
           if (matchingCurrent.name) {
             alterations.push({
@@ -3708,28 +3712,30 @@ export class SchemaDiffer {
     desiredConstraints: ForeignKeyConstraint[],
     currentConstraints: ForeignKeyConstraint[],
     droppedColumns: Set<string>,
+    manageValidation: boolean,
     alterations: TableAlteration[]
   ): void {
-    const getStructuralKey = (c: ForeignKeyConstraint) =>
-      `${c.columns.join(',')}->${c.referencedTable}.${c.referencedColumns.join(',')}`;
-
     const currentByName = new Map(
       currentConstraints.filter(c => c.name).map(c => [c.name!, c])
     );
     const currentByStructure = new Map(
-      currentConstraints.map(c => [getStructuralKey(c), c])
+      currentConstraints.map(c => [getForeignKeyStructuralKey(c), c])
     );
 
     const matchedCurrentNames = new Set<string>();
 
     for (const desired of desiredConstraints) {
-      const structKey = getStructuralKey(desired);
+      const structKey = getForeignKeyStructuralKey(desired);
 
       if (desired.name) {
         const currentByNameMatch = currentByName.get(desired.name);
         if (currentByNameMatch) {
           matchedCurrentNames.add(desired.name);
-          const change = this.getForeignKeyChange(desired, currentByNameMatch);
+          const change = this.getForeignKeyChange(
+            desired,
+            currentByNameMatch,
+            manageValidation
+          );
           if (change === "validate") {
             alterations.push({
               type: "validate_foreign_key",
@@ -3748,7 +3754,11 @@ export class SchemaDiffer {
           if (currentByStructMatch.name) {
             matchedCurrentNames.add(currentByStructMatch.name);
           }
-          const change = this.getForeignKeyChange(desired, currentByStructMatch);
+          const change = this.getForeignKeyChange(
+            desired,
+            currentByStructMatch,
+            manageValidation
+          );
           if (change === "validate" && currentByStructMatch.name) {
             alterations.push({
               type: "validate_foreign_key",
