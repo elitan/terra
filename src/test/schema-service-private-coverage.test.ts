@@ -284,6 +284,9 @@ describe("SchemaService private coverage", function () {
     );
 
     const ignoredMock = createMockProvider({ parsedSchema });
+    ignoredMock.provider.getCurrentComments = async function () {
+      throw new Error("comments must not be inspected when comment management is disabled");
+    };
     const ignoredPlan = await createService(ignoredMock.provider).plan(
       "CREATE TABLE users (id INT);",
       ["public"],
@@ -481,7 +484,7 @@ describe("SchemaService private coverage", function () {
     )).toEqual([]);
   });
 
-  test("trigger comparison distinguishes equal arrays from changed arguments", function () {
+  test("trigger comparison distinguishes semantic WHEN clauses and changed definitions", function () {
     const handler = new TriggerHandler();
     const current: Trigger = {
       name: "audit_orders",
@@ -493,11 +496,27 @@ describe("SchemaService private coverage", function () {
       functionName: "audit_row",
       functionSchema: "public",
       functionArgs: ["current"],
+      when: "NEW.status = ANY (ARRAY['active']::text[])",
     };
 
     expect(handler.generateStatements([{ ...current }], [current])).toEqual([]);
     expect(handler.generateStatements([
+      { ...current, when: "NEW.status = 'active'" },
+    ], [current])).toEqual([]);
+    expect(handler.generateStatements([
       { ...current, functionArgs: ["desired"] },
+    ], [current])).toEqual([
+      'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
+      expect.stringContaining("CREATE TRIGGER"),
+    ]);
+    expect(handler.generateStatements([
+      { ...current, when: "NEW.status = 'inactive'" },
+    ], [current])).toEqual([
+      'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
+      expect.stringContaining("CREATE TRIGGER"),
+    ]);
+    expect(handler.generateStatements([
+      { ...current, when: undefined },
     ], [current])).toEqual([
       'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
       expect.stringContaining("CREATE TRIGGER"),

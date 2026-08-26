@@ -21,6 +21,35 @@ function makeParseResult(overrides: Partial<Record<string, unknown>> = {}): Reco
 }
 
 describe("SchemaParser private coverage", () => {
+  test("quotes reserved identifiers without rewriting SQL comments", function () {
+    const parser = new SchemaParser() as any;
+    const sql = `CREATE TABLE user (
+  user TEXT
+);
+-- CREATE TABLE user (user TEXT);
+/* outer CREATE TABLE user (
+   /* nested user TEXT */
+   user TEXT
+) */
+CREATE TABLE status (
+  order TEXT
+);
+-- trailing user TEXT`;
+
+    expect(parser.autoQuoteReservedKeywords(sql)).toBe(`CREATE TABLE "user" (
+  "user" TEXT
+);
+-- CREATE TABLE user (user TEXT);
+/* outer CREATE TABLE user (
+   /* nested user TEXT */
+   user TEXT
+) */
+CREATE TABLE "status" (
+  "order" TEXT
+);
+-- trailing user TEXT`);
+  });
+
   test("qualifies unambiguous declared routine types across object kinds", function () {
     const functions = [
       {
