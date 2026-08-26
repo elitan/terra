@@ -14,104 +14,21 @@ env:
   TERRADB_TEST_SILENT: "1"
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      mutation_base_ref: "${{ github.sha }}^"
+
+  nightly:
+    uses: ./.github/workflows/nightly.yml
+
   release:
+    needs: [ci, nightly]
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
-    services:
-      postgres14:
-        image: postgres:14-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5486:5432
-      postgres15:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5485:5432
-      postgres16:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5484:5432
-      postgres17:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5487:5432
-      postgres18:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5483:5432
-      postgres-pgvector:
-        image: pgvector/pgvector:0.8.1-pg17
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5488:5432
-      postgres-postgis:
-        image: postgis/postgis:17-3.5
-        env:
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_USER: test_user
-          POSTGRES_DB: sql_terraform_test
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 5489:5432
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,10 +40,8 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      - run: cp .env.example .env
       - run: bun install
-      - run: bun run test:matrix:pr
-      - run: bun run test:matrix:nightly
+      - run: bun run build
       - run: npm pack --dry-run
       - run: npm version ${{ github.event.inputs.version }} --no-git-tag-version
       - run: |
