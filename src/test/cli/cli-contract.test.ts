@@ -136,6 +136,9 @@ describe("CLI Contract", () => {
     expect(result.stdout).toContain("--auto-approve");
     expect(result.stdout).toContain("--dry-run");
     expect(result.stdout).toContain("--strict");
+    expect(result.stdout).toContain("--ignore-privileges");
+    expect(result.stdout).toContain("--ignore-comments");
+    expect(result.stdout).toContain("--ignore-constraint-validation");
     expect(result.stdout).toContain("--format <format>");
   });
 
@@ -149,6 +152,9 @@ describe("CLI Contract", () => {
     expect(result.stdout).toContain("Usage: terradb plan");
     expect(result.stdout).toContain("--format <format>");
     expect(result.stdout).toContain("--schema <schema>");
+    expect(result.stdout).toContain("--ignore-privileges");
+    expect(result.stdout).toContain("--ignore-comments");
+    expect(result.stdout).toContain("--ignore-constraint-validation");
   });
 
   test("should fail when no connection string is provided", async () => {

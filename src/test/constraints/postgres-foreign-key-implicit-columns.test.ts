@@ -157,6 +157,25 @@ describe("PostgreSQL implicit foreign key columns", function () {
       referencedColumns: ["Tenant Key", "Parent Key"],
     });
 
+    const searchPathReference = await services.parser.parseSchema(`
+      CREATE TABLE public.shared_parent (
+        public_id integer PRIMARY KEY
+      );
+      CREATE TABLE tenant_a.shared_parent (
+        tenant_id integer PRIMARY KEY
+      );
+      CREATE TABLE tenant_a.shared_child (
+        parent_id integer
+      );
+      ALTER TABLE tenant_a.shared_child
+        ADD CONSTRAINT shared_child_parent_fkey
+        FOREIGN KEY (parent_id) REFERENCES shared_parent;
+    `);
+    expect(searchPathReference.tables[2]?.foreignKeys?.[0]).toMatchObject({
+      referencedTable: "shared_parent",
+      referencedColumns: ["public_id"],
+    });
+
     const selfReference = await services.parser.parseSchema(`
       CREATE TABLE public.implicit_node (
         id integer PRIMARY KEY,

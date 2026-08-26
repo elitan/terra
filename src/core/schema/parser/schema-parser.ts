@@ -109,7 +109,7 @@ type PendingTableConstraint = {
   | {
       kind: "check";
       constraint: NonNullable<Table["checkConstraints"]>[number];
-    }
+  }
 );
 
 const POSTGRES_SERIAL_CONFLICTING_CLAUSES: ReadonlyMap<string, string> = new Map([
@@ -347,6 +347,75 @@ function isCanonicalPartitionBoundDatum(datum: any, strategy: string): boolean {
   return sentinel === "minvalue" || sentinel === "maxvalue";
 }
 
+function protectReservedKeywordSegments(sql: string): {
+  sql: string;
+  segments: string[];
+} {
+  const segments: string[] = [];
+  const output: string[] = [];
+  let index = 0;
+
+  function protect(end: number): void {
+    const placeholder = `__TERRADB_PROTECTED_SQL_${segments.length}__`;
+    segments.push(sql.slice(index, end));
+    output.push(placeholder);
+    index = end;
+  }
+
+  while (index < sql.length) {
+    if (sql.slice(index, index + 2) === "--") {
+      const lineEnd = sql.indexOf("\n", index + 2);
+      protect(lineEnd === -1 ? sql.length : lineEnd);
+      continue;
+    }
+    if (sql.slice(index, index + 2) === "/*") {
+      let end = index + 2;
+      let depth = 1;
+      while (end < sql.length && depth > 0) {
+        if (sql.slice(end, end + 2) === "/*") {
+          depth += 1;
+          end += 2;
+        } else if (sql.slice(end, end + 2) === "*/") {
+          depth -= 1;
+          end += 2;
+        } else {
+          end += 1;
+        }
+      }
+      protect(end);
+      continue;
+    }
+    if (sql[index] === "'" || sql[index] === '"') {
+      protect(skipPostgresQuoted(sql, index, sql[index] as "'" | '"'));
+      continue;
+    }
+    const dollarEnd = postgresDollarQuoteEnd(sql, index);
+    if (dollarEnd !== undefined) {
+      protect(dollarEnd);
+      continue;
+    }
+    output.push(sql[index]!);
+    index += 1;
+  }
+
+  return { sql: output.join(""), segments };
+}
+
+function restoreReservedKeywordSegments(
+  sql: string,
+  segments: string[]
+): string {
+  for (const [index, segment] of segments.entries()) {
+    sql = sql.replace(
+      `__TERRADB_PROTECTED_SQL_${index}__`,
+      function restoreSegment() {
+        return segment;
+      }
+    );
+  }
+  return sql;
+}
+
 export class SchemaParser {
   private async ensureWasmLoaded() {
     if (!wasmInitialization) {
@@ -405,6 +474,8 @@ export class SchemaParser {
    * Auto-quote common reserved keywords when used as identifiers
    */
   private autoQuoteReservedKeywords(sql: string): string {
+    const protectedSql = protectReservedKeywordSegments(sql);
+    sql = protectedSql.sql;
     // List of commonly used PostgreSQL reserved keywords that users might use as column names
     // Note: Excludes highly ambiguous keywords like 'table', 'column', 'index' that appear in DDL
     const keywords = [
@@ -432,7 +503,7 @@ export class SchemaParser {
       sql = sql.replace(keyPattern, `$1"${keyword}"`);
     }
 
-    return sql;
+    return restoreReservedKeywordSegments(sql, protectedSql.segments);
   }
 
   /**
@@ -1732,14 +1803,6 @@ export class SchemaParser {
         if (!table.foreignKeys) {
           table.foreignKeys = [];
         }
-        if (
-          pending.schemaName &&
-          pending.schemaName !== "public" &&
-          !pending.constraint.referencedTable.includes(".")
-        ) {
-          pending.constraint.referencedTable =
-            `${pending.schemaName}.${pending.constraint.referencedTable}`;
-        }
         table.foreignKeys.push(pending.constraint);
       } else {
         if (!table.checkConstraints) {
@@ -1766,13 +1829,29 @@ export class SchemaParser {
           continue;
         }
 
-        const referencedTableKey = SchemaParser.referencedTableKey(
+        let referencedTableKey = SchemaParser.referencedTableKey(
           foreignKey.referencedTable
         );
         const sourceTableKey = SchemaParser.tableKey(table.name, table.schema);
         const errorPrefix =
           `Cannot resolve implicit referenced columns for foreign key on ${sourceTableKey}`;
-        const referencedTable = tableMap.get(referencedTableKey);
+        let referencedTable = tableMap.get(referencedTableKey);
+        if (
+          !referencedTable &&
+          !foreignKey.referencedTable.includes(".") &&
+          table.schema &&
+          table.schema !== "public"
+        ) {
+          const sameSchemaKey = SchemaParser.tableKey(
+            foreignKey.referencedTable,
+            table.schema
+          );
+          referencedTable = tableMap.get(sameSchemaKey);
+          if (referencedTable) {
+            referencedTableKey = sameSchemaKey;
+            foreignKey.referencedTable = sameSchemaKey;
+          }
+        }
         if (!referencedTable) {
           throw new ParserError(
             `${errorPrefix}: referenced table ${referencedTableKey} is not defined in the desired schema; specify referenced columns explicitly for external or unmanaged tables`,

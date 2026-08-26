@@ -194,7 +194,7 @@ describe("Foreign Key Constraints", () => {
         CREATE TABLE app.child (
           id SERIAL PRIMARY KEY,
           parent_id INTEGER NOT NULL,
-          CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES parent(id)
+          CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES app.parent(id)
         );
       `;
 

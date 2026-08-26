@@ -200,6 +200,109 @@ function createService(provider: DatabaseProvider): SchemaService {
 }
 
 describe("SchemaService private coverage", function () {
+  test("preserves an existing wildcard view order for the same unique column set", async function () {
+    await loadModule();
+    const mock = createMockProvider();
+    const service = createService(mock.provider) as unknown as {
+      reorderCanonicalWildcardView(
+        desiredDefinition: string,
+        canonical: { definition: string; columnNames: string[] },
+        current: { name: string; definition: string; materialized: boolean; columnNames: string[] }
+      ): { definition: string; columnNames: string[] } | undefined;
+    };
+
+    const reordered = service.reorderCanonicalWildcardView(
+      "SELECT cases.*, 1 AS prognosis_value FROM cases",
+      {
+        definition:
+          "SELECT cases.id, cases.created_at, cases.title, 1 AS prognosis_value FROM cases",
+        columnNames: ["id", "created_at", "title", "prognosis_value"],
+      },
+      {
+        name: "cases_with_prognosis_value",
+        definition: "",
+        materialized: false,
+        columnNames: ["id", "title", "created_at", "prognosis_value"],
+      }
+    );
+
+    expect(reordered).toBeDefined();
+    if (!reordered) {
+      throw new Error("expected wildcard view reordering");
+    }
+    expect(reordered.columnNames).toEqual([
+      "id",
+      "title",
+      "created_at",
+      "prognosis_value",
+    ]);
+    expect(reordered.definition.indexOf("cases.title")).toBeLessThan(
+      reordered.definition.indexOf("cases.created_at")
+    );
+  });
+
+  test("can leave comments and privileges outside the managed contract", async function () {
+    const parsedSchema = createParsedSchema({
+      comments: [
+        {
+          objectType: "SCHEMA",
+          objectName: "public",
+          comment: "application schema",
+        },
+      ],
+      sqlObjects: [
+        {
+          kind: "grant",
+          key: 'grant:GRANT SELECT ON TABLE "public"."users" TO "reader";',
+          name: 'GRANT SELECT ON TABLE "public"."users" TO "reader";',
+          schema: "public",
+          createStatement:
+            'GRANT SELECT ON TABLE "public"."users" TO "reader";',
+          grantDefinition: {
+            objectType: "TABLE",
+            objectName: "users",
+            schema: "public",
+            grantee: "reader",
+            granteeIsPublic: false,
+            privilege: "SELECT",
+            grantable: false,
+            implicitDefault: false,
+          },
+        },
+      ],
+    });
+
+    const managedMock = createMockProvider({ parsedSchema });
+    const managedPlan = await createService(managedMock.provider).plan(
+      "CREATE TABLE users (id INT);"
+    );
+    expect(managedPlan.transactional).toContain(
+      'COMMENT ON SCHEMA "public" IS \'application schema\';'
+    );
+    expect(managedPlan.transactional).toContain(
+      'GRANT SELECT ON TABLE "public"."users" TO "reader";'
+    );
+
+    const ignoredMock = createMockProvider({ parsedSchema });
+    ignoredMock.provider.getCurrentComments = async function () {
+      throw new Error("comments must not be inspected when comment management is disabled");
+    };
+    const ignoredPlan = await createService(ignoredMock.provider).plan(
+      "CREATE TABLE users (id INT);",
+      ["public"],
+      {
+        manageComments: false,
+        manageConstraintValidation: false,
+        managePrivileges: false,
+      }
+    );
+    expect(ignoredPlan.hasChanges).toBe(false);
+    expect(ignoredPlan.transactional).toEqual([]);
+    expect(ignoredMock.state.migrationContexts).toEqual([
+      { constraintValidationManaged: false },
+    ]);
+  });
+
   test("loads virtual generated operator metadata only for PostgreSQL", async function () {
     const postgresMock = createMockProvider();
     const postgresService = createService(postgresMock.provider) as unknown as {
@@ -381,7 +484,7 @@ describe("SchemaService private coverage", function () {
     )).toEqual([]);
   });
 
-  test("trigger comparison distinguishes equal arrays from changed arguments", function () {
+  test("trigger comparison distinguishes semantic WHEN clauses and changed definitions", function () {
     const handler = new TriggerHandler();
     const current: Trigger = {
       name: "audit_orders",
@@ -393,11 +496,27 @@ describe("SchemaService private coverage", function () {
       functionName: "audit_row",
       functionSchema: "public",
       functionArgs: ["current"],
+      when: "NEW.status = ANY (ARRAY['active']::text[])",
     };
 
     expect(handler.generateStatements([{ ...current }], [current])).toEqual([]);
     expect(handler.generateStatements([
+      { ...current, when: "NEW.status = 'active'" },
+    ], [current])).toEqual([]);
+    expect(handler.generateStatements([
       { ...current, functionArgs: ["desired"] },
+    ], [current])).toEqual([
+      'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
+      expect.stringContaining("CREATE TRIGGER"),
+    ]);
+    expect(handler.generateStatements([
+      { ...current, when: "NEW.status = 'inactive'" },
+    ], [current])).toEqual([
+      'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
+      expect.stringContaining("CREATE TRIGGER"),
+    ]);
+    expect(handler.generateStatements([
+      { ...current, when: undefined },
     ], [current])).toEqual([
       'DROP TRIGGER IF EXISTS "audit_orders" ON "public"."orders";',
       expect.stringContaining("CREATE TRIGGER"),
@@ -987,7 +1106,10 @@ describe("SchemaService private coverage", function () {
     expect(plan.transactional).toHaveLength(3);
     expect(plan.deferred).toHaveLength(0);
     expect(plan.concurrent).toHaveLength(0);
-    expect(mock.state.migrationContexts).toEqual([migrationContext]);
+    expect(mock.state.migrationContexts).toEqual([{
+      ...migrationContext,
+      constraintValidationManaged: true,
+    }]);
     expect(mock.state.clientEndCalls).toBe(1);
   });
 

@@ -11,6 +11,7 @@ import {
   renderPostgresTableTriggerMode,
 } from "../../../utils/postgres-trigger";
 import { generateStatements, type HandlerConfig } from "./base-handler";
+import { expressionsEqual } from "../../../utils/expression-comparator";
 
 function getTriggerKey(trigger: Trigger): string {
   const parts = [trigger.schema || "public", trigger.tableName, trigger.name];
@@ -111,12 +112,10 @@ function postgresTriggerDefinitionsDiffer(
   desired: Trigger,
   current: Trigger
 ): boolean {
-  const desiredWhen = desired.when
-    ? normalizeExpression(desired.when)
-    : undefined;
-  const currentWhen = current.when
-    ? normalizeExpression(current.when)
-    : undefined;
+  const whenExpressionsDiffer = desired.when && current.when
+    ? normalizeExpression(desired.when) !== normalizeExpression(current.when) &&
+      !expressionsEqual(desired.when, current.when)
+    : desired.when !== current.when;
   return (
     desired.timing !== current.timing ||
     (desired.forEach || "STATEMENT") !==
@@ -134,7 +133,7 @@ function postgresTriggerDefinitionsDiffer(
     ) ||
     desired.oldTransitionTable !== current.oldTransitionTable ||
     desired.newTransitionTable !== current.newTransitionTable ||
-    desiredWhen !== currentWhen ||
+    whenExpressionsDiffer ||
     !arraysAreEqual(
       normalizeTriggerArgs(desired.functionArgs),
       normalizeTriggerArgs(current.functionArgs)

@@ -13,6 +13,7 @@ export interface MigrationContext {
   defaultTableAccessMethod?: string;
   currentUser?: string;
   sessionUser?: string;
+  constraintValidationManaged?: boolean;
 }
 
 export interface MigrationOptions {

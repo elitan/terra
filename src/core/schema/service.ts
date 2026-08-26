@@ -1,5 +1,5 @@
 import type { MigrationPlan } from "../../types/migration";
-import { parseSync } from "pgsql-parser";
+import { deparseSync, parseSync } from "pgsql-parser";
 import { StrictModeError, ValidationError } from "../../types/errors";
 import type {
   DatabaseProvider,
@@ -38,6 +38,104 @@ import {
   orderPostgresTypeStatements,
   type PostgresTypeStatement,
 } from "./handlers/postgres-type-ordering";
+import { toPgAstNode } from "./parser/pgsql-ast";
+
+export interface SchemaManagementOptions {
+  manageComments?: boolean;
+  manageConstraintValidation?: boolean;
+  managePrivileges?: boolean;
+}
+
+function reorderCanonicalWildcardView(
+  desiredDefinition: string,
+  canonical: { definition: string; columnNames: string[] },
+  current: View
+): { definition: string; columnNames: string[] } | undefined {
+  if (
+    !current.columnNames ||
+    canonical.columnNames.length !== current.columnNames.length ||
+    new Set(canonical.columnNames).size !== canonical.columnNames.length ||
+    new Set(current.columnNames).size !== current.columnNames.length
+  ) {
+    return undefined;
+  }
+  const canonicalNames = new Set(canonical.columnNames);
+  if (!current.columnNames.every(function hasCanonicalName(name) {
+    return canonicalNames.has(name);
+  })) {
+    return undefined;
+  }
+
+  try {
+    const desiredAst = parseSync(desiredDefinition);
+    const desiredStatement = toPgAstNode(desiredAst.stmts?.[0]?.stmt);
+    const desiredSelect = desiredStatement?.SelectStmt;
+    const hasWildcardProjection = desiredSelect?.targetList?.some(
+      function hasWildcard(target) {
+        const targetNode = toPgAstNode(target);
+        const valueNode = toPgAstNode(targetNode?.ResTarget?.val);
+        return valueNode?.ColumnRef?.fields?.some(
+          function isWildcard(field) {
+            return Boolean(toPgAstNode(field)?.A_Star);
+          }
+        );
+      }
+    );
+    if (
+      !hasWildcardProjection ||
+      desiredSelect?.larg ||
+      desiredSelect?.rarg ||
+      desiredSelect?.distinctClause ||
+      desiredSelect?.groupClause ||
+      desiredSelect?.havingClause ||
+      desiredSelect?.sortClause
+    ) {
+      return undefined;
+    }
+
+    const canonicalAst = parseSync(canonical.definition);
+    const canonicalStatement = toPgAstNode(canonicalAst.stmts?.[0]?.stmt);
+    const canonicalSelect = canonicalStatement?.SelectStmt;
+    if (
+      !canonicalSelect?.targetList ||
+      canonicalSelect.targetList.length !== canonical.columnNames.length
+    ) {
+      return undefined;
+    }
+    const targetByName = new Map<
+      string,
+      (typeof canonicalSelect.targetList)[number]
+    >();
+    for (const [index, name] of canonical.columnNames.entries()) {
+      const target = canonicalSelect.targetList[index];
+      if (!target) {
+        return undefined;
+      }
+      targetByName.set(name, target);
+    }
+    const reorderedTargets: typeof canonicalSelect.targetList = [];
+    for (const name of current.columnNames) {
+      const target = targetByName.get(name);
+      if (!target) {
+        return undefined;
+      }
+      reorderedTargets.push(target);
+    }
+    canonicalSelect.targetList = reorderedTargets;
+    const statements = canonicalAst.stmts?.flatMap(function getStatement(item) {
+      return item.stmt ? [item.stmt] : [];
+    });
+    if (!statements || statements.length !== canonicalAst.stmts?.length) {
+      return undefined;
+    }
+    return {
+      definition: deparseSync(statements).trim(),
+      columnNames: [...current.columnNames],
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 export class SchemaService {
   private provider: DatabaseProvider;
@@ -74,7 +172,8 @@ export class SchemaService {
 
   async plan(
     schemaFile: string,
-    schemas: string[] = ['public']
+    schemas: string[] = ['public'],
+    managementOptions: SchemaManagementOptions = {}
   ): Promise<MigrationPlan> {
     const client = await this.provider.createClient(this.config);
 
@@ -96,7 +195,12 @@ export class SchemaService {
         filtered = this.filterUnmanagedSchemas(schemas, parsedSchema);
       }
 
-      const result = await this.buildCombinedPlan(client, filtered, schemas);
+      const result = await this.buildCombinedPlan(
+        client,
+        filtered,
+        schemas,
+        managementOptions
+      );
       const plan = result.plan;
 
       if (!plan.hasChanges) {
@@ -134,7 +238,8 @@ export class SchemaService {
     autoApprove: boolean = false,
     lockOptions?: AdvisoryLockOptions,
     dryRun: boolean = false,
-    strict: boolean = false
+    strict: boolean = false,
+    managementOptions: SchemaManagementOptions = {}
   ): Promise<MigrationPlan> {
     const client = await this.provider.createClient(this.config);
 
@@ -166,7 +271,12 @@ export class SchemaService {
         }
       }
 
-      const result = await this.buildCombinedPlan(client, filtered, schemas);
+      const result = await this.buildCombinedPlan(
+        client,
+        filtered,
+        schemas,
+        managementOptions
+      );
       const combinedPlan = result.plan;
       const totalChanges = result.totalChanges;
 
@@ -671,7 +781,8 @@ export class SchemaService {
   private async buildCombinedPlan(
     client: DatabaseClient,
     filtered: ParsedSchema,
-    schemas: string[]
+    schemas: string[],
+    managementOptions: SchemaManagementOptions = {}
   ): Promise<{
     plan: MigrationPlan;
     totalChanges: number;
@@ -690,8 +801,15 @@ export class SchemaService {
     const desiredSequences = filtered.sequences;
     const desiredExtensions = filtered.extensions;
     const desiredSchemas = filtered.schemas || [];
-    const desiredComments = filtered.comments || [];
-    const desiredSqlObjects = filtered.sqlObjects || [];
+    const desiredComments = managementOptions.manageComments === false
+      ? []
+      : filtered.comments || [];
+    const desiredSqlObjects = (filtered.sqlObjects || []).filter(
+      function isManagedSqlObject(object) {
+        return managementOptions.managePrivileges !== false ||
+          (object.kind !== "grant" && object.kind !== "default-privilege");
+      }
+    );
 
     const currentSchema = await this.provider.getCurrentSchema(client, schemas);
     const currentEnums = await this.provider.getCurrentEnums(client, schemas);
@@ -709,9 +827,16 @@ export class SchemaService {
       schemas
     );
     const currentSchemas = await this.provider.getCurrentSchemas(client, schemas);
-    const currentComments = await this.provider.getCurrentComments(client, schemas);
+    const currentComments = managementOptions.manageComments === false
+      ? []
+      : await this.provider.getCurrentComments(client, schemas);
+    const inspectedSqlObjects =
+      await this.provider.getCurrentSqlObjects?.(client, schemas) || [];
     const currentSqlObjects = this.filterCurrentSqlObjects(
-      await this.provider.getCurrentSqlObjects?.(client, schemas) || [],
+      inspectedSqlObjects.filter(function isManagedSqlObject(object) {
+        return managementOptions.managePrivileges !== false ||
+          (object.kind !== "grant" && object.kind !== "default-privilege");
+      }),
       desiredSqlObjects,
       desiredSchemas
     );
@@ -722,7 +847,13 @@ export class SchemaService {
         [...desiredTriggers, ...currentTriggers]
       )
       : [];
-    const migrationContext = await this.provider.getMigrationContext?.(client);
+    const inspectedMigrationContext =
+      await this.provider.getMigrationContext?.(client);
+    const migrationContext = {
+      ...inspectedMigrationContext,
+      constraintValidationManaged:
+        managementOptions.manageConstraintValidation !== false,
+    };
     if (this.provider.dialect === "postgres") {
       const desiredTypeModifierSchema = {
         tables: desiredSchema,
@@ -1544,27 +1675,49 @@ export class SchemaService {
       return desiredViews;
     }
 
-    const currentViewKeys = new Set(
-      currentViews.map(this.getViewKey)
+    const currentViewsByKey = new Map(
+      currentViews.map((view) => [this.getViewKey(view), view] as const)
     );
 
-    if (currentViewKeys.size === 0) {
+    if (currentViewsByKey.size === 0) {
       return desiredViews;
     }
 
     const normalizedViews: View[] = [];
 
     for (const view of desiredViews) {
-      if (!currentViewKeys.has(this.getViewKey(view))) {
+      const currentView = currentViewsByKey.get(this.getViewKey(view));
+      if (!currentView) {
         normalizedViews.push(view);
         continue;
       }
 
       const canonical = await this.canonicalizeViewDefinition(client, view);
-      normalizedViews.push(canonical ? { ...view, ...canonical } : view);
+      const reordered = canonical
+        ? this.reorderCanonicalWildcardView(
+            view.definition,
+            canonical,
+            currentView
+          )
+        : undefined;
+      normalizedViews.push(
+        canonical ? { ...view, ...(reordered || canonical) } : view
+      );
     }
 
     return normalizedViews;
+  }
+
+  private reorderCanonicalWildcardView(
+    desiredDefinition: string,
+    canonical: { definition: string; columnNames: string[] },
+    current: View
+  ): { definition: string; columnNames: string[] } | undefined {
+    return reorderCanonicalWildcardView(
+      desiredDefinition,
+      canonical,
+      current
+    );
   }
 
   private async canonicalizeViewDefinition(

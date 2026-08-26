@@ -1312,6 +1312,35 @@ describe("SchemaDiffer private coverage", () => {
     expect(legacyStatements[0]).toContain(
       'VALIDATE CONSTRAINT "users_profile_fkey"'
     );
+
+    expect(
+      differ.generateMigrationPlan(
+        [makeTable({ foreignKeys: [valid] })],
+        [makeTable({ foreignKeys: [notValid] })],
+        { constraintValidationManaged: false }
+      ).hasChanges
+    ).toBe(false);
+  });
+
+  test("matches unnamed foreign keys across public qualification and server names", function () {
+    const differ = new SchemaDiffer();
+    const desired: ForeignKeyConstraint = {
+      columns: ["id"],
+      referencedTable: "public.profiles",
+      referencedColumns: ["id"],
+    };
+    const current: ForeignKeyConstraint = {
+      ...desired,
+      name: "users_id_fkey",
+      referencedTable: "profiles",
+    };
+
+    const plan = differ.generateMigrationPlan(
+      [makeTable({ foreignKeys: [desired] })],
+      [makeTable({ foreignKeys: [current] })]
+    );
+
+    expect(plan.hasChanges).toBe(false);
   });
 
   test("check metadata chooses validate, replace, and post-create add transitions", function () {
@@ -1381,6 +1410,14 @@ describe("SchemaDiffer private coverage", () => {
     expect(legacyStatements).toEqual([
       'ALTER TABLE "public"."users" VALIDATE CONSTRAINT "users_id_check";',
     ]);
+
+    expect(
+      differ.generateMigrationPlan(
+        [makeTable({ checkConstraints: [valid] })],
+        [makeTable({ checkConstraints: [notValid] })],
+        { constraintValidationManaged: false }
+      ).hasChanges
+    ).toBe(false);
 
     const duplicateExpressionCurrent: CheckConstraint[] = [
       { name: "users_id_local", expression: "id > 0", noInherit: true },

@@ -15,6 +15,9 @@ export type PlanCliOptions = {
   file: string;
   schema: string[];
   format: string;
+  ignorePrivileges?: boolean;
+  ignoreComments?: boolean;
+  ignoreConstraintValidation?: boolean;
 };
 
 function normalizeFormat(format: string): CliOutputFormat {
@@ -82,7 +85,14 @@ export async function planCommand(
     schemas,
     true,
     undefined,
-    true
+    true,
+    false,
+    {
+      managePrivileges: options.ignorePrivileges !== true,
+      manageComments: options.ignoreComments !== true,
+      manageConstraintValidation:
+        options.ignoreConstraintValidation !== true,
+    }
   );
 
   if (format === "text") {

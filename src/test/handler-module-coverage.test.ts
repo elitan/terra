@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { loadModule } from "pgsql-parser";
 import { CommentHandler } from "../core/schema/handlers/comment-handler";
 import { ExtensionHandler } from "../core/schema/handlers/extension-handler";
 import { ProcedureHandler } from "../core/schema/handlers/procedure-handler";
@@ -6,6 +7,10 @@ import { SequenceHandler } from "../core/schema/handlers/sequence-handler";
 import { SchemaHandler } from "../core/schema/handlers/schema-handler";
 import { TriggerHandler } from "../core/schema/handlers/trigger-handler";
 import type { Comment, Extension, Procedure, SchemaDefinition, Sequence, Trigger } from "../types/schema";
+
+beforeAll(async function () {
+  await loadModule();
+});
 
 function makeSequence(overrides: Partial<Sequence> = {}): Sequence {
   return {
@@ -482,6 +487,18 @@ describe("Handler module coverage", () => {
 
       const statements = handler.generateStatements([desired], [current]);
       expect(statements).toEqual([]);
+    });
+
+    test("does not update when PostgreSQL parenthesizes boolean trigger terms", function () {
+      const handler = new TriggerHandler();
+      const desired = makeTrigger({
+        when: "old.topic IS DISTINCT FROM new.topic OR old.status IS DISTINCT FROM new.status",
+      });
+      const current = makeTrigger({
+        when: "(old.topic IS DISTINCT FROM new.topic) OR (old.status IS DISTINCT FROM new.status)",
+      });
+
+      expect(handler.generateStatements([desired], [current])).toEqual([]);
     });
 
     test("does not update for equivalent trigger event order", () => {

@@ -368,5 +368,26 @@ describe("Parser Error Handling", () => {
       expect(userColumn).toBeDefined();
       expect(userColumn?.type).toBe("MOOD");
     });
+
+    test("should not rewrite reserved words inside function bodies", async function () {
+      const sql = `
+        CREATE FUNCTION public.test_reserved_body(input_date date)
+        RETURNS integer
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+          RETURN extract(year FROM input_date);
+          PERFORM status FROM records ORDER BY status FOR UPDATE;
+        END;
+        $$;
+      `;
+
+      const result = await parser.parseSchema(sql);
+
+      expect(result.functions[0]?.body).toContain("extract(year FROM input_date)");
+      expect(result.functions[0]?.body).toContain("ORDER BY status FOR UPDATE");
+      expect(result.functions[0]?.body).not.toContain('"year"');
+      expect(result.functions[0]?.body).not.toContain('"status"');
+    });
   });
 });

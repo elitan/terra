@@ -21,6 +21,9 @@ export type ApplyCliOptions = {
   lockName: string;
   lockTimeout: string;
   format: string;
+  ignorePrivileges?: boolean;
+  ignoreComments?: boolean;
+  ignoreConstraintValidation?: boolean;
 };
 
 function normalizeFormat(format: string): CliOutputFormat {
@@ -110,7 +113,13 @@ export async function applyCommand(
       options.autoApprove,
       lockOptions,
       dryRun,
-      strict
+      strict,
+      {
+        managePrivileges: options.ignorePrivileges !== true,
+        manageComments: options.ignoreComments !== true,
+        manageConstraintValidation:
+          options.ignoreConstraintValidation !== true,
+      }
     );
     return;
   }
@@ -121,7 +130,13 @@ export async function applyCommand(
     options.autoApprove,
     lockOptions,
     dryRun,
-    strict
+    strict,
+    {
+      managePrivileges: options.ignorePrivileges !== true,
+      manageComments: options.ignoreComments !== true,
+      manageConstraintValidation:
+        options.ignoreConstraintValidation !== true,
+    }
   );
 
   return {
