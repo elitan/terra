@@ -40,8 +40,50 @@ jobs:
           bun-version: latest
       - run: cp .env.example .env
       - run: bun install
-      - run: bun run test:pg:matrix
+      - name: Test PostgreSQL ${{ matrix.pg }}
+        run: |
+          export "DATABASE_URL_PG${{ matrix.pg }}=$DATABASE_URL"
+          bun run test:pg:matrix
         env:
+          DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
+          DATABASE_URL_PG14: ""
+          DATABASE_URL_PG15: ""
+          DATABASE_URL_PG16: ""
+          DATABASE_URL_PG17: ""
+          DATABASE_URL_PG18: ""
+
+  property-seeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: ["20260218", "20260219", "20260220"]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_USER: test_user
+          POSTGRES_DB: sql_terraform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: cp .env.example .env
+      - run: bun install
+      - name: Test property seed ${{ matrix.seed }}
+        run: bun run test:property:replay
+        env:
+          FC_SEED: ${{ matrix.seed }}
           DATABASE_URL: postgres://test_user:test_password@localhost:5432/sql_terraform_test
 
   deep-checks:
@@ -99,9 +141,6 @@ jobs:
       - run: bun run test:pg:extensions
       - run: bun run test:e2e
       - run: bun run test:fuzz
-      - run: bun run test:property:nightly
-        env:
-          DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
       - run: bun run test:flake
         env:
           DATABASE_URL: postgres://test_user:test_password@localhost:5487/sql_terraform_test
