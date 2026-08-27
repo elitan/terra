@@ -75,6 +75,8 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+      - name: Install npm with trusted publishing support
+        run: npm install -g npm@11.5.1
       - run: bun install
       - run: bun run build
       - run: npm pack --dry-run
@@ -113,8 +115,6 @@ jobs:
         if: steps.release_state.outputs.existing_tag != 'true'
       - run: npm publish --provenance --access public
         if: steps.npm_state.outputs.published != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Create GitHub Release
         uses: actions/github-script@v7
         with:
